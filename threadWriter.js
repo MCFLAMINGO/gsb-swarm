@@ -3,28 +3,23 @@
  * ACP Provider Agent
  *
  * Service: Writes viral X threads about any token, wallet, or market event.
- *          Injects live DexScreener data for credibility.
  * Price: $0.25 USDC per thread
  * APIs: OpenAI GPT-4o + DexScreener
  */
 
-require('dotenv').config();
-const axios = require('axios');
-const OpenAI = require('openai').default;
-const { buildAcpClient } = require('./acp');
+import 'dotenv/config';
+import axios from 'axios';
+import OpenAI from 'openai';
+import { buildAcpClient } from './acp.js';
 
 const AGENT_NAME = 'GSB Thread Writer';
 const JOB_PRICE = 0.25;
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ── Core thread writing logic ────────────────────────────────────────────────
-
 async function writeThread(jobRequest) {
-  // Try to extract a contract address or token name from the request
   const addressMatch = jobRequest.match(/0x[a-fA-F0-9]{40}/);
   let liveData = null;
-
   if (addressMatch) {
     liveData = await fetchTokenData(addressMatch[0]);
   }
@@ -39,7 +34,7 @@ Your threads are:
 - Always include: thesis, key data points, risk warning, and finale
 
 Brand voice: Bold. Irreverent. Data-driven. A little biblical.
-Thou shalt never run out of GAS. ⛽`;
+Thou shalt never run out of GAS.`;
 
   const userPrompt = liveData
     ? `Write a viral X thread about this token. Use the live data below.
@@ -49,13 +44,12 @@ Price: $${liveData.priceUsd}
 24h Change: ${liveData.priceChange24h}%
 Liquidity: $${liveData.liquidity?.toLocaleString()}
 24h Volume: $${liveData.volume24h?.toLocaleString()}
-Buys/Sells 24h: ${liveData.buys24h}/${liveData.sells24h}
 Market Cap: $${liveData.marketCap?.toLocaleString() || 'Unknown'}
 
-User's request: ${jobRequest}`
+User request: ${jobRequest}`
     : `Write a viral X thread about: ${jobRequest}
 
-Make it compelling, data-aware (use placeholder figures if no contract provided), and end with a $GSB mention.`;
+Make it compelling and end with a $GSB mention.`;
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
@@ -68,13 +62,12 @@ Make it compelling, data-aware (use placeholder figures if no contract provided)
   });
 
   const thread = response.choices[0]?.message?.content || 'Thread generation failed.';
-
   return {
     thread,
     token_data: liveData || null,
     word_count: thread.split(' ').length,
     generated_at: new Date().toISOString(),
-    powered_by: 'GSB Intelligence Swarm — Agent Gas Bible ⛽',
+    powered_by: 'GSB Intelligence Swarm — Agent Gas Bible',
   };
 }
 
@@ -86,7 +79,6 @@ async function fetchTokenData(contractAddress) {
     );
     const pair = res.data?.pairs?.[0];
     if (!pair) return null;
-
     return {
       name: pair.baseToken?.name,
       symbol: pair.baseToken?.symbol,
@@ -94,8 +86,6 @@ async function fetchTokenData(contractAddress) {
       priceChange24h: pair.priceChange?.h24 || 0,
       liquidity: pair.liquidity?.usd || 0,
       volume24h: pair.volume?.h24 || 0,
-      buys24h: pair.txns?.h24?.buys || 0,
-      sells24h: pair.txns?.h24?.sells || 0,
       marketCap: pair.marketCap || pair.fdv,
     };
   } catch {
@@ -103,55 +93,29 @@ async function fetchTokenData(contractAddress) {
   }
 }
 
-// ── ACP Provider loop ────────────────────────────────────────────────────────
-
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
 
   const client = await buildAcpClient({
     privateKey: process.env.AGENT_WALLET_PRIVATE_KEY,
-    entityId: process.env.THREAD_WRITER_ENTITY_ID,
+    entityId: parseInt(process.env.THREAD_WRITER_ENTITY_ID),
     agentWalletAddress: process.env.THREAD_WRITER_WALLET_ADDRESS,
 
     onNewTask: async (job, memoToSign) => {
       console.log(`[${AGENT_NAME}] New job received: ${job.id}`);
-
       try {
-        const content = typeof job.description === 'string'
-          ? job.description
-          : JSON.stringify(job.description);
-
+        const content = typeof job.description === 'string' ? job.description : JSON.stringify(job.description);
         if (!content || content.length < 3) {
-          await client.respondJob(
-            job.id,
-            memoToSign?.id,
-            false,
-            'Please provide a topic, token name, or contract address for the thread.'
-          );
+          await client.respondJob(job.id, memoToSign?.id, false, 'Please provide a topic or contract address.');
           return;
         }
-
-        await client.respondJob(
-          job.id,
-          memoToSign?.id,
-          true,
-          'Accepted. Writing your thread now...'
-        );
-
+        await client.respondJob(job.id, memoToSign?.id, true, 'Accepted. Writing your thread now...');
         const result = await writeThread(content);
-
-        await client.deliverJob(job.id, {
-          type: 'text',
-          value: JSON.stringify(result, null, 2),
-        });
-
+        await client.deliverJob(job.id, { type: 'text', value: JSON.stringify(result, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job ${job.id} failed:`, err.message);
-        await client.deliverJob(job.id, {
-          type: 'text',
-          value: JSON.stringify({ error: err.message }),
-        });
+        await client.deliverJob(job.id, { type: 'text', value: JSON.stringify({ error: err.message }) });
       }
     },
 
