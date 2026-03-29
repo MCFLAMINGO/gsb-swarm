@@ -1,7 +1,8 @@
 // ACP Client factory — shared across all workers
-import AcpClient, { AcpContractClient } from '@virtuals-protocol/acp-node';
+const AcpClient = require('@virtuals-protocol/acp-node').default;
+const { AcpContractClient } = require('@virtuals-protocol/acp-node');
 
-export async function buildAcpClient({ privateKey, entityId, agentWalletAddress, onNewTask, onEvaluate }) {
+async function buildAcpClient({ privateKey, entityId, agentWalletAddress, onNewTask, onEvaluate }) {
   const contractClient = await AcpContractClient.build(
     privateKey,
     entityId,
@@ -18,3 +19,5 @@ export async function buildAcpClient({ privateKey, entityId, agentWalletAddress,
   await client.init();
   return client;
 }
+
+module.exports = { buildAcpClient };
