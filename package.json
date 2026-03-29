@@ -8,7 +8,7 @@
     "postinstall": "node ./patch-acp.cjs || true"
   },
   "dependencies": {
-    "@virtuals-protocol/acp-node": "latest",
+    "@virtuals-protocol/acp-node": "0.3.0-beta.40",
     "axios": "^1.6.0",
     "dotenv": "^16.0.0",
     "openai": "^4.0.0",
