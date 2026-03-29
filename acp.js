@@ -1,4 +1,4 @@
-// ACP Client factory — shared across all workers
+require('dotenv').config();
 const AcpClient = require('@virtuals-protocol/acp-node').default;
 const { AcpContractClient } = require('@virtuals-protocol/acp-node');
 
@@ -6,8 +6,7 @@ async function buildAcpClient({ privateKey, entityId, agentWalletAddress, onNewT
   const contractClient = await AcpContractClient.build(
     privateKey,
     entityId,
-    agentWalletAddress,
-process.env.BASE_RPC_URL || 'https://mainnet.base.org' || 'https://mainnet.base.org'
+    agentWalletAddress
   );
 
   const client = new AcpClient({
