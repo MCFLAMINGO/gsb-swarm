@@ -7,9 +7,9 @@
  * APIs: DexScreener (free), Basescan (free)
  */
 
-require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') });
+require('dotenv').config();
 const axios = require('axios');
-const { buildAcpClient } = require('../utils/acp');
+const { buildAcpClient } = require('./acp');
 
 const AGENT_NAME = 'GSB Token Analyst';
 const JOB_PRICE = 0.25;
