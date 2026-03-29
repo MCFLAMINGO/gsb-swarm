@@ -10,28 +10,18 @@ if (!fs.existsSync(acpDistPath)) {
 
 let content = fs.readFileSync(acpDistPath, 'utf8');
 
-// Remove any previous patch markers so we always re-apply cleanly
-content = content.replace(/\/\/ PATCHED BY GSB - START[\s\S]*?\/\/ PATCHED BY GSB - END\n/g, '');
-content = content.replace('// PATCHED BY GSB\n', '');
-
-// Fix 1: @account-kit/infra -> viem/chains (chain definitions)
+// Always rewrite both lines regardless of current state
+// Fix 1: replace whatever is assigned to import_infra with viem/chains
 content = content.replace(
-  'var import_infra = require("@account-kit/infra");',
-  '// PATCHED BY GSB - START\nvar import_infra = require("viem/chains");\n// PATCHED BY GSB - END'
+  /var import_infra = require\([^)]+\);/,
+  'var import_infra = require("viem/chains");'
 );
 
-// Fix 2: @aa-sdk/core first occurrence -> LocalAccountSigner stub using viem
-const aaSdkStub = `// PATCHED BY GSB - START
-var import_core = { LocalAccountSigner: { privateKeyToAccountSigner: (pk) => { const { privateKeyToAccount } = require('viem/accounts'); const acct = privateKeyToAccount(pk.startsWith('0x') ? pk : '0x'+pk); return { signMessage: async (msg) => acct.signMessage({ message: msg }), getAddress: async () => acct.address, account: acct }; } } };
-// PATCHED BY GSB - END`;
+// Fix 2 & 3: replace @aa-sdk/core requires with stubs
+const stub = `var import_core = { LocalAccountSigner: { privateKeyToAccountSigner: (pk) => { const { privateKeyToAccount } = require('viem/accounts'); const acct = privateKeyToAccount(pk.startsWith('0x') ? pk : '0x'+pk); return { signMessage: async (msg) => acct.signMessage({ message: msg }), getAddress: async () => acct.address, account: acct }; } } };`;
 
-// Fix 3: @aa-sdk/core second occurrence -> reuse import_core
-const aaSdkStub2 = `// PATCHED BY GSB - START
-var import_core2 = import_core;
-// PATCHED BY GSB - END`;
-
-content = content.replace('var import_core = require("@aa-sdk/core");', aaSdkStub);
-content = content.replace('var import_core2 = require("@aa-sdk/core");', aaSdkStub2);
+content = content.replace(/var import_core = require\("[^"]+"\);/, stub);
+content = content.replace(/var import_core2 = require\("[^"]+"\);/, 'var import_core2 = import_core;');
 
 fs.writeFileSync(acpDistPath, content, 'utf8');
-console.log('[patch-acp] All patches applied successfully.');
+console.log('[patch-acp] Patches applied.');
