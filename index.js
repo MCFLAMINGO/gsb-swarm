@@ -1,0 +1,88 @@
+/**
+ * GSB INTELLIGENCE SWARM — Master Entry Point
+ * 
+ * Starts all 4 workers as child processes.
+ * Each worker runs independently and handles its own ACP job queue.
+ * 
+ * Usage:
+ *   npm start          — runs all 4 workers
+ *   npm run worker:token   — runs Token Analyst only
+ *   npm run worker:wallet  — runs Wallet Profiler only
+ *   npm run worker:alpha   — runs Alpha Scanner only
+ *   npm run worker:thread  — runs Thread Writer only
+ */
+
+require('dotenv').config();
+const { fork } = require('child_process');
+const path = require('path');
+
+const workers = [
+  { name: 'Token Analyst',   file: 'tokenAnalyst.js',  color: '\x1b[36m' },
+  { name: 'Wallet Profiler', file: 'walletProfiler.js', color: '\x1b[35m' },
+  { name: 'Alpha Scanner',   file: 'alphaScanner.js',   color: '\x1b[33m' },
+  { name: 'Thread Writer',   file: 'threadWriter.js',   color: '\x1b[32m' },
+];
+
+const RESET = '\x1b[0m';
+
+console.log(`
+╔══════════════════════════════════════════════════════════╗
+║         GSB INTELLIGENCE SWARM — ACTIVATING             ║
+║         Agent Gas Bible · ACP Provider Network          ║
+║         Thou shalt never run out of GAS ⛽               ║
+╚══════════════════════════════════════════════════════════╝
+`);
+
+const processes = [];
+
+workers.forEach(({ name, file, color }) => {
+  const workerPath = path.join(__dirname, 'workers', file);
+  const child = fork(workerPath, [], {
+    silent: false,
+    env: process.env,
+  });
+
+  child.on('error', (err) => {
+    console.error(`${color}[${name}] ERROR: ${err.message}${RESET}`);
+  });
+
+  child.on('exit', (code) => {
+    console.log(`${color}[${name}] exited with code ${code}. Restarting in 5s...${RESET}`);
+    setTimeout(() => {
+      const newChild = fork(workerPath, [], { silent: false, env: process.env });
+      processes.push(newChild);
+    }, 5000);
+  });
+
+  processes.push(child);
+  console.log(`${color}[${name}] Worker started (PID: ${child.pid})${RESET}`);
+});
+
+// Health check endpoint for Railway
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ONLINE',
+    swarm: 'GSB Intelligence Swarm',
+    workers: workers.map((w) => w.name),
+    uptime_seconds: Math.floor(process.uptime()),
+    message: 'Thou shalt never run out of GAS ⛽',
+  });
+});
+
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
+app.listen(PORT, () => {
+  console.log(`\n[SWARM] Health check running on port ${PORT}`);
+  console.log(`[SWARM] All ${workers.length} workers active. Swarm is LIVE.\n`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('[SWARM] Shutting down gracefully...');
+  processes.forEach((p) => p.kill());
+  process.exit(0);
+});
