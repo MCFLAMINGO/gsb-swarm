@@ -8,10 +8,10 @@
  * APIs: OpenAI GPT-4o + DexScreener
  */
 
-require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') });
+require('dotenv').config();
 const axios = require('axios');
 const OpenAI = require('openai').default;
-const { buildAcpClient } = require('../utils/acp');
+const { buildAcpClient } = require('./acp');
 
 const AGENT_NAME = 'GSB Thread Writer';
 const JOB_PRICE = 0.25;
