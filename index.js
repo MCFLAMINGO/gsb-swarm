@@ -36,7 +36,7 @@ console.log(`
 const processes = [];
 
 workers.forEach(({ name, file, color }) => {
-  const workerPath = path.join(__dirname, 'workers', file);
+  const workerPath = path.join(__dirname,file);
   const child = fork(workerPath, [], {
     silent: false,
     env: process.env,
