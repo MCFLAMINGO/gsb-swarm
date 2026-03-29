@@ -2,4 +2,4 @@
 cmds = ["npm install --production"]
 
 [start]
-cmd = "node index.js"
+cmd = "node --experimental-require-module index.js"
