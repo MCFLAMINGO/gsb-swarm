@@ -7,7 +7,7 @@ async function buildAcpClient({ privateKey, entityId, agentWalletAddress, onNewT
     privateKey,
     entityId,
     agentWalletAddress,
-    process.env.BASE_RPC_URL || 'https://mainnet.base.org'
+process.env.BASE_RPC_URL || 'https://mainnet.base.org' || 'https://mainnet.base.org'
   );
 
   const client = new AcpClient({
