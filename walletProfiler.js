@@ -7,9 +7,9 @@
  * APIs: Zerion (free), DexScreener, Basescan (free)
  */
 
-require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') });
+require('dotenv').config();
 const axios = require('axios');
-const { buildAcpClient } = require('../utils/acp');
+const { buildAcpClient } = require('./acp');
 
 const AGENT_NAME = 'GSB Wallet Profiler';
 const JOB_PRICE = 0.50;
