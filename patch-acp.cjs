@@ -1,10 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const acpDistPath = path.join(__dirname, 'node_modules', '@virtuals-protocol', 'acp-node', 'dist', 'index.js');
+const acpDistPath = path.join(process.cwd(), 'node_modules', '@virtuals-protocol', 'acp-node', 'dist', 'index.js');
 
 if (!fs.existsSync(acpDistPath)) {
-  console.log('[patch-acp] ACP dist not found, skipping patch.');
+  console.log('[patch-acp] ACP dist not found, skipping.');
   process.exit(0);
 }
 
