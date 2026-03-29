@@ -4,18 +4,16 @@
   "description": "GSB Intelligence Swarm - 4 ACP provider agents for Agent Gas Bible",
   "main": "index.js",
   "scripts": {
-    "start": "node patch-acp.cjs && node index.js",
-    "postinstall": "node patch-acp.cjs || true"
+    "start": "node --experimental-require-module index.js"
   },
   "dependencies": {
     "@virtuals-protocol/acp-node": "latest",
     "axios": "^1.6.0",
     "dotenv": "^16.0.0",
     "openai": "^4.0.0",
-    "express": "^4.18.0",
-    "viem": "^2.0.0"
+    "express": "^4.18.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   }
 }
