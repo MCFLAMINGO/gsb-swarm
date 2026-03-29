@@ -1,17 +1,12 @@
 /**
  * GSB INTELLIGENCE SWARM — Master Entry Point
- *
  * Starts all 4 workers as child processes.
- * Each worker runs independently and handles its own ACP job queue.
  */
 
-import 'dotenv/config';
-import { fork } from 'child_process';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import express from 'express';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
+require('dotenv').config();
+const { fork } = require('child_process');
+const path = require('path');
+const express = require('express');
 
 const workers = [
   { name: 'Token Analyst',   file: 'tokenAnalyst.js' },
@@ -31,16 +26,10 @@ console.log(`
 const processes = [];
 
 workers.forEach(({ name, file }) => {
-  const workerPath = join(__dirname, file);
-  const child = fork(workerPath, [], {
-    silent: false,
-    env: process.env,
-  });
+  const workerPath = path.join(__dirname, file);
+  const child = fork(workerPath, [], { silent: false, env: process.env });
 
-  child.on('error', (err) => {
-    console.error(`[${name}] ERROR: ${err.message}`);
-  });
-
+  child.on('error', (err) => console.error(`[${name}] ERROR: ${err.message}`));
   child.on('exit', (code) => {
     console.log(`[${name}] exited with code ${code}. Restarting in 5s...`);
     setTimeout(() => {
@@ -53,19 +42,16 @@ workers.forEach(({ name, file }) => {
   console.log(`[${name}] Worker started (PID: ${child.pid})`);
 });
 
-// Health check endpoint for Railway
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get('/', (req, res) => {
-  res.json({
-    status: 'ONLINE',
-    swarm: 'GSB Intelligence Swarm',
-    workers: workers.map((w) => w.name),
-    uptime_seconds: Math.floor(process.uptime()),
-    message: 'Thou shalt never run out of GAS',
-  });
-});
+app.get('/', (req, res) => res.json({
+  status: 'ONLINE',
+  swarm: 'GSB Intelligence Swarm',
+  workers: workers.map((w) => w.name),
+  uptime_seconds: Math.floor(process.uptime()),
+  message: 'Thou shalt never run out of GAS',
+}));
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
@@ -74,7 +60,6 @@ app.listen(PORT, () => {
   console.log(`[SWARM] All ${workers.length} workers active. Swarm is LIVE.\n`);
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('[SWARM] Shutting down gracefully...');
   processes.forEach((p) => p.kill());
