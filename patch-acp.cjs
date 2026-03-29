@@ -10,19 +10,35 @@ if (!fs.existsSync(acpDistPath)) {
 
 let content = fs.readFileSync(acpDistPath, 'utf8');
 
-if (content.includes('// PATCHED BY GSB')) {
-  console.log('[patch-acp] Already patched, skipping.');
-  process.exit(0);
+// Remove old patch marker so we re-apply cleanly
+content = content.replace('// PATCHED BY GSB\n', '');
+
+let patched = false;
+
+// Fix 1: @account-kit/infra -> viem/chains
+if (content.includes('var import_infra = require("@account-kit/infra");')) {
+  content = content.replace(
+    'var import_infra = require("@account-kit/infra");',
+    'var import_infra = require("viem/chains");'
+  );
+  console.log('[patch-acp] Fixed @account-kit/infra');
+  patched = true;
 }
 
-const original = 'var import_infra = require("@account-kit/infra");';
-const replacement = '// PATCHED BY GSB\nvar import_infra = require("viem/chains");';
-
-if (!content.includes(original)) {
-  console.log('[patch-acp] Target line not found, skipping.');
-  process.exit(0);
+// Fix 2: @aa-sdk/core -> stub
+if (content.includes('var import_aa_sdk_core = require("@aa-sdk/core");')) {
+  content = content.replace(
+    'var import_aa_sdk_core = require("@aa-sdk/core");',
+    'var import_aa_sdk_core = {};'
+  );
+  console.log('[patch-acp] Fixed @aa-sdk/core');
+  patched = true;
 }
 
-content = content.replace(original, replacement);
-fs.writeFileSync(acpDistPath, content, 'utf8');
-console.log('[patch-acp] Patched successfully.');
+if (patched) {
+  content = '// PATCHED BY GSB\n' + content;
+  fs.writeFileSync(acpDistPath, content, 'utf8');
+  console.log('[patch-acp] All patches applied successfully.');
+} else {
+  console.log('[patch-acp] Nothing to patch.');
+}
