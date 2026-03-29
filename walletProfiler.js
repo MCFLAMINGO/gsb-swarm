@@ -7,14 +7,12 @@
  * APIs: Zerion (free), DexScreener, Basescan (free)
  */
 
-require('dotenv').config();
-const axios = require('axios');
-const { buildAcpClient } = require('./acp');
+import 'dotenv/config';
+import axios from 'axios';
+import { buildAcpClient } from './acp.js';
 
 const AGENT_NAME = 'GSB Wallet Profiler';
 const JOB_PRICE = 0.50;
-
-// ── Core profiling logic ─────────────────────────────────────────────────────
 
 async function profileWallet(walletAddress) {
   try {
@@ -64,14 +62,12 @@ async function fetchZerionPortfolio(address) {
         timeout: 8000,
       }
     );
-
     const data = res.data?.data?.attributes;
     if (!data) return null;
-
     return {
       total_value_usd: data.total?.positions || 0,
       chains: data.positions_distribution_by_chain || {},
-      top_holdings: [], // Zerion returns positions separately
+      top_holdings: [],
     };
   } catch {
     return null;
@@ -93,10 +89,8 @@ async function fetchBasescanTxHistory(address) {
       },
       timeout: 8000,
     });
-
     const txns = res.data?.result;
     if (!Array.isArray(txns)) return [];
-
     return txns.map((tx) => ({
       hash: tx.hash,
       token: tx.tokenSymbol,
@@ -111,45 +105,38 @@ async function fetchBasescanTxHistory(address) {
 
 function classifyWhale(portfolio) {
   const value = portfolio?.total_value_usd || 0;
-  if (value >= 1_000_000) return '🐋 MEGA WHALE ($1M+)';
-  if (value >= 100_000) return '🐳 WHALE ($100K–$1M)';
-  if (value >= 10_000) return '🐬 DOLPHIN ($10K–$100K)';
-  if (value >= 1_000) return '🐟 FISH ($1K–$10K)';
-  return '🦐 SHRIMP (<$1K)';
+  if (value >= 1_000_000) return 'MEGA WHALE ($1M+)';
+  if (value >= 100_000) return 'WHALE ($100K-$1M)';
+  if (value >= 10_000) return 'DOLPHIN ($10K-$100K)';
+  if (value >= 1_000) return 'FISH ($1K-$10K)';
+  return 'SHRIMP (<$1K)';
 }
 
 function calculateWinRate(txHistory) {
   if (!txHistory || txHistory.length === 0) return 'Insufficient data';
   const inTxns = txHistory.filter((t) => t.direction === 'IN').length;
-  const total = txHistory.length;
-  return `${Math.round((inTxns / total) * 100)}% inflow ratio (${total} txns analyzed)`;
+  return `${Math.round((inTxns / txHistory.length) * 100)}% inflow ratio (${txHistory.length} txns analyzed)`;
 }
 
 function generateWalletVerdict(portfolio, winRate, classification) {
   const value = portfolio?.total_value_usd || 0;
-  if (value > 100000) return `💎 HIGH VALUE WALLET — ${classification}. Track this address.`;
-  if (value > 10000) return `👀 NOTABLE WALLET — ${classification}. Active on-chain.`;
-  return `📊 STANDARD WALLET — ${classification}. Normal activity.`;
+  if (value > 100000) return `HIGH VALUE WALLET — ${classification}. Track this address.`;
+  if (value > 10000) return `NOTABLE WALLET — ${classification}. Active on-chain.`;
+  return `STANDARD WALLET — ${classification}. Normal activity.`;
 }
-
-// ── ACP Provider loop ────────────────────────────────────────────────────────
 
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
 
   const client = await buildAcpClient({
     privateKey: process.env.AGENT_WALLET_PRIVATE_KEY,
-    entityId: process.env.WALLET_PROFILER_ENTITY_ID,
+    entityId: parseInt(process.env.WALLET_PROFILER_ENTITY_ID),
     agentWalletAddress: process.env.WALLET_PROFILER_WALLET_ADDRESS,
 
     onNewTask: async (job, memoToSign) => {
       console.log(`[${AGENT_NAME}] New job received: ${job.id}`);
-
       try {
-        const content = typeof job.description === 'string'
-          ? job.description
-          : JSON.stringify(job.description);
-
+        const content = typeof job.description === 'string' ? job.description : JSON.stringify(job.description);
         const addressMatch = content.match(/0x[a-fA-F0-9]{40}/);
         const walletAddress = addressMatch ? addressMatch[0] : content.trim();
 
@@ -159,20 +146,12 @@ async function start() {
         }
 
         await client.respondJob(job.id, memoToSign?.id, true, `Accepted. Profiling ${walletAddress}...`);
-
         const profile = await profileWallet(walletAddress);
-        await client.deliverJob(job.id, {
-          type: 'text',
-          value: JSON.stringify(profile, null, 2),
-        });
-
+        await client.deliverJob(job.id, { type: 'text', value: JSON.stringify(profile, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job ${job.id} failed:`, err.message);
-        await client.deliverJob(job.id, {
-          type: 'text',
-          value: JSON.stringify({ error: err.message }),
-        });
+        await client.deliverJob(job.id, { type: 'text', value: JSON.stringify({ error: err.message }) });
       }
     },
 
