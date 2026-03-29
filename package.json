@@ -1,15 +1,10 @@
 {
   "name": "gsb-intelligence-swarm",
   "version": "1.0.0",
-  "description": "GSB Intelligence Swarm — 4 ACP provider agents for Agent Gas Bible",
- "main": "index.js",
+  "description": "GSB Intelligence Swarm - 4 ACP provider agents for Agent Gas Bible",
+  "main": "index.js",
   "scripts": {
     "start": "node index.js"
-    "dev": "nodemon src/index.js",
-    "worker:token": "node src/workers/tokenAnalyst.js",
-    "worker:wallet": "node src/workers/walletProfiler.js",
-    "worker:alpha": "node src/workers/alphaScanner.js",
-    "worker:thread": "node src/workers/threadWriter.js"
   },
   "dependencies": {
     "@virtuals-protocol/acp-node": "latest",
@@ -17,9 +12,6 @@
     "dotenv": "^16.0.0",
     "openai": "^4.0.0",
     "express": "^4.18.0"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
