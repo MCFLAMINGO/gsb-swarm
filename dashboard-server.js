@@ -300,35 +300,46 @@ app.post('/api/command', async (req, res) => {
   const addrMatch = command.match(/0x[0-9a-fA-F]{40}/i);
   const customAddr = addrMatch ? addrMatch[0] : null;
 
+  // Extract any ticker symbol like $BTC, $ETH, $GSB etc.
+  const tickerMatch = command.match(/\$([A-Z]{2,10})/i);
+  const ticker = tickerMatch ? tickerMatch[1].toUpperCase() : null;
+
   const intents = [];
 
-  // Token analysis
-  if (/token|analyz|price|liquidity|market|dex|mcap|\$gsb/.test(cmd)) {
-    const req = customAddr
-      ? `Analyze token ${customAddr} on Base`
-      : WORKER_CATALOG['GSB Token Analyst'].defaultReq;
-    intents.push({ worker: 'GSB Token Analyst', requirement: req });
+  // Token analysis — also catches crypto tickers like bitcoin, ethereum, solana
+  if (/token|analyz|price|liquidity|market|dex|mcap|\$|bitcoin|btc|ethereum|eth|solana|sol|crypto|coin|chart|up|down|pump|dump|rally|crash/.test(cmd)) {
+    let requirement;
+    if (customAddr) {
+      requirement = `Analyze token ${customAddr} on Base`;
+    } else if (ticker && ticker !== 'GSB') {
+      requirement = `Analyze ${ticker} — check DexScreener and provide price, 24h change, liquidity, and market sentiment`;
+    } else {
+      requirement = WORKER_CATALOG['GSB Token Analyst'].defaultReq;
+    }
+    intents.push({ worker: 'GSB Token Analyst', requirement });
   }
 
   // Wallet profiling
   if (/wallet|profile|who is|address|holder|tx|transaction/.test(cmd)) {
-    const req = customAddr
+    const requirement = customAddr
       ? `Profile wallet ${customAddr} on Base`
       : WORKER_CATALOG['GSB Wallet Profiler'].defaultReq;
-    intents.push({ worker: 'GSB Wallet Profiler', requirement: req });
+    intents.push({ worker: 'GSB Wallet Profiler', requirement });
   }
 
-  // Alpha scanning
-  if (/alpha|scan|signal|mover|gainer|trending|opportunity|what.s moving/.test(cmd)) {
+  // Alpha scanning — catches "what's hot", "what should I watch", "any plays"
+  if (/alpha|scan|signal|mover|gainer|trending|opportunity|what.s moving|what.s hot|what should|any play|top token|best token|watch/.test(cmd)) {
     intents.push({ worker: 'GSB Alpha Scanner', requirement: WORKER_CATALOG['GSB Alpha Scanner'].defaultReq });
   }
 
   // Thread writing
   if (/thread|tweet|post|write|twitter|content/.test(cmd)) {
-    const req = customAddr
+    const requirement = customAddr
       ? `Write a crypto Twitter thread about token ${customAddr}`
-      : WORKER_CATALOG['GSB Thread Writer'].defaultReq;
-    intents.push({ worker: 'GSB Thread Writer', requirement: req });
+      : ticker && ticker !== 'GSB'
+        ? `Write a crypto Twitter thread about ${ticker}`
+        : WORKER_CATALOG['GSB Thread Writer'].defaultReq;
+    intents.push({ worker: 'GSB Thread Writer', requirement });
   }
 
   // "Full brief" / "everything" / "run all" → hire all 4
@@ -338,13 +349,14 @@ app.post('/api/command', async (req, res) => {
     });
   }
 
-  // Fallback — couldn't map command to any worker
+  // Fallback — route any general market/crypto question to Alpha Scanner + Token Analyst
   if (intents.length === 0) {
     broadcast('cmd-status', {
-      type: 'error',
-      message: `Could not understand "${command}". Try: "analyze token", "profile wallet", "scan for alpha", or "write a thread".`,
+      type: 'info',
+      message: `Routing "${command}" → deploying Alpha Scanner + Token Analyst for market context.`,
     });
-    return res.json({ ok: false, message: 'No matching workers for that command.' });
+    intents.push({ worker: 'GSB Alpha Scanner', requirement: WORKER_CATALOG['GSB Alpha Scanner'].defaultReq });
+    intents.push({ worker: 'GSB Token Analyst', requirement: WORKER_CATALOG['GSB Token Analyst'].defaultReq });
   }
 
   // ── Acknowledge immediately, then fire async ──────────────────────────────
