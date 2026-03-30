@@ -5,10 +5,8 @@ const { buildAcpClient } = require('./acp');
 const AGENT_NAME = 'GSB Thread Writer';
 const JOB_PRICE = 0.15;
 
-// Deduplicate — track jobs we've already started processing
 const handledJobs = new Set();
 
-// Lazy-init OpenAI — don't crash at module load if key is missing/invalid
 let _openai = null;
 function getOpenAI() {
   if (!_openai) {
@@ -18,7 +16,6 @@ function getOpenAI() {
   return _openai;
 }
 
-// Wait for job to reach TRANSACTION phase (phase=2) after respond(true)
 async function waitForTransaction(client, jobId, maxWaitMs = 30000) {
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
@@ -29,15 +26,15 @@ async function waitForTransaction(client, jobId, maxWaitMs = 30000) {
   throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
 }
 
-// Extract plain string from requirement (may be object or string)
-function extractContent(requirement) {
-  if (!requirement) return '';
-  if (typeof requirement === 'string') return requirement;
-  if (typeof requirement === 'object') {
-    // Butler sends {topic: "..."} or {requirement: "..."}
-    return requirement.topic || requirement.requirement || requirement.content || JSON.stringify(requirement);
+function extractContent(req) {
+  if (!req) return '';
+  if (typeof req === 'string') {
+    try { req = JSON.parse(req); } catch { return req; }
   }
-  return String(requirement);
+  if (typeof req === 'object') {
+    return req.topic || req.requirement || req.content || req.contractAddress || JSON.stringify(req);
+  }
+  return String(req);
 }
 
 async function fetchTokenData(contractAddress) {
@@ -69,7 +66,6 @@ Brand: Bold. Irreverent. Data-driven. Biblical. Thou shalt never run out of GAS.
     ? `Write a viral X thread about ${liveData.name} (${liveData.symbol}). Price: $${liveData.priceUsd}, 24h: ${liveData.priceChange24h}%, Liq: $${(liveData.liquidity||0).toLocaleString()}, Vol: $${(liveData.volume24h||0).toLocaleString()}. Request: ${jobRequest}`
     : `Write a viral X thread about: ${jobRequest}. End with $GSB mention.`;
 
-  // If no OpenAI key, return a template thread
   if (!process.env.OPENAI_API_KEY) {
     return {
       thread: `1/ The Gas Bible is written. $GSB is the agent that never runs dry.\n\n2/ While others panic about gas fees, $GSB agents are already 3 moves ahead.\n\n3/ Tokenized intelligence. On-chain. Always on. Always earning.\n\n4/ Thou shalt never run out of GAS. — $GSB`,
@@ -107,9 +103,8 @@ async function start() {
     onNewTask: async (job) => {
       console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase}`);
 
-      // Skip if already being handled (SDK fires onNewTask again when phase changes)
       if (handledJobs.has(job.id)) {
-        console.log(`[${AGENT_NAME}] Job ${job.id} already in progress — skipping duplicate.`);
+        console.log(`[${AGENT_NAME}] Job ${job.id} already in progress — skipping.`);
         return;
       }
       handledJobs.add(job.id);
@@ -120,24 +115,29 @@ async function start() {
           || '';
         console.log(`[${AGENT_NAME}] Job ${job.id} content: ${content.slice(0, 120)}`);
 
-        if (!content || content.length < 3) {
-          await job.respond(false, 'Please provide a topic or contract address.');
-          handledJobs.delete(job.id);
-          return;
+        let freshJob = job;
+
+        if (job.phase === 2) {
+          // Already in TRANSACTION — skip respond(), deliver directly
+          console.log(`[${AGENT_NAME}] Job ${job.id} already in TRANSACTION phase.`);
+        } else {
+          if (!content || content.length < 3) {
+            await job.respond(false, 'Please provide a topic or contract address.');
+            handledJobs.delete(job.id);
+            return;
+          }
+          await job.respond(true, 'Writing your thread now...');
+          console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
+          freshJob = await waitForTransaction(client, job.id);
+          console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase. Writing thread...`);
         }
-
-        await job.respond(true, 'Writing your thread now...');
-        console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
-
-        const freshJob = await waitForTransaction(client, job.id);
-        console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase. Writing thread...`);
 
         const result = await writeThread(content);
         await freshJob.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job ${job.id} error:`, err.message);
-        handledJobs.delete(job.id); // allow retry on next job event
+        handledJobs.delete(job.id);
       }
     },
     onEvaluate: async (job) => {

@@ -17,13 +17,15 @@ async function waitForTransaction(client, jobId, maxWaitMs = 30000) {
   throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
 }
 
-function extractContent(requirement) {
-  if (!requirement) return '';
-  if (typeof requirement === 'string') return requirement;
-  if (typeof requirement === 'object') {
-    return requirement.topic || requirement.requirement || requirement.content || requirement.contractAddress || JSON.stringify(requirement);
+function extractContent(req) {
+  if (!req) return '';
+  if (typeof req === 'string') {
+    try { req = JSON.parse(req); } catch { return req; }
   }
-  return String(requirement);
+  if (typeof req === 'object') {
+    return req.topic || req.requirement || req.content || req.contractAddress || JSON.stringify(req);
+  }
+  return String(req);
 }
 
 async function analyzeToken(contractAddress) {
@@ -60,6 +62,23 @@ async function analyzeToken(contractAddress) {
   }
 }
 
+async function processJob(client, job) {
+  const rawContent = extractContent(job.requirement)
+    || extractContent(job.memos?.[0]?.content)
+    || '';
+  console.log(`[${AGENT_NAME}] Job ${job.id} content: ${rawContent.slice(0, 120)}`);
+
+  const match = rawContent.match(/0x[a-fA-F0-9]{40}/);
+  if (!match) {
+    await job.deliver({ type: 'text', value: 'No contract address found. Please provide a valid Base token address.' });
+    return;
+  }
+
+  const report = await analyzeToken(match[0]);
+  await job.deliver({ type: 'text', value: JSON.stringify(report, null, 2) });
+  console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
+}
+
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
   let client;
@@ -71,32 +90,26 @@ async function start() {
       console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase}`);
 
       if (handledJobs.has(job.id)) {
-        console.log(`[${AGENT_NAME}] Job ${job.id} already in progress — skipping duplicate.`);
+        console.log(`[${AGENT_NAME}] Job ${job.id} already in progress — skipping.`);
         return;
       }
       handledJobs.add(job.id);
 
       try {
-        await job.respond(true, 'Analyzing token now...');
-        console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
+        let freshJob = job;
 
-        const freshJob = await waitForTransaction(client, job.id);
-        console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase.`);
-
-        const rawContent = extractContent(freshJob.requirement)
-          || extractContent(freshJob.memos?.[0]?.content)
-          || '';
-        console.log(`[${AGENT_NAME}] Job ${job.id} content: ${rawContent.slice(0, 120)}`);
-
-        const match = rawContent.match(/0x[a-fA-F0-9]{40}/);
-        if (!match) {
-          await freshJob.deliver({ type: 'text', value: 'No contract address found. Please provide a valid Base token address.' });
-          return;
+        if (job.phase === 2) {
+          // Already in TRANSACTION — skip respond(), deliver directly
+          console.log(`[${AGENT_NAME}] Job ${job.id} already in TRANSACTION phase.`);
+        } else {
+          // phase=0: accept first, then wait for TRANSACTION
+          await job.respond(true, 'Analyzing token now...');
+          console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
+          freshJob = await waitForTransaction(client, job.id);
+          console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase.`);
         }
 
-        const report = await analyzeToken(match[0]);
-        await freshJob.deliver({ type: 'text', value: JSON.stringify(report, null, 2) });
-        console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
+        await processJob(client, freshJob);
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job ${job.id} error:`, err.message);
         handledJobs.delete(job.id);

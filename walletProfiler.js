@@ -17,13 +17,15 @@ async function waitForTransaction(client, jobId, maxWaitMs = 30000) {
   throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
 }
 
-function extractContent(requirement) {
-  if (!requirement) return '';
-  if (typeof requirement === 'string') return requirement;
-  if (typeof requirement === 'object') {
-    return requirement.topic || requirement.requirement || requirement.content || requirement.walletAddress || JSON.stringify(requirement);
+function extractContent(req) {
+  if (!req) return '';
+  if (typeof req === 'string') {
+    try { req = JSON.parse(req); } catch { return req; }
   }
-  return String(requirement);
+  if (typeof req === 'object') {
+    return req.topic || req.requirement || req.content || req.walletAddress || JSON.stringify(req);
+  }
+  return String(req);
 }
 
 async function profileWallet(address) {
@@ -60,6 +62,20 @@ async function profileWallet(address) {
   }
 }
 
+async function processJob(client, job) {
+  const rawContent = extractContent(job.requirement)
+    || extractContent(job.memos?.[0]?.content)
+    || '';
+  const match = rawContent.match(/0x[a-fA-F0-9]{40}/);
+  if (!match) {
+    await job.deliver({ type: 'text', value: 'No wallet address found. Please provide a valid Base wallet address.' });
+    return;
+  }
+  const profile = await profileWallet(match[0]);
+  await job.deliver({ type: 'text', value: JSON.stringify(profile, null, 2) });
+  console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
+}
+
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
   let client;
@@ -71,31 +87,24 @@ async function start() {
       console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase}`);
 
       if (handledJobs.has(job.id)) {
-        console.log(`[${AGENT_NAME}] Job ${job.id} already in progress — skipping duplicate.`);
+        console.log(`[${AGENT_NAME}] Job ${job.id} already in progress — skipping.`);
         return;
       }
       handledJobs.add(job.id);
 
       try {
-        await job.respond(true, 'Profiling wallet now...');
-        console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
+        let freshJob = job;
 
-        const freshJob = await waitForTransaction(client, job.id);
-        console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase.`);
-
-        const rawContent = extractContent(freshJob.requirement)
-          || extractContent(freshJob.memos?.[0]?.content)
-          || '';
-        const match = rawContent.match(/0x[a-fA-F0-9]{40}/);
-
-        if (!match) {
-          await freshJob.deliver({ type: 'text', value: 'No wallet address found. Please provide a valid Base wallet address.' });
-          return;
+        if (job.phase === 2) {
+          console.log(`[${AGENT_NAME}] Job ${job.id} already in TRANSACTION phase.`);
+        } else {
+          await job.respond(true, 'Profiling wallet now...');
+          console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
+          freshJob = await waitForTransaction(client, job.id);
+          console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase.`);
         }
 
-        const profile = await profileWallet(match[0]);
-        await freshJob.deliver({ type: 'text', value: JSON.stringify(profile, null, 2) });
-        console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
+        await processJob(client, freshJob);
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job ${job.id} error:`, err.message);
         handledJobs.delete(job.id);

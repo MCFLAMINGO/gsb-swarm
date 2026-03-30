@@ -79,17 +79,22 @@ async function start() {
       console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase}`);
 
       if (handledJobs.has(job.id)) {
-        console.log(`[${AGENT_NAME}] Job ${job.id} already in progress — skipping duplicate.`);
+        console.log(`[${AGENT_NAME}] Job ${job.id} already in progress — skipping.`);
         return;
       }
       handledJobs.add(job.id);
 
       try {
-        await job.respond(true, 'Scanning Base for alpha...');
-        console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
+        let freshJob = job;
 
-        const freshJob = await waitForTransaction(client, job.id);
-        console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase. Scanning...`);
+        if (job.phase === 2) {
+          console.log(`[${AGENT_NAME}] Job ${job.id} already in TRANSACTION phase.`);
+        } else {
+          await job.respond(true, 'Scanning Base for alpha...');
+          console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
+          freshJob = await waitForTransaction(client, job.id);
+          console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase. Scanning...`);
+        }
 
         const result = await scanAlpha();
         await freshJob.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
