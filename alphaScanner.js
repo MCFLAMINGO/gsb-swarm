@@ -5,7 +5,95 @@ const { buildAcpClient } = require('./acp');
 const AGENT_NAME = 'GSB Alpha Scanner';
 const JOB_PRICE = 0.10;
 
+// ── Job requirements JSON schema ──────────────────────────────────────────────
+const REQUIREMENTS_SCHEMA = {
+  name: 'GSB Alpha Scanner',
+  description: 'Scans for alpha signals on Base: trending tokens, new launches, whale movements, DEX volume spikes.',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: {
+        type: 'string',
+        description: "What to scan for — e.g. 'trending tokens', 'new launches today', 'whale wallets moving'",
+      },
+      chain: {
+        type: 'string',
+        description: "Blockchain to scan. Must be 'base'.",
+        enum: ['base'],
+      },
+      limit: {
+        type: 'number',
+        description: 'Max results to return (default 10, max 50)',
+      },
+    },
+    required: ['query'],
+  },
+  examples: [
+    { input: { query: 'trending tokens on base today' }, description: 'Scan for trending Base tokens' },
+    { input: { query: 'new launches', chain: 'base', limit: 20 }, description: 'Find new token launches' },
+  ],
+  rejection_cases: [
+    'Empty or missing query',
+    'Non-Base chain specified (only Base is supported)',
+    'NSFW or inappropriate query content',
+  ],
+};
+
+// ── Input validation ──────────────────────────────────────────────────────────
+const NSFW_KEYWORDS = /hack|drain|steal|phish|scam|exploit|launder|porn|nsfw|xxx/i;
+
+function validateInput(raw) {
+  if (!raw || typeof raw !== 'string' || raw.trim().length === 0) {
+    return { valid: false, reason: 'Empty or missing query.' };
+  }
+
+  // Try to parse as JSON to extract structured fields
+  let query = raw;
+  let chain = null;
+  let limit = null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed.query) query = parsed.query;
+    chain = parsed.chain || null;
+    limit = parsed.limit || null;
+  } catch {
+    // raw string is the query itself
+  }
+
+  if (!query || query.trim().length < 3) {
+    return { valid: false, reason: 'Empty or missing query.' };
+  }
+
+  // Reject NSFW/scam keywords
+  if (NSFW_KEYWORDS.test(query)) {
+    return { valid: false, reason: 'Query contains disallowed content and cannot be processed.' };
+  }
+
+  // Chain must be base if specified
+  if (chain && chain.toLowerCase() !== 'base') {
+    return { valid: false, reason: `Only the Base network is supported. Received: ${chain}` };
+  }
+
+  // Clamp limit to 50 (do NOT reject)
+  if (limit !== null && limit > 50) {
+    limit = 50;
+  }
+
+  return { valid: true, query, chain, limit };
+}
+
 const handledJobs = new Set();
+
+function extractContent(req) {
+  if (!req) return '';
+  if (typeof req === 'string') {
+    try { req = JSON.parse(req); } catch { return req; }
+  }
+  if (typeof req === 'object') {
+    return req.query || req.topic || req.requirement || req.content || JSON.stringify(req);
+  }
+  return String(req);
+}
 
 async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
   const start = Date.now();
@@ -85,6 +173,20 @@ async function start() {
       handledJobs.add(job.id);
 
       try {
+        const rawContent = extractContent(job.requirement)
+          || extractContent(job.memos?.[0]?.content)
+          || '';
+        console.log(`[${AGENT_NAME}] Job ${job.id} content: ${rawContent.slice(0, 120)}`);
+
+        // ── Validate BEFORE accepting ────────────────────────────────────────
+        const check = validateInput(rawContent);
+        if (!check.valid) {
+          console.log(`[${AGENT_NAME}] Job ${job.id} REJECTED: ${check.reason}`);
+          await job.reject(check.reason);
+          handledJobs.delete(job.id);
+          return;
+        }
+
         let freshJob = job;
 
         if (job.phase === 2) {

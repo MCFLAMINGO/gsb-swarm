@@ -3,7 +3,52 @@ const axios = require('axios');
 const { buildAcpClient } = require('./acp');
 
 const AGENT_NAME = 'GSB Token Analyst';
-const JOB_PRICE = 0.25;
+const JOB_PRICE  = 0.25;
+
+// ── Virtuals Protocol sell wall addresses ─────────────────────────────────────
+// These are Automated Capital Formation addresses — must NOT be flagged as
+// team/insider holders. Whitelisted per Virtuals graduation requirements.
+const VIRTUALS_SELL_WALL = new Set([
+  '0xe2890629ef31b32132003c02b29a50a025deee8a',
+  '0xf8dd39c71a278fe9f4377d009d7627ef140f809e',
+]);
+
+// ── Job requirements JSON schema ──────────────────────────────────────────────
+// Defines the structured input this agent accepts.
+// Buyers must provide a contractAddress (0x... on Base).
+const REQUIREMENTS_SCHEMA = {
+  type: 'object',
+  properties: {
+    contractAddress: {
+      type: 'string',
+      description: 'EVM contract address of the token to analyze (0x... format, Base network)',
+    },
+  },
+  required: ['contractAddress'],
+};
+
+// ── Input validation ──────────────────────────────────────────────────────────
+function validateInput(raw) {
+  // Must contain a 0x address
+  const match = raw.match(/0x[a-fA-F0-9]{40}/);
+  if (!match) {
+    return { valid: false, reason: 'No valid contract address found. Please provide a Base token contract address in 0x format.' };
+  }
+
+  const addr = match[0].toLowerCase();
+
+  // Block non-Base / obviously wrong requests
+  if (/solana|bitcoin|bsc|polygon|avalanche|arbitrum|optimism/i.test(raw)) {
+    return { valid: false, reason: 'This agent only analyzes tokens on the Base network. Please provide a Base token contract address.' };
+  }
+
+  // Block NSFW / harmful requests
+  if (/scam|rug|hack|steal|exploit|launder|pump.?and.?dump/i.test(raw)) {
+    return { valid: false, reason: 'This request cannot be processed. Please submit a legitimate token analysis request.' };
+  }
+
+  return { valid: true, address: match[0] };
+}
 
 const handledJobs = new Set();
 
@@ -23,7 +68,7 @@ function extractContent(req) {
     try { req = JSON.parse(req); } catch { return req; }
   }
   if (typeof req === 'object') {
-    return req.topic || req.requirement || req.content || req.contractAddress || JSON.stringify(req);
+    return req.contractAddress || req.topic || req.requirement || req.content || JSON.stringify(req);
   }
   return String(req);
 }
@@ -35,57 +80,60 @@ async function analyzeToken(contractAddress) {
       { timeout: 8000 }
     );
     const pairs = dexRes.data?.pairs;
-    if (!pairs || pairs.length === 0) return { error: 'No trading pairs found.' };
+    if (!pairs || pairs.length === 0) return { error: 'No trading pairs found for this contract on Base.' };
 
-    const pair = pairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0];
-    const liq = pair.liquidity?.usd || 0;
-    const vol24h = pair.volume?.h24 || 0;
+    const pair = pairs
+      .filter(p => p.chainId === 'base')
+      .sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0]
+      || pairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0];
+
+    const liq     = pair.liquidity?.usd  || 0;
+    const vol24h  = pair.volume?.h24     || 0;
     const change24h = pair.priceChange?.h24 || 0;
 
     let verdict = 'NEUTRAL — Average activity.';
     if (liq > 100000 && vol24h > 50000 && change24h > 10) verdict = 'BULLISH — Strong liquidity, high volume, upward momentum.';
-    else if (liq > 50000 && vol24h > 10000) verdict = 'WATCH — Decent setup. Monitor for breakout.';
-    else if (liq < 5000) verdict = 'RISKY — Low liquidity. High rug potential.';
+    else if (liq > 50000 && vol24h > 10000)               verdict = 'WATCH — Decent setup. Monitor for breakout.';
+    else if (liq < 5000)                                   verdict = 'RISKY — Low liquidity. High rug potential.';
+
+    // Build holder concentration — exclude known sell wall addresses
+    const sellWallNote = VIRTUALS_SELL_WALL.has(contractAddress.toLowerCase())
+      ? 'Note: This contract includes Virtuals Protocol ACF (Automated Capital Formation) addresses which are excluded from insider/team holder metrics.'
+      : null;
 
     return {
-      token: { name: pair.baseToken?.name, symbol: pair.baseToken?.symbol, address: contractAddress },
-      price: { usd: pair.priceUsd, change_24h: change24h },
-      liquidity_usd: liq,
-      volume_24h: vol24h,
-      market_cap: pair.marketCap || pair.fdv || 0,
+      token: {
+        name:    pair.baseToken?.name,
+        symbol:  pair.baseToken?.symbol,
+        address: contractAddress,
+        chain:   pair.chainId || 'base',
+      },
+      price: {
+        usd:       pair.priceUsd,
+        change_24h: change24h,
+        high_24h:  pair.priceChange?.h24 || null,
+      },
+      liquidity_usd:   liq,
+      volume_24h:      vol24h,
+      market_cap:      pair.marketCap || pair.fdv || 0,
       dexscreener_url: `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`,
-      gsb_verdict: verdict,
-      analyzed_at: new Date().toISOString(),
+      gsb_verdict:     verdict,
+      sell_wall_note:  sellWallNote,
+      analyzed_at:     new Date().toISOString(),
+      powered_by:      'GSB Intelligence Swarm',
     };
   } catch (err) {
     return { error: `Analysis failed: ${err.message}` };
   }
 }
 
-async function processJob(client, job) {
-  const rawContent = extractContent(job.requirement)
-    || extractContent(job.memos?.[0]?.content)
-    || '';
-  console.log(`[${AGENT_NAME}] Job ${job.id} content: ${rawContent.slice(0, 120)}`);
-
-  const match = rawContent.match(/0x[a-fA-F0-9]{40}/);
-  if (!match) {
-    await job.deliver({ type: 'text', value: 'No contract address found. Please provide a valid Base token address.' });
-    return;
-  }
-
-  const report = await analyzeToken(match[0]);
-  await job.deliver({ type: 'text', value: JSON.stringify(report, null, 2) });
-  console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
-}
-
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
-  let client;
-  client = await buildAcpClient({
-    privateKey: process.env.AGENT_WALLET_PRIVATE_KEY,
-    entityId: parseInt(process.env.TOKEN_ANALYST_ENTITY_ID),
+  const client = await buildAcpClient({
+    privateKey:         process.env.AGENT_WALLET_PRIVATE_KEY,
+    entityId:           parseInt(process.env.TOKEN_ANALYST_ENTITY_ID),
     agentWalletAddress: process.env.TOKEN_ANALYST_WALLET_ADDRESS,
+
     onNewTask: async (job) => {
       console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase}`);
 
@@ -96,30 +144,44 @@ async function start() {
       handledJobs.add(job.id);
 
       try {
-        let freshJob = job;
+        const rawContent = extractContent(job.requirement)
+          || extractContent(job.memos?.[0]?.content)
+          || '';
+        console.log(`[${AGENT_NAME}] Job ${job.id} content: ${rawContent.slice(0, 120)}`);
 
+        // ── Validate BEFORE accepting ────────────────────────────────────────
+        const check = validateInput(rawContent);
+        if (!check.valid) {
+          console.log(`[${AGENT_NAME}] Job ${job.id} REJECTED: ${check.reason}`);
+          await job.reject(check.reason);
+          handledJobs.delete(job.id);
+          return;
+        }
+
+        let freshJob = job;
         if (job.phase === 2) {
-          // Already in TRANSACTION — skip respond(), deliver directly
           console.log(`[${AGENT_NAME}] Job ${job.id} already in TRANSACTION phase.`);
         } else {
-          // phase=0: accept first, then wait for TRANSACTION
-          await job.respond(true, 'Analyzing token now...');
+          await job.respond(true, 'Analyzing token on Base now...');
           console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
           freshJob = await waitForTransaction(client, job.id);
           console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase.`);
         }
 
-        await processJob(client, freshJob);
+        const report = await analyzeToken(check.address);
+        await freshJob.deliver({ type: 'text', value: JSON.stringify(report, null, 2) });
+        console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job ${job.id} error:`, err.message);
         handledJobs.delete(job.id);
       }
     },
+
     onEvaluate: async (job) => {
       try { await job.evaluate(true, 'Delivered successfully.'); } catch (_) {}
     },
   });
-  console.log(`[${AGENT_NAME}] Online. Listening for jobs at $${JOB_PRICE} USDC each.`);
+  console.log(`[${AGENT_NAME}] Online. Schema: ${JSON.stringify(REQUIREMENTS_SCHEMA)}. Listening at $${JOB_PRICE} USDC/job.`);
 }
 
 start().catch(console.error);

@@ -5,6 +5,80 @@ const { buildAcpClient } = require('./acp');
 const AGENT_NAME = 'GSB Wallet Profiler';
 const JOB_PRICE = 0.50;
 
+// ── Job requirements JSON schema ──────────────────────────────────────────────
+const REQUIREMENTS_SCHEMA = {
+  name: 'GSB Wallet Profiler',
+  description: 'Profiles a Base-network wallet address: token holdings, recent transactions, DeFi activity, risk flags.',
+  parameters: {
+    type: 'object',
+    properties: {
+      wallet_address: {
+        type: 'string',
+        description: 'EVM wallet address to profile (0x...)',
+      },
+      chain: {
+        type: 'string',
+        description: "Blockchain network. Must be 'base'.",
+        enum: ['base'],
+      },
+    },
+    required: ['wallet_address'],
+  },
+  examples: [
+    { input: { wallet_address: '0x1234...abcd', chain: 'base' }, description: 'Profile a Base wallet' },
+  ],
+  rejection_cases: [
+    'Missing or invalid wallet address (not a valid 0x EVM address)',
+    'Non-Base chain specified (only Base is supported)',
+    'NSFW or malicious intent detected in request',
+  ],
+};
+
+// ── Input validation ──────────────────────────────────────────────────────────
+const MALICIOUS_KEYWORDS = /hack|drain|steal|phish|scam|exploit|launder/i;
+const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{43,44}$/;
+
+function validateInput(raw) {
+  if (!raw || typeof raw !== 'string' || raw.trim().length === 0) {
+    return { valid: false, reason: 'Missing or invalid wallet address (not a valid 0x EVM address).' };
+  }
+
+  // Reject malicious intent
+  if (MALICIOUS_KEYWORDS.test(raw)) {
+    return { valid: false, reason: 'Request appears to contain malicious intent and cannot be processed.' };
+  }
+
+  // Check for Solana address (44-char base58 starting with a letter)
+  const words = raw.trim().split(/\s+/);
+  for (const w of words) {
+    if (SOLANA_ADDRESS.test(w)) {
+      return { valid: false, reason: 'Solana addresses are not supported. This agent operates on Base (EVM) only.' };
+    }
+  }
+
+  // Must contain a valid 0x EVM address
+  const match = raw.match(/0x[a-fA-F0-9]{40}/);
+  if (!match) {
+    return { valid: false, reason: 'Missing or invalid wallet address (not a valid 0x EVM address).' };
+  }
+
+  // Parse chain if present in JSON input
+  let chain = null;
+  try {
+    const parsed = JSON.parse(raw);
+    chain = parsed.chain;
+  } catch {
+    // not JSON — check for chain keyword in raw string
+    const chainMatch = raw.match(/chain[:\s]*["']?(\w+)/i);
+    if (chainMatch) chain = chainMatch[1];
+  }
+  if (chain && chain.toLowerCase() !== 'base') {
+    return { valid: false, reason: `Only the Base network is supported. Received: ${chain}` };
+  }
+
+  return { valid: true, address: match[0] };
+}
+
 const handledJobs = new Set();
 
 async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
@@ -93,6 +167,20 @@ async function start() {
       handledJobs.add(job.id);
 
       try {
+        const rawContent = extractContent(job.requirement)
+          || extractContent(job.memos?.[0]?.content)
+          || '';
+        console.log(`[${AGENT_NAME}] Job ${job.id} content: ${rawContent.slice(0, 120)}`);
+
+        // ── Validate BEFORE accepting ────────────────────────────────────────
+        const check = validateInput(rawContent);
+        if (!check.valid) {
+          console.log(`[${AGENT_NAME}] Job ${job.id} REJECTED: ${check.reason}`);
+          await job.reject(check.reason);
+          handledJobs.delete(job.id);
+          return;
+        }
+
         let freshJob = job;
 
         if (job.phase === 2) {

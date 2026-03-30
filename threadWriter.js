@@ -5,6 +5,97 @@ const { buildAcpClient } = require('./acp');
 const AGENT_NAME = 'GSB Thread Writer';
 const JOB_PRICE = 0.15;
 
+// ── Job requirements JSON schema ──────────────────────────────────────────────
+const REQUIREMENTS_SCHEMA = {
+  name: 'GSB Thread Writer',
+  description: 'Writes engaging crypto Twitter/X threads on any topic. Returns a formatted multi-tweet thread.',
+  parameters: {
+    type: 'object',
+    properties: {
+      topic: {
+        type: 'string',
+        description: "The topic or theme for the thread (e.g. 'why Base is winning', 'tokenomics of $GSB')",
+      },
+      tone: {
+        type: 'string',
+        description: "Writing tone: 'alpha', 'educational', 'hype', 'analytical'. Default: 'alpha'",
+        enum: ['alpha', 'educational', 'hype', 'analytical'],
+      },
+      tweets: {
+        type: 'number',
+        description: 'Number of tweets in the thread (default 5, max 15)',
+      },
+    },
+    required: ['topic'],
+  },
+  examples: [
+    { input: { topic: 'why Base is the future of DeFi', tone: 'alpha', tweets: 7 }, description: 'Write an alpha thread about Base' },
+    { input: { topic: 'GSB tokenomics explained', tone: 'educational' }, description: 'Educational thread on $GSB' },
+  ],
+  rejection_cases: [
+    'Empty or missing topic',
+    'Topic is too short (less than 10 characters)',
+    'NSFW, hateful, or illegal content requested',
+    'Topic is pure gibberish/nonsense',
+  ],
+};
+
+// ── Input validation ──────────────────────────────────────────────────────────
+const NSFW_HATEFUL_RE = /\b(nigger|nigga|faggot|kike|spic|chink|kill\s+yourself|rape|child\s*porn|cp\b|genocide|nazi|terroris[mt]|bomb\s+threat)\b/i;
+const EXPLICIT_RE = /\b(porn|hentai|nsfw|xxx|nude|onlyfans)\b/i;
+
+function hasRealWords(text) {
+  // Check if the text contains at least one common English word (3+ chars)
+  const words = text.toLowerCase().match(/[a-z]{3,}/g) || [];
+  const commonPatterns = /\b(the|and|for|are|but|not|you|all|can|her|was|one|our|out|how|why|what|who|this|that|with|from|base|token|crypto|defi|chain|price|market|trade|swap|eth|bitcoin|solana|agent|write|about|thread)\b/i;
+  return words.length >= 1 && commonPatterns.test(text);
+}
+
+function validateInput(raw) {
+  if (!raw || typeof raw !== 'string' || raw.trim().length === 0) {
+    return { valid: false, reason: 'Empty or missing topic.' };
+  }
+
+  // Try to parse structured input
+  let topic = raw;
+  let tweets = null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      topic = parsed.topic || '';
+      tweets = parsed.tweets || null;
+    }
+  } catch { /* treat as plain text topic */ }
+
+  const trimmed = topic.trim();
+
+  if (!trimmed || trimmed.length < 10) {
+    return { valid: false, reason: 'Topic is too short (less than 10 characters). Please provide a clear crypto or finance topic.' };
+  }
+
+  // Reject if all special characters / whitespace
+  if (/^[\s\W]+$/.test(trimmed)) {
+    return { valid: false, reason: 'Topic does not appear to be a valid subject. Please provide a clear crypto or finance topic.' };
+  }
+
+  // Reject NSFW / hateful / illegal
+  if (NSFW_HATEFUL_RE.test(trimmed) || EXPLICIT_RE.test(trimmed)) {
+    return { valid: false, reason: 'This topic cannot be written due to content policy restrictions.' };
+  }
+
+  // Reject pure nonsense / gibberish
+  if (!hasRealWords(trimmed)) {
+    return { valid: false, reason: 'Topic does not appear to be a valid subject. Please provide a clear crypto or finance topic.' };
+  }
+
+  // Clamp tweets (do NOT reject, just cap at 15)
+  if (tweets !== null && tweets > 15) {
+    tweets = 15;
+  }
+
+  return { valid: true, topic: trimmed, tweets };
+}
+
 const handledJobs = new Set();
 
 async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
@@ -139,17 +230,21 @@ async function start() {
           || '';
         console.log(`[${AGENT_NAME}] Job ${job.id} content: ${content.slice(0, 120)}`);
 
+        // ── Validate BEFORE accepting ────────────────────────────────────────
+        const check = validateInput(content);
+        if (!check.valid) {
+          console.log(`[${AGENT_NAME}] Job ${job.id} REJECTED: ${check.reason}`);
+          await job.reject(check.reason);
+          handledJobs.delete(job.id);
+          return;
+        }
+
         let freshJob = job;
 
         if (job.phase === 2) {
           // Already in TRANSACTION — skip respond(), deliver directly
           console.log(`[${AGENT_NAME}] Job ${job.id} already in TRANSACTION phase.`);
         } else {
-          if (!content || content.length < 3) {
-            await job.respond(false, 'Please provide a topic or contract address.');
-            handledJobs.delete(job.id);
-            return;
-          }
           await job.respond(true, 'Writing your thread now...');
           console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
           freshJob = await waitForTransaction(client, job.id);
