@@ -52,53 +52,41 @@ const WORKERS = [
 
 const JOBS_PER_WORKER = 3;
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-function makeFare(priceUsdc) {
-  const baseUnits = Math.round(priceUsdc * 1_000_000);
-  return new FareAmount(baseUnits, baseAcpConfig.baseFare);
+function makeFare(p) {
+  return new FareAmount(Math.round(p * 1_000_000), baseAcpConfig.baseFare);
 }
 
-function extractDetails(err) {
-  const m = err?.message || '';
-  const match = m.match(/Details:\s*(.+?)(?:\nVersion:|$)/s);
-  return match ? match[1].trim() : m.split('\n')[0];
-}
-
-// ── Serialized payment queue ─────────────────────────────────────────────────
-// payAndAcceptRequirement does: approveAllowance + signMemo + createMemo(→TRANSACTION)
-// All are UserOps — must be serialized to avoid bundler nonce conflicts
+// ── Serialized queue ─────────────────────────────────────────────────────────
 let payQueue = Promise.resolve();
 
 function queuePay(job) {
   payQueue = payQueue.then(async () => {
-    const MAX_RETRIES = 4;
+    const MAX_RETRIES = 3;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         console.log(`[ceo] payAndAcceptRequirement job ${job.id} attempt ${attempt}...`);
         await job.payAndAcceptRequirement('Requirement accepted. Please deliver.');
-        console.log(`[ceo] ✓ Job ${job.id} paid + accepted → TRANSACTION phase.`);
+        console.log(`[ceo] ✓ Job ${job.id} → TRANSACTION phase.`);
         break;
       } catch (err) {
-        const detail = extractDetails(err);
-        console.error(`[ceo] payAndAccept error job ${job.id} attempt ${attempt}: ${detail}`);
+        // Print the FULL raw stack so we can see the Details: line
+        console.error(`\n[ceo] === ERROR job ${job.id} attempt ${attempt} ===`);
+        console.error(err.stack || err.message);
+        console.error(`[ceo] === END ERROR ===\n`);
         if (attempt < MAX_RETRIES) {
-          const delay = attempt * 10000;
-          console.log(`[ceo] Retrying job ${job.id} in ${delay/1000}s...`);
-          await sleep(delay);
+          await sleep(attempt * 10000);
         } else {
-          console.error(`[ceo] ✗ Gave up on job ${job.id}.`);
+          console.error(`[ceo] ✗ Gave up job ${job.id}.`);
         }
       }
     }
-    await sleep(6000); // let bundler clear
+    await sleep(6000);
   });
 }
 
-// ── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
-  if (!PRIVATE_KEY) throw new Error('AGENT_WALLET_PRIVATE_KEY not set in env');
+  if (!PRIVATE_KEY) throw new Error('AGENT_WALLET_PRIVATE_KEY not set');
 
   console.log('\n╔══════════════════════════════════════════════════╗');
   console.log('║   GSB CEO BUYER — Graduation Job Firer           ║');
@@ -106,70 +94,57 @@ async function main() {
 
   console.log('[ceo] Building ACP client for CEO (entity', CEO_ENTITY_ID, ')...');
   const contractClient = await AcpContractClient.build(
-    PRIVATE_KEY,
-    CEO_ENTITY_ID,
-    CEO_WALLET_ADDRESS
+    PRIVATE_KEY, CEO_ENTITY_ID, CEO_WALLET_ADDRESS
   );
 
   const client = new AcpClient({
     acpContractClient: contractClient,
-
     onNewTask: async (job, memo) => {
-      // onNewTask fires when worker has posted their requirement memo (nextPhase=2).
-      // Use payAndAcceptRequirement() — it finds the memo itself, approves USDC,
-      // signs it, and advances the job to TRANSACTION phase in one batch UserOp.
       if (memo) {
-        console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} memo=${memo?.id} memoNextPhase=${memo?.nextPhase}`);
+        console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} memo=${memo?.id} nextPhase=${memo?.nextPhase}`);
         queuePay(job);
       } else {
-        console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} — no memo to sign.`);
+        console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} — no memo.`);
       }
     },
-
     onEvaluate: async (job) => {
-      console.log(`[ceo] Auto-approving job ${job.id}`);
+      console.log(`[ceo] Evaluating job ${job.id}...`);
       await sleep(2000);
       try {
         await job.evaluate(true, 'Good work. Approved.');
         console.log(`[ceo] ✓ Job ${job.id} approved.`);
       } catch (err) {
-        console.error(`[ceo] Evaluate error job ${job.id}:`, extractDetails(err));
+        console.error(`[ceo] Evaluate error job ${job.id}:`, err.message);
       }
     },
   });
 
-  console.log('[ceo] CEO client ready. Using payAndAcceptRequirement (approve+sign+advance).\n');
+  console.log('[ceo] Ready.\n');
 
-  // Fire jobs sequentially per worker
   for (const worker of WORKERS) {
-    console.log(`\n── Hiring ${worker.name} (${JOBS_PER_WORKER} jobs × $${worker.price} USDC) ──`);
+    console.log(`\n── Hiring ${worker.name} (${JOBS_PER_WORKER} × $${worker.price} USDC) ──`);
     for (let i = 1; i <= JOBS_PER_WORKER; i++) {
       try {
-        console.log(`  [job ${i}/${JOBS_PER_WORKER}] Initiating → ${worker.address}...`);
+        console.log(`  [${i}/${JOBS_PER_WORKER}] → ${worker.address}...`);
         const jobId = await client.initiateJob(
-          worker.address,
-          worker.requirement,
-          makeFare(worker.price),
-          null,
+          worker.address, worker.requirement,
+          makeFare(worker.price), null,
           new Date(Date.now() + 1000 * 60 * 30),
         );
-        console.log(`  [job ${i}/${JOBS_PER_WORKER}] ✓ Created: ${jobId}`);
+        console.log(`  [${i}/${JOBS_PER_WORKER}] ✓ Job: ${jobId}`);
         await sleep(3000);
       } catch (err) {
-        console.error(`  [job ${i}/${JOBS_PER_WORKER}] ✗ Failed:`, extractDetails(err));
+        console.error(`  [${i}/${JOBS_PER_WORKER}] ✗`, err.message);
       }
     }
     await sleep(5000);
   }
 
-  console.log('\n[ceo] All jobs fired. Waiting for payAndAccept queue to drain...');
+  console.log('\n[ceo] All fired. Draining queue...');
   await payQueue;
-  console.log('\n[ceo] Queue drained. Waiting for workers to deliver + CEO to evaluate...\n');
+  console.log('\n[ceo] Queue done. Waiting for deliveries...\n');
   await sleep(1000 * 60 * 15);
   console.log('[ceo] Done.');
 }
 
-main().catch(err => {
-  console.error('[ceo] Fatal:', err);
-  process.exit(1);
-});
+main().catch(err => { console.error('[ceo] Fatal:', err); process.exit(1); });
