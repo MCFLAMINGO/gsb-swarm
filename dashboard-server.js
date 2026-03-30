@@ -75,7 +75,7 @@ const wss    = new WebSocketServer({ server, path: '/ws' });
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'dashboard-ui')));
 
 // ── WebSocket broadcast ──────────────────────────────────────────────────────
 function broadcast(type, data) {
@@ -283,7 +283,7 @@ app.get('/api/workers', (req, res) => {
 
 // ── Catch-all → index.html ────────────────────────────────────────────────────
 app.use((req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'dashboard-ui', 'index.html'));
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
