@@ -22,9 +22,6 @@ baseAcpConfig.chain.rpcUrls.default.http = [VIRTUALS_RPC];
 const CEO_ENTITY_ID         = 2;
 const CEO_WALLET_ADDRESS    = '0xf0d4832A4c2D33Faa1F655cd4dE5e7c551a0fE45';
 const PRIVATE_KEY           = process.env.AGENT_WALLET_PRIVATE_KEY;
-const ACP_CONTRACT          = '0x6a1FE26D54ab0d3E1e3168f2e0c0cDa5cC0A0A4A';
-const USDC_CONTRACT         = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-const USDC_APPROVE_AMOUNT   = BigInt(100_000_000); // 100 USDC
 
 const WORKERS = [
   {
@@ -63,37 +60,39 @@ function makeFare(priceUsdc) {
   return new FareAmount(baseUnits, baseAcpConfig.baseFare);
 }
 
-function extractErrorDetails(err) {
-  const detailsMatch = err.message?.match(/Details:\s*(.+?)(?:\nVersion:|$)/s);
-  if (detailsMatch) return detailsMatch[1].trim();
-  return err.message;
+function extractDetails(err) {
+  const m = err?.message || '';
+  const match = m.match(/Details:\s*(.+?)(?:\nVersion:|$)/s);
+  return match ? match[1].trim() : m.split('\n')[0];
 }
 
-// ── Serialized acceptRequirement queue ──────────────────────────────────────
-let acceptQueue = Promise.resolve();
+// ── Serialized payment queue ─────────────────────────────────────────────────
+// payAndAcceptRequirement does: approveAllowance + signMemo + createMemo(→TRANSACTION)
+// All are UserOps — must be serialized to avoid bundler nonce conflicts
+let payQueue = Promise.resolve();
 
-function queueAccept(job, memo) {
-  acceptQueue = acceptQueue.then(async () => {
+function queuePay(job) {
+  payQueue = payQueue.then(async () => {
     const MAX_RETRIES = 4;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        console.log(`[ceo] Accepting requirement for job ${job.id} (memo ${memo.id}) attempt ${attempt}...`);
-        await job.acceptRequirement(memo, 'Requirement accepted. Proceed with delivery.');
-        console.log(`[ceo] ✓ Job ${job.id} requirement accepted — now in TRANSACTION phase.`);
+        console.log(`[ceo] payAndAcceptRequirement job ${job.id} attempt ${attempt}...`);
+        await job.payAndAcceptRequirement('Requirement accepted. Please deliver.');
+        console.log(`[ceo] ✓ Job ${job.id} paid + accepted → TRANSACTION phase.`);
         break;
       } catch (err) {
-        const details = extractErrorDetails(err);
-        console.error(`[ceo] acceptRequirement error on job ${job.id} (attempt ${attempt}): ${details}`);
+        const detail = extractDetails(err);
+        console.error(`[ceo] payAndAccept error job ${job.id} attempt ${attempt}: ${detail}`);
         if (attempt < MAX_RETRIES) {
-          const delay = attempt * 8000;
+          const delay = attempt * 10000;
           console.log(`[ceo] Retrying job ${job.id} in ${delay/1000}s...`);
           await sleep(delay);
         } else {
-          console.error(`[ceo] ✗ Giving up on job ${job.id}.`);
+          console.error(`[ceo] ✗ Gave up on job ${job.id}.`);
         }
       }
     }
-    await sleep(5000);
+    await sleep(6000); // let bundler clear
   });
 }
 
@@ -112,44 +111,21 @@ async function main() {
     CEO_WALLET_ADDRESS
   );
 
-  // ── STEP 1: Check + set USDC allowance ────────────────────────────────────
-  console.log('[ceo] Checking USDC allowance...');
-  try {
-    // Read current allowance via public RPC
-    const { createPublicClient, http, erc20Abi } = require('viem');
-    const { base } = require('viem/chains');
-    const pub = createPublicClient({ chain: base, transport: http(VIRTUALS_RPC) });
-    const allowance = await pub.readContract({
-      address: USDC_CONTRACT,
-      abi: erc20Abi,
-      functionName: 'allowance',
-      args: [CEO_WALLET_ADDRESS, ACP_CONTRACT],
-    });
-    console.log(`[ceo] Current USDC allowance: ${Number(allowance) / 1e6} USDC`);
-
-    if (allowance < BigInt(10_000_000)) { // less than 10 USDC, re-approve
-      console.log('[ceo] Allowance low — approving 100 USDC for ACP contract...');
-      const approveOp = contractClient.approveAllowance(USDC_APPROVE_AMOUNT, USDC_CONTRACT, ACP_CONTRACT);
-      await contractClient.handleOperation([approveOp]);
-      console.log('[ceo] ✓ USDC approved.\n');
-    } else {
-      console.log('[ceo] ✓ Allowance sufficient — skipping approve.\n');
-    }
-  } catch (approveErr) {
-    console.error('[ceo] Allowance check/approve error:', approveErr.message);
-    console.error('[ceo] Proceeding anyway...\n');
-  }
-
-  // ── STEP 2: Build ACP client ───────────────────────────────────────────────
   const client = new AcpClient({
     acpContractClient: contractClient,
+
     onNewTask: async (job, memo) => {
+      // onNewTask fires when worker has posted their requirement memo (nextPhase=2).
+      // Use payAndAcceptRequirement() — it finds the memo itself, approves USDC,
+      // signs it, and advances the job to TRANSACTION phase in one batch UserOp.
       if (memo) {
-        queueAccept(job, memo);
+        console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} memo=${memo?.id} memoNextPhase=${memo?.nextPhase}`);
+        queuePay(job);
       } else {
-        console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} — no memo.`);
+        console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} — no memo to sign.`);
       }
     },
+
     onEvaluate: async (job) => {
       console.log(`[ceo] Auto-approving job ${job.id}`);
       await sleep(2000);
@@ -157,19 +133,19 @@ async function main() {
         await job.evaluate(true, 'Good work. Approved.');
         console.log(`[ceo] ✓ Job ${job.id} approved.`);
       } catch (err) {
-        console.error(`[ceo] Evaluate error on job ${job.id}:`, extractErrorDetails(err));
+        console.error(`[ceo] Evaluate error job ${job.id}:`, extractDetails(err));
       }
     },
   });
 
-  console.log('[ceo] CEO ACP client ready.\n');
+  console.log('[ceo] CEO client ready. Using payAndAcceptRequirement (approve+sign+advance).\n');
 
-  // ── STEP 3: Fire jobs ──────────────────────────────────────────────────────
+  // Fire jobs sequentially per worker
   for (const worker of WORKERS) {
     console.log(`\n── Hiring ${worker.name} (${JOBS_PER_WORKER} jobs × $${worker.price} USDC) ──`);
     for (let i = 1; i <= JOBS_PER_WORKER; i++) {
       try {
-        console.log(`  [job ${i}/${JOBS_PER_WORKER}] Initiating job → ${worker.address}...`);
+        console.log(`  [job ${i}/${JOBS_PER_WORKER}] Initiating → ${worker.address}...`);
         const jobId = await client.initiateJob(
           worker.address,
           worker.requirement,
@@ -177,23 +153,23 @@ async function main() {
           null,
           new Date(Date.now() + 1000 * 60 * 30),
         );
-        console.log(`  [job ${i}/${JOBS_PER_WORKER}] ✓ Job created: ${jobId}`);
+        console.log(`  [job ${i}/${JOBS_PER_WORKER}] ✓ Created: ${jobId}`);
         await sleep(3000);
       } catch (err) {
-        console.error(`  [job ${i}/${JOBS_PER_WORKER}] ✗ Failed:`, extractErrorDetails(err));
+        console.error(`  [job ${i}/${JOBS_PER_WORKER}] ✗ Failed:`, extractDetails(err));
       }
     }
     await sleep(5000);
   }
 
-  console.log('\n[ceo] All jobs fired. Waiting for acceptRequirement queue to drain...');
-  await acceptQueue;
-  console.log('\n[ceo] Queue drained. Keeping alive for deliveries + evaluations...\n');
+  console.log('\n[ceo] All jobs fired. Waiting for payAndAccept queue to drain...');
+  await payQueue;
+  console.log('\n[ceo] Queue drained. Waiting for workers to deliver + CEO to evaluate...\n');
   await sleep(1000 * 60 * 15);
   console.log('[ceo] Done.');
 }
 
 main().catch(err => {
-  console.error('[ceo] Fatal error:', err);
+  console.error('[ceo] Fatal:', err);
   process.exit(1);
 });
