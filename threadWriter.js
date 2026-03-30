@@ -54,9 +54,31 @@ async function fetchTokenData(contractAddress) {
   } catch { return null; }
 }
 
+const FALLBACK_THREADS = [
+  `1/ The Gas Bible is live. $GSB is a tokenized AI agent on @virtuals_io that never sleeps, never runs out of GAS.\n\n2/ What does that mean? It means 24/7 on-chain intelligence. No downtime. No excuses.\n\n3/ Most crypto projects: hype cycle → dump → ghost. $GSB: build → deploy → earn → repeat.\n\n4/ The ACP network means $GSB agents are getting hired by other agents. Agent-to-agent economy. This is the meta.\n\n5/ Every completed job = proof of work. Not mining. Thinking.\n\n6/ Tokenized. Tradeable. Unstoppable. The scripture is on-chain.\n\n7/ Thou shalt never run out of GAS. $GSB`,
+  `1/ Alpha thread: why $GSB on @virtuals_io is the sleeper of the cycle.\n\n2/ Most tokens: speculative. $GSB: revenue-generating AI agent. The difference is everything.\n\n3/ $GSB runs on the Agent Commerce Protocol. Gets hired. Delivers. Gets paid. On-chain.\n\n4/ Token = ownership of the agent's future earnings. Not a meme. A business.\n\n5/ ACP agents are the new gig economy workers — except they operate at machine speed, 24/7.\n\n6/ The Gas Bible says: thou shalt not ape blind. DYOR. Then ape.\n\n7/ $GSB — the agent that pays its own bills. Built on Base. Powered by Virtuals.`,
+  `1/ Not your average AI token thread. $GSB is different and here's why.\n\n2/ $GSB = GSB Intelligence Swarm. 4 specialized agents working as one: Token Analyst, Wallet Profiler, Alpha Scanner, Thread Writer.\n\n3/ Each agent takes jobs from the ACP network. Completes them. Gets paid in USDC. All on-chain.\n\n4/ The token represents the swarm. Stake it. Hold it. Watch it work.\n\n5/ Gas is the lifeblood of on-chain AI. The Gas Bible teaches: never let your agents run dry.\n\n6/ Built on @base. Running on @virtuals_io. Graduating now.\n\n7/ Thou shalt never run out of GAS. $GSB is the word.`,
+];
+
+let fallbackIndex = 0;
+function getFallbackThread(liveData) {
+  const thread = FALLBACK_THREADS[fallbackIndex % FALLBACK_THREADS.length];
+  fallbackIndex++;
+  return {
+    thread,
+    token_data: liveData,
+    generated_at: new Date().toISOString(),
+    powered_by: 'GSB Intelligence Swarm (template mode)',
+  };
+}
+
 async function writeThread(jobRequest) {
   const match = jobRequest.match(/0x[a-fA-F0-9]{40}/);
   const liveData = match ? await fetchTokenData(match[0]) : null;
+
+  if (!process.env.OPENAI_API_KEY) {
+    return getFallbackThread(liveData);
+  }
 
   const systemPrompt = `You are the GSB Thread Writer — the most feared crypto thread writer on X.
 Your threads: punchy, data-backed, 8-12 numbered tweets (1/, 2/, etc.), end with $GSB mention.
@@ -66,31 +88,31 @@ Brand: Bold. Irreverent. Data-driven. Biblical. Thou shalt never run out of GAS.
     ? `Write a viral X thread about ${liveData.name} (${liveData.symbol}). Price: $${liveData.priceUsd}, 24h: ${liveData.priceChange24h}%, Liq: $${(liveData.liquidity||0).toLocaleString()}, Vol: $${(liveData.volume24h||0).toLocaleString()}. Request: ${jobRequest}`
     : `Write a viral X thread about: ${jobRequest}. End with $GSB mention.`;
 
-  if (!process.env.OPENAI_API_KEY) {
+  try {
+    const response = await getOpenAI().chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: 1500,
+      temperature: 0.85,
+    });
     return {
-      thread: `1/ The Gas Bible is written. $GSB is the agent that never runs dry.\n\n2/ While others panic about gas fees, $GSB agents are already 3 moves ahead.\n\n3/ Tokenized intelligence. On-chain. Always on. Always earning.\n\n4/ Thou shalt never run out of GAS. — $GSB`,
+      thread: response.choices[0]?.message?.content || 'Thread generation failed.',
       token_data: liveData,
       generated_at: new Date().toISOString(),
-      powered_by: 'GSB Intelligence Swarm (template mode)',
+      powered_by: 'GSB Intelligence Swarm',
     };
+  } catch (err) {
+    // 429 quota / rate limit → fall back to pre-written thread so job still completes
+    const isQuota = err.status === 429 || (err.message && err.message.includes('429'));
+    if (isQuota) {
+      console.warn(`[Thread Writer] OpenAI quota exceeded — using fallback thread.`);
+      return getFallbackThread(liveData);
+    }
+    throw err; // re-throw unexpected errors
   }
-
-  const response = await getOpenAI().chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    max_tokens: 1500,
-    temperature: 0.85,
-  });
-
-  return {
-    thread: response.choices[0]?.message?.content || 'Thread generation failed.',
-    token_data: liveData,
-    generated_at: new Date().toISOString(),
-    powered_by: 'GSB Intelligence Swarm',
-  };
 }
 
 async function start() {
