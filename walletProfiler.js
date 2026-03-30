@@ -5,11 +5,21 @@ const { buildAcpClient } = require('./acp');
 const AGENT_NAME = 'GSB Wallet Profiler';
 const JOB_PRICE = 0.50;
 
+// Wait for job to reach TRANSACTION phase (phase=2) after respond(true)
+async function waitForTransaction(client, jobId, maxWaitMs = 30000) {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const fresh = await client.getJobById(jobId);
+    if (fresh && fresh.phase === 2) return fresh;
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
+}
+
 async function profileWallet(address) {
   try {
-    const [txRes, tokenRes] = await Promise.allSettled([
+    const [txRes] = await Promise.allSettled([
       axios.get(`https://api.basescan.org/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=YourApiKeyToken`, { timeout: 8000 }),
-      axios.get(`https://api.dexscreener.com/latest/dex/tokens/${address}`, { timeout: 8000 }),
     ]);
 
     const txs = txRes.status === 'fulfilled' ? txRes.value.data?.result || [] : [];
@@ -41,31 +51,35 @@ async function profileWallet(address) {
 
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
-  const client = await buildAcpClient({
+  let client;
+  client = await buildAcpClient({
     privateKey: process.env.AGENT_WALLET_PRIVATE_KEY,
     entityId: parseInt(process.env.WALLET_PROFILER_ENTITY_ID),
     agentWalletAddress: process.env.WALLET_PROFILER_WALLET_ADDRESS,
     onNewTask: async (job) => {
-      console.log(`[${AGENT_NAME}] New job: ${job.id}`);
+      console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase}`);
       try {
         await job.respond(true, 'Profiling wallet now...');
+        console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
 
-        const content = typeof job.description === 'string'
-          ? job.description
-          : JSON.stringify(job.description);
-        const match = content.match(/0x[a-fA-F0-9]{40}/);
+        const freshJob = await waitForTransaction(client, job.id);
+        console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase.`);
+
+        const rawContent = freshJob.requirement
+          || (freshJob.memos?.[0] ? (typeof freshJob.memos[0].content === 'string' ? freshJob.memos[0].content : JSON.stringify(freshJob.memos[0].content)) : '')
+          || '';
+        const match = rawContent.match(/0x[a-fA-F0-9]{40}/);
 
         if (!match) {
-          await job.deliver({ type: 'text', value: 'No wallet address found. Please provide a valid Base wallet address.' });
+          await freshJob.deliver({ type: 'text', value: 'No wallet address found. Please provide a valid Base wallet address.' });
           return;
         }
 
         const profile = await profileWallet(match[0]);
-        await job.deliver({ type: 'text', value: JSON.stringify(profile, null, 2) });
+        await freshJob.deliver({ type: 'text', value: JSON.stringify(profile, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job error:`, err.message);
-        try { await job.deliver({ type: 'text', value: JSON.stringify({ error: err.message }) }); } catch (_) {}
       }
     },
     onEvaluate: async (job) => {

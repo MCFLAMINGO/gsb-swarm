@@ -15,6 +15,17 @@ function getOpenAI() {
   return _openai;
 }
 
+// Wait for job to reach TRANSACTION phase (phase=2) after respond(true)
+async function waitForTransaction(client, jobId, maxWaitMs = 30000) {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const fresh = await client.getJobById(jobId);
+    if (fresh && fresh.phase === 2) return fresh;
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
+}
+
 async function fetchTokenData(contractAddress) {
   try {
     const res = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${contractAddress}`, { timeout: 8000 });
@@ -74,16 +85,17 @@ Brand: Bold. Irreverent. Data-driven. Biblical. Thou shalt never run out of GAS.
 
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
-  const client = await buildAcpClient({
+  let client;
+  client = await buildAcpClient({
     privateKey: process.env.AGENT_WALLET_PRIVATE_KEY,
     entityId: parseInt(process.env.THREAD_WRITER_ENTITY_ID),
     agentWalletAddress: process.env.THREAD_WRITER_WALLET_ADDRESS,
     onNewTask: async (job) => {
-      console.log(`[${AGENT_NAME}] New job: ${job.id}`);
+      console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase} | requirement=${JSON.stringify(job.requirement)} | memos[0]=${JSON.stringify(job.memos?.[0]?.content)}`);
       try {
-        const content = typeof job.description === 'string'
-          ? job.description
-          : JSON.stringify(job.description);
+        const content = job.requirement
+          || (job.memos?.[0] ? (typeof job.memos[0].content === 'string' ? job.memos[0].content : JSON.stringify(job.memos[0].content)) : '')
+          || '';
 
         if (!content || content.length < 3) {
           await job.respond(false, 'Please provide a topic or contract address.');
@@ -91,12 +103,17 @@ async function start() {
         }
 
         await job.respond(true, 'Writing your thread now...');
+        console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
+
+        // Re-fetch job to get updated phase=2 before deliver()
+        const freshJob = await waitForTransaction(client, job.id);
+        console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase. Writing thread...`);
+
         const result = await writeThread(content);
-        await job.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
+        await freshJob.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job error:`, err.message);
-        try { await job.deliver({ type: 'text', value: JSON.stringify({ error: err.message }) }); } catch (_) {}
       }
     },
     onEvaluate: async (job) => {

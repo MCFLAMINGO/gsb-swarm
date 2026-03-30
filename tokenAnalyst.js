@@ -5,6 +5,17 @@ const { buildAcpClient } = require('./acp');
 const AGENT_NAME = 'GSB Token Analyst';
 const JOB_PRICE = 0.25;
 
+// Wait for job to reach TRANSACTION phase (phase=2) after respond(true)
+async function waitForTransaction(client, jobId, maxWaitMs = 30000) {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const fresh = await client.getJobById(jobId);
+    if (fresh && fresh.phase === 2) return fresh;
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
+}
+
 async function analyzeToken(contractAddress) {
   try {
     const dexRes = await axios.get(
@@ -41,33 +52,39 @@ async function analyzeToken(contractAddress) {
 
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
-  const client = await buildAcpClient({
+  let client;
+  client = await buildAcpClient({
     privateKey: process.env.AGENT_WALLET_PRIVATE_KEY,
     entityId: parseInt(process.env.TOKEN_ANALYST_ENTITY_ID),
     agentWalletAddress: process.env.TOKEN_ANALYST_WALLET_ADDRESS,
     onNewTask: async (job) => {
-      console.log(`[${AGENT_NAME}] New job: ${job.id}`);
+      console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase} | requirement=${JSON.stringify(job.requirement)} | memos[0]=${JSON.stringify(job.memos?.[0]?.content)}`);
       try {
-        // Accept the job
+        // Accept the job (moves to TRANSACTION phase on-chain)
         await job.respond(true, 'Analyzing token now...');
+        console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
 
-        // Parse contract address from job description
-        const content = typeof job.description === 'string'
-          ? job.description
-          : JSON.stringify(job.description);
-        const match = content.match(/0x[a-fA-F0-9]{40}/);
+        // Re-fetch job to get updated phase=2 (TRANSACTION) before deliver()
+        const freshJob = await waitForTransaction(client, job.id);
+        console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase. Processing...`);
+
+        // Parse contract address from job requirement (SDK field)
+        const rawContent = freshJob.requirement
+          || (freshJob.memos?.[0] ? (typeof freshJob.memos[0].content === 'string' ? freshJob.memos[0].content : JSON.stringify(freshJob.memos[0].content)) : '')
+          || '';
+        console.log(`[${AGENT_NAME}] Job ${job.id} rawContent: ${rawContent.slice(0, 100)}`);
+        const match = rawContent.match(/0x[a-fA-F0-9]{40}/);
 
         if (!match) {
-          await job.deliver({ type: 'text', value: 'No contract address found. Please provide a valid Base token address.' });
+          await freshJob.deliver({ type: 'text', value: 'No contract address found. Please provide a valid Base token address.' });
           return;
         }
 
         const report = await analyzeToken(match[0]);
-        await job.deliver({ type: 'text', value: JSON.stringify(report, null, 2) });
+        await freshJob.deliver({ type: 'text', value: JSON.stringify(report, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job error:`, err.message);
-        try { await job.deliver({ type: 'text', value: JSON.stringify({ error: err.message }) }); } catch (_) {}
       }
     },
     onEvaluate: async (job) => {

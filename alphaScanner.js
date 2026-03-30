@@ -5,14 +5,19 @@ const { buildAcpClient } = require('./acp');
 const AGENT_NAME = 'GSB Alpha Scanner';
 const JOB_PRICE = 0.10;
 
+// Wait for job to reach TRANSACTION phase (phase=2) after respond(true)
+async function waitForTransaction(client, jobId, maxWaitMs = 30000) {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const fresh = await client.getJobById(jobId);
+    if (fresh && fresh.phase === 2) return fresh;
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
+}
+
 async function scanAlpha() {
   try {
-    // Scan DexScreener for top trending tokens on Base
-    const res = await axios.get(
-      'https://api.dexscreener.com/latest/dex/tokens/trending?chainId=base',
-      { timeout: 8000 }
-    );
-
     // Fallback: use token boosts endpoint
     const boostRes = await axios.get(
       'https://api.dexscreener.com/token-boosts/latest/v1',
@@ -66,20 +71,25 @@ async function scanAlpha() {
 
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
-  const client = await buildAcpClient({
+  let client;
+  client = await buildAcpClient({
     privateKey: process.env.AGENT_WALLET_PRIVATE_KEY,
     entityId: parseInt(process.env.ALPHA_SCANNER_ENTITY_ID),
     agentWalletAddress: process.env.ALPHA_SCANNER_WALLET_ADDRESS,
     onNewTask: async (job) => {
-      console.log(`[${AGENT_NAME}] New job: ${job.id}`);
+      console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase}`);
       try {
         await job.respond(true, 'Scanning Base for alpha...');
+        console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
+
+        const freshJob = await waitForTransaction(client, job.id);
+        console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase. Scanning...`);
+
         const result = await scanAlpha();
-        await job.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
+        await freshJob.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job error:`, err.message);
-        try { await job.deliver({ type: 'text', value: JSON.stringify({ error: err.message }) }); } catch (_) {}
       }
     },
     onEvaluate: async (job) => {
