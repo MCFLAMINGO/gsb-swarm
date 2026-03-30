@@ -54,7 +54,7 @@ function connectWS() {
 }
 
 function handle(msg) {
-  if      (msg.type === 'brief')      { latestBrief = msg.data; renderBrief(msg.data); }
+  if      (msg.type === 'brief')      { latestBrief = msg.data; renderBrief(msg.data); renderBriefInCmd(msg.data); }
   else if (msg.type === 'history')    renderHistory(msg.data);
   else if (msg.type === 'job-event')  appendJobEvent(msg.data);
   else if (msg.type === 'acp_status') setAcpStatus(msg.data);
@@ -452,16 +452,56 @@ async function sendCommand() {
 // Handle incoming cmd-status WebSocket messages
 function appendCmdStatus(data) {
   const type = data.type || 'info';
+
+  if (type === 'instant') {
+    // Fast lane: render multi-line intel block
+    addCmdBlock('instant', data.message);
+    return;
+  }
+  if (type === 'hint') {
+    addCmdMsg('hint', data.message);
+    return;
+  }
+
   addCmdMsg(type, data.message || JSON.stringify(data));
 
-  // If a job was fired, also bump to jobs tab hint
   if (type === 'done') {
-    // Flash the jobs nav badge
     const jobsNav = document.querySelector('[data-section="jobs"]');
     if (jobsNav) {
       jobsNav.style.color = 'var(--accent)';
       setTimeout(() => jobsNav.style.color = '', 3000);
     }
+  }
+}
+
+// Render a brief result snippet into the command history when an agent delivers
+function renderBriefInCmd(brief) {
+  const r = brief?.results || {};
+  const lines = [];
+
+  if (r.token_analysis && !r.token_analysis.error) {
+    const t = r.token_analysis;
+    const sym   = t.token?.symbol || 'TOKEN';
+    const price = t.price?.usd ? `$${parseFloat(t.price.usd).toFixed(6)}` : null;
+    const chg   = t.price?.change_24h;
+    const chgStr = chg != null ? ` ${chg > 0 ? '▲' : '▼'} ${Math.abs(chg).toFixed(2)}%` : '';
+    if (price) lines.push(`📊 ${sym} ${price}${chgStr}  ${t.gsb_verdict || ''}`);
+  }
+  if (r.alpha_signals && !r.alpha_signals.error) {
+    const a = r.alpha_signals;
+    if (a.gsb_signal) lines.push(`⚡ ${a.gsb_signal}`);
+  }
+  if (r.thread && r.thread.thread) {
+    lines.push(`🧵 Thread ready — check the Intel tab`);
+  }
+  if (r.wallet_profile && !r.wallet_profile.error) {
+    const w = r.wallet_profile;
+    lines.push(`👤 Wallet: ${w.classification || 'profiled'} — ${w.transaction_count || '?'} txs`);
+  }
+
+  if (lines.length) {
+    addCmdBlock('result', lines.join('\n'));
+    addCmdMsg('done', 'Agent intel delivered → Intel tab updated');
   }
 }
 
@@ -484,14 +524,32 @@ function addCmdMsg(type, text) {
     done:   'DONE',
     error:  'ERROR',
     info:   'INFO',
+    hint:   'TIP',
   };
   tag.textContent = tagMap[type] || type.toUpperCase();
 
   el.appendChild(tag);
   el.appendChild(body);
   cmdHistory.appendChild(el);
+  cmdHistory.scrollTop = cmdHistory.scrollHeight;
+}
 
-  // Auto-scroll to bottom
+// Multi-line block for instant intel and agent results
+function addCmdBlock(type, text) {
+  const el = document.createElement('div');
+  el.className = `cmd-block ${type}`;
+
+  const header = document.createElement('div');
+  header.className = 'block-header';
+  header.textContent = type === 'instant' ? '⚡ INSTANT INTEL' : '🤖 AGENT BRIEF';
+
+  const body = document.createElement('pre');
+  body.className = 'block-body';
+  body.textContent = text;
+
+  el.appendChild(header);
+  el.appendChild(body);
+  cmdHistory.appendChild(el);
   cmdHistory.scrollTop = cmdHistory.scrollHeight;
 }
 

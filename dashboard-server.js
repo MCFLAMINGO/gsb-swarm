@@ -2,6 +2,8 @@
 // Express 4 + WebSocket + ACP SDK for live job firing
 require('dotenv').config();
 
+const https = require('https');
+
 const express  = require('express');
 const http     = require('http');
 const path     = require('path');
@@ -108,6 +110,11 @@ function logJob(jobId, workerName, event, status) {
 
 function parseDeliverable(rawValue) {
   if (!rawValue) return null;
+  // Workers deliver { type: 'text', value: JSON.stringify(result) }
+  // Unwrap that envelope first
+  if (typeof rawValue === 'object' && rawValue.type === 'text' && rawValue.value) {
+    rawValue = rawValue.value;
+  }
   if (typeof rawValue === 'object') return rawValue;
   try { return JSON.parse(rawValue); } catch { return { raw: rawValue }; }
 }
@@ -281,6 +288,243 @@ app.get('/api/workers', (req, res) => {
   })));
 });
 
+// ── Instant query engine (fast lane — no ACP) ───────────────────────────────
+// Returns a rich intel snapshot in ~1-2 seconds using free public APIs.
+// No wallet, no on-chain tx, no waiting.
+
+function httpGet(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'GSB-Dashboard/1.0' } }, res => {
+      let data = '';
+      res.on('data', d => data += d);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('JSON parse: ' + e.message)); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(8000, () => { req.destroy(); reject(new Error('timeout')); });
+  });
+}
+
+// Coin symbol → CoinGecko ID map for common coins
+const COINGECKO_IDS = {
+  btc: 'bitcoin', bitcoin: 'bitcoin',
+  eth: 'ethereum', ethereum: 'ethereum',
+  sol: 'solana', solana: 'solana',
+  bnb: 'binancecoin',
+  xrp: 'ripple',
+  ada: 'cardano',
+  doge: 'dogecoin',
+  avax: 'avalanche-2',
+  dot: 'polkadot',
+  link: 'chainlink',
+  matic: 'matic-network', pol: 'matic-network',
+  uni: 'uniswap',
+  base: 'base-protocol',
+  virtual: 'virtual-protocol', virtuals: 'virtual-protocol',
+  gsb: null, // not on CoinGecko, use DexScreener
+};
+
+function formatBigNum(n) {
+  if (!n) return '—';
+  n = parseFloat(n);
+  if (n >= 1e9)  return '$' + (n / 1e9).toFixed(2)  + 'B';
+  if (n >= 1e6)  return '$' + (n / 1e6).toFixed(2)  + 'M';
+  if (n >= 1e3)  return '$' + (n / 1e3).toFixed(1)  + 'K';
+  return '$' + n.toFixed(4);
+}
+
+function formatPrice(p) {
+  if (!p) return '—';
+  p = parseFloat(p);
+  if (p >= 1000) return '$' + p.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (p >= 1)    return '$' + p.toFixed(4);
+  return '$' + p.toPrecision(4);
+}
+
+function sentimentEmoji(pct) {
+  if (pct === null || pct === undefined) return '';
+  if (pct >= 10)  return '🚀';
+  if (pct >= 3)   return '📈';
+  if (pct >= -3)  return '➡️';
+  if (pct >= -10) return '📉';
+  return '🔴';
+}
+
+function buildInsight(name, symbol, price, change24h, vol24h, mcap, extra) {
+  const dir = change24h > 0 ? 'up' : change24h < 0 ? 'down' : 'flat';
+  const absPct = Math.abs(change24h || 0).toFixed(1);
+  const emoji = sentimentEmoji(change24h);
+
+  const lines = [
+    `${emoji} ${name} (${symbol.toUpperCase()}) — ${formatPrice(price)}`,
+    `24h: ${change24h > 0 ? '+' : ''}${(change24h||0).toFixed(2)}% · Vol: ${formatBigNum(vol24h)} · MCap: ${formatBigNum(mcap)}`,
+  ];
+
+  // Color commentary
+  if (dir === 'up' && change24h >= 10) {
+    lines.push(`Strong momentum — ${absPct}% gain. Watch for follow-through or retrace at resistance.`);
+  } else if (dir === 'up') {
+    lines.push(`Healthy move up ${absPct}%. Holding gains with ${formatBigNum(vol24h)} in volume.`);
+  } else if (dir === 'down' && change24h <= -10) {
+    lines.push(`Significant pullback — ${absPct}% down. Key support levels in play.`);
+  } else if (dir === 'down') {
+    lines.push(`Slight weakness, off ${absPct}%. Normal consolidation or broader market drag.`);
+  } else {
+    lines.push(`Tight range, consolidating. Low volatility can precede a directional break.`);
+  }
+
+  if (extra) lines.push(extra);
+  return lines.join('\n');
+}
+
+async function instantQuery(command) {
+  const cmd = command.toLowerCase().trim();
+
+  // ── 1. Extract coin name / ticker ───────────────────────────────────────────
+  // Match $TICKER or bare words like "bitcoin", "ethereum", "what is up with bitcoin"
+  const tickerMatch  = cmd.match(/\$([a-z]{2,10})/);
+  const ticker = tickerMatch ? tickerMatch[1] : null;
+
+  // Try bare word against known coin list
+  const words = cmd.split(/\s+/);
+  let coinKey = null;
+  if (ticker && COINGECKO_IDS.hasOwnProperty(ticker)) {
+    coinKey = ticker;
+  } else {
+    for (const w of words) {
+      if (COINGECKO_IDS.hasOwnProperty(w)) { coinKey = w; break; }
+    }
+  }
+
+  // ── 2. Detect intent ─────────────────────────────────────────────────────────
+  const isPrice   = /price|how much|worth|cost|what is|what'?s|up with|down|check|trading|market/.test(cmd);
+  const isNews    = /news|latest|update|happen|today|recently|what.s going on|narrative/.test(cmd);
+  const isMarket  = /market|crypto|overall|sentiment|fear|greed|total|cap|dominance/.test(cmd) && !coinKey;
+  const isTrend   = /trending|hot|top|best|movers|gainer|winner/.test(cmd);
+
+  // If we can't identify a coin or market intent, return null → fall through to ACP
+  if (!coinKey && !isMarket && !isTrend) return null;
+
+  const results = [];
+
+  // ── 3. Fetch coin data ───────────────────────────────────────────────────────
+  if (coinKey) {
+    const cgId = COINGECKO_IDS[coinKey];
+
+    if (cgId) {
+      // CoinGecko free API — no key needed
+      try {
+        const data = await httpGet(
+          `https://api.coingecko.com/api/v3/coins/${cgId}?localization=false&tickers=false&community_data=false&developer_data=false`
+        );
+        const md  = data.market_data || {};
+        const price     = md.current_price?.usd;
+        const change24h = md.price_change_percentage_24h;
+        const vol24h    = md.total_volume?.usd;
+        const mcap      = md.market_cap?.usd;
+        const ath       = md.ath?.usd;
+        const athPct    = md.ath_change_percentage?.usd;
+
+        let extra = null;
+        if (ath && athPct) {
+          extra = `ATH: ${formatPrice(ath)} — currently ${Math.abs(athPct).toFixed(0)}% below all-time high.`;
+        }
+
+        results.push(buildInsight(data.name, data.symbol, price, change24h, vol24h, mcap, extra));
+
+        // High/low 24h
+        const hi = md.high_24h?.usd, lo = md.low_24h?.usd;
+        if (hi && lo) {
+          results.push(`Range 24h: ${formatPrice(lo)} – ${formatPrice(hi)}`);
+        }
+
+        // Supply pressure
+        const circ = md.circulating_supply, total = md.total_supply;
+        if (circ && total && total > 0) {
+          const pct = ((circ / total) * 100).toFixed(1);
+          results.push(`Supply: ${pct}% circulating (${(circ/1e6).toFixed(1)}M / ${(total/1e6).toFixed(1)}M)`);
+        }
+
+        return results.join('\n');
+      } catch (err) {
+        console.warn('[instant] CoinGecko failed:', err.message);
+      }
+    }
+
+    // GSB or unknown — try DexScreener
+    try {
+      const searchSym = ticker || coinKey;
+      const ds = await httpGet(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(searchSym)}`);
+      const pairs = (ds.pairs || []).filter(p => p.chainId === 'base').slice(0, 3);
+      if (pairs.length) {
+        const p = pairs[0];
+        const price     = parseFloat(p.priceUsd || 0);
+        const change24h = parseFloat(p.priceChange?.h24 || 0);
+        const vol24h    = p.volume?.h24;
+        const liq       = p.liquidity?.usd;
+        const name      = p.baseToken?.name || searchSym.toUpperCase();
+        const sym       = p.baseToken?.symbol || searchSym.toUpperCase();
+
+        const lines = [
+          buildInsight(name, sym, price, change24h, vol24h, null, null),
+          `Liquidity: ${formatBigNum(liq)} · Pair: ${p.pairAddress?.slice(0,10)}… on Base`,
+          `DexScreener: ${p.url}`,
+        ];
+        return lines.join('\n');
+      }
+    } catch (err) {
+      console.warn('[instant] DexScreener failed:', err.message);
+    }
+  }
+
+  // ── 4. Overall market / fear & greed ─────────────────────────────────────────
+  if (isMarket || isTrend) {
+    const lines = [];
+    try {
+      const fg = await httpGet('https://api.alternative.me/fng/?limit=2');
+      const now  = fg.data?.[0];
+      const prev = fg.data?.[1];
+      if (now) {
+        const val = parseInt(now.value);
+        const label = now.value_classification;
+        const emoji = val >= 75 ? '🟢' : val >= 55 ? '🔵' : val >= 45 ? '⚪' : val >= 25 ? '🟡' : '🔴';
+        const delta = prev ? ` (${val > parseInt(prev.value) ? '+' : ''}${val - parseInt(prev.value)} vs yesterday)` : '';
+        lines.push(`${emoji} Fear & Greed Index: ${val}/100 — ${label}${delta}`);
+
+        if (val >= 75) lines.push('Extreme greed — market is hot, watch for euphoria tops.');
+        else if (val >= 55) lines.push('Greed territory — momentum favoring bulls, but not overheated.');
+        else if (val >= 45) lines.push('Neutral — market undecided, range-bound action likely.');
+        else if (val >= 25) lines.push('Fear — potential buying opportunity forming for patient capital.');
+        else lines.push('Extreme fear — historically high-conviction entry zone for long-term holders.');
+      }
+    } catch (e) { console.warn('[instant] F&G failed:', e.message); }
+
+    // Top movers from DexScreener on Base
+    if (isTrend) {
+      try {
+        const ds = await httpGet('https://api.dexscreener.com/latest/dex/tokens/trending/base');
+        const top = (ds.pairs || ds.data?.pairs || []).slice(0, 5);
+        if (top.length) {
+          lines.push('\nTrending on Base right now:');
+          top.forEach((p, i) => {
+            const sym    = p.baseToken?.symbol || '?';
+            const price  = formatPrice(p.priceUsd);
+            const chg    = parseFloat(p.priceChange?.h24 || 0);
+            const emoji  = sentimentEmoji(chg);
+            lines.push(`${i+1}. ${emoji} ${sym} ${price} · ${chg >= 0 ? '+' : ''}${chg.toFixed(1)}% 24h · Vol ${formatBigNum(p.volume?.h24)}`);
+          });
+        }
+      } catch (e) { console.warn('[instant] DexScreener trend failed:', e.message); }
+    }
+
+    if (lines.length) return lines.join('\n');
+  }
+
+  return null; // nothing matched — let ACP handle it
+}
+
 // ── POST /api/command — CEO natural-language command line ─────────────────────
 // Parses the command text and fires the right workers automatically.
 // Streams status back via WebSocket under type 'cmd-status'.
@@ -289,11 +533,39 @@ app.post('/api/command', async (req, res) => {
   if (!command || !command.trim()) {
     return res.status(400).json({ error: 'No command provided' });
   }
-  if (!acpClient || !acpReady) {
-    return res.status(503).json({ error: 'ACP client not ready — CEO wallet not initialized' });
+  const cmd = command.toLowerCase();
+
+  // ── Fast lane: instant response for price/market queries ─────────────────
+  // Skip ACP entirely for questions answerable in <2 seconds
+  const DEEP_KEYWORDS = /thread|tweet|post|write|profile|wallet|address|full brief|run all|swarm|everything/;
+  const isDeepWork = DEEP_KEYWORDS.test(cmd);
+
+  if (!isDeepWork) {
+    try {
+      const instant = await instantQuery(command);
+      if (instant) {
+        // Stream the fast answer immediately via WebSocket
+        broadcast('cmd-status', { type: 'instant', message: instant });
+        broadcast('cmd-status', {
+          type: 'hint',
+          message: 'Instant intel via live APIs. Type "analyze $TOKEN" to deploy Token Analyst for a deep dive.',
+        });
+        return res.json({ ok: true, lane: 'instant' });
+      }
+    } catch (err) {
+      console.warn('[cmd] instant lane error:', err.message);
+      // Fall through to ACP
+    }
   }
 
-  const cmd = command.toLowerCase();
+  // ── Agent lane: deep work that needs the swarm ────────────────────────────
+  if (!acpClient || !acpReady) {
+    broadcast('cmd-status', {
+      type: 'error',
+      message: 'CEO wallet not ready — cannot deploy agents. Check your .env and restart.',
+    });
+    return res.status(503).json({ error: 'ACP client not ready' });
+  }
 
   // ── Intent detection ──────────────────────────────────────────────────────
   // Extract any 0x address from the command for dynamic requirements
