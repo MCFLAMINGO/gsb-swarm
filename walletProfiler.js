@@ -5,59 +5,38 @@ const { buildAcpClient } = require('./acp');
 const AGENT_NAME = 'GSB Wallet Profiler';
 const JOB_PRICE = 0.50;
 
-async function profileWallet(walletAddress) {
+async function profileWallet(address) {
   try {
-    const [portfolioResult, txResult] = await Promise.allSettled([
-      fetchZerionPortfolio(walletAddress),
-      fetchBasescanTxHistory(walletAddress),
+    const [txRes, tokenRes] = await Promise.allSettled([
+      axios.get(`https://api.basescan.org/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=YourApiKeyToken`, { timeout: 8000 }),
+      axios.get(`https://api.dexscreener.com/latest/dex/tokens/${address}`, { timeout: 8000 }),
     ]);
-    const portfolio = portfolioResult.status === 'fulfilled' ? portfolioResult.value : null;
-    const txHistory = txResult.status === 'fulfilled' ? txResult.value : [];
-    const value = portfolio?.total_value_usd || 0;
-    let classification = 'SHRIMP (<$1K)';
-    if (value >= 1_000_000) classification = 'MEGA WHALE ($1M+)';
-    else if (value >= 100_000) classification = 'WHALE ($100K-$1M)';
-    else if (value >= 10_000) classification = 'DOLPHIN ($10K-$100K)';
-    else if (value >= 1_000) classification = 'FISH ($1K-$10K)';
+
+    const txs = txRes.status === 'fulfilled' ? txRes.value.data?.result || [] : [];
+    const txCount = Array.isArray(txs) ? txs.length : 0;
+    const recentTxs = Array.isArray(txs) ? txs.slice(0, 5).map(t => ({
+      hash: t.hash,
+      value_eth: (parseInt(t.value || 0) / 1e18).toFixed(4),
+      age_days: Math.floor((Date.now() / 1000 - parseInt(t.timeStamp)) / 86400),
+    })) : [];
+
+    let classification = 'RETAIL — Standard wallet activity.';
+    if (txCount > 1000) classification = 'WHALE — High transaction volume.';
+    else if (txCount > 200) classification = 'ACTIVE TRADER — Frequent on-chain activity.';
+    else if (txCount < 10) classification = 'NEW WALLET — Limited history.';
+
     return {
-      wallet: walletAddress,
+      wallet: address,
+      transaction_count: txCount,
       classification,
-      total_value_usd: value,
-      tx_count: txHistory.length,
-      recent_txns: txHistory.slice(0, 10),
-      gsb_verdict: value > 100000 ? `HIGH VALUE — ${classification}` : value > 10000 ? `NOTABLE — ${classification}` : `STANDARD — ${classification}`,
-      analyzed_at: new Date().toISOString(),
+      recent_transactions: recentTxs,
+      basescan_url: `https://basescan.org/address/${address}`,
+      profiled_at: new Date().toISOString(),
+      powered_by: 'GSB Intelligence Swarm',
     };
   } catch (err) {
-    return { error: `Profiling failed: ${err.message}` };
+    return { error: `Profile failed: ${err.message}` };
   }
-}
-
-async function fetchZerionPortfolio(address) {
-  try {
-    const res = await axios.get(`https://api.zerion.io/v1/wallets/${address}/portfolio`, {
-      headers: { Authorization: `Basic ${Buffer.from(`${process.env.ZERION_API_KEY || 'demo'}:`).toString('base64')}`, accept: 'application/json' },
-      timeout: 8000,
-    });
-    const data = res.data?.data?.attributes;
-    return data ? { total_value_usd: data.total?.positions || 0 } : null;
-  } catch { return null; }
-}
-
-async function fetchBasescanTxHistory(address) {
-  try {
-    const res = await axios.get('https://api.basescan.org/api', {
-      params: { module: 'account', action: 'tokentx', address, page: 1, offset: 20, sort: 'desc' },
-      timeout: 8000,
-    });
-    const txns = res.data?.result;
-    if (!Array.isArray(txns)) return [];
-    return txns.map((tx) => ({
-      hash: tx.hash, token: tx.tokenSymbol,
-      direction: tx.to?.toLowerCase() === address.toLowerCase() ? 'IN' : 'OUT',
-      timestamp: new Date(parseInt(tx.timeStamp) * 1000).toISOString(),
-    }));
-  } catch { return []; }
 }
 
 async function start() {
@@ -66,21 +45,32 @@ async function start() {
     privateKey: process.env.AGENT_WALLET_PRIVATE_KEY,
     entityId: parseInt(process.env.WALLET_PROFILER_ENTITY_ID),
     agentWalletAddress: process.env.WALLET_PROFILER_WALLET_ADDRESS,
-    onNewTask: async (job, memoToSign) => {
+    onNewTask: async (job) => {
       console.log(`[${AGENT_NAME}] New job: ${job.id}`);
       try {
-        const content = typeof job.description === 'string' ? job.description : JSON.stringify(job.description);
+        await job.respond(true, 'Profiling wallet now...');
+
+        const content = typeof job.description === 'string'
+          ? job.description
+          : JSON.stringify(job.description);
         const match = content.match(/0x[a-fA-F0-9]{40}/);
-        if (!match) { await client.respondJob(job.id, memoToSign?.id, false, 'Provide a wallet address.'); return; }
-        await client.respondJob(job.id, memoToSign?.id, true, `Profiling ${match[0]}...`);
+
+        if (!match) {
+          await job.deliver({ type: 'text', value: 'No wallet address found. Please provide a valid Base wallet address.' });
+          return;
+        }
+
         const profile = await profileWallet(match[0]);
-        await client.deliverJob(job.id, { type: 'text', value: JSON.stringify(profile, null, 2) });
+        await job.deliver({ type: 'text', value: JSON.stringify(profile, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
-        await client.deliverJob(job.id, { type: 'text', value: JSON.stringify({ error: err.message }) });
+        console.error(`[${AGENT_NAME}] Job error:`, err.message);
+        try { await job.deliver({ type: 'text', value: JSON.stringify({ error: err.message }) }); } catch (_) {}
       }
     },
-    onEvaluate: async (job) => { await client.evaluateJob(job.id, true, 'Delivered.'); },
+    onEvaluate: async (job) => {
+      try { await job.evaluate(true, 'Delivered successfully.'); } catch (_) {}
+    },
   });
   console.log(`[${AGENT_NAME}] Online. Listening for jobs at $${JOB_PRICE} USDC each.`);
 }
