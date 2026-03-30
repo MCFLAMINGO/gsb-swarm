@@ -17,12 +17,11 @@ if (!baseAcpConfig.chain.rpcUrls.alchemy) {
   baseAcpConfig.chain.rpcUrls.alchemy.http = [VIRTUALS_RPC];
 }
 baseAcpConfig.chain.rpcUrls.default.http = [VIRTUALS_RPC];
-console.log('[ceo] RPC patched to Virtuals proxy:', VIRTUALS_RPC);
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const CEO_ENTITY_ID         = 2;
 const CEO_WALLET_ADDRESS    = '0xf0d4832A4c2D33Faa1F655cd4dE5e7c551a0fE45';
-const PRIVATE_KEY           = process.env.AGENT_WALLET_PRIVATE_KEY; // swarm wallet, whitelisted on CEO
+const PRIVATE_KEY           = process.env.AGENT_WALLET_PRIVATE_KEY;
 
 // Workers the CEO will hire
 const WORKERS = [
@@ -52,17 +51,44 @@ const WORKERS = [
   },
 ];
 
-// How many jobs to fire per worker (need 10 total + 3 consecutive for graduation)
 const JOBS_PER_WORKER = 3;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function makeFare(priceUsdc) {
-  // FareAmount(amount_in_base_units, fare_config)
-  // USDC has 6 decimals, so $0.25 = 250000
   const baseUnits = Math.round(priceUsdc * 1_000_000);
   return new FareAmount(baseUnits, baseAcpConfig.baseFare);
+}
+
+// ── Serialized acceptRequirement queue ──────────────────────────────────────
+// ERC-4337 UserOps must be submitted one at a time — parallel submissions cause
+// "Failed to send user operation" nonce conflicts on the bundler.
+let acceptQueue = Promise.resolve(); // chain promises to serialize
+
+function queueAccept(job, memo) {
+  acceptQueue = acceptQueue.then(async () => {
+    const MAX_RETRIES = 4;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        console.log(`[ceo] Accepting requirement for job ${job.id} (memo ${memo.id}) attempt ${attempt}...`);
+        await job.acceptRequirement(memo, 'Requirement accepted. Proceed with delivery.');
+        console.log(`[ceo] ✓ Job ${job.id} requirement accepted — now in TRANSACTION phase.`);
+        break; // success — stop retrying
+      } catch (err) {
+        console.error(`[ceo] acceptRequirement error on job ${job.id} (attempt ${attempt}): ${err.message}`);
+        if (attempt < MAX_RETRIES) {
+          const delay = attempt * 8000; // 8s, 16s, 24s backoff
+          console.log(`[ceo] Retrying job ${job.id} in ${delay/1000}s...`);
+          await sleep(delay);
+        } else {
+          console.error(`[ceo] ✗ Giving up on job ${job.id} after ${MAX_RETRIES} attempts.`);
+        }
+      }
+    }
+    // Always wait 5s between UserOps to let bundler clear
+    await sleep(5000);
+  });
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -73,33 +99,27 @@ async function main() {
   console.log('║   GSB CEO BUYER — Graduation Job Firer           ║');
   console.log('╚══════════════════════════════════════════════════╝\n');
 
-  // Build CEO ACP client
   console.log('[ceo] Building ACP client for CEO (entity', CEO_ENTITY_ID, ')...');
   const contractClient = await AcpContractClient.build(
     PRIVATE_KEY,
     CEO_ENTITY_ID,
     CEO_WALLET_ADDRESS
   );
+
   const client = new AcpClient({
     acpContractClient: contractClient,
     onNewTask: async (job, memo) => {
-      // Provider called respond(true) + createRequirement — CEO must acceptRequirement
-      // to advance the job to phase=2 (TRANSACTION) so the provider can deliver
       if (memo) {
-        console.log(`[ceo] Accepting requirement for job ${job.id} (memo ${memo.id})...`);
-        try {
-          await job.acceptRequirement(memo, 'Requirement accepted. Proceed with delivery.');
-          console.log(`[ceo] ✓ Job ${job.id} requirement accepted — now in TRANSACTION phase.`);
-        } catch (err) {
-          console.error(`[ceo] acceptRequirement error on job ${job.id}:`, err.message);
-        }
+        // Queue serializes all acceptRequirement calls — no parallel UserOps
+        queueAccept(job, memo);
       } else {
-        console.log(`[ceo] onNewTask fired for job ${job.id} phase=${job.phase} — no memo to sign.`);
+        console.log(`[ceo] onNewTask fired for job ${job.id} phase=${job.phase} — no memo, skipping.`);
       }
     },
     onEvaluate: async (job) => {
-      // Auto-approve all deliverables from workers
       console.log(`[ceo] Auto-approving job ${job.id}`);
+      // Evaluate also uses UserOps — add a small delay before calling
+      await sleep(2000);
       try {
         await job.evaluate(true, 'Good work. Approved.');
         console.log(`[ceo] ✓ Job ${job.id} approved.`);
@@ -110,8 +130,9 @@ async function main() {
   });
 
   console.log('[ceo] CEO ACP client ready.\n');
+  console.log('[ceo] NOTE: acceptRequirement calls are now SERIALIZED (one at a time) to avoid bundler nonce conflicts.\n');
 
-  // Fire jobs at each worker
+  // Fire jobs at each worker — sequential between workers, with delays
   for (const worker of WORKERS) {
     console.log(`\n── Hiring ${worker.name} (${JOBS_PER_WORKER} jobs × $${worker.price} USDC) ──`);
     for (let i = 1; i <= JOBS_PER_WORKER; i++) {
@@ -122,25 +143,25 @@ async function main() {
           worker.address,
           worker.requirement,
           fare,
-          null, // evaluator — null uses CEO wallet as evaluator (v1 behavior)
+          null,
           new Date(Date.now() + 1000 * 60 * 30), // 30 min expiry
         );
         console.log(`  [job ${i}/${JOBS_PER_WORKER}] ✓ Job created: ${jobId}`);
-        // Wait between jobs to avoid hammering RPC
-        if (i < JOBS_PER_WORKER) await sleep(5000);
+        await sleep(3000); // brief gap between initiateJob calls
       } catch (err) {
         console.error(`  [job ${i}/${JOBS_PER_WORKER}] ✗ Failed:`, err.message);
       }
     }
-    // Pause between workers
-    await sleep(8000);
+    await sleep(5000); // gap between workers
   }
 
-  console.log('\n[ceo] All jobs fired. Listening for deliveries + auto-approving...');
-  console.log('[ceo] Keep this running for ~5 minutes so workers can deliver and CEO can evaluate.\n');
+  console.log('\n[ceo] All jobs fired. Waiting for serialized acceptRequirement queue to drain...');
+  console.log('[ceo] Workers will deliver once their jobs reach TRANSACTION phase.\n');
 
-  // Keep process alive to handle onEvaluate callbacks
-  await sleep(1000 * 60 * 10); // 10 minutes
+  // Wait for the accept queue to finish draining, then keep alive for evaluations
+  await acceptQueue;
+  console.log('\n[ceo] All acceptRequirement calls processed. Keeping alive for deliveries + evaluations...\n');
+  await sleep(1000 * 60 * 15); // 15 minutes for workers to deliver + CEO to evaluate
   console.log('[ceo] Done. Check each worker\'s successful job count on Virtuals.');
 }
 
