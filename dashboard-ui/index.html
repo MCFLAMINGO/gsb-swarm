@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GSB Intelligence Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="logo-wrap">
+    <svg class="logo" viewBox="0 0 40 40" fill="none" aria-label="GSB">
+      <rect width="40" height="40" rx="8" fill="var(--accent)"/>
+      <text x="20" y="27" text-anchor="middle" font-family="JetBrains Mono" font-weight="700" font-size="14" fill="#000">GSB</text>
+    </svg>
+    <div class="logo-text">
+      <span class="logo-name">Intelligence</span>
+      <span class="logo-sub">Swarm</span>
+    </div>
+  </div>
+
+  <nav class="nav">
+    <a href="#brief"  class="nav-item active" data-section="brief">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+      <span>Brief</span>
+    </a>
+    <a href="#token"  class="nav-item" data-section="token">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+      <span>Token</span>
+    </a>
+    <a href="#wallet" class="nav-item" data-section="wallet">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/></svg>
+      <span>Wallet</span>
+    </a>
+    <a href="#alpha"  class="nav-item" data-section="alpha">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+      <span>Alpha</span>
+    </a>
+    <a href="#thread" class="nav-item" data-section="thread">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>Thread</span>
+    </a>
+    <a href="#jobs"   class="nav-item" data-section="jobs">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      <span>Jobs</span>
+    </a>
+    <a href="#fire"   class="nav-item nav-item-fire" data-section="fire">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      <span>Fire Job</span>
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="status-row">
+      <span class="dot" id="ws-dot"></span>
+      <span id="ws-status">Connecting…</span>
+    </div>
+    <div class="status-row">
+      <span class="dot" id="acp-dot"></span>
+      <span id="acp-status">Initializing…</span>
+    </div>
+    <div class="status-row muted" id="last-update">No brief yet</div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main class="main">
+
+  <!-- Theme toggle -->
+  <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+  </button>
+
+  <!-- KPI Bar -->
+  <div class="kpi-bar">
+    <div class="kpi-card">
+      <span class="kpi-label">Token Verdict</span>
+      <span class="kpi-value" id="kpi-verdict-val">—</span>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">Wallet Class</span>
+      <span class="kpi-value" id="kpi-wallet-val">—</span>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">Alpha Signal</span>
+      <span class="kpi-value" id="kpi-signal-val">—</span>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">Jobs Fired</span>
+      <span class="kpi-value mono" id="kpi-jobs-val">0</span>
+    </div>
+  </div>
+
+  <!-- BRIEF -->
+  <section class="section active" id="section-brief">
+    <div class="section-header">
+      <h2>Latest Intelligence Brief</h2>
+      <span class="badge" id="brief-ts">—</span>
+    </div>
+    <div class="empty-state" id="brief-empty">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.25"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      <p>Waiting for worker deliveries…</p>
+      <p class="muted">Fire jobs from the <strong>Fire Job</strong> tab or run <code>ceobuyer.js</code></p>
+    </div>
+    <div class="brief-grid hidden" id="brief-grid">
+      <div class="brief-card">
+        <div class="card-head">
+          <span class="card-icon">⬡</span>
+          <span class="card-title">Token Analysis</span>
+          <a class="card-link hidden" id="brief-dex-link" href="#" target="_blank" rel="noopener">DexScreener ↗</a>
+        </div>
+        <div class="card-body">
+          <div class="stat-row"><span class="stat-label">Token</span>    <span class="stat-val mono" id="brief-token-name">—</span></div>
+          <div class="stat-row"><span class="stat-label">Price</span>    <span class="stat-val mono" id="brief-price">—</span></div>
+          <div class="stat-row"><span class="stat-label">24h</span>      <span class="stat-val mono" id="brief-change">—</span></div>
+          <div class="stat-row"><span class="stat-label">Liquidity</span><span class="stat-val mono" id="brief-liq">—</span></div>
+          <div class="stat-row"><span class="stat-label">Volume 24h</span><span class="stat-val mono" id="brief-vol">—</span></div>
+          <div class="stat-row"><span class="stat-label">Mkt Cap</span>  <span class="stat-val mono" id="brief-mcap">—</span></div>
+          <div class="verdict-row" id="brief-verdict">—</div>
+        </div>
+      </div>
+
+      <div class="brief-card">
+        <div class="card-head">
+          <span class="card-icon">◈</span>
+          <span class="card-title">Wallet Profile</span>
+          <a class="card-link hidden" id="brief-basescan-link" href="#" target="_blank" rel="noopener">BaseScan ↗</a>
+        </div>
+        <div class="card-body">
+          <div class="stat-row"><span class="stat-label">Wallet</span>  <span class="stat-val mono truncate" id="brief-wallet-addr">—</span></div>
+          <div class="stat-row"><span class="stat-label">Tx Count</span><span class="stat-val mono" id="brief-tx-count">—</span></div>
+          <div class="stat-row"><span class="stat-label">Class</span>   <span class="stat-val" id="brief-wallet-class">—</span></div>
+          <div class="recent-txs" id="brief-recent-txs"></div>
+        </div>
+      </div>
+
+      <div class="brief-card wide">
+        <div class="card-head">
+          <span class="card-icon">◎</span>
+          <span class="card-title">Alpha Signals</span>
+          <span class="badge green" id="brief-signal-badge">—</span>
+        </div>
+        <div class="card-body">
+          <div class="gsb-signal" id="brief-gsb-signal">—</div>
+          <div class="gainers-table" id="brief-gainers"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TOKEN -->
+  <section class="section" id="section-token">
+    <div class="section-header"><h2>Token Analysis</h2></div>
+    <div class="detail-panel" id="token-detail">
+      <div class="empty-state"><p class="muted">No token data yet.</p></div>
+    </div>
+  </section>
+
+  <!-- WALLET -->
+  <section class="section" id="section-wallet">
+    <div class="section-header"><h2>Wallet Profile</h2></div>
+    <div class="detail-panel" id="wallet-detail">
+      <div class="empty-state"><p class="muted">No wallet data yet.</p></div>
+    </div>
+  </section>
+
+  <!-- ALPHA -->
+  <section class="section" id="section-alpha">
+    <div class="section-header"><h2>Alpha Signals</h2></div>
+    <div class="detail-panel" id="alpha-detail">
+      <div class="empty-state"><p class="muted">No alpha data yet.</p></div>
+    </div>
+  </section>
+
+  <!-- THREAD -->
+  <section class="section" id="section-thread">
+    <div class="section-header">
+      <h2>Thread Ready to Post</h2>
+      <button class="btn-primary" id="copy-thread-btn" disabled>Copy Thread</button>
+    </div>
+    <div class="thread-panel" id="thread-panel">
+      <div class="empty-state"><p class="muted">No thread yet. Fire a Thread Writer job.</p></div>
+    </div>
+  </section>
+
+  <!-- JOBS -->
+  <section class="section" id="section-jobs">
+    <div class="section-header">
+      <h2>Job History</h2>
+      <span class="badge" id="job-count">0 jobs</span>
+    </div>
+    <div class="jobs-table-wrap">
+      <table class="jobs-table">
+        <thead><tr><th>Time</th><th>Job ID</th><th>Worker</th><th>Event</th><th>Status</th></tr></thead>
+        <tbody id="jobs-tbody"><tr><td colspan="5" class="muted center">No jobs yet.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- FIRE JOB -->
+  <section class="section" id="section-fire">
+    <div class="section-header"><h2>Fire Custom Job</h2></div>
+    <div class="fire-panel">
+      <div class="form-row">
+        <div class="form-group flex-2">
+          <label for="fire-worker">Worker</label>
+          <select id="fire-worker"></select>
+        </div>
+        <div class="form-group flex-none">
+          <label for="fire-count">Count</label>
+          <input type="number" id="fire-count" value="1" min="1" max="10">
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="fire-requirement">Requirement</label>
+        <textarea id="fire-requirement" rows="3" placeholder="e.g. Analyze token 0x… on Base"></textarea>
+      </div>
+      <div class="fire-actions">
+        <button class="btn-primary" id="fire-btn" disabled>Waiting for wallet…</button>
+        <div class="fire-presets">
+          <span class="preset-label">Quick fire:</span>
+          <button class="btn-preset" data-worker="GSB Token Analyst" data-req="Analyze token 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 on Base">Token</button>
+          <button class="btn-preset" data-worker="GSB Wallet Profiler" data-req="Profile wallet 0x6dA1A9793Ebe96975c240501A633ab8B3c83D14A on Base">Wallet</button>
+          <button class="btn-preset" data-worker="GSB Alpha Scanner" data-req="Scan Base chain for alpha signals now">Alpha</button>
+          <button class="btn-preset" data-worker="GSB Thread Writer" data-req="Write a crypto Twitter thread about $GSB Agent Gas Bible tokenized agent on Virtuals Protocol">Thread</button>
+        </div>
+      </div>
+      <div class="fire-feedback hidden" id="fire-feedback"></div>
+
+      <!-- Graduate helper -->
+      <div class="graduate-box">
+        <div class="graduate-header">
+          <span class="card-icon">🎓</span>
+          <span>Graduation Targets</span>
+        </div>
+        <div class="graduate-rows">
+          <div class="grad-row"><span>Token Analyst</span><span class="badge" id="grad-ta">9/10</span><button class="btn-grad" data-worker="GSB Token Analyst" data-count="1">Fire 1</button></div>
+          <div class="grad-row"><span>Wallet Profiler</span><span class="badge green" id="grad-wp">12/10 ✓</span><button class="btn-grad" disabled>Done</button></div>
+          <div class="grad-row"><span>Alpha Scanner</span><span class="badge green" id="grad-as">10/10 ✓</span><button class="btn-grad" disabled>Done</button></div>
+          <div class="grad-row"><span>Thread Writer</span><span class="badge" id="grad-tw">6/10</span><button class="btn-grad" data-worker="GSB Thread Writer" data-count="4">Fire 4</button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
