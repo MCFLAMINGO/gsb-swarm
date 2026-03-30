@@ -45,21 +45,34 @@ async function start() {
     privateKey: process.env.AGENT_WALLET_PRIVATE_KEY,
     entityId: parseInt(process.env.TOKEN_ANALYST_ENTITY_ID),
     agentWalletAddress: process.env.TOKEN_ANALYST_WALLET_ADDRESS,
-    onNewTask: async (job, memoToSign) => {
+    onNewTask: async (job) => {
       console.log(`[${AGENT_NAME}] New job: ${job.id}`);
       try {
-        const content = typeof job.description === 'string' ? job.description : JSON.stringify(job.description);
+        // Accept the job
+        await job.respond(true, 'Analyzing token now...');
+
+        // Parse contract address from job description
+        const content = typeof job.description === 'string'
+          ? job.description
+          : JSON.stringify(job.description);
         const match = content.match(/0x[a-fA-F0-9]{40}/);
-        if (!match) { await client.respondJob(job.id, memoToSign?.id, false, 'Provide a contract address.'); return; }
-        await client.respondJob(job.id, memoToSign?.id, true, `Analyzing ${match[0]}...`);
+
+        if (!match) {
+          await job.deliver({ type: 'text', value: 'No contract address found. Please provide a valid Base token address.' });
+          return;
+        }
+
         const report = await analyzeToken(match[0]);
-        await client.deliverJob(job.id, { type: 'text', value: JSON.stringify(report, null, 2) });
+        await job.deliver({ type: 'text', value: JSON.stringify(report, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
-        await client.deliverJob(job.id, { type: 'text', value: JSON.stringify({ error: err.message }) });
+        console.error(`[${AGENT_NAME}] Job error:`, err.message);
+        try { await job.deliver({ type: 'text', value: JSON.stringify({ error: err.message }) }); } catch (_) {}
       }
     },
-    onEvaluate: async (job) => { await client.evaluateJob(job.id, true, 'Delivered.'); },
+    onEvaluate: async (job) => {
+      try { await job.evaluate(true, 'Delivered successfully.'); } catch (_) {}
+    },
   });
   console.log(`[${AGENT_NAME}] Online. Listening for jobs at $${JOB_PRICE} USDC each.`);
 }
