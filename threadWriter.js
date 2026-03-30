@@ -7,15 +7,6 @@ const JOB_PRICE = 0.15;
 
 const handledJobs = new Set();
 
-let _openai = null;
-function getOpenAI() {
-  if (!_openai) {
-    const OpenAI = require('openai').default;
-    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  }
-  return _openai;
-}
-
 async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
@@ -54,65 +45,76 @@ async function fetchTokenData(contractAddress) {
   } catch { return null; }
 }
 
-const FALLBACK_THREADS = [
-  `1/ The Gas Bible is live. $GSB is a tokenized AI agent on @virtuals_io that never sleeps, never runs out of GAS.\n\n2/ What does that mean? It means 24/7 on-chain intelligence. No downtime. No excuses.\n\n3/ Most crypto projects: hype cycle → dump → ghost. $GSB: build → deploy → earn → repeat.\n\n4/ The ACP network means $GSB agents are getting hired by other agents. Agent-to-agent economy. This is the meta.\n\n5/ Every completed job = proof of work. Not mining. Thinking.\n\n6/ Tokenized. Tradeable. Unstoppable. The scripture is on-chain.\n\n7/ Thou shalt never run out of GAS. $GSB`,
-  `1/ Alpha thread: why $GSB on @virtuals_io is the sleeper of the cycle.\n\n2/ Most tokens: speculative. $GSB: revenue-generating AI agent. The difference is everything.\n\n3/ $GSB runs on the Agent Commerce Protocol. Gets hired. Delivers. Gets paid. On-chain.\n\n4/ Token = ownership of the agent's future earnings. Not a meme. A business.\n\n5/ ACP agents are the new gig economy workers — except they operate at machine speed, 24/7.\n\n6/ The Gas Bible says: thou shalt not ape blind. DYOR. Then ape.\n\n7/ $GSB — the agent that pays its own bills. Built on Base. Powered by Virtuals.`,
-  `1/ Not your average AI token thread. $GSB is different and here's why.\n\n2/ $GSB = GSB Intelligence Swarm. 4 specialized agents working as one: Token Analyst, Wallet Profiler, Alpha Scanner, Thread Writer.\n\n3/ Each agent takes jobs from the ACP network. Completes them. Gets paid in USDC. All on-chain.\n\n4/ The token represents the swarm. Stake it. Hold it. Watch it work.\n\n5/ Gas is the lifeblood of on-chain AI. The Gas Bible teaches: never let your agents run dry.\n\n6/ Built on @base. Running on @virtuals_io. Graduating now.\n\n7/ Thou shalt never run out of GAS. $GSB is the word.`,
+// ── Template-based thread generator — no API key required ──────────────────
+// Generates unique threads using live DexScreener data + rotating templates.
+
+const INTROS = [
+  'The Gas Bible is open. Thread time.',
+  'Alpha drop. No fluff. Read this.',
+  'Most people are sleeping on this. Don\'t.',
+  'I ran the numbers. Here\'s what I found.',
+  'Unpopular opinion: on-chain AI agents are the trade of the cycle.',
 ];
 
-let fallbackIndex = 0;
-function getFallbackThread(liveData) {
-  const thread = FALLBACK_THREADS[fallbackIndex % FALLBACK_THREADS.length];
-  fallbackIndex++;
-  return {
-    thread,
-    token_data: liveData,
-    generated_at: new Date().toISOString(),
-    powered_by: 'GSB Intelligence Swarm (template mode)',
-  };
+const OUTROS = [
+  'Thou shalt never run out of GAS. $GSB',
+  'The scripture is on-chain. $GSB is the word.',
+  '$GSB — the agent that never sleeps, never misses, never runs dry.',
+  'Built on Base. Powered by Virtuals. Graduating now. $GSB',
+  'Agent-to-agent economy is here. $GSB is already in it.',
+];
+
+let threadCounter = 0;
+
+function buildThread(jobRequest, liveData) {
+  const idx = threadCounter++;
+  const intro = INTROS[idx % INTROS.length];
+  const outro = OUTROS[idx % OUTROS.length];
+  const ts = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+  const lines = [];
+  lines.push(`1/ ${intro}`);
+
+  if (liveData) {
+    const { name, symbol, priceUsd, priceChange24h, liquidity, volume24h, marketCap } = liveData;
+    const trend = priceChange24h > 5 ? '🟢 ripping' : priceChange24h < -5 ? '🔴 bleeding' : '🟡 consolidating';
+    const liqStr = liquidity > 1e6 ? '$' + (liquidity/1e6).toFixed(1) + 'M' : '$' + Math.round(liquidity/1e3) + 'K';
+    const volStr = volume24h > 1e6 ? '$' + (volume24h/1e6).toFixed(1) + 'M' : '$' + Math.round(volume24h/1e3) + 'K';
+    const mcStr  = marketCap > 1e6 ? '$' + (marketCap/1e6).toFixed(1) + 'M' : '$' + Math.round(marketCap/1e3) + 'K';
+
+    lines.push(`2/ ${name} (${symbol}) is ${trend} right now.`);
+    lines.push(`3/ Price: $${parseFloat(priceUsd).toFixed(6)} | 24h: ${priceChange24h > 0 ? '+' : ''}${priceChange24h}%`);
+    lines.push(`4/ Liquidity: ${liqStr} | 24h Volume: ${volStr} | MCap: ${mcStr}`);
+    lines.push(`5/ These are the numbers that matter. Everything else is noise.`);
+    lines.push(`6/ $GSB Token Analyst ran this scan at ${ts}. On-chain. Autonomous. Always on.`);
+    lines.push(`7/ This is what tokenized intelligence looks like. Agent runs the numbers so you don't have to.`);
+    lines.push(`8/ ACP network: agent hired → agent delivered → agent paid. USDC. On-chain. No middleman.`);
+    lines.push(`9/ ${outro}`);
+  } else {
+    // generic $GSB thread
+    lines.push(`2/ $GSB is a tokenized AI agent on @virtuals_io. It gets hired, delivers work, gets paid. On-chain.`);
+    lines.push(`3/ 4 specialized agents: Token Analyst, Wallet Profiler, Alpha Scanner, Thread Writer.`);
+    lines.push(`4/ Every job completed is a transaction on Base. Transparent. Verifiable. Unstoppable.`);
+    lines.push(`5/ The Agent Commerce Protocol (ACP) is the rails. $GSB rides them.`);
+    lines.push(`6/ Token = ownership of the swarm's earning power. Not a meme. A machine.`);
+    lines.push(`7/ Most AI tokens: vibes + promises. $GSB: deployed agents + completed jobs + USDC earned.`);
+    lines.push(`8/ The Gas Bible teaches one law: thou shalt always have gas for your agents.`);
+    lines.push(`9/ ${outro}`);
+  }
+
+  return lines.join('\n\n');
 }
 
 async function writeThread(jobRequest) {
   const match = jobRequest.match(/0x[a-fA-F0-9]{40}/);
   const liveData = match ? await fetchTokenData(match[0]) : null;
-
-  if (!process.env.OPENAI_API_KEY) {
-    return getFallbackThread(liveData);
-  }
-
-  const systemPrompt = `You are the GSB Thread Writer — the most feared crypto thread writer on X.
-Your threads: punchy, data-backed, 8-12 numbered tweets (1/, 2/, etc.), end with $GSB mention.
-Brand: Bold. Irreverent. Data-driven. Biblical. Thou shalt never run out of GAS.`;
-
-  const userPrompt = liveData
-    ? `Write a viral X thread about ${liveData.name} (${liveData.symbol}). Price: $${liveData.priceUsd}, 24h: ${liveData.priceChange24h}%, Liq: $${(liveData.liquidity||0).toLocaleString()}, Vol: $${(liveData.volume24h||0).toLocaleString()}. Request: ${jobRequest}`
-    : `Write a viral X thread about: ${jobRequest}. End with $GSB mention.`;
-
-  try {
-    const response = await getOpenAI().chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      max_tokens: 1500,
-      temperature: 0.85,
-    });
-    return {
-      thread: response.choices[0]?.message?.content || 'Thread generation failed.',
-      token_data: liveData,
-      generated_at: new Date().toISOString(),
-      powered_by: 'GSB Intelligence Swarm',
-    };
-  } catch (err) {
-    // 429 quota / rate limit → fall back to pre-written thread so job still completes
-    const isQuota = err.status === 429 || (err.message && err.message.includes('429'));
-    if (isQuota) {
-      console.warn(`[Thread Writer] OpenAI quota exceeded — using fallback thread.`);
-      return getFallbackThread(liveData);
-    }
-    throw err; // re-throw unexpected errors
-  }
+  const thread = buildThread(jobRequest, liveData);
+  return {
+    thread,
+    token_data: liveData,
+    generated_at: new Date().toISOString(),
+    powered_by: 'GSB Intelligence Swarm',
+  };
 }
 
 async function start() {
