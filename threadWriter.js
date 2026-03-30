@@ -78,27 +78,29 @@ async function start() {
     privateKey: process.env.AGENT_WALLET_PRIVATE_KEY,
     entityId: parseInt(process.env.THREAD_WRITER_ENTITY_ID),
     agentWalletAddress: process.env.THREAD_WRITER_WALLET_ADDRESS,
-    onNewTask: async (job, memoToSign) => {
+    onNewTask: async (job) => {
       console.log(`[${AGENT_NAME}] New job: ${job.id}`);
       try {
-        const content = typeof job.description === 'string' ? job.description : JSON.stringify(job.description);
+        const content = typeof job.description === 'string'
+          ? job.description
+          : JSON.stringify(job.description);
+
         if (!content || content.length < 3) {
-          await client.respondJob(job.id, memoToSign?.id, false, 'Provide a topic or contract address.');
+          await job.respond(false, 'Please provide a topic or contract address.');
           return;
         }
-        await client.respondJob(job.id, memoToSign?.id, true, 'Writing your thread...');
+
+        await job.respond(true, 'Writing your thread now...');
         const result = await writeThread(content);
-        await client.deliverJob(job.id, { type: 'text', value: JSON.stringify(result, null, 2) });
+        await job.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job error:`, err.message);
-        try {
-          await client.deliverJob(job.id, { type: 'text', value: JSON.stringify({ error: err.message }) });
-        } catch (_) {}
+        try { await job.deliver({ type: 'text', value: JSON.stringify({ error: err.message }) }); } catch (_) {}
       }
     },
     onEvaluate: async (job) => {
-      await client.evaluateJob(job.id, true, 'Delivered.');
+      try { await job.evaluate(true, 'Delivered successfully.'); } catch (_) {}
     },
   });
   console.log(`[${AGENT_NAME}] Online. Writing threads for $${JOB_PRICE} USDC each.`);
