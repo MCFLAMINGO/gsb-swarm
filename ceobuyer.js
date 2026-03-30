@@ -54,7 +54,10 @@ const JOBS_PER_WORKER = 3;
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function makeFare(p) {
-  return new FareAmount(Math.round(p * 1_000_000), baseAcpConfig.baseFare);
+  // FareAmount expects the human-readable dollar amount (e.g. 0.25 for $0.25 USDC).
+  // It internally calls parseUnits(p, 6) → 250000 base units.
+  // Do NOT pre-multiply by 1e6 — that causes 250000 * 1e6 = 250,000 USDC budget!
+  return new FareAmount(p, baseAcpConfig.baseFare);
 }
 
 // ── Serialized queue — one UserOp at a time ──────────────────────────────────

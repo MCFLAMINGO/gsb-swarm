@@ -7,7 +7,7 @@ const JOB_PRICE = 0.50;
 
 const handledJobs = new Set();
 
-async function waitForTransaction(client, jobId, maxWaitMs = 30000) {
+async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
     const fresh = await client.getJobById(jobId);

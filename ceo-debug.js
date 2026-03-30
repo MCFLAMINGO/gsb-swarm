@@ -21,7 +21,7 @@ const CEO_WALLET_ADDRESS = '0xf0d4832A4c2D33Faa1F655cd4dE5e7c551a0fE45';
 const PRIVATE_KEY        = process.env.AGENT_WALLET_PRIVATE_KEY;
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-function makeFare(p) { return new FareAmount(Math.round(p * 1_000_000), baseAcpConfig.baseFare); }
+function makeFare(p) { return new FareAmount(p, baseAcpConfig.baseFare); }
 
 async function main() {
   if (!PRIVATE_KEY) throw new Error('AGENT_WALLET_PRIVATE_KEY not set');
