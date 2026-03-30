@@ -20,10 +20,11 @@ baseAcpConfig.chain.rpcUrls.default.http = [VIRTUALS_RPC];
 console.log('[ceo] RPC patched to Virtuals proxy:', VIRTUALS_RPC);
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const CEO_ENTITY_ID      = 2;
-const CEO_WALLET_ADDRESS = '0xf0d4832A4c2D33Faa1F655cd4dE5e7c551a0fE45';
-const PRIVATE_KEY        = process.env.AGENT_WALLET_PRIVATE_KEY;
+const CEO_ENTITY_ID         = 2;
+const CEO_WALLET_ADDRESS    = '0xf0d4832A4c2D33Faa1F655cd4dE5e7c551a0fE45';
+const PRIVATE_KEY           = process.env.AGENT_WALLET_PRIVATE_KEY; // swarm wallet, whitelisted on CEO
 
+// Workers the CEO will hire
 const WORKERS = [
   {
     name: 'GSB Token Analyst',
@@ -51,15 +52,20 @@ const WORKERS = [
   },
 ];
 
+// How many jobs to fire per worker (need 10 total + 3 consecutive for graduation)
 const JOBS_PER_WORKER = 3;
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function makeFare(priceUsdc) {
+  // FareAmount(amount_in_base_units, fare_config)
+  // USDC has 6 decimals, so $0.25 = 250000
   const baseUnits = Math.round(priceUsdc * 1_000_000);
   return new FareAmount(baseUnits, baseAcpConfig.baseFare);
 }
 
+// ── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
   if (!PRIVATE_KEY) throw new Error('AGENT_WALLET_PRIVATE_KEY not set in env');
 
@@ -67,6 +73,7 @@ async function main() {
   console.log('║   GSB CEO BUYER — Graduation Job Firer           ║');
   console.log('╚══════════════════════════════════════════════════╝\n');
 
+  // Build CEO ACP client
   console.log('[ceo] Building ACP client for CEO (entity', CEO_ENTITY_ID, ')...');
   const contractClient = await AcpContractClient.build(
     PRIVATE_KEY,
@@ -75,11 +82,12 @@ async function main() {
   );
   const client = new AcpClient({
     acpContractClient: contractClient,
-    onNewTask: async () => {},
+    onNewTask: async () => {}, // CEO is buyer-only, won't receive jobs
     onEvaluate: async (job) => {
+      // Auto-approve all deliverables from workers
       console.log(`[ceo] Auto-approving job ${job.id}`);
       try {
-        await client.evaluateJob(job.id, true, 'Good work. Approved.');
+        await job.evaluate(true, 'Good work. Approved.');
         console.log(`[ceo] ✓ Job ${job.id} approved.`);
       } catch (err) {
         console.error(`[ceo] Evaluate error on job ${job.id}:`, err.message);
@@ -89,31 +97,37 @@ async function main() {
 
   console.log('[ceo] CEO ACP client ready.\n');
 
+  // Fire jobs at each worker
   for (const worker of WORKERS) {
     console.log(`\n── Hiring ${worker.name} (${JOBS_PER_WORKER} jobs × $${worker.price} USDC) ──`);
     for (let i = 1; i <= JOBS_PER_WORKER; i++) {
       try {
-        console.log(`  [job ${i}/${JOBS_PER_WORKER}] Initiating → ${worker.address}...`);
+        console.log(`  [job ${i}/${JOBS_PER_WORKER}] Initiating job → ${worker.address}...`);
         const fare = makeFare(worker.price);
         const jobId = await client.initiateJob(
           worker.address,
           worker.requirement,
           fare,
-          null,
-          new Date(Date.now() + 1000 * 60 * 30),
+          null, // evaluator — null uses CEO wallet as evaluator (v1 behavior)
+          new Date(Date.now() + 1000 * 60 * 30), // 30 min expiry
         );
         console.log(`  [job ${i}/${JOBS_PER_WORKER}] ✓ Job created: ${jobId}`);
+        // Wait between jobs to avoid hammering RPC
         if (i < JOBS_PER_WORKER) await sleep(5000);
       } catch (err) {
         console.error(`  [job ${i}/${JOBS_PER_WORKER}] ✗ Failed:`, err.message);
       }
     }
+    // Pause between workers
     await sleep(8000);
   }
 
-  console.log('\n[ceo] All jobs fired. Listening for deliveries + auto-approving...\n');
-  await sleep(1000 * 60 * 10);
-  console.log('[ceo] Done.');
+  console.log('\n[ceo] All jobs fired. Listening for deliveries + auto-approving...');
+  console.log('[ceo] Keep this running for ~5 minutes so workers can deliver and CEO can evaluate.\n');
+
+  // Keep process alive to handle onEvaluate callbacks
+  await sleep(1000 * 60 * 10); // 10 minutes
+  console.log('[ceo] Done. Check each worker\'s successful job count on Virtuals.');
 }
 
 main().catch((err) => {
