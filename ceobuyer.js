@@ -82,7 +82,21 @@ async function main() {
   );
   const client = new AcpClient({
     acpContractClient: contractClient,
-    onNewTask: async () => {}, // CEO is buyer-only, won't receive jobs
+    onNewTask: async (job, memo) => {
+      // Provider called respond(true) + createRequirement — CEO must acceptRequirement
+      // to advance the job to phase=2 (TRANSACTION) so the provider can deliver
+      if (memo) {
+        console.log(`[ceo] Accepting requirement for job ${job.id} (memo ${memo.id})...`);
+        try {
+          await job.acceptRequirement(memo, 'Requirement accepted. Proceed with delivery.');
+          console.log(`[ceo] ✓ Job ${job.id} requirement accepted — now in TRANSACTION phase.`);
+        } catch (err) {
+          console.error(`[ceo] acceptRequirement error on job ${job.id}:`, err.message);
+        }
+      } else {
+        console.log(`[ceo] onNewTask fired for job ${job.id} phase=${job.phase} — no memo to sign.`);
+      }
+    },
     onEvaluate: async (job) => {
       // Auto-approve all deliverables from workers
       console.log(`[ceo] Auto-approving job ${job.id}`);
