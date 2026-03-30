@@ -58,6 +58,7 @@ function handle(msg) {
   else if (msg.type === 'history')    renderHistory(msg.data);
   else if (msg.type === 'job-event')  appendJobEvent(msg.data);
   else if (msg.type === 'acp_status') setAcpStatus(msg.data);
+  else if (msg.type === 'cmd-status') appendCmdStatus(msg.data);
 }
 
 async function fetchState() {
@@ -81,10 +82,17 @@ function setAcpStatus(data) {
   const dot   = document.getElementById('acp-dot');
   const label = document.getElementById('acp-status');
   const btn   = document.getElementById('fire-btn');
+  const cmdBtn = document.getElementById('cmd-send');
+  const cmdIn  = document.getElementById('cmd-input');
   dot.className   = 'dot ' + (acpReady ? 'connected' : 'error');
   label.textContent = acpReady ? 'CEO wallet ready' : (data.error ? 'Wallet error' : 'Initializing…');
   btn.disabled    = !acpReady;
   btn.textContent = acpReady ? 'Fire Job →' : 'Waiting for wallet…';
+  cmdBtn.disabled = !acpReady;
+  cmdIn.disabled  = !acpReady;
+  cmdIn.placeholder = acpReady
+    ? 'Tell the agents what to do — e.g. "analyze $GSB token and write a thread"'
+    : 'Waiting for CEO wallet…';
 }
 
 // ── Render Brief ──────────────────────────────────────────────────────────────
@@ -392,4 +400,106 @@ document.querySelectorAll('.btn-grad').forEach(btn => {
     // Navigate to jobs tab to watch
     document.querySelector('[data-section="jobs"]').click();
   });
+});
+
+// ── CEO Command Line ──────────────────────────────────────────────────────────
+const cmdInput   = document.getElementById('cmd-input');
+const cmdSend    = document.getElementById('cmd-send');
+const cmdHistory = document.getElementById('cmd-history');
+
+// Send on Enter key
+cmdInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendCommand();
+  }
+});
+
+cmdSend.addEventListener('click', sendCommand);
+
+async function sendCommand() {
+  const text = cmdInput.value.trim();
+  if (!text || !acpReady) return;
+
+  // Echo user command into history
+  addCmdMsg('user', `> ${text}`);
+  cmdInput.value = '';
+
+  // Disable while firing
+  cmdSend.disabled = true;
+  cmdInput.disabled = true;
+
+  try {
+    const r = await fetch(`${API_BASE}/api/command`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ command: text }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      addCmdMsg('error', data.error || 'Server error');
+    }
+    // Real-time status updates come through WebSocket cmd-status messages
+  } catch (err) {
+    addCmdMsg('error', 'Network error: ' + err.message);
+  } finally {
+    cmdSend.disabled = false;
+    cmdInput.disabled = false;
+    cmdInput.focus();
+  }
+}
+
+// Handle incoming cmd-status WebSocket messages
+function appendCmdStatus(data) {
+  const type = data.type || 'info';
+  addCmdMsg(type, data.message || JSON.stringify(data));
+
+  // If a job was fired, also bump to jobs tab hint
+  if (type === 'done') {
+    // Flash the jobs nav badge
+    const jobsNav = document.querySelector('[data-section="jobs"]');
+    if (jobsNav) {
+      jobsNav.style.color = 'var(--accent)';
+      setTimeout(() => jobsNav.style.color = '', 3000);
+    }
+  }
+}
+
+function addCmdMsg(type, text) {
+  const el = document.createElement('div');
+  el.className = `cmd-msg ${type}`;
+
+  const tag  = document.createElement('span');
+  tag.className = 'msg-tag';
+
+  const body = document.createElement('span');
+  body.className = 'msg-body';
+  body.textContent = text;
+
+  const tagMap = {
+    user:   'YOU',
+    ack:    'CEO',
+    firing: 'HIRING',
+    fired:  'HIRED',
+    done:   'DONE',
+    error:  'ERROR',
+    info:   'INFO',
+  };
+  tag.textContent = tagMap[type] || type.toUpperCase();
+
+  el.appendChild(tag);
+  el.appendChild(body);
+  cmdHistory.appendChild(el);
+
+  // Auto-scroll to bottom
+  cmdHistory.scrollTop = cmdHistory.scrollHeight;
+}
+
+// Suggested commands on focus (shown once per session)
+let hintShown = false;
+cmdInput.addEventListener('focus', () => {
+  if (!hintShown && acpReady) {
+    hintShown = true;
+    addCmdMsg('info', 'Try: "analyze $GSB token" · "profile wallet 0x…" · "scan for alpha" · "write a thread" · "run full brief"');
+  }
 });

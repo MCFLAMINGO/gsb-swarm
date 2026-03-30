@@ -740,3 +740,98 @@ body {
 [data-theme="dark"] #last-update { color: #7a7a76; }
 [data-theme="dark"] .empty-state p { color: #989894; }
 [data-theme="dark"] .empty-state .muted { color: #7a7a76; }
+
+/* ── CEO Command Line ────────────────────────────────────────────────────── */
+.cmd-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-2);
+  box-shadow: 0 0 0 1px var(--accent-dim), 0 0 12px 0 rgba(57,232,176,0.08);
+}
+
+.cmd-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+
+.cmd-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  caret-color: var(--accent);
+  padding: 0;
+}
+.cmd-input::placeholder { color: var(--text-faint); }
+
+.cmd-send {
+  padding: var(--space-1) var(--space-4);
+  border: 1px solid var(--accent-dim);
+  border-radius: 4px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+  white-space: nowrap;
+}
+.cmd-send:hover:not(:disabled) { background: var(--accent); color: #000; }
+.cmd-send:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* Chat history */
+.cmd-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+  max-height: 240px;
+  overflow-y: auto;
+  /* hide scrollbar by default, show on hover */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.cmd-history:empty { display: none; }
+
+.cmd-msg {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  padding: var(--space-2) var(--space-3);
+  border-radius: 4px;
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.cmd-msg.user {
+  background: var(--surface-2);
+  border-left: 2px solid var(--accent);
+  color: var(--text);
+}
+.cmd-msg.user .msg-tag { color: var(--accent); font-weight: 700; }
+
+.cmd-msg.ack    { background: var(--accent-bg); border-left: 2px solid var(--accent); color: var(--accent); }
+.cmd-msg.firing { background: var(--surface-2); border-left: 2px solid var(--gold); color: var(--gold); }
+.cmd-msg.fired  { background: var(--surface-2); border-left: 2px solid var(--accent); color: var(--text-muted); }
+.cmd-msg.done   { background: var(--accent-bg); border-left: 2px solid var(--accent); color: var(--accent); font-weight: 600; }
+.cmd-msg.error  { background: var(--red-bg); border-left: 2px solid var(--red); color: var(--red); }
+.cmd-msg.info   { background: var(--surface-2); border-left: 2px solid var(--blue); color: var(--text-muted); }
+
+.msg-tag  { white-space: nowrap; font-weight: 700; letter-spacing: 0.03em; }
+.msg-body { flex: 1; word-break: break-word; }
