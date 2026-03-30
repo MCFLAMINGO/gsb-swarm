@@ -5,7 +5,8 @@ const { buildAcpClient } = require('./acp');
 const AGENT_NAME = 'GSB Wallet Profiler';
 const JOB_PRICE = 0.50;
 
-// Wait for job to reach TRANSACTION phase (phase=2) after respond(true)
+const handledJobs = new Set();
+
 async function waitForTransaction(client, jobId, maxWaitMs = 30000) {
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
@@ -16,13 +17,23 @@ async function waitForTransaction(client, jobId, maxWaitMs = 30000) {
   throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
 }
 
+function extractContent(requirement) {
+  if (!requirement) return '';
+  if (typeof requirement === 'string') return requirement;
+  if (typeof requirement === 'object') {
+    return requirement.topic || requirement.requirement || requirement.content || requirement.walletAddress || JSON.stringify(requirement);
+  }
+  return String(requirement);
+}
+
 async function profileWallet(address) {
   try {
-    const [txRes] = await Promise.allSettled([
-      axios.get(`https://api.basescan.org/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=YourApiKeyToken`, { timeout: 8000 }),
-    ]);
+    const txRes = await axios.get(
+      `https://api.basescan.org/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=YourApiKeyToken`,
+      { timeout: 8000 }
+    ).catch(() => ({ data: { result: [] } }));
 
-    const txs = txRes.status === 'fulfilled' ? txRes.value.data?.result || [] : [];
+    const txs = txRes.data?.result || [];
     const txCount = Array.isArray(txs) ? txs.length : 0;
     const recentTxs = Array.isArray(txs) ? txs.slice(0, 5).map(t => ({
       hash: t.hash,
@@ -58,6 +69,13 @@ async function start() {
     agentWalletAddress: process.env.WALLET_PROFILER_WALLET_ADDRESS,
     onNewTask: async (job) => {
       console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase}`);
+
+      if (handledJobs.has(job.id)) {
+        console.log(`[${AGENT_NAME}] Job ${job.id} already in progress — skipping duplicate.`);
+        return;
+      }
+      handledJobs.add(job.id);
+
       try {
         await job.respond(true, 'Profiling wallet now...');
         console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
@@ -65,8 +83,8 @@ async function start() {
         const freshJob = await waitForTransaction(client, job.id);
         console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase.`);
 
-        const rawContent = freshJob.requirement
-          || (freshJob.memos?.[0] ? (typeof freshJob.memos[0].content === 'string' ? freshJob.memos[0].content : JSON.stringify(freshJob.memos[0].content)) : '')
+        const rawContent = extractContent(freshJob.requirement)
+          || extractContent(freshJob.memos?.[0]?.content)
           || '';
         const match = rawContent.match(/0x[a-fA-F0-9]{40}/);
 
@@ -79,7 +97,8 @@ async function start() {
         await freshJob.deliver({ type: 'text', value: JSON.stringify(profile, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
-        console.error(`[${AGENT_NAME}] Job error:`, err.message);
+        console.error(`[${AGENT_NAME}] Job ${job.id} error:`, err.message);
+        handledJobs.delete(job.id);
       }
     },
     onEvaluate: async (job) => {

@@ -5,7 +5,8 @@ const { buildAcpClient } = require('./acp');
 const AGENT_NAME = 'GSB Alpha Scanner';
 const JOB_PRICE = 0.10;
 
-// Wait for job to reach TRANSACTION phase (phase=2) after respond(true)
+const handledJobs = new Set();
+
 async function waitForTransaction(client, jobId, maxWaitMs = 30000) {
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
@@ -18,7 +19,6 @@ async function waitForTransaction(client, jobId, maxWaitMs = 30000) {
 
 async function scanAlpha() {
   try {
-    // Fallback: use token boosts endpoint
     const boostRes = await axios.get(
       'https://api.dexscreener.com/token-boosts/latest/v1',
       { timeout: 8000 }
@@ -34,7 +34,6 @@ async function scanAlpha() {
         totalAmount: t.totalAmount,
       }));
 
-    // Also get top gainers
     const pairsRes = await axios.get(
       'https://api.dexscreener.com/latest/dex/search?q=base',
       { timeout: 8000 }
@@ -78,6 +77,13 @@ async function start() {
     agentWalletAddress: process.env.ALPHA_SCANNER_WALLET_ADDRESS,
     onNewTask: async (job) => {
       console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase}`);
+
+      if (handledJobs.has(job.id)) {
+        console.log(`[${AGENT_NAME}] Job ${job.id} already in progress — skipping duplicate.`);
+        return;
+      }
+      handledJobs.add(job.id);
+
       try {
         await job.respond(true, 'Scanning Base for alpha...');
         console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
@@ -89,7 +95,8 @@ async function start() {
         await freshJob.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
-        console.error(`[${AGENT_NAME}] Job error:`, err.message);
+        console.error(`[${AGENT_NAME}] Job ${job.id} error:`, err.message);
+        handledJobs.delete(job.id);
       }
     },
     onEvaluate: async (job) => {
