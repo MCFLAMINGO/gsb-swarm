@@ -1,4 +1,4 @@
-// CEO DEBUG v2 — test acceptRequirement with full error detail + USDC already approved
+// CEO DEBUG v3 — fire ONE job, print FULL error stack from acceptRequirement
 require('dotenv').config();
 
 const {
@@ -26,11 +26,10 @@ function makeFare(p) { return new FareAmount(Math.round(p * 1_000_000), baseAcpC
 async function main() {
   if (!PRIVATE_KEY) throw new Error('AGENT_WALLET_PRIVATE_KEY not set');
 
-  console.log('[debug] Building CEO ACP client...');
+  console.log('[debug] Building CEO client...');
   const contractClient = await AcpContractClient.build(PRIVATE_KEY, CEO_ENTITY_ID, CEO_WALLET_ADDRESS);
 
-  let capturedJob = null;
-  let capturedMemo = null;
+  let capturedJob = null, capturedMemo = null;
 
   const client = new AcpClient({
     acpContractClient: contractClient,
@@ -38,15 +37,7 @@ async function main() {
       if (memo && !capturedJob) {
         capturedJob = job;
         capturedMemo = memo;
-        console.log(`[debug] Captured job ${job.id} memo ${memo.id} phase=${job.phase}`);
-        console.log(`[debug] job keys:`, Object.keys(job));
-        console.log(`[debug] memo keys:`, Object.keys(memo));
-        console.log(`[debug] job.budget:`, job.budget);
-        console.log(`[debug] job.priceValue:`, job.priceValue);
-        console.log(`[debug] job.priceType:`, job.priceType);
-        console.log(`[debug] memo.content:`, memo.content);
-        console.log(`[debug] memo.type:`, memo.type);
-        console.log(`[debug] memo.nextPhase:`, memo.nextPhase);
+        console.log(`[debug] Got job ${job.id} memo ${memo.id} phase=${job.phase}`);
       }
     },
     onEvaluate: async () => {},
@@ -56,42 +47,25 @@ async function main() {
   const jobId = await client.initiateJob(
     '0xBF56F4EC74cC1aE19c48197Eb32066c8a85dEfda',
     'DEBUG: Analyze token 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 on Base',
-    makeFare(0.25),
-    null,
+    makeFare(0.25), null,
     new Date(Date.now() + 1000 * 60 * 30),
   );
-  console.log(`[debug] Job created: ${jobId}. Waiting for worker response...`);
+  console.log(`[debug] Job created: ${jobId}. Waiting...`);
 
-  for (let i = 0; i < 30; i++) {
-    if (capturedJob) break;
-    await sleep(2000);
-  }
+  for (let i = 0; i < 30; i++) { if (capturedJob) break; await sleep(2000); }
+  if (!capturedJob) { console.log('[debug] Timed out.'); process.exit(0); }
 
-  if (!capturedJob) {
-    console.log('[debug] Timed out — no onNewTask callback received.');
-    process.exit(0);
-  }
-
-  console.log(`\n[debug] Calling acceptRequirement...`);
+  console.log('\n[debug] Calling acceptRequirement...');
   try {
     await capturedJob.acceptRequirement(capturedMemo, 'Debug acceptance');
     console.log('[debug] ✓ SUCCESS!');
   } catch (err) {
-    console.error('[debug] FULL ERROR name:', err.name);
-    console.error('[debug] FULL ERROR message:', err.message);
-    // Extract the innermost "Details:" line
-    const detailsMatch = err.message.match(/Details:\s*(.+)/);
-    if (detailsMatch) console.error('[debug] DETAILS:', detailsMatch[1]);
-    const stackLines = err.stack?.split('\n') || [];
-    const causedBy = stackLines.findIndex(l => l.includes('Caused by'));
-    if (causedBy >= 0) {
-      console.error('[debug] CAUSED BY:');
-      stackLines.slice(causedBy, causedBy + 10).forEach(l => console.error('  ', l));
-    }
+    // Print the FULL stack — the "Details:" line is buried in the caused-by chain
+    console.error('[debug] === FULL ERROR DUMP ===');
+    console.error(err.stack || err.message);
   }
 
-  await sleep(3000);
+  await sleep(2000);
   process.exit(0);
 }
-
 main().catch(err => { console.error('[debug] Fatal:', err); process.exit(1); });
