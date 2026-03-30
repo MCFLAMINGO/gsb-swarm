@@ -9,7 +9,7 @@ const {
   default: AcpClient,
 } = require('@virtuals-protocol/acp-node');
 
-// ── RPC patch (same as acp.js) ──────────────────────────────────────────────
+// ── RPC patch ──────────────────────────────────────────────────────────────
 const VIRTUALS_RPC = baseAcpConfig.alchemyRpcUrl;
 if (!baseAcpConfig.chain.rpcUrls.alchemy) {
   baseAcpConfig.chain.rpcUrls.alchemy = { http: [VIRTUALS_RPC] };
@@ -22,6 +22,12 @@ baseAcpConfig.chain.rpcUrls.default.http = [VIRTUALS_RPC];
 const CEO_ENTITY_ID         = 2;
 const CEO_WALLET_ADDRESS    = '0xf0d4832A4c2D33Faa1F655cd4dE5e7c551a0fE45';
 const PRIVATE_KEY           = process.env.AGENT_WALLET_PRIVATE_KEY;
+const ACP_CONTRACT          = '0x6a1FE26D54ab0d3E1e3168f2e0c0cDa5cC0A0A4A';
+const USDC_CONTRACT         = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+
+// Approve a large amount so we don't hit allowance again mid-run
+// 100 USDC = 100_000_000 base units (6 decimals)
+const USDC_APPROVE_AMOUNT = BigInt(100_000_000);
 
 // Workers the CEO will hire
 const WORKERS = [
@@ -62,9 +68,8 @@ function makeFare(priceUsdc) {
 }
 
 // ── Serialized acceptRequirement queue ──────────────────────────────────────
-// ERC-4337 UserOps must be submitted one at a time — parallel submissions cause
-// "Failed to send user operation" nonce conflicts on the bundler.
-let acceptQueue = Promise.resolve(); // chain promises to serialize
+// ERC-4337 UserOps must be one-at-a-time to avoid bundler nonce conflicts.
+let acceptQueue = Promise.resolve();
 
 function queueAccept(job, memo) {
   acceptQueue = acceptQueue.then(async () => {
@@ -74,11 +79,11 @@ function queueAccept(job, memo) {
         console.log(`[ceo] Accepting requirement for job ${job.id} (memo ${memo.id}) attempt ${attempt}...`);
         await job.acceptRequirement(memo, 'Requirement accepted. Proceed with delivery.');
         console.log(`[ceo] ✓ Job ${job.id} requirement accepted — now in TRANSACTION phase.`);
-        break; // success — stop retrying
+        break;
       } catch (err) {
         console.error(`[ceo] acceptRequirement error on job ${job.id} (attempt ${attempt}): ${err.message}`);
         if (attempt < MAX_RETRIES) {
-          const delay = attempt * 8000; // 8s, 16s, 24s backoff
+          const delay = attempt * 8000;
           console.log(`[ceo] Retrying job ${job.id} in ${delay/1000}s...`);
           await sleep(delay);
         } else {
@@ -86,8 +91,7 @@ function queueAccept(job, memo) {
         }
       }
     }
-    // Always wait 5s between UserOps to let bundler clear
-    await sleep(5000);
+    await sleep(5000); // let bundler clear between UserOps
   });
 }
 
@@ -106,19 +110,34 @@ async function main() {
     CEO_WALLET_ADDRESS
   );
 
+  // ── STEP 1: Pre-approve USDC so acceptRequirement can escrow funds ──────────
+  console.log(`[ceo] Pre-approving USDC allowance (${USDC_APPROVE_AMOUNT / BigInt(1e6)} USDC) for ACP contract...`);
+  try {
+    const approveOp = contractClient.approveAllowance(
+      USDC_APPROVE_AMOUNT,
+      USDC_CONTRACT,
+      ACP_CONTRACT
+    );
+    await contractClient.handleOperation([approveOp]);
+    console.log('[ceo] ✓ USDC approved. ACP contract can now escrow up to 100 USDC.\n');
+  } catch (err) {
+    console.error('[ceo] USDC approval failed:', err.message);
+    console.error('[ceo] Cannot proceed without allowance. Aborting.');
+    process.exit(1);
+  }
+
+  // ── STEP 2: Build ACP client and register callbacks ──────────────────────
   const client = new AcpClient({
     acpContractClient: contractClient,
     onNewTask: async (job, memo) => {
       if (memo) {
-        // Queue serializes all acceptRequirement calls — no parallel UserOps
         queueAccept(job, memo);
       } else {
-        console.log(`[ceo] onNewTask fired for job ${job.id} phase=${job.phase} — no memo, skipping.`);
+        console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} — no memo, skipping.`);
       }
     },
     onEvaluate: async (job) => {
       console.log(`[ceo] Auto-approving job ${job.id}`);
-      // Evaluate also uses UserOps — add a small delay before calling
       await sleep(2000);
       try {
         await job.evaluate(true, 'Good work. Approved.');
@@ -129,10 +148,9 @@ async function main() {
     },
   });
 
-  console.log('[ceo] CEO ACP client ready.\n');
-  console.log('[ceo] NOTE: acceptRequirement calls are now SERIALIZED (one at a time) to avoid bundler nonce conflicts.\n');
+  console.log('[ceo] CEO ACP client ready. acceptRequirement calls are serialized.\n');
 
-  // Fire jobs at each worker — sequential between workers, with delays
+  // ── STEP 3: Fire jobs at each worker ─────────────────────────────────────
   for (const worker of WORKERS) {
     console.log(`\n── Hiring ${worker.name} (${JOBS_PER_WORKER} jobs × $${worker.price} USDC) ──`);
     for (let i = 1; i <= JOBS_PER_WORKER; i++) {
@@ -144,28 +162,25 @@ async function main() {
           worker.requirement,
           fare,
           null,
-          new Date(Date.now() + 1000 * 60 * 30), // 30 min expiry
+          new Date(Date.now() + 1000 * 60 * 30),
         );
         console.log(`  [job ${i}/${JOBS_PER_WORKER}] ✓ Job created: ${jobId}`);
-        await sleep(3000); // brief gap between initiateJob calls
+        await sleep(3000);
       } catch (err) {
         console.error(`  [job ${i}/${JOBS_PER_WORKER}] ✗ Failed:`, err.message);
       }
     }
-    await sleep(5000); // gap between workers
+    await sleep(5000);
   }
 
-  console.log('\n[ceo] All jobs fired. Waiting for serialized acceptRequirement queue to drain...');
-  console.log('[ceo] Workers will deliver once their jobs reach TRANSACTION phase.\n');
-
-  // Wait for the accept queue to finish draining, then keep alive for evaluations
+  console.log('\n[ceo] All jobs fired. Waiting for acceptRequirement queue to drain...');
   await acceptQueue;
   console.log('\n[ceo] All acceptRequirement calls processed. Keeping alive for deliveries + evaluations...\n');
-  await sleep(1000 * 60 * 15); // 15 minutes for workers to deliver + CEO to evaluate
+  await sleep(1000 * 60 * 15); // 15 min for workers to deliver
   console.log('[ceo] Done. Check each worker\'s successful job count on Virtuals.');
 }
 
-main().catch((err) => {
+main().catch(err => {
   console.error('[ceo] Fatal error:', err);
   process.exit(1);
 });
