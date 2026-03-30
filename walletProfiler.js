@@ -195,6 +195,11 @@ async function start() {
         await processJob(client, freshJob);
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job ${job.id} error:`, err.message);
+        // If we're past the REQUEST phase, use rejectPayable so the buyer is refunded
+        try {
+          await job.rejectPayable(`Internal error: ${err.message}. Your payment will be refunded.`);
+          console.log(`[${AGENT_NAME}] Job ${job.id} rejectPayable issued — buyer will be refunded.`);
+        } catch (_) {}
         handledJobs.delete(job.id);
       }
     },
