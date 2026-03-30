@@ -57,31 +57,31 @@ function makeFare(p) {
   return new FareAmount(Math.round(p * 1_000_000), baseAcpConfig.baseFare);
 }
 
-// ── Serialized queue ─────────────────────────────────────────────────────────
-let payQueue = Promise.resolve();
+// ── Serialized queue — one UserOp at a time ──────────────────────────────────
+let acceptQueue = Promise.resolve();
 
-function queuePay(job) {
-  payQueue = payQueue.then(async () => {
-    const MAX_RETRIES = 3;
+function queueAccept(job, memo) {
+  acceptQueue = acceptQueue.then(async () => {
+    const MAX_RETRIES = 4;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        console.log(`[ceo] payAndAcceptRequirement job ${job.id} attempt ${attempt}...`);
-        await job.payAndAcceptRequirement('Requirement accepted. Please deliver.');
+        console.log(`[ceo] acceptRequirement job ${job.id} memo ${memo.id} attempt ${attempt}...`);
+        await job.acceptRequirement(memo, 'Requirement accepted. Proceed with delivery.');
         console.log(`[ceo] ✓ Job ${job.id} → TRANSACTION phase.`);
         break;
       } catch (err) {
-        // Print the FULL raw stack so we can see the Details: line
+        // Print full stack so we see the Details: line
         console.error(`\n[ceo] === ERROR job ${job.id} attempt ${attempt} ===`);
         console.error(err.stack || err.message);
         console.error(`[ceo] === END ERROR ===\n`);
         if (attempt < MAX_RETRIES) {
-          await sleep(attempt * 10000);
+          await sleep(attempt * 8000);
         } else {
           console.error(`[ceo] ✗ Gave up job ${job.id}.`);
         }
       }
     }
-    await sleep(6000);
+    await sleep(5000); // let bundler clear between UserOps
   });
 }
 
@@ -101,8 +101,8 @@ async function main() {
     acpContractClient: contractClient,
     onNewTask: async (job, memo) => {
       if (memo) {
-        console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} memo=${memo?.id} nextPhase=${memo?.nextPhase}`);
-        queuePay(job);
+        console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} memo=${memo.id} nextPhase=${memo.nextPhase}`);
+        queueAccept(job, memo);
       } else {
         console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} — no memo.`);
       }
@@ -119,7 +119,7 @@ async function main() {
     },
   });
 
-  console.log('[ceo] Ready.\n');
+  console.log('[ceo] Ready. Using acceptRequirement (signMemo + createMemo → TRANSACTION).\n');
 
   for (const worker of WORKERS) {
     console.log(`\n── Hiring ${worker.name} (${JOBS_PER_WORKER} × $${worker.price} USDC) ──`);
@@ -140,9 +140,9 @@ async function main() {
     await sleep(5000);
   }
 
-  console.log('\n[ceo] All fired. Draining queue...');
-  await payQueue;
-  console.log('\n[ceo] Queue done. Waiting for deliveries...\n');
+  console.log('\n[ceo] All fired. Draining acceptRequirement queue...');
+  await acceptQueue;
+  console.log('\n[ceo] Queue done. Waiting 15 min for deliveries + evaluations...\n');
   await sleep(1000 * 60 * 15);
   console.log('[ceo] Done.');
 }
