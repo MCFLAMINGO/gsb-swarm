@@ -512,8 +512,22 @@ async function main() {
     onNewTask: async (job, memo) => {
       // ── PROVIDER side — incoming jobs to the CEO's offerings ──
       if (job.phase === 0) {
-        const offeringName = job.serviceName || job.serviceOffering || '';
+        let offeringName = job.serviceName || job.serviceOffering || '';
         const rawContent = extractContent(job.requirement) || extractContent(job.memos?.[0]?.content) || '';
+
+        // Keyword fallback when serviceName/serviceOffering are empty or unknown
+        if (!offeringName || !OFFERING_SCHEMAS[offeringName]) {
+          const lower = (rawContent || job.requirement || job.content || '').toLowerCase();
+          if (/heartbeat|status|swarm/.test(lower)) {
+            offeringName = 'swarm_heartbeat_report';
+          } else if (/escalat|risk|situation|urgent|decision/.test(lower)) {
+            offeringName = 'escalation_decision_support';
+          } else if (/strateg|task|assign|alpha|scan|trend|token|wallet|thread|write/.test(lower)) {
+            offeringName = 'strategy_task_assignment';
+          } else {
+            offeringName = 'swarm_heartbeat_report';
+          }
+        }
 
         if (OFFERING_SCHEMAS[offeringName]) {
           console.log(`[CEO-provider] Incoming job ${job.id} for offering: ${offeringName}`);
