@@ -105,50 +105,109 @@ async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
   throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
 }
 
+// ── Data sources (no API keys required) ──────────────────────────────────────
+const GECKO_BASE   = 'https://api.geckoterminal.com/api/v2/networks/base';
+const DEX_BOOST    = 'https://api.dexscreener.com/token-boosts/latest/v1';
+const GECKO_HEADERS = { 'Accept': 'application/json', 'User-Agent': 'GSB-Alpha-Scanner/1.0' };
+
+function fmt(n) {
+  const num = parseFloat(n || 0);
+  if (num >= 1e6) return `$${(num / 1e6).toFixed(2)}M`;
+  if (num >= 1e3) return `$${(num / 1e3).toFixed(1)}K`;
+  return `$${num.toFixed(2)}`;
+}
+
 async function scanAlpha() {
   try {
-    const boostRes = await axios.get(
-      'https://api.dexscreener.com/token-boosts/latest/v1',
-      { timeout: 8000 }
-    );
+    // Run all fetches in parallel
+    const [trendingRes, newPoolsRes, boostRes] = await Promise.allSettled([
+      // 1. GeckoTerminal — trending pools on Base (most reliable source)
+      axios.get(`${GECKO_BASE}/trending_pools?page=1`, { headers: GECKO_HEADERS, timeout: 10000 }),
+      // 2. GeckoTerminal — newest pools on Base (new launches)
+      axios.get(`${GECKO_BASE}/new_pools?page=1`, { headers: GECKO_HEADERS, timeout: 10000 }),
+      // 3. DexScreener boosted tokens
+      axios.get(DEX_BOOST, { timeout: 8000 }),
+    ]);
 
-    const boosted = (boostRes.data || [])
-      .filter(t => t.chainId === 'base')
+    // ── Top gainers from trending pools ───────────────────────────────────────
+    const trendingPools = trendingRes.status === 'fulfilled'
+      ? (trendingRes.value.data?.data || [])
+      : [];
+
+    const topGainers = trendingPools
+      .map(p => {
+        const a = p.attributes || {};
+        const change24h = parseFloat(a.price_change_percentage?.h24 || 0);
+        const vol24h    = parseFloat(a.volume_usd?.h24 || 0);
+        const liq       = parseFloat(a.reserve_in_usd || 0);
+        const price     = parseFloat(a.base_token_price_usd || 0);
+        return { p, a, change24h, vol24h, liq, price };
+      })
+      .filter(({ liq, vol24h }) => liq > 1000 && vol24h > 500)
+      .sort((a, b) => b.change24h - a.change24h)
       .slice(0, 5)
-      .map(t => ({
-        address: t.tokenAddress,
-        url: t.url,
-        boostAmount: t.amount,
-        totalAmount: t.totalAmount,
-      }));
+      .map(({ a, change24h, vol24h, liq, price }) => {
+        const name = a.name || '';
+        const [base] = name.split(' / ');
+        const changeStr = change24h >= 0 ? `+${change24h.toFixed(1)}%` : `${change24h.toFixed(1)}%`;
+        return {
+          name: base.trim(),
+          pair: name,
+          price_usd: price < 0.0001 ? price.toExponential(4) : price.toFixed(6),
+          change_24h: changeStr,
+          liquidity: fmt(liq),
+          volume_24h: fmt(vol24h),
+          geckoterminal: a.pool_created_at
+            ? `https://www.geckoterminal.com/base/pools/${a.address}`
+            : null,
+          fdv: fmt(a.fdv_usd || 0),
+        };
+      });
 
-    const pairsRes = await axios.get(
-      'https://api.dexscreener.com/latest/dex/search?q=base',
-      { timeout: 8000 }
-    );
+    // ── New launches ──────────────────────────────────────────────────────────
+    const newPools = newPoolsRes.status === 'fulfilled'
+      ? (newPoolsRes.value.data?.data || [])
+      : [];
 
-    const topGainers = (pairsRes.data?.pairs || [])
-      .filter(p => p.chainId === 'base' && p.priceChange?.h24 > 20 && p.liquidity?.usd > 10000)
-      .sort((a, b) => (b.priceChange?.h24 || 0) - (a.priceChange?.h24 || 0))
+    const newLaunches = newPools
+      .filter(p => parseFloat(p.attributes?.reserve_in_usd || 0) > 500)
       .slice(0, 5)
-      .map(p => ({
-        name: p.baseToken?.name,
-        symbol: p.baseToken?.symbol,
-        address: p.baseToken?.address,
-        price_usd: p.priceUsd,
-        change_24h: `+${p.priceChange?.h24}%`,
-        liquidity: `$${(p.liquidity?.usd || 0).toLocaleString()}`,
-        volume_24h: `$${(p.volume?.h24 || 0).toLocaleString()}`,
-        dexscreener: `https://dexscreener.com/base/${p.pairAddress}`,
-      }));
+      .map(p => {
+        const a = p.attributes || {};
+        const name = a.name || '';
+        const [base] = name.split(' / ');
+        const ageMin = Math.floor((Date.now() - new Date(a.pool_created_at || Date.now()).getTime()) / 60000);
+        return {
+          name: base.trim(),
+          pair: name,
+          age: ageMin < 60 ? `${ageMin}m ago` : `${Math.floor(ageMin / 60)}h ago`,
+          liquidity: fmt(a.reserve_in_usd || 0),
+          volume_24h: fmt((a.volume_usd || {}).h24 || 0),
+          change_24h: `${parseFloat((a.price_change_percentage || {}).h24 || 0).toFixed(1)}%`,
+        };
+      });
+
+    // ── DexScreener boosted tokens on Base ───────────────────────────────────
+    const boosted = boostRes.status === 'fulfilled'
+      ? (boostRes.value.data || [])
+          .filter(t => t.chainId === 'base')
+          .slice(0, 3)
+          .map(t => ({ address: t.tokenAddress, url: t.url, boost: t.totalAmount }))
+      : [];
+
+    // ── Signal ────────────────────────────────────────────────────────────────
+    let gsb_signal = 'Market is quiet on Base right now. No high-conviction plays detected.';
+    if (topGainers.length > 0) {
+      const top = topGainers[0];
+      gsb_signal = `${top.name} leading Base with ${top.change_24h} | Vol: ${top.volume_24h} | Liq: ${top.liquidity} — watch for continuation.`;
+    }
 
     return {
       scan_time: new Date().toISOString(),
       top_gainers_base: topGainers,
+      new_launches_base: newLaunches,
       boosted_tokens_base: boosted,
-      gsb_signal: topGainers.length > 0
-        ? `${topGainers[0].symbol} leading with ${topGainers[0].change_24h} — watch for continuation.`
-        : 'No strong alpha signals detected right now. Market is quiet.',
+      gsb_signal,
       powered_by: 'GSB Intelligence Swarm',
     };
   } catch (err) {
