@@ -684,6 +684,29 @@ function httpGet(url) {
   });
 }
 
+// ── Token symbol → contract address resolver (DexScreener) ──────────────────
+async function resolveTokenAddress(ticker) {
+  try {
+    const data = await httpGet(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(ticker)}`);
+    const pairs = data.pairs || [];
+    // Prefer Base chain matches
+    const basePair = pairs.find(p =>
+      p.chainId === 'base' &&
+      p.baseToken?.symbol?.toUpperCase() === ticker.toUpperCase()
+    ) || pairs.find(p =>
+      p.baseToken?.symbol?.toUpperCase() === ticker.toUpperCase()
+    ) || pairs[0];
+
+    if (basePair?.baseToken?.address) {
+      console.log(`[cmd] Resolved $${ticker} → ${basePair.baseToken.address} (${basePair.chainId})`);
+      return { address: basePair.baseToken.address, chain: basePair.chainId, name: basePair.baseToken.name };
+    }
+  } catch (e) {
+    console.warn(`[cmd] Symbol lookup failed for $${ticker}:`, e.message);
+  }
+  return null;
+}
+
 // Coin symbol → CoinGecko ID map for common coins
 const COINGECKO_IDS = {
   btc: 'bitcoin', bitcoin: 'bitcoin',
@@ -978,7 +1001,15 @@ app.post('/api/command', async (req, res) => {
     if (customAddr) {
       requirement = `Analyze token ${customAddr} on Base`;
     } else if (ticker && ticker !== 'GSB') {
-      requirement = `Analyze ${ticker} — check DexScreener and provide price, 24h change, liquidity, and market sentiment`;
+      // Resolve ticker symbol to contract address via DexScreener
+      broadcast('cmd-status', { type: 'info', message: `Looking up $${ticker} on DexScreener…` });
+      const resolved = await resolveTokenAddress(ticker);
+      if (resolved) {
+        requirement = `Analyze token ${resolved.address} on ${resolved.chain}`;
+        broadcast('cmd-status', { type: 'info', message: `Found $${ticker} → ${resolved.address} on ${resolved.chain}` });
+      } else {
+        requirement = `Analyze ${ticker} — check DexScreener and provide price, 24h change, liquidity, and market sentiment`;
+      }
     } else {
       requirement = WORKER_CATALOG['GSB Token Analyst'].defaultReq;
     }

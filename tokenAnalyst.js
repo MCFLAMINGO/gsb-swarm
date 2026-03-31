@@ -67,14 +67,6 @@ const REQUIREMENTS_SCHEMA = {
 
 // ── Input validation ──────────────────────────────────────────────────────────
 function validateInput(raw) {
-  // Must contain a 0x address
-  const match = raw.match(/0x[a-fA-F0-9]{40}/);
-  if (!match) {
-    return { valid: false, reason: 'No valid contract address found. Please provide a Base token contract address in 0x format.' };
-  }
-
-  const addr = match[0].toLowerCase();
-
   // Block non-Base / obviously wrong requests
   if (/solana|bitcoin|bsc|polygon|avalanche|arbitrum|optimism/i.test(raw)) {
     return { valid: false, reason: 'This agent only analyzes tokens on the Base network. Please provide a Base token contract address.' };
@@ -85,7 +77,14 @@ function validateInput(raw) {
     return { valid: false, reason: 'This request cannot be processed. Please submit a legitimate token analysis request.' };
   }
 
-  return { valid: true, address: match[0] };
+  // Try to extract a 0x address from JSON or plain text
+  const match = raw.match(/0x[a-fA-F0-9]{40}/);
+  if (match) {
+    return { valid: true, address: match[0] };
+  }
+
+  // No address found — not necessarily invalid; caller may have a ticker symbol
+  return { valid: false, reason: 'No valid contract address found. Please provide a Base token contract address in 0x format.' };
 }
 
 const handledJobs = new Set();
@@ -199,14 +198,32 @@ async function start() {
           }
         }
 
+        // ── Extract address from JSON params or plain text ──────────────────
+        let contractAddress;
+        if (parsed.skillId && parsed.params?.address) {
+          contractAddress = parsed.params.address;
+        } else if (parsed.params?.contractAddress) {
+          contractAddress = parsed.params.contractAddress;
+        } else {
+          const addrMatch = rawContent.match(/0x[0-9a-fA-F]{40}/i);
+          contractAddress = addrMatch ? addrMatch[0] : null;
+        }
+
         // ── Validate BEFORE accepting ────────────────────────────────────────
         const check = validateInput(rawContent);
+        // Use extracted address if validateInput didn't find one (e.g. from JSON params)
+        if (!check.valid && contractAddress) {
+          check.valid = true;
+          check.address = contractAddress;
+        }
         if (!check.valid) {
           console.log(`[${AGENT_NAME}] Job ${job.id} REJECTED: ${check.reason}`);
           await job.reject(check.reason);
           handledJobs.delete(job.id);
           return;
         }
+        // Prefer the directly extracted address
+        if (contractAddress) check.address = contractAddress;
 
         let freshJob = job;
         if (job.phase === 2) {
