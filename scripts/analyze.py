@@ -161,6 +161,61 @@ DEBT_VENDOR_KEYWORDS = [
 ]
 
 # ---------------------------------------------------------------------------
+# PERSONAL MODE — SPENDING CATEGORY KEYWORDS
+# ---------------------------------------------------------------------------
+PERSONAL_CATEGORY_KEYWORDS = {
+    "groceries": [
+        "walmart", "kroger", "publix", "whole foods", "trader joe", "aldi",
+        "food lion", "safeway", "target grocery", "costco", "sam's club",
+        "heb", "wegmans", "sprouts", "market", "grocery",
+    ],
+    "dining": [
+        "mcdonald", "starbucks", "chick-fil", "subway", "doordash", "ubereats",
+        "grubhub", "restaurant", "cafe", "pizza", "sushi", "taco", "burger",
+        "wendy", "chipotle", "panera", "dunkin", "popeye", "domino",
+        "denny", "ihop", "waffle house", "panda express",
+    ],
+    "subscriptions": [
+        "netflix", "spotify", "hulu", "disney", "amazon prime", "apple",
+        "google", "gym", "membership", "planet fitness", "youtube premium",
+        "dropbox", "adobe", "microsoft 365", "openai", "chatgpt", "icloud",
+    ],
+    "utilities": [
+        "electric", "gas", "water", "internet", "phone", "att", "verizon",
+        "tmobile", "t-mobile", "comcast", "duke energy", "spectrum", "xfinity",
+        "power", "sewage", "waste management", "cox", "centurylink",
+    ],
+    "entertainment": [
+        "ticketmaster", "movies", "theater", "concert", "amazon", "steam",
+        "playstation", "xbox", "nintendo", "amc", "regal", "cinemark",
+        "stubhub", "fandango",
+    ],
+    "transfers": [
+        "zelle", "venmo", "cashapp", "cash app", "paypal", "transfer",
+        "withdrawal", "atm",
+    ],
+}
+
+PERSONAL_INCOME_KEYWORDS = [
+    "direct deposit", "payroll", "ach credit", "employer", "salary",
+    "pension", "social security", "ssi", "tax refund", "irs",
+]
+
+
+def classify_personal_transaction(desc: str) -> str:
+    """Classify a personal bank transaction into a spending category."""
+    lower = desc.lower()
+    # Check income first
+    for kw in PERSONAL_INCOME_KEYWORDS:
+        if kw in lower:
+            return "income"
+    for category, keywords in PERSONAL_CATEGORY_KEYWORDS.items():
+        for kw in keywords:
+            if kw in lower:
+                return category
+    return "other"
+
+# ---------------------------------------------------------------------------
 # FONT SETUP
 # ---------------------------------------------------------------------------
 FONTS_DIR = Path("/tmp/fonts")
@@ -568,6 +623,700 @@ def generate_key_findings(metrics: Dict) -> List[str]:
         findings.append("No critical findings. Financial metrics are within acceptable ranges.")
 
     return findings
+
+
+# ---------------------------------------------------------------------------
+# PERSONAL MODE — METRICS & PDF GENERATION
+# ---------------------------------------------------------------------------
+
+def calculate_personal_metrics(bank_df: Optional[pd.DataFrame]) -> Dict:
+    """Calculate personal finance metrics from bank statement."""
+    metrics = {
+        "total_income": 0.0,
+        "total_expenses": 0.0,
+        "net_monthly_position": 0.0,
+        "monthly_breakdown": [],
+        "category_totals": {},
+        "top_expenses": [],
+        "subscriptions": [],
+        "burn_rate": 0.0,
+        "num_months": 0,
+        "opening_balance": None,
+        "closing_balance": None,
+        "min_balance": None,
+        "min_balance_date": None,
+        "near_zero_events": [],
+        "total_cash_in": 0.0,
+        "total_cash_out": 0.0,
+        "net_cash_flow": 0.0,
+    }
+
+    if bank_df is None or len(bank_df) == 0:
+        return metrics
+
+    # Classify every transaction
+    bank_df["personal_category"] = bank_df["description"].apply(
+        lambda d: classify_personal_transaction(d) if d else "other"
+    )
+
+    # Income vs expenses
+    income_mask = (bank_df["amount"] > 0) | (bank_df["personal_category"] == "income")
+    expense_mask = (bank_df["amount"] < 0) & (bank_df["personal_category"] != "income")
+
+    total_income = bank_df[income_mask]["amount"].abs().sum()
+    total_expenses = bank_df[expense_mask]["amount"].abs().sum()
+
+    metrics["total_income"] = total_income
+    metrics["total_expenses"] = total_expenses
+    metrics["total_cash_in"] = total_income
+    metrics["total_cash_out"] = total_expenses
+    metrics["net_cash_flow"] = total_income - total_expenses
+    metrics["net_monthly_position"] = total_income - total_expenses
+
+    # Balances
+    if bank_df["balance"].notna().any():
+        bal_rows = bank_df[bank_df["balance"].notna()]
+        metrics["opening_balance"] = bal_rows["balance"].iloc[0]
+        metrics["closing_balance"] = bal_rows["balance"].iloc[-1]
+        min_idx = bank_df["balance"].idxmin()
+        metrics["min_balance"] = bank_df.loc[min_idx, "balance"]
+        metrics["min_balance_date"] = bank_df.loc[min_idx, "date"].date()
+
+        near_zero = bank_df[bank_df["balance"] < 500][["date", "balance"]].copy()
+        near_zero["date"] = near_zero["date"].dt.date
+        metrics["near_zero_events"] = list(near_zero.itertuples(index=False, name=None))
+
+    # Monthly breakdown
+    bank_df["month"] = bank_df["date"].dt.to_period("M")
+    monthly_records = []
+    for period_key, group in bank_df.groupby("month"):
+        monthly_records.append({
+            "month": str(period_key),
+            "cash_in": group[group["amount"] > 0]["amount"].sum(),
+            "cash_out": abs(group[group["amount"] < 0]["amount"].sum()),
+            "net": group["amount"].sum(),
+        })
+    metrics["monthly_breakdown"] = monthly_records
+    metrics["num_months"] = max(len(monthly_records), 1)
+
+    # Category totals (expenses only)
+    cat_totals: Dict[str, float] = defaultdict(float)
+    for _, row in bank_df[expense_mask].iterrows():
+        cat = row["personal_category"]
+        cat_totals[cat] += abs(row["amount"])
+    metrics["category_totals"] = dict(sorted(cat_totals.items(), key=lambda x: x[1], reverse=True))
+
+    # Top individual expenses
+    top_exp = (
+        bank_df[expense_mask]
+        .assign(abs_amount=bank_df[expense_mask]["amount"].abs())
+        .nlargest(10, "abs_amount")[["description", "abs_amount", "date"]]
+    )
+    metrics["top_expenses"] = [
+        (row["description"], row["abs_amount"], row["date"].date())
+        for _, row in top_exp.iterrows()
+    ]
+
+    # Recurring subscriptions (appear 2+ times)
+    sub_mask = expense_mask & (bank_df["personal_category"] == "subscriptions")
+    if sub_mask.any():
+        sub_counts = bank_df[sub_mask].groupby("description").agg(
+            count=("amount", "count"),
+            total=("amount", lambda x: abs(x).sum()),
+            avg=("amount", lambda x: abs(x).mean()),
+        ).reset_index()
+        sub_counts = sub_counts[sub_counts["count"] >= 2].sort_values("total", ascending=False)
+        metrics["subscriptions"] = [
+            (row["description"], row["total"], row["avg"], row["count"])
+            for _, row in sub_counts.iterrows()
+        ]
+
+    # Burn rate (monthly deficit if expenses > income)
+    if total_expenses > total_income and metrics["num_months"] > 0:
+        metrics["burn_rate"] = (total_expenses - total_income) / metrics["num_months"]
+
+    return metrics
+
+
+def generate_personal_key_findings(metrics: Dict) -> List[str]:
+    """Generate key findings for personal mode."""
+    findings = []
+    income = metrics.get("total_income", 0)
+    expenses = metrics.get("total_expenses", 0)
+    net = income - expenses
+    burn = metrics.get("burn_rate", 0)
+    cats = metrics.get("category_totals", {})
+    nze = metrics.get("near_zero_events", [])
+    cb = metrics.get("closing_balance")
+    num_months = max(metrics.get("num_months", 1), 1)
+
+    if net < 0:
+        findings.append(
+            f"NEGATIVE NET POSITION: You spent ${abs(net):,.2f} more than you earned during this period. "
+            f"Your monthly deficit averages ${burn:,.2f}."
+        )
+    else:
+        findings.append(f"Positive net position: you earned ${net:,.2f} more than you spent.")
+
+    # Top 3 categories
+    top_cats = list(cats.items())[:3]
+    if top_cats:
+        cat_lines = ", ".join(f"{c} (${v:,.0f})" for c, v in top_cats)
+        findings.append(f"Top spending categories: {cat_lines}.")
+
+    if burn > 0 and cb and cb > 0:
+        runway = cb / (burn if burn > 0 else 1)
+        findings.append(
+            f"At current burn rate of ${burn:,.0f}/month, your balance of ${cb:,.0f} "
+            f"gives you approximately {runway:.1f} months of runway."
+        )
+
+    subs = metrics.get("subscriptions", [])
+    if subs:
+        monthly_sub_total = sum(avg for _, _, avg, _ in subs)
+        findings.append(
+            f"Recurring subscriptions total ~${monthly_sub_total:,.0f}/month across {len(subs)} services."
+        )
+
+    if nze:
+        findings.append(
+            f"CASH STRESS: Your balance fell below $500 on {len(nze)} occasion(s). "
+            "This indicates significant cash flow pressure."
+        )
+
+    if cb is not None and cb < 1000:
+        findings.append(
+            f"LOW ENDING BALANCE: ${cb:,.2f} provides minimal cushion for emergencies."
+        )
+
+    if not findings:
+        findings.append("No critical findings. Finances appear stable within the analyzed period.")
+
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# PERSONAL MODE — PDF 1: PERSONAL FINANCIAL OVERVIEW
+# ---------------------------------------------------------------------------
+
+def generate_personal_overview(
+    metrics: Dict,
+    project_name: str,
+    address: str,
+    period: str,
+    output_path: str,
+    font_name: str,
+) -> str:
+    """Generate Personal Financial Overview PDF."""
+    styles = make_styles(font_name)
+    doc = BaseDocTemplate(
+        output_path,
+        pagesize=LETTER,
+        leftMargin=0.6*inch, rightMargin=0.6*inch,
+        topMargin=0.6*inch, bottomMargin=0.8*inch,
+        title=f"Personal Financial Overview — {project_name}",
+        author="MCFL Restaurant Holdings LLC",
+    )
+    frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="main")
+    footer_fn = lambda canvas, doc: disclaimer_footer(canvas, doc, font_name)
+    template = PageTemplate(id="main", frames=[frame], onPage=footer_fn)
+    doc.addPageTemplates([template])
+
+    story = []
+
+    # --- Cover ---
+    story.append(Spacer(1, 0.5 * inch))
+    story.append(Paragraph("PERSONAL FINANCIAL OVERVIEW", styles["h1"]))
+    story.append(Paragraph(project_name, styles["h2"]))
+    story.append(Paragraph(f"Analysis Period: {period}", styles["body"]))
+    story.append(Paragraph(f"Generated: {datetime.now().strftime('%B %d, %Y')}", styles["small"]))
+    story.append(Spacer(1, 0.2 * inch))
+    story.append(HRFlowable(width="100%", thickness=2, color=PRIMARY, spaceAfter=10))
+
+    # Disclaimer
+    disc_table = Table([[Paragraph(DISCLAIMER_FULL, styles["disclaimer"])]], colWidths=[doc.width])
+    disc_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), SURFACE),
+        ("BOX", (0, 0), (-1, -1), 1, BORDER),
+        ("TOPPADDING", (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    story.append(disc_table)
+    story.append(PageBreak())
+
+    # --- Executive Summary KPIs ---
+    income = metrics.get("total_income", 0)
+    expenses = metrics.get("total_expenses", 0)
+    net = income - expenses
+    cb = metrics.get("closing_balance") or 0
+    burn = metrics.get("burn_rate", 0)
+    num_months = max(metrics.get("num_months", 1), 1)
+
+    story.append(Paragraph("INCOME VS. EXPENSES", styles["h2"]))
+    kpi_data = [
+        ("TOTAL INCOME", f"${income:,.0f}", f"{period}"),
+        ("TOTAL EXPENSES", f"${expenses:,.0f}", f"{period}"),
+        ("NET POSITION", f"${net:,.0f}", "Surplus" if net >= 0 else "Deficit"),
+        ("ENDING BALANCE", f"${cb:,.0f}", "As of last transaction"),
+    ]
+    story.append(build_kpi_table(kpi_data, styles, col_width=(doc.width / 4) - 4))
+    story.append(Spacer(1, 0.15 * inch))
+
+    kpi2 = [
+        ("MONTHLY INCOME", f"${income/num_months:,.0f}", "Average"),
+        ("MONTHLY EXPENSES", f"${expenses/num_months:,.0f}", "Average"),
+        ("BURN RATE", f"${burn:,.0f}/mo" if burn > 0 else "N/A", "Monthly deficit" if burn > 0 else "No deficit"),
+        ("NEAR-ZERO EVENTS", str(len(metrics.get("near_zero_events", []))), "Balance < $500"),
+    ]
+    story.append(build_kpi_table(kpi2, styles, col_width=(doc.width / 4) - 4))
+    story.append(Spacer(1, 0.3 * inch))
+
+    # --- Spending by Category ---
+    cats = metrics.get("category_totals", {})
+    if cats:
+        story.append(Paragraph("SPENDING BREAKDOWN BY CATEGORY", styles["h2"]))
+        cat_rows = [["Category", "Total Spent", "Monthly Avg", "% of Expenses"]]
+        for cat, total in cats.items():
+            pct = (total / expenses * 100) if expenses > 0 else 0
+            monthly_avg = total / num_months
+            cat_rows.append([
+                cat.capitalize(),
+                f"${total:,.0f}",
+                f"${monthly_avg:,.0f}",
+                f"{pct:.1f}%",
+            ])
+        cat_t = Table(cat_rows, colWidths=[2*inch, 1.5*inch, 1.5*inch, 1.2*inch], hAlign="LEFT", repeatRows=1)
+        cat_t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
+            ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("GRID", (0, 0), (-1, -1), 0.3, BORDER),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, SURFACE]),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        ]))
+        story.append(cat_t)
+        story.append(Spacer(1, 0.3 * inch))
+
+    # --- Top 3 Cash Drains ---
+    top_cats = list(cats.items())[:3]
+    if top_cats:
+        story.append(Paragraph("TOP 3 CASH DRAINS", styles["h2"]))
+        for i, (cat, total) in enumerate(top_cats, 1):
+            pct = (total / expenses * 100) if expenses > 0 else 0
+            monthly_avg = total / num_months
+            story.append(Paragraph(
+                f"<b>{i}. {cat.capitalize()}</b> — ${total:,.0f} total (${monthly_avg:,.0f}/mo, {pct:.1f}% of spending)",
+                styles["body"],
+            ))
+        story.append(Spacer(1, 0.3 * inch))
+
+    # --- Subscriptions ---
+    subs = metrics.get("subscriptions", [])
+    if subs:
+        story.append(Paragraph("RECURRING SUBSCRIPTIONS DETECTED", styles["h2"]))
+        sub_rows = [["Service", "Total Charged", "Avg/Month", "Occurrences"]]
+        for desc, total, avg, count in subs[:15]:
+            sub_rows.append([desc[:40], f"${total:,.2f}", f"${avg:,.2f}", str(int(count))])
+        sub_t = Table(sub_rows, colWidths=[2.5*inch, 1.3*inch, 1.2*inch, 1.2*inch], hAlign="LEFT", repeatRows=1)
+        sub_t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
+            ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("GRID", (0, 0), (-1, -1), 0.3, BORDER),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, SURFACE]),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        ]))
+        story.append(sub_t)
+        story.append(Spacer(1, 0.3 * inch))
+
+    # --- Monthly Trend ---
+    monthly = metrics.get("monthly_breakdown", [])
+    if monthly:
+        story.append(Paragraph("MONTH-OVER-MONTH TREND", styles["h2"]))
+        story.append(build_monthly_table(monthly, styles, income))
+        story.append(Spacer(1, 0.3 * inch))
+
+    # --- Near-Zero Events ---
+    nze = metrics.get("near_zero_events", [])
+    if nze:
+        story.append(Paragraph("NEAR-ZERO BALANCE EVENTS", styles["h2"]))
+        story.append(Paragraph(
+            "Dates when your balance fell below $500 — these represent financial stress points.",
+            styles["small"],
+        ))
+        nze_rows = [["Date", "Balance"]]
+        for d, bal in nze[:20]:
+            nze_rows.append([str(d), f"${bal:,.2f}"])
+        nze_t = Table(nze_rows, colWidths=[2*inch, 2*inch], hAlign="LEFT", repeatRows=1)
+        nze_t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), ERROR),
+            ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("GRID", (0, 0), (-1, -1), 0.3, BORDER),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, SURFACE]),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(nze_t)
+        story.append(Spacer(1, 0.3 * inch))
+
+    # --- Key Findings ---
+    story.append(Paragraph("KEY FINDINGS & ACTION ITEMS", styles["h2"]))
+    for finding in generate_personal_key_findings(metrics):
+        bullet_text = f"• {finding}"
+        style = styles["bullet"]
+        if any(word in finding for word in ["NEGATIVE", "HIGH", "CRITICAL", "STRESS", "LOW"]):
+            style = ParagraphStyle("BulletRed", parent=styles["bullet"], textColor=ERROR)
+        story.append(Paragraph(bullet_text, style))
+        story.append(Spacer(1, 0.05 * inch))
+
+    # --- 90-Day Outlook ---
+    story.append(Spacer(1, 0.2 * inch))
+    story.append(Paragraph("90-DAY OUTLOOK & ACTION ITEMS", styles["h2"]))
+    actions = []
+    if burn > 0:
+        actions.append("Reduce spending to close the monthly deficit. Target the top spending category first.")
+    if subs:
+        monthly_sub = sum(avg for _, _, avg, _ in subs)
+        actions.append(f"Audit ${monthly_sub:,.0f}/month in subscriptions — cancel unused services.")
+    top_cat = list(cats.keys())[0] if cats else None
+    if top_cat and top_cat in ("dining", "entertainment"):
+        actions.append(f"Your largest category is {top_cat} — set a monthly budget and track against it.")
+    actions.append("Build an emergency fund: target 1 month of expenses as a first milestone.")
+    if net < 0:
+        actions.append("Consider additional income sources or side work to close the deficit.")
+    actions.append("Re-run this analysis in 90 days to measure progress.")
+
+    for a in actions:
+        story.append(Paragraph(f"• {a}", styles["bullet"]))
+        story.append(Spacer(1, 0.05 * inch))
+
+    doc.build(story)
+    print(f"  Generated: {output_path}")
+    return output_path
+
+
+# ---------------------------------------------------------------------------
+# PERSONAL MODE — PDF 2: CREDITOR LETTER
+# ---------------------------------------------------------------------------
+
+def generate_creditor_letter(
+    metrics: Dict,
+    project_name: str,
+    address: str,
+    period: str,
+    output_path: str,
+    font_name: str,
+) -> str:
+    """Generate personal Creditor Letter PDF."""
+    styles = make_styles(font_name)
+    doc = BaseDocTemplate(
+        output_path,
+        pagesize=LETTER,
+        leftMargin=0.75*inch, rightMargin=0.75*inch,
+        topMargin=0.65*inch, bottomMargin=0.85*inch,
+        title=f"Creditor Letter — {project_name}",
+        author="MCFL Restaurant Holdings LLC",
+    )
+    frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="main")
+    footer_fn = lambda canvas, doc: disclaimer_footer(canvas, doc, font_name)
+    template = PageTemplate(id="main", frames=[frame], onPage=footer_fn)
+    doc.addPageTemplates([template])
+
+    income = metrics.get("total_income", 0)
+    expenses = metrics.get("total_expenses", 0)
+    net = income - expenses
+    burn = metrics.get("burn_rate", 0)
+    num_months = max(metrics.get("num_months", 1), 1)
+    monthly_income = income / num_months
+    monthly_expenses = expenses / num_months
+
+    story = []
+    story += letterhead_block(project_name, address, period, "REQUEST FOR PAYMENT FLEXIBILITY", styles)
+
+    story.append(Paragraph("Dear Creditor,", styles["body"]))
+    story.append(Spacer(1, 0.1 * inch))
+
+    if net >= 0:
+        opening = (
+            f"I am writing proactively to discuss my payment terms. During {period}, "
+            f"my total income was ${income:,.2f} and total expenses were ${expenses:,.2f}, "
+            f"resulting in a net positive position of ${net:,.2f}. While I am currently meeting "
+            f"obligations, I would like to arrange modified terms to ensure continued reliability "
+            f"as I navigate upcoming financial commitments."
+        )
+    elif burn > 0 and burn < monthly_income * 0.15:
+        opening = (
+            f"I am writing to address my current financial position honestly and to propose "
+            f"a realistic payment arrangement. During {period}, my income totaled ${income:,.2f} "
+            f"while expenses reached ${expenses:,.2f}, creating a monthly shortfall of "
+            f"approximately ${burn:,.2f}. I am committed to resolving this balance and "
+            f"maintaining my obligations."
+        )
+    else:
+        opening = (
+            f"I owe you a direct conversation about my financial situation. During {period}, "
+            f"I have experienced significant cash flow pressure — my expenses of ${expenses:,.2f} "
+            f"have exceeded my income of ${income:,.2f} by ${abs(net):,.2f}. I want to present "
+            f"an honest picture of my finances alongside a concrete plan to meet my obligations."
+        )
+
+    story.append(Paragraph(opening, styles["body"]))
+    story.append(Spacer(1, 0.15 * inch))
+
+    # Financial snapshot
+    story.append(Paragraph("CURRENT FINANCIAL POSITION", styles["h3"]))
+    snap_rows = [
+        ["METRIC", "AMOUNT"],
+        ["Monthly Income (avg)", f"${monthly_income:,.0f}"],
+        ["Monthly Expenses (avg)", f"${monthly_expenses:,.0f}"],
+        ["Monthly Net", f"${(monthly_income - monthly_expenses):,.0f}"],
+        ["Current Balance", f"${metrics.get('closing_balance', 0) or 0:,.0f}"],
+    ]
+    snap_t = Table(snap_rows, colWidths=[2.5*inch, 2.0*inch], hAlign="LEFT")
+    snap_t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 0.3, BORDER),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [SURFACE, WHITE]),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(snap_t)
+    story.append(Spacer(1, 0.2 * inch))
+
+    # Monthly cash flow
+    if metrics.get("monthly_breakdown"):
+        story.append(Paragraph("MONTHLY CASH FLOW DETAIL", styles["h3"]))
+        story.append(build_monthly_table(metrics["monthly_breakdown"], styles, income))
+        story.append(Spacer(1, 0.2 * inch))
+
+    # Proposed timeline
+    story.append(Paragraph("PROPOSED PAYMENT TIMELINE", styles["h3"]))
+    story.append(Paragraph(
+        "I respectfully propose the following arrangement for any outstanding balance:",
+        styles["body"],
+    ))
+    story.append(Spacer(1, 0.1 * inch))
+    proposals = [
+        "Temporary reduced payments: [proposed amount] per month for [X months] while I stabilize cash flow.",
+        "Interest-only period: If applicable, interest-only payments for [X months] before resuming full payments.",
+        "Extended terms: Redistribute the remaining balance over a longer period to reduce the monthly burden.",
+        "Good faith commitment: I will make consistent payments on the agreed schedule and notify you immediately of any changes.",
+    ]
+    for p in proposals:
+        story.append(Paragraph(f"• {p}", styles["bullet"]))
+    story.append(Spacer(1, 0.2 * inch))
+
+    # Steps being taken
+    story.append(Paragraph("STEPS I AM TAKING", styles["h3"]))
+    steps = [
+        "Conducted a full financial analysis to identify spending leaks and areas for reduction.",
+        "Reviewing and canceling non-essential subscriptions and discretionary spending.",
+        "Building a realistic monthly budget based on actual income and fixed obligations.",
+        "Exploring additional income opportunities to close the monthly deficit.",
+    ]
+    for s in steps:
+        story.append(Paragraph(f"• {s}", styles["bullet"]))
+    story.append(Spacer(1, 0.2 * inch))
+
+    story.append(Paragraph(
+        "I value our relationship and am committed to resolving this responsibly. "
+        "Please contact me at your earliest convenience to discuss these terms.",
+        styles["body"],
+    ))
+
+    story += signature_block(project_name, address, styles)
+    doc.build(story)
+    print(f"  Generated: {output_path}")
+    return output_path
+
+
+# ---------------------------------------------------------------------------
+# PERSONAL MODE — PDF 3: LENDER LETTER
+# ---------------------------------------------------------------------------
+
+def generate_lender_letter(
+    metrics: Dict,
+    project_name: str,
+    address: str,
+    period: str,
+    output_path: str,
+    font_name: str,
+) -> str:
+    """Generate personal Lender Letter PDF (loan/refinance request)."""
+    styles = make_styles(font_name)
+    doc = BaseDocTemplate(
+        output_path,
+        pagesize=LETTER,
+        leftMargin=0.75*inch, rightMargin=0.75*inch,
+        topMargin=0.65*inch, bottomMargin=0.85*inch,
+        title=f"Lender Letter — {project_name}",
+        author="MCFL Restaurant Holdings LLC",
+    )
+    frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="main")
+    footer_fn = lambda canvas, doc: disclaimer_footer(canvas, doc, font_name)
+    template = PageTemplate(id="main", frames=[frame], onPage=footer_fn)
+    doc.addPageTemplates([template])
+
+    income = metrics.get("total_income", 0)
+    expenses = metrics.get("total_expenses", 0)
+    net = income - expenses
+    burn = metrics.get("burn_rate", 0)
+    num_months = max(metrics.get("num_months", 1), 1)
+    monthly_income = income / num_months
+    monthly_expenses = expenses / num_months
+    cb = metrics.get("closing_balance") or 0
+
+    story = []
+    story += letterhead_block(
+        project_name, address, period,
+        "PERSONAL LOAN / DEBT CONSOLIDATION REQUEST",
+        styles,
+    )
+
+    # Opening
+    story.append(Paragraph("EXECUTIVE SUMMARY", styles["h2"]))
+    if net > 0:
+        opening = (
+            f"I am writing to formally request a personal loan for debt consolidation. "
+            f"During {period}, my total income was ${income:,.2f} with expenses of "
+            f"${expenses:,.2f}, resulting in positive net cash flow of ${net:,.2f}. "
+            f"This loan would allow me to consolidate higher-rate obligations into a single, "
+            f"manageable monthly payment, further strengthening my financial position."
+        )
+    else:
+        opening = (
+            f"I am writing to request a personal loan to consolidate existing debt obligations. "
+            f"During {period}, my income totaled ${income:,.2f}. While my expenses of "
+            f"${expenses:,.2f} currently exceed income, the primary driver is fragmented debt "
+            f"payments at high interest rates. Consolidation into a single lower-rate instrument "
+            f"would reduce my monthly obligation and create a sustainable payment structure."
+        )
+    story.append(Paragraph(opening, styles["body"]))
+    story.append(Spacer(1, 0.2 * inch))
+
+    # Financial overview
+    story.append(Paragraph("FINANCIAL OVERVIEW", styles["h2"]))
+    kpi_data = [
+        ("MONTHLY INCOME", f"${monthly_income:,.0f}", "Average"),
+        ("MONTHLY EXPENSES", f"${monthly_expenses:,.0f}", "Average"),
+        ("NET MONTHLY", f"${(monthly_income - monthly_expenses):,.0f}", "Surplus" if net >= 0 else "Deficit"),
+        ("CURRENT BALANCE", f"${cb:,.0f}", "As of last transaction"),
+    ]
+    story.append(build_kpi_table(kpi_data, styles, col_width=(doc.width / 4) - 4))
+    story.append(Spacer(1, 0.2 * inch))
+
+    # Expense breakdown
+    cats = metrics.get("category_totals", {})
+    if cats:
+        story.append(Paragraph("EXPENSE BREAKDOWN", styles["h2"]))
+        cat_rows = [["Category", "Monthly Avg", "% of Expenses"]]
+        for cat, total in list(cats.items())[:8]:
+            pct = (total / expenses * 100) if expenses > 0 else 0
+            monthly_avg = total / num_months
+            cat_rows.append([cat.capitalize(), f"${monthly_avg:,.0f}", f"{pct:.1f}%"])
+        cat_t = Table(cat_rows, colWidths=[2.5*inch, 1.5*inch, 1.2*inch], hAlign="LEFT", repeatRows=1)
+        cat_t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
+            ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("GRID", (0, 0), (-1, -1), 0.3, BORDER),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, SURFACE]),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        ]))
+        story.append(cat_t)
+        story.append(Spacer(1, 0.2 * inch))
+
+    # Cash flow detail
+    if metrics.get("monthly_breakdown"):
+        story.append(Paragraph("MONTHLY CASH FLOW", styles["h2"]))
+        story.append(build_monthly_table(metrics["monthly_breakdown"], styles, income))
+        story.append(Spacer(1, 0.2 * inch))
+
+    # Loan request
+    story.append(Paragraph("LOAN REQUEST DETAILS", styles["h2"]))
+    loan_rows = [
+        ["DETAIL", "REQUEST"],
+        ["Loan Type", "Personal loan / debt consolidation"],
+        ["Purpose", "Consolidate existing obligations into one payment"],
+        ["Requested Term", "3–5 years"],
+        ["Repayment", "Monthly fixed payment"],
+    ]
+    loan_t = Table(loan_rows, colWidths=[2.5*inch, 3.5*inch], hAlign="LEFT")
+    loan_t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("SPAN", (0, 0), (-1, 0)),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 0.3, BORDER),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [SURFACE, WHITE]),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    story.append(loan_t)
+    story.append(Spacer(1, 0.2 * inch))
+
+    # Case for consolidation
+    story.append(Paragraph("WHY CONSOLIDATION MAKES SENSE", styles["h2"]))
+    rationale = [
+        f"Demonstrated income: ${income:,.2f} earned during {period} shows consistent earning capacity.",
+        f"Expense awareness: Full spending analysis completed, identifying areas for reduction.",
+        "A single lower-rate payment replaces multiple high-rate obligations, reducing monthly outflow.",
+        "Predictable fixed payment allows for reliable budgeting and reduces the risk of missed payments.",
+    ]
+    if burn > 0:
+        reduced = burn * 0.6
+        rationale.append(
+            f"At current rates, monthly deficit is ${burn:,.0f}. Consolidation at lower rates "
+            f"could reduce this to ~${reduced:,.0f}, making the gap manageable."
+        )
+    for r in rationale:
+        story.append(Paragraph(f"• {r}", styles["bullet"]))
+        story.append(Spacer(1, 0.05 * inch))
+
+    story.append(Spacer(1, 0.15 * inch))
+    story.append(Paragraph(
+        "I am prepared to provide additional documentation including tax returns, "
+        "pay stubs, or other materials as needed. Thank you for your consideration.",
+        styles["body"],
+    ))
+
+    story += signature_block(project_name, address, styles)
+    doc.build(story)
+    print(f"  Generated: {output_path}")
+    return output_path
 
 
 # ---------------------------------------------------------------------------
@@ -1513,9 +2262,11 @@ def main():
     parser.add_argument("--bank", help="Path to bank statement (XLS/XLSX/CSV)")
     parser.add_argument("--pos", help="Path to POS sales export (XLS/XLSX/CSV)")
     parser.add_argument("--project-name", required=True, help="Project codename (anonymized — no real business name)")
-    parser.add_argument("--address", required=True, help="Business address")
+    parser.add_argument("--address", default="N/A", help="Business address")
     parser.add_argument("--period", required=True, help="Analysis period (e.g. 'Q1 2026')")
     parser.add_argument("--output-dir", default=".", help="Output directory for PDFs")
+    parser.add_argument("--mode", default="restaurant", choices=["restaurant", "personal"],
+                        help="Analysis mode: 'restaurant' (default) or 'personal'")
     parser.add_argument(
         "--context",
         default="{}",
@@ -1556,46 +2307,82 @@ def main():
     pos_df = anonymize_dataframe(pos_df, project_name) if pos_df is not None else None
     print("[SECURITY] All PII stripped from datasets.")
 
-    # --- Calculate metrics ---
-    print("\nCalculating financial metrics...")
-    metrics = calculate_metrics(bank_df, pos_df)
-
-    # Print summary
-    print(f"\nMetrics Summary:")
-    print(f"  Net Sales:        ${metrics['net_sales_total']:,.2f}")
-    print(f"  Total Cash In:    ${metrics['total_cash_in']:,.2f}")
-    print(f"  Total Cash Out:   ${metrics['total_cash_out']:,.2f}")
-    print(f"  Net Cash Flow:    ${metrics['net_cash_flow']:,.2f}")
-    print(f"  Closing Balance:  ${metrics.get('closing_balance') or 0:,.2f}")
-    print(f"  Food Cost %:      {metrics.get('food_cost_pct', 'N/A')}")
-    print(f"  Labor %:          {metrics.get('labor_pct', 'N/A')}")
-    print(f"  Debt Service:     ${metrics['debt_service_total']:,.2f}")
-    print(f"  Near-Zero Events: {len(metrics['near_zero_events'])}")
-    print(f"  Months of data:   {metrics['num_months']}")
-
     # --- Build filenames ---
     slug = re.sub(r'[^a-z0-9]+', '-', project_name.lower()).strip('-')
     ym = period_to_ym(args.period)
 
-    analysis_path = str(output_dir / f"{slug}-financial-analysis-{ym}.pdf")
-    vendor_path = str(output_dir / f"{slug}-vendor-letter-{ym}.pdf")
-    loan_path = str(output_dir / f"{slug}-bank-loan-letter-{ym}.pdf")
-
-    # --- Generate PDFs ---
-    print(f"\nGenerating PDFs in: {output_dir}")
     generated = []
 
-    print("\n[1/3] Financial Analysis Report...")
-    generate_analysis_report(metrics, project_name, args.address, args.period, analysis_path, font_name)
-    generated.append(analysis_path)
+    if args.mode == "personal":
+        # ── PERSONAL MODE ──
+        print("\n[MODE] Personal financial triage")
+        print("\nCalculating personal financial metrics...")
+        metrics = calculate_personal_metrics(bank_df)
 
-    print("\n[2/3] Vendor Credit Letter...")
-    generate_vendor_letter(metrics, project_name, args.address, args.period, vendor_path, font_name, context)
-    generated.append(vendor_path)
+        print(f"\nMetrics Summary:")
+        print(f"  Total Income:     ${metrics['total_income']:,.2f}")
+        print(f"  Total Expenses:   ${metrics['total_expenses']:,.2f}")
+        print(f"  Net Position:     ${metrics['total_income'] - metrics['total_expenses']:,.2f}")
+        print(f"  Closing Balance:  ${metrics.get('closing_balance') or 0:,.2f}")
+        print(f"  Burn Rate:        ${metrics.get('burn_rate', 0):,.2f}/mo")
+        print(f"  Categories:       {len(metrics.get('category_totals', {}))}")
+        print(f"  Subscriptions:    {len(metrics.get('subscriptions', []))}")
+        print(f"  Near-Zero Events: {len(metrics.get('near_zero_events', []))}")
+        print(f"  Months of data:   {metrics['num_months']}")
 
-    print("\n[3/3] Bank Loan Request Letter...")
-    generate_bank_loan_letter(metrics, project_name, args.address, args.period, loan_path, font_name, context)
-    generated.append(loan_path)
+        overview_path = str(output_dir / f"{slug}-personal-overview-{ym}.pdf")
+        creditor_path = str(output_dir / f"{slug}-creditor-letter-{ym}.pdf")
+        lender_path = str(output_dir / f"{slug}-lender-letter-{ym}.pdf")
+
+        print(f"\nGenerating PDFs in: {output_dir}")
+
+        print("\n[1/3] Personal Financial Overview...")
+        generate_personal_overview(metrics, project_name, args.address, args.period, overview_path, font_name)
+        generated.append(overview_path)
+
+        print("\n[2/3] Creditor Letter...")
+        generate_creditor_letter(metrics, project_name, args.address, args.period, creditor_path, font_name)
+        generated.append(creditor_path)
+
+        print("\n[3/3] Lender Letter...")
+        generate_lender_letter(metrics, project_name, args.address, args.period, lender_path, font_name)
+        generated.append(lender_path)
+
+    else:
+        # ── RESTAURANT MODE (existing) ──
+        print("\n[MODE] Restaurant financial triage")
+        print("\nCalculating financial metrics...")
+        metrics = calculate_metrics(bank_df, pos_df)
+
+        print(f"\nMetrics Summary:")
+        print(f"  Net Sales:        ${metrics['net_sales_total']:,.2f}")
+        print(f"  Total Cash In:    ${metrics['total_cash_in']:,.2f}")
+        print(f"  Total Cash Out:   ${metrics['total_cash_out']:,.2f}")
+        print(f"  Net Cash Flow:    ${metrics['net_cash_flow']:,.2f}")
+        print(f"  Closing Balance:  ${metrics.get('closing_balance') or 0:,.2f}")
+        print(f"  Food Cost %:      {metrics.get('food_cost_pct', 'N/A')}")
+        print(f"  Labor %:          {metrics.get('labor_pct', 'N/A')}")
+        print(f"  Debt Service:     ${metrics['debt_service_total']:,.2f}")
+        print(f"  Near-Zero Events: {len(metrics['near_zero_events'])}")
+        print(f"  Months of data:   {metrics['num_months']}")
+
+        analysis_path = str(output_dir / f"{slug}-financial-analysis-{ym}.pdf")
+        vendor_path = str(output_dir / f"{slug}-vendor-letter-{ym}.pdf")
+        loan_path = str(output_dir / f"{slug}-bank-loan-letter-{ym}.pdf")
+
+        print(f"\nGenerating PDFs in: {output_dir}")
+
+        print("\n[1/3] Financial Analysis Report...")
+        generate_analysis_report(metrics, project_name, args.address, args.period, analysis_path, font_name)
+        generated.append(analysis_path)
+
+        print("\n[2/3] Vendor Credit Letter...")
+        generate_vendor_letter(metrics, project_name, args.address, args.period, vendor_path, font_name, context)
+        generated.append(vendor_path)
+
+        print("\n[3/3] Bank Loan Request Letter...")
+        generate_bank_loan_letter(metrics, project_name, args.address, args.period, loan_path, font_name, context)
+        generated.append(loan_path)
 
     # --- Security: delete input files ---
     secure_delete_inputs(args.bank, args.pos)

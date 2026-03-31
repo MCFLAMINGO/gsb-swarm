@@ -1358,7 +1358,8 @@ if (BASALT_API_KEY) {
 // POST /api/create-triage-order — create a BasaltSurge order
 app.post('/api/create-triage-order', express.json(), async (req, res) => {
   try {
-    const { projectName, period, email } = req.body || {};
+    const { projectName, period, email, mode } = req.body || {};
+    const triageMode = (mode === 'personal') ? 'personal' : 'restaurant';
     if (!projectName || !email) {
       return res.status(400).json({ error: 'projectName and email are required' });
     }
@@ -1377,6 +1378,7 @@ app.post('/api/create-triage-order', express.json(), async (req, res) => {
       projectName: projectName.trim(),
       period: period || '',
       email: email.trim(),
+      mode: triageMode,
       status: 'pending',
       createdAt: Date.now(),
     });
@@ -1451,7 +1453,7 @@ app.post('/api/financial-triage', triageUpload.fields([
   { name: 'posFile', maxCount: 1 },
 ]), async (req, res) => {
   try {
-    const { projectName, period, tier, agreedToTos, uploadToken } = req.body || {};
+    const { projectName, period, tier, agreedToTos, uploadToken, mode } = req.body || {};
 
     // Validate payment via uploadToken
     if (!uploadToken || !uploadTokens.has(uploadToken)) {
@@ -1504,9 +1506,13 @@ app.post('/api/financial-triage', triageUpload.fields([
       execSync('pip install reportlab xlrd openpyxl pandas -q', { stdio: 'inherit' });
     }
 
+    // Resolve triage mode from form data or stored order
+    const triageMode = (mode === 'personal' || paidOrder.mode === 'personal') ? 'personal' : 'restaurant';
+    const modeArg = ` --mode ${triageMode}`;
+
     // Run analyze.py
     const scriptPath = path.join(__dirname, 'scripts', 'analyze.py');
-    const cmd = `python3 ${scriptPath} --project-name "${projectName.replace(/"/g, '')}" --bank "${bankPath}" --period "${(period || 'Current').replace(/"/g, '')}" --output-dir "${outputDir}"${posArg}`;
+    const cmd = `python3 ${scriptPath} --project-name "${projectName.replace(/"/g, '')}" --bank "${bankPath}" --period "${(period || 'Current').replace(/"/g, '')}" --output-dir "${outputDir}"${posArg}${modeArg}`;
     console.log(`[triage] Running: ${cmd}`);
     execSync(cmd, { stdio: 'inherit', timeout: 120000 });
 
