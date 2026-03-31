@@ -52,6 +52,21 @@ const WORKERS = [
 
 const JOBS_PER_WORKER = 3;
 
+// ── Worker configs for orchestration dispatch ──────────────────────────────
+const WORKER_CONFIGS = {
+  token_analyst:   { name: 'GSB Token Analyst',  address: '0xBF56F4EC74cC1aE19c48197Eb32066c8a85dEfda', price: 0.25 },
+  wallet_profiler: { name: 'GSB Wallet Profiler', address: '0x730e371ff3E2277c36060748dd5207CEAF50701d', price: 0.50 },
+  alpha_scanner:   { name: 'GSB Alpha Scanner',   address: '0x2c87651012bFA0247Fe741448DEbBF06c1b5c906', price: 0.10 },
+  thread_writer:   { name: 'GSB Thread Writer',   address: '0x4ab8320491A1FD8396F7F23c212cd6fC978C8Ad0', price: 0.15 },
+};
+
+// ── CEO pricing (must exceed worker costs for margin) ──────────────────────
+const CEO_PRICES = {
+  swarm_heartbeat_report:      0.10,  // no worker needed, pure margin
+  strategy_task_assignment:    0.25,  // routes to best worker
+  escalation_decision_support: 0.35,  // alpha scanner + analysis
+};
+
 // ── Provider offerings ─────────────────────────────────────────────────────
 const OFFERING_SCHEMAS = {
   swarm_heartbeat_report: {
@@ -182,41 +197,32 @@ async function handleProviderJob(client, job, offeringName) {
     } else if (offeringName === 'strategy_task_assignment') {
       let goal = rawContent;
       try { const p = JSON.parse(rawContent); goal = p.goal || rawContent; } catch {}
-      const lower = goal.toLowerCase();
 
-      let assigned, wallet, rationale, cost;
-      if (/token|contract|price/.test(lower)) {
-        assigned = 'GSB Token Analyst';
-        wallet = '0xBF56F4EC74cC1aE19c48197Eb32066c8a85dEfda';
-        rationale = 'Goal references token/contract/price analysis — best handled by Token Analyst.';
-        cost = 0.25;
-      } else if (/wallet|address|profile/.test(lower)) {
-        assigned = 'GSB Wallet Profiler';
-        wallet = '0x730e371ff3E2277c36060748dd5207CEAF50701d';
-        rationale = 'Goal references wallet/address profiling — best handled by Wallet Profiler.';
-        cost = 0.50;
-      } else if (/alpha|trending|scan/.test(lower)) {
-        assigned = 'GSB Alpha Scanner';
-        wallet = '0x2c87651012bFA0247Fe741448DEbBF06c1b5c906';
-        rationale = 'Goal references alpha/trending/scanning — best handled by Alpha Scanner.';
-        cost = 0.10;
-      } else {
-        assigned = 'GSB Thread Writer';
-        wallet = '0x4ab8320491A1FD8396F7F23c212cd6fC978C8Ad0';
-        rationale = 'General strategic goal — Thread Writer will synthesize the output.';
-        cost = 0.15;
+      const workerKey = routeGoalToWorker(goal);
+      const worker = WORKER_CONFIGS[workerKey];
+      const requirement = buildWorkerRequirement(workerKey, goal);
+
+      if (!requirement) {
+        // wallet_profiler needs an address
+        await freshJob.deliver({ type: 'text', value: JSON.stringify({
+          orchestrated_by: 'GSB CEO',
+          error: 'Please include a wallet address (0x...) in your goal.',
+          timestamp: new Date().toISOString(),
+        }, null, 2) });
+        console.log(`[CEO-provider] Job ${job.id} rejected — missing wallet address.`);
+        return;
       }
 
+      console.log(`[CEO-provider] Routing to ${worker.name}: "${requirement}"`);
+      const workerResult = await dispatchToWorker(client, workerKey, requirement);
+
       result = {
-        assignment_type: 'strategy_task',
-        timestamp: new Date().toISOString(),
+        orchestrated_by: 'GSB CEO',
+        worker_used: worker.name,
         goal,
-        assigned_agent: assigned,
-        agent_wallet: wallet,
-        rationale,
-        suggested_requirement: goal,
-        estimated_cost_usdc: cost,
-        powered_by: 'GSB CEO Orchestrator',
+        result: workerResult,
+        timestamp: new Date().toISOString(),
+        powered_by: 'GSB Intelligence Swarm',
       };
     } else if (offeringName === 'escalation_decision_support') {
       let situation = rawContent;
@@ -228,28 +234,41 @@ async function handleProviderJob(client, job, offeringName) {
       } catch {}
       const lower = situation.toLowerCase();
 
-      let recommendation;
-      const suggestedAgents = [];
-      if (/rug|exploit|hack|risk|anomal/.test(lower)) {
-        recommendation = 'High-risk situation detected. Recommend immediate wallet profiling and token analysis to assess exposure.';
-        suggestedAgents.push('GSB Token Analyst', 'GSB Wallet Profiler');
+      // Always dispatch to Alpha Scanner for market context
+      console.log(`[CEO-provider] Dispatching Alpha Scanner for escalation context...`);
+      let alphaResult;
+      try {
+        alphaResult = await dispatchToWorker(client, 'alpha_scanner', 'Scan for trending tokens and risk signals on Base');
+      } catch (err) {
+        console.error(`[CEO-provider] Alpha Scanner dispatch failed: ${err.message}`);
+        alphaResult = { error: err.message };
+      }
+
+      // Generate recommendation from situation keywords
+      let recommendation, action;
+      if (/rug|exploit|risk|anomal/.test(lower)) {
+        recommendation = 'High-risk situation detected. Immediate exposure assessment recommended.';
+        action = 'Pause trading activity, profile affected wallets, and run token analysis on flagged contracts.';
       } else if (/pump|spike|volume|whale/.test(lower)) {
-        recommendation = 'Market movement detected. Recommend alpha scan to identify opportunity and token analysis for validation.';
-        suggestedAgents.push('GSB Alpha Scanner', 'GSB Token Analyst');
+        recommendation = 'Significant market movement detected. Validate opportunity before acting.';
+        action = 'Cross-reference alpha signals with token fundamentals. Set stop-losses if entering positions.';
+      } else if (/drop|crash|dump|sell/.test(lower)) {
+        recommendation = 'Downward pressure detected. Defensive posture recommended.';
+        action = 'Review portfolio exposure, check liquidity depth, and monitor for cascading liquidations.';
       } else {
-        recommendation = 'Situation noted. Recommend a full swarm scan — alpha signals + token analysis — then synthesize findings via Thread Writer.';
-        suggestedAgents.push('GSB Alpha Scanner', 'GSB Token Analyst', 'GSB Thread Writer');
+        recommendation = 'Situation acknowledged. Full swarm intelligence scan completed for context.';
+        action = 'Review alpha signals below, then assign follow-up tasks via strategy_task_assignment if deeper analysis needed.';
       }
 
       result = {
-        decision_type: 'escalation_support',
-        timestamp: new Date().toISOString(),
+        orchestrated_by: 'GSB CEO',
         situation,
         urgency,
+        market_context: alphaResult,
         recommendation,
-        suggested_agents: suggestedAgents,
-        action_required: true,
-        powered_by: 'GSB CEO Orchestrator',
+        action,
+        timestamp: new Date().toISOString(),
+        powered_by: 'GSB Intelligence Swarm',
       };
     }
 
@@ -300,6 +319,85 @@ function parseDeliverable(rawValue) {
   if (!rawValue) return null;
   if (typeof rawValue === 'object') return rawValue;
   try { return JSON.parse(rawValue); } catch { return { raw: rawValue }; }
+}
+
+// ── Dispatch a job to a worker and wait for the deliverable ────────────────
+async function dispatchToWorker(acpClient, workerKey, requirement) {
+  const worker = WORKER_CONFIGS[workerKey];
+  console.log(`[CEO-dispatch] Hiring ${worker.name} for: ${requirement.slice(0, 80)}`);
+
+  return new Promise(async (resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Worker timeout after 3 min')), 180000);
+
+    try {
+      const fare = new FareAmount(worker.price, baseAcpConfigV2.baseFare);
+      const expiry = new Date(Date.now() + 1000 * 60 * 30);
+
+      const jobId = await acpClient.initiateJob(
+        worker.address,
+        requirement,
+        fare,
+        null,
+        expiry
+      );
+
+      console.log(`[CEO-dispatch] Job ${jobId} fired at ${worker.name}`);
+
+      // Poll for completion
+      const start = Date.now();
+      while (Date.now() - start < 180000) {
+        await sleep(3000);
+        try {
+          const job = await acpClient.getJobById(jobId);
+          if (job && job.phase === 4) { // COMPLETED
+            const memos = job.memos || [];
+            const deliverMemo = memos.find(m => m.nextPhase === 3 || m.nextPhase === 'EVALUATION');
+            const rawValue = deliverMemo?.content ?? memos[memos.length - 1]?.content;
+            clearTimeout(timeout);
+            resolve(parseDeliverable(rawValue));
+            return;
+          }
+          if (job && job.phase === 2) {
+            // In transaction — wait for deliver
+            continue;
+          }
+        } catch (e) { /* keep polling */ }
+      }
+      clearTimeout(timeout);
+      reject(new Error('Worker did not complete in time'));
+    } catch (err) {
+      clearTimeout(timeout);
+      reject(err);
+    }
+  });
+}
+
+// ── Route goal keywords to the correct worker ──────────────────────────────
+function routeGoalToWorker(goal) {
+  const lower = goal.toLowerCase();
+  if (/token|contract|price|analyze|ca\b/.test(lower)) return 'token_analyst';
+  if (/wallet|address|profile|who/.test(lower))        return 'wallet_profiler';
+  if (/alpha|trending|scan|gainers|launch/.test(lower)) return 'alpha_scanner';
+  if (/thread|write|tweet|content/.test(lower))         return 'thread_writer';
+  return 'alpha_scanner'; // default — most useful
+}
+
+// ── Build the requirement string for a worker ──────────────────────────────
+function buildWorkerRequirement(workerKey, goal) {
+  const addressMatch = goal.match(/0x[a-fA-F0-9]{40}/);
+  switch (workerKey) {
+    case 'token_analyst':
+      return `Analyze token ${addressMatch ? addressMatch[0] : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'}`;
+    case 'wallet_profiler':
+      if (!addressMatch) return null; // need an address
+      return `Profile wallet ${addressMatch[0]}`;
+    case 'alpha_scanner':
+      return `Scan for trending tokens on Base`;
+    case 'thread_writer':
+      return goal;
+    default:
+      return goal;
+  }
 }
 
 // ── Build the GSB Intelligence Brief from all deliverables ──────────────────
