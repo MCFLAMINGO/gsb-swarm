@@ -132,6 +132,7 @@ const CEO_PRICES = {
   escalation_decision_support: 0.35,  // alpha scanner + analysis
   token_deep_dive:             0.35,  // Token Analyst + Wallet Profiler parallel
   daily_brief:                 0.50,  // all 4 workers parallel
+  financial_triage:            0.25,  // restaurant financial analysis — 3 PDFs via token
 };
 
 // ── Provider offerings ─────────────────────────────────────────────────────
@@ -192,6 +193,28 @@ const OFFERING_SCHEMAS = {
       required: []
     },
     rejection_cases: ['NSFW or malicious content']
+  },
+  financial_triage: {
+    description: 'Restaurant financial triage — upload bank statement + POS export, receive Financial Analysis Report, Vendor Credit Letter, and Bank Loan Request Letter as a 24hr download token. All data anonymized under a project codename. Files deleted after processing. Operated by MCFL Restaurant Holdings LLC.',
+    price: 0.25,
+    parameters: {
+      type: 'object',
+      properties: {
+        projectName:  { type: 'string', description: 'Anonymized project codename (e.g. PROJECT-FALCON)' },
+        bankFileUrl:  { type: 'string', description: 'URL to bank statement file (XLS/XLSX/CSV)' },
+        posFileUrl:   { type: 'string', description: 'URL to POS sales export file (XLS/XLSX/CSV) — optional' },
+        period:       { type: 'string', description: 'Reporting period (e.g. Q1 2026)' },
+        tier:         { type: 'string', enum: ['basic','standard','full'], description: 'Output tier — full returns all 3 PDFs' },
+        agreedToTos:  { type: 'boolean', description: 'Must be true — confirms agreement to MCFL Terms of Service' }
+      },
+      required: ['projectName', 'bankFileUrl', 'period', 'agreedToTos']
+    },
+    rejection_cases: [
+      'agreedToTos is false or missing',
+      'No bank file URL provided',
+      'Project name is empty',
+      'NSFW or malicious content'
+    ]
   }
 };
 
@@ -267,7 +290,8 @@ function determineOffering(job, rawContent) {
   let skillRequest = null;
   try { skillRequest = JSON.parse(rawContent); } catch {}
   if (skillRequest?.skillId === 'social_blast' || skillRequest?.skillId === 'bank_status_report'
-      || skillRequest?.skillId === 'token_deep_dive' || skillRequest?.skillId === 'daily_brief') {
+      || skillRequest?.skillId === 'token_deep_dive' || skillRequest?.skillId === 'daily_brief'
+      || skillRequest?.skillId === 'financial_triage') {
     return skillRequest.skillId;
   }
 
@@ -281,6 +305,7 @@ function determineOffering(job, rawContent) {
   if (/social.?blast|raid|amplif/.test(lower)) return 'social_blast';
   if (/deep.?dive|deep.?analysis|full.?token|token.?intel|whale.?holders/.test(lower)) return 'token_deep_dive';
   if (/daily.?brief|morning.?report|full.?swarm|all.?agents|everything/.test(lower)) return 'daily_brief';
+  if (/financial.?triage|restaurant.?financ|vendor.?letter|bank.?loan.?letter|burn.?rate|food.?cost|cash.?crunch|pos.?report|triage/.test(lower)) return 'financial_triage';
   if (/heartbeat|status|swarm|bank/.test(lower)) return 'swarm_heartbeat_report';
   if (/escalat|risk|situation|urgent|decision/.test(lower)) return 'escalation_decision_support';
   if (/strateg|task|assign|alpha|scan|trend|token|wallet|thread|write/.test(lower)) return 'strategy_task_assignment';
@@ -572,6 +597,56 @@ Write a 2-3 sentence bank status. Include worker load, jobs served, and top oppo
       ceoCache.totalJobsServed++;
       await job.deliver({ type: 'text', value: formatCeoBrief(brief, new Date().toISOString()) });
       console.log(`[CEO-provider] Job ${job.id} delivered instantly (bank_status_report).`);
+      return;
+    }
+
+    // ── financial_triage: forward to /api/financial-triage endpoint ─────────
+    if (offeringName === 'financial_triage') {
+      const params = input || {};
+      if (!params.agreedToTos) {
+        await job.rejectPayable('Must agree to MCFL Terms of Service (agreedToTos: true).');
+        return;
+      }
+      if (!params.projectName || !params.bankFileUrl) {
+        await job.rejectPayable('Missing required fields: projectName and bankFileUrl.');
+        return;
+      }
+      console.log(`[CEO-provider] financial_triage: project=${params.projectName} period=${params.period || 'unspecified'}`);
+      try {
+        const fetch = (await import('node-fetch')).default;
+        const baseUrl = process.env.RAILWAY_STATIC_URL
+          ? `https://${process.env.RAILWAY_STATIC_URL}`
+          : 'http://localhost:8080';
+        const res = await fetch(`${baseUrl}/api/financial-triage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectName:  params.projectName,
+            bankFileUrl:  params.bankFileUrl,
+            posFileUrl:   params.posFileUrl || null,
+            period:       params.period || 'Q1 2026',
+            tier:         params.tier || 'full',
+            agreedToTos:  'true',
+          }),
+        });
+        const result = await res.json();
+        if (result.error) throw new Error(result.error);
+        const msg = [
+          `Financial Triage Complete — Project: ${params.projectName}`,
+          `Access Token: ${result.accessToken}`,
+          `Download: ${baseUrl}/api/financial-triage/download/${result.accessToken}`,
+          `Files ready: ${(result.filesGenerated || []).join(', ')}`,
+          `Expires: ${result.expiresAt}`,
+          '',
+          'Includes: Financial Analysis Report | Vendor Credit Letter | Bank Loan Request Letter',
+          'All data anonymized. Source files deleted. Operated by MCFL Restaurant Holdings LLC.',
+        ].join('\n');
+        ceoCache.totalJobsServed++;
+        await job.deliver({ type: 'text', value: msg });
+        console.log(`[CEO-provider] Job ${job.id} delivered (financial_triage) token=${result.accessToken}`);
+      } catch (err) {
+        await job.rejectPayable(`Financial triage failed: ${err.message}. Payment will be refunded.`);
+      }
       return;
     }
 
