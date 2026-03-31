@@ -50,8 +50,27 @@ function spawnWorker({ name, file }) {
   }
 })();
 
+// ── Dashboard server ──────────────────────────────────────────────────────────
+// Spawn as a child process so it gets Railway's PORT env var for public access
+function spawnDashboard() {
+  const dashPath = path.join(__dirname, 'dashboard-server.js');
+  const proc = fork(dashPath, [], {
+    env: { ...process.env },
+    stdio: 'inherit',
+  });
+  proc.on('exit', (code) => {
+    console.error(`[dashboard] Process exited with code ${code}, restarting in 3s...`);
+    setTimeout(() => { dashProc = spawnDashboard(); }, 3000);
+  });
+  console.log('[SWARM] Dashboard server started');
+  return proc;
+}
+
+let dashProc = spawnDashboard();
+
+// ── Internal health-check server (fixed port, not Railway's PORT) ─────────────
 const app = express();
-const PORT = process.env.PORT || 3000;
+const HEALTH_PORT = 3000;
 
 app.get('/', (req, res) => res.json({
   status: 'ONLINE',
@@ -63,13 +82,14 @@ app.get('/', (req, res) => res.json({
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
-app.listen(PORT, () => {
-  console.log(`\n[SWARM] Health check running on port ${PORT}`);
+app.listen(HEALTH_PORT, () => {
+  console.log(`\n[SWARM] Health check running on port ${HEALTH_PORT}`);
   console.log(`[SWARM] All ${workers.length} workers active. Swarm is LIVE.\n`);
 });
 
 process.on('SIGTERM', () => {
   console.log('[SWARM] Shutting down gracefully...');
   processes.forEach((p) => p.kill());
+  dashProc && dashProc.kill();
   process.exit(0);
 });
