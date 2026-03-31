@@ -9,10 +9,13 @@ const path = require('path');
 const express = require('express');
 
 const workers = [
-  { name: 'Token Analyst',   file: 'tokenAnalyst.js' },
-  { name: 'Wallet Profiler', file: 'walletProfiler.js' },
-  { name: 'Alpha Scanner',   file: 'alphaScanner.js' },
-  { name: 'Thread Writer',   file: 'threadWriter.js' },
+  { name: 'Token Analyst',      file: 'tokenAnalyst.js' },
+  { name: 'Wallet Profiler',    file: 'walletProfiler.js' },
+  { name: 'Alpha Scanner',      file: 'alphaScanner.js' },
+  { name: 'Thread Writer',      file: 'threadWriter.js' },
+  ...(process.env.FINANCIAL_ANALYST_ENTITY_ID
+    ? [{ name: 'Financial Analyst', file: 'financialAnalyst.js' }]
+    : []),
 ];
 
 console.log(`

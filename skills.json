@@ -111,6 +111,16 @@
       "outputFields": ["content", "sentiment", "keyNarratives"]
     }
   ],
+  "GSB Financial Analyst": [
+    {
+      "skillId": "financial_triage",
+      "description": "Full restaurant financial triage — analyzes bank statements and POS exports, generates Financial Analysis Report, Vendor Credit Letter, and Bank Loan Request Letter. All data anonymized under project codename. Files deleted after processing. Operated by MCFL Restaurant Holdings LLC.",
+      "instruction": "Run financial triage for project {projectName} using period {period}. Tier: {tier}. Download bank file from {bankFileUrl} and POS file from {posFileUrl}. Generate all 3 documents and return access token.",
+      "params": ["projectName", "period", "tier", "bankFileUrl", "posFileUrl"],
+      "price": 0.25,
+      "outputFields": ["accessToken", "downloadUrl", "filesGenerated", "expiresAt"]
+    }
+  ],
   "GSB CEO": [
     {
       "skillId": "social_blast",

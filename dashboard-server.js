@@ -10,6 +10,8 @@ const http     = require('http');
 const path     = require('path');
 const { WebSocketServer } = require('ws');
 const cors     = require('cors');
+const multer   = require('multer');
+const { execSync } = require('child_process');
 const { CHAIN_CONFIG, CHAIN_ALIASES, resolveChain, SUPPORTED_CHAINS } = require('./chains');
 
 // ── ACP SDK (V2) ─────────────────────────────────────────────────────────────
@@ -1310,6 +1312,136 @@ app.post('/api/command', async (req, res) => {
     type: 'done',
     message: `All ${intents.length} job${intents.length > 1 ? 's' : ''} fired. Watch the Jobs tab for deliveries.`,
   });
+});
+
+// ── Financial Triage API ─────────────────────────────────────────────────────
+const triageUpload = multer({ dest: '/tmp/triage-uploads/' });
+const triageJobStore = new Map(); // accessToken -> { pdfs: [{name, buffer}], createdAt, expiresAt }
+
+// Clean expired triage tokens every 30 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, entry] of triageJobStore) {
+    if (now > entry.expiresAt) {
+      triageJobStore.delete(token);
+      console.log(`[triage] Token ${token} expired and cleaned up.`);
+    }
+  }
+}, 30 * 60 * 1000);
+
+app.post('/api/financial-triage', triageUpload.fields([
+  { name: 'bankFile', maxCount: 1 },
+  { name: 'posFile', maxCount: 1 },
+]), async (req, res) => {
+  try {
+    const { projectName, period, tier, agreedToTos } = req.body || {};
+
+    if (agreedToTos !== 'true') {
+      return res.status(400).json({ error: 'Must agree to Terms of Service' });
+    }
+    if (!projectName || !projectName.trim()) {
+      return res.status(400).json({ error: 'projectName is required' });
+    }
+    if (!req.files?.bankFile?.[0]) {
+      return res.status(400).json({ error: 'bankFile is required' });
+    }
+
+    const jobId = `ftriage_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let accessToken = 'TKN-';
+    for (let i = 0; i < 6; i++) accessToken += chars.charAt(Math.floor(Math.random() * chars.length));
+
+    const tmpDir = `/tmp/${jobId}`;
+    const outputDir = `${tmpDir}/output`;
+    fs.mkdirSync(outputDir, { recursive: true });
+
+    // Move uploaded files into job dir
+    const bankFile = req.files.bankFile[0];
+    const bankExt = path.extname(bankFile.originalname) || '.xlsx';
+    const bankPath = `${tmpDir}/bank${bankExt}`;
+    fs.renameSync(bankFile.path, bankPath);
+
+    let posArg = '';
+    if (req.files?.posFile?.[0]) {
+      const posFile = req.files.posFile[0];
+      const posExt = path.extname(posFile.originalname) || '.xlsx';
+      const posPath = `${tmpDir}/pos${posExt}`;
+      fs.renameSync(posFile.path, posPath);
+      posArg = ` --pos "${posPath}"`;
+    }
+
+    // Install Python deps if needed
+    try {
+      execSync('python3 -c "import reportlab, openpyxl, pandas"', { stdio: 'pipe' });
+    } catch {
+      execSync('pip install reportlab xlrd openpyxl pandas -q', { stdio: 'inherit' });
+    }
+
+    // Run analyze.py
+    const scriptPath = path.join(__dirname, 'scripts', 'analyze.py');
+    const cmd = `python3 ${scriptPath} --project-name "${projectName.replace(/"/g, '')}" --bank "${bankPath}" --period "${(period || 'Current').replace(/"/g, '')}" --output-dir "${outputDir}"${posArg}`;
+    console.log(`[triage] Running: ${cmd}`);
+    execSync(cmd, { stdio: 'inherit', timeout: 120000 });
+
+    // Read PDFs into memory
+    const pdfFiles = fs.readdirSync(outputDir).filter(f => f.endsWith('.pdf'));
+    const pdfs = pdfFiles.map(name => ({
+      name,
+      buffer: fs.readFileSync(path.join(outputDir, name)),
+    }));
+
+    // Clean up temp files
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+
+    const now = Date.now();
+    const expiresAt = now + 24 * 60 * 60 * 1000;
+
+    triageJobStore.set(accessToken, {
+      pdfs,
+      createdAt: now,
+      expiresAt,
+    });
+
+    console.log(`[triage] Job ${jobId} complete. Token: ${accessToken}. Files: ${pdfs.length}`);
+    res.json({
+      jobId,
+      accessToken,
+      status: 'complete',
+      downloadUrl: `/api/financial-triage/download/${accessToken}`,
+      expiresAt: new Date(expiresAt).toISOString(),
+    });
+  } catch (err) {
+    console.error('[triage] Error:', err.message);
+    res.status(500).json({ error: `Triage failed: ${err.message}` });
+  }
+});
+
+app.get('/api/financial-triage/download/:token', (req, res) => {
+  const entry = triageJobStore.get(req.params.token);
+  if (!entry || Date.now() > entry.expiresAt) {
+    return res.status(404).json({ error: 'Token not found or expired' });
+  }
+  res.json({
+    files: entry.pdfs.map((pdf, i) => ({
+      name: pdf.name,
+      downloadPath: `/api/financial-triage/file/${req.params.token}/${i}`,
+    })),
+  });
+});
+
+app.get('/api/financial-triage/file/:token/:index', (req, res) => {
+  const entry = triageJobStore.get(req.params.token);
+  if (!entry || Date.now() > entry.expiresAt) {
+    return res.status(404).json({ error: 'Token not found or expired' });
+  }
+  const idx = parseInt(req.params.index);
+  if (isNaN(idx) || idx < 0 || idx >= entry.pdfs.length) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+  const pdf = entry.pdfs[idx];
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${pdf.name}"`);
+  res.send(pdf.buffer);
 });
 
 // ── Catch-all → index.html ────────────────────────────────────────────────────
