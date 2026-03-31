@@ -24,8 +24,9 @@ console.log(`
 `);
 
 const processes = [];
+const STAGGER_DELAY_MS = 2000; // 2s between each worker to avoid RPC rate limits
 
-workers.forEach(({ name, file }) => {
+function spawnWorker({ name, file }) {
   const workerPath = path.join(__dirname, file);
   const child = fork(workerPath, [], { silent: false, env: process.env });
 
@@ -40,7 +41,14 @@ workers.forEach(({ name, file }) => {
 
   processes.push(child);
   console.log(`[${name}] Worker started (PID: ${child.pid})`);
-});
+}
+
+(async () => {
+  for (let i = 0; i < workers.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, STAGGER_DELAY_MS));
+    spawnWorker(workers[i]);
+  }
+})();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
