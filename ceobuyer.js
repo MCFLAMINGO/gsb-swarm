@@ -476,8 +476,16 @@ Write a 2-3 sentence bank status. Include worker load, jobs served, and top oppo
   }
 }
 
+// ── Latest brief cache (for resource endpoint) ──────────────────────────────
+let latestBriefText = null;
+let latestBriefAt = null;
+
 // ── Post brief to dashboard (helper) ──────────────────────────────────────
 async function postToDashboard(brief) {
+  // Cache the brief locally for resource endpoint awareness
+  latestBriefText = typeof brief === 'string' ? brief : JSON.stringify(brief);
+  latestBriefAt = new Date().toISOString();
+
   const DASHBOARD_URL = process.env.RAILWAY_STATIC_URL
     ? `https://${process.env.RAILWAY_STATIC_URL}`
     : 'http://localhost:8080';
@@ -486,7 +494,7 @@ async function postToDashboard(brief) {
     await fetch(`${DASHBOARD_URL}/api/brief`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ brief, source: 'ceobuyer', timestamp: new Date().toISOString() }),
+      body: JSON.stringify({ brief, source: 'ceobuyer', timestamp: latestBriefAt }),
     });
     console.log('[CEO-provider] Brief posted to dashboard');
   } catch (e) {
@@ -907,6 +915,16 @@ async function main() {
   refreshCacheFromAlphaScanner(); // initial fetch
   setInterval(refreshCacheFromAlphaScanner, 5 * 60 * 1000);
   console.log('[ceo] Cache refresh started (every 5 min)');
+
+  // ── Log public resource URLs for ACP/Butler reads ───────────────────────
+  const RESOURCE_BASE = process.env.RAILWAY_STATIC_URL
+    ? `https://${process.env.RAILWAY_STATIC_URL}`
+    : 'https://gsb-swarm-production.up.railway.app';
+  console.log(`[CEO] Public resources available:`);
+  console.log(`  ${RESOURCE_BASE}/api/resource/market_snapshot`);
+  console.log(`  ${RESOURCE_BASE}/api/resource/swarm_status`);
+  console.log(`  ${RESOURCE_BASE}/api/resource/latest_brief`);
+  console.log(`[CEO] Register these URLs in Virtuals ACP dashboard under CEO → Resources`);
 
   console.log('[ceo] Provider + Buyer clients ready. Firing jobs at all 4 workers.\n');
 

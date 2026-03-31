@@ -605,13 +605,25 @@ app.post('/api/fire-job', requireOperator, async (req, res) => {
 // ── POST /api/brief (from external ceobuyer.js) ───────────────────────────────
 app.post('/api/brief', async (req, res) => {
   const brief = req.body;
-  if (!brief?.results) return res.status(400).json({ error: 'Missing results' });
+  if (!brief?.results) {
+    // Accept plain-text briefs from ceobuyer provider-side deliveries
+    if (brief?.brief && typeof brief.brief === 'string') {
+      global.latestCeoBrief = brief.brief;
+      global.latestCeoBriefAt = brief.timestamp || new Date().toISOString();
+      console.log('[api] Plain-text brief stored for resource endpoint');
+      return res.json({ ok: true });
+    }
+    return res.status(400).json({ error: 'Missing results' });
+  }
   // Merge into briefResults
   Object.assign(briefResults, brief.results);
   latestBrief = buildBriefSnapshot();
   latestBrief.ceoSynthesis = await ceoSynthesize(briefResults);
   broadcast('brief', latestBrief);
   broadcast('cmd-synthesis', latestBrief.ceoSynthesis);
+  // Update global brief for resource endpoint
+  global.latestCeoBrief = latestBrief.ceoSynthesis?.summary || JSON.stringify(latestBrief.ceoSynthesis);
+  global.latestCeoBriefAt = new Date().toISOString();
   console.log('[api] External brief received, pushed to dashboard');
   res.json({ ok: true });
 });
@@ -636,6 +648,59 @@ app.get('/api/public', (req, res) => {
     message: 'GSB Intelligence Swarm is live',
     hireCeo: 'https://app.virtuals.io/acp/agents/itrtj5b95z14av53qoubqwcu',
   });
+});
+
+// ── GET /api/resource/:name — Public resource endpoint for ACP/Butler reads ──
+app.get('/api/resource/:name', (req, res) => {
+  const { name } = req.params;
+
+  if (name === 'market_snapshot') {
+    const pools = ceoDashCache.lastAlphaScan?.data ?? [];
+    // Extract top 5 trending tokens
+    const top5 = pools.slice(0, 5).map(p => {
+      const attrs = p.attributes || p;
+      return {
+        name: attrs.name || attrs.symbol || 'Unknown',
+        price_usd: attrs.base_token_price_usd || null,
+        volume_24h: attrs.volume_usd?.h24 || attrs.volume_24h || null,
+        price_change_24h: attrs.price_change_percentage?.h24 || null,
+      };
+    });
+    return res.json({
+      resource: 'market_snapshot',
+      data: top5,
+      updatedAt: ceoDashCache.lastAlphaScan?.fetchedAt
+        ? new Date(ceoDashCache.lastAlphaScan.fetchedAt).toISOString()
+        : null,
+      description: 'Top trending Base tokens — refreshed every 5 minutes',
+    });
+  }
+
+  if (name === 'swarm_status') {
+    const workers = Object.entries(WORKER_CATALOG).map(([wName, w]) => ({
+      name: wName,
+      status: workerStatus[wName]?.status || 'idle',
+      price: w.price,
+      jobsCompleted: workerStatus[wName]?.jobsCompleted || 0,
+    }));
+    return res.json({
+      resource: 'swarm_status',
+      status: acpReady ? 'ONLINE' : 'OFFLINE',
+      agents: workers,
+      totalJobsServed: ceoDashCache.totalJobsServed,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  if (name === 'latest_brief') {
+    return res.json({
+      resource: 'latest_brief',
+      brief: global.latestCeoBrief || 'GSB Intelligence Swarm is online and processing. Hire the CEO for a full report.',
+      updatedAt: global.latestCeoBriefAt || null,
+    });
+  }
+
+  return res.status(404).json({ error: 'Unknown resource', available: ['market_snapshot', 'swarm_status', 'latest_brief'] });
 });
 
 // ── GET /api/state ────────────────────────────────────────────────────────────
