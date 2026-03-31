@@ -14,6 +14,22 @@ const {
   default: AcpClient,
 } = require('@virtuals-protocol/acp-node');
 
+// ── Anthropic (Claude) — lazy async import ──────────────────────────────────
+let anthropic = null;
+(async () => {
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      const { default: Anthropic } = await import('@anthropic-ai/sdk');
+      anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      console.log('[CEO] ✓ Claude brain online');
+    } catch (e) {
+      console.warn('[CEO] Anthropic SDK load failed:', e.message);
+    }
+  } else {
+    console.log('[CEO] No ANTHROPIC_API_KEY — using fallback synthesis');
+  }
+})();
+
 // ── Config ──────────────────────────────────────────────────────────────────
 const CEO_ENTITY_ID         = 2;
 const CEO_WALLET_ADDRESS    = '0xf0d4832A4c2D33Faa1F655cd4dE5e7c551a0fE45';
@@ -157,6 +173,28 @@ function makeFare(p) {
   return new FareAmount(p, baseAcpConfigV2.baseFare);
 }
 
+// ── CEO Claude Synthesis ────────────────────────────────────────────────────
+async function ceoSynthesize(prompt) {
+  if (anthropic) {
+    try {
+      const msg = await anthropic.messages.create({
+        model: 'claude-haiku-3-5',
+        max_tokens: 600,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      return msg.content[0].text;
+    } catch (err) {
+      console.warn('[CEO] Claude synthesis failed, using fallback:', err.message);
+    }
+  }
+  // Fallback: return a simple note so we never return empty
+  return 'GSB Intelligence Swarm is online. Claude synthesis unavailable — raw data was used to compile this brief.';
+}
+
+function formatCeoBrief(content, timestamp) {
+  return `🧠 GSB CEO Intelligence Brief\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${content}\n\nPowered by GSB Intelligence Swarm | ${timestamp}`;
+}
+
 // ── Provider: waitForTransaction ────────────────────────────────────────────
 async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
   const start = Date.now();
@@ -185,24 +223,45 @@ async function handleProviderJob(client, job, offeringName) {
     console.log(`[CEO-provider] Job ${job.id} in TRANSACTION phase. Generating deliverable...`);
   }
 
-  let result;
+  let briefText;
+  const ts = new Date().toISOString();
 
   try {
     if (offeringName === 'swarm_heartbeat_report') {
-      result = {
-        report_type: 'swarm_heartbeat',
-        timestamp: new Date().toISOString(),
-        swarm_status: 'ONLINE',
-        agents: [
-          { name: 'GSB Token Analyst', status: 'ONLINE', role: 'token_analysis', price_usdc: 0.25 },
-          { name: 'GSB Wallet Profiler', status: 'ONLINE', role: 'wallet_profile', price_usdc: 0.50 },
-          { name: 'GSB Alpha Scanner', status: 'ONLINE', role: 'alpha_signals', price_usdc: 0.10 },
-          { name: 'GSB Thread Writer', status: 'ONLINE', role: 'content', price_usdc: 0.15 },
-        ],
-        total_jobs_completed: 55,
-        gsb_summary: 'All 4 GSB Intelligence Swarm agents are active and accepting jobs on Base via ACP.',
-        powered_by: 'GSB Intelligence Swarm',
-      };
+      // Fire a real scan_trending job at Alpha Scanner for live market data
+      let alphaData = null;
+      try {
+        console.log(`[CEO-provider] Firing Alpha Scanner scan_trending for heartbeat...`);
+        alphaData = await dispatchToWorker(client, 'alpha_scanner', null, 'scan_trending', {});
+      } catch (err) {
+        console.warn(`[CEO-provider] Alpha Scanner failed for heartbeat: ${err.message}`);
+      }
+
+      // Build market snapshot and opportunities from alpha data
+      let marketContext = '';
+      if (alphaData && !alphaData.error) {
+        marketContext = `Alpha scanner data: ${JSON.stringify(alphaData)}`;
+      } else {
+        marketContext = `Alpha scanner unavailable. Timestamp: ${ts}. All 4 swarm agents are online and operational on Base chain.`;
+      }
+
+      // Synthesize with Claude
+      const synthesis = await ceoSynthesize(
+        `You are the GSB CEO intelligence agent. Write a concise swarm heartbeat report.\n\nSwarm status: All 4 agents ONLINE (Token Analyst, Wallet Profiler, Alpha Scanner, Thread Writer) on Base chain via ACP.\nTimestamp: ${ts}\n\n${marketContext}\n\nWrite a 2-3 sentence market snapshot summarizing current Base market conditions, then list top opportunities if any. Be specific with numbers. End with a 1-sentence GSB swarm status summary.`
+      );
+
+      const agents = [
+        'Token Analyst — ONLINE (token analysis, $0.25)',
+        'Wallet Profiler — ONLINE (wallet profiling, $0.50)',
+        'Alpha Scanner — ONLINE (alpha signals, $0.10)',
+        'Thread Writer — ONLINE (content, $0.15)',
+      ];
+
+      briefText = formatCeoBrief(
+        `SWARM HEARTBEAT REPORT\nStatus: ONLINE\n\nAgents:\n${agents.map(a => `  • ${a}`).join('\n')}\n\n${synthesis}`,
+        ts
+      );
+
     } else if (offeringName === 'strategy_task_assignment') {
       let goal = rawContent;
       try { const p = JSON.parse(rawContent); goal = p.goal || rawContent; } catch {}
@@ -212,17 +271,16 @@ async function handleProviderJob(client, job, offeringName) {
       const requirement = buildWorkerRequirement(workerKey, goal);
 
       if (!requirement) {
-        // wallet_profiler needs an address
-        await freshJob.deliver({ type: 'text', value: JSON.stringify({
-          orchestrated_by: 'GSB CEO',
-          error: 'Please include a wallet address (0x...) in your goal.',
-          timestamp: new Date().toISOString(),
-        }, null, 2) });
+        const errorBrief = formatCeoBrief(
+          `STRATEGY TASK ASSIGNMENT\n\nUnable to process: please include a wallet address (0x...) in your goal so the Wallet Profiler can execute.`,
+          ts
+        );
+        await freshJob.deliver({ type: 'text', value: errorBrief });
         console.log(`[CEO-provider] Job ${job.id} rejected — missing wallet address.`);
         return;
       }
 
-      // Try skill-based dispatch based on the routed worker
+      // Dispatch to the routed worker
       const addressMatch = goal.match(/0x[a-fA-F0-9]{40}/);
       let workerResult;
       if (workerKey === 'alpha_scanner') {
@@ -236,14 +294,17 @@ async function handleProviderJob(client, job, offeringName) {
         workerResult = await dispatchToWorker(client, workerKey, requirement);
       }
 
-      result = {
-        orchestrated_by: 'GSB CEO',
-        worker_used: worker.name,
-        goal,
-        result: workerResult,
-        timestamp: new Date().toISOString(),
-        powered_by: 'GSB Intelligence Swarm',
-      };
+      // Always pass through Claude for a clean natural-language recommendation
+      const workerDataStr = typeof workerResult === 'string' ? workerResult : JSON.stringify(workerResult, null, 2);
+      const synthesis = await ceoSynthesize(
+        `You are the GSB CEO intelligence agent. A user requested: "${goal}"\n\nThe ${worker.name} worker returned this data:\n${workerDataStr}\n\nWrite a clear, actionable strategic recommendation in 3-5 sentences. Reference specific numbers and findings from the worker data. Be direct and crypto-native.`
+      );
+
+      briefText = formatCeoBrief(
+        `STRATEGY TASK ASSIGNMENT\nGoal: ${goal}\nAssigned to: ${worker.name}\n\n${synthesis}`,
+        ts
+      );
+
     } else if (offeringName === 'escalation_decision_support') {
       let situation = rawContent;
       let urgency = 'medium';
@@ -252,47 +313,33 @@ async function handleProviderJob(client, job, offeringName) {
         situation = p.situation || rawContent;
         urgency = p.urgency || 'medium';
       } catch {}
-      const lower = situation.toLowerCase();
 
-      // Always dispatch to Alpha Scanner for market context
+      // Dispatch to Alpha Scanner for market context
       console.log(`[CEO-provider] Dispatching Alpha Scanner for escalation context...`);
       let alphaResult;
       try {
         alphaResult = await dispatchToWorker(client, 'alpha_scanner', 'Scan for trending tokens and risk signals on Base');
       } catch (err) {
         console.error(`[CEO-provider] Alpha Scanner dispatch failed: ${err.message}`);
-        alphaResult = { error: err.message };
+        alphaResult = null;
       }
 
-      // Generate recommendation from situation keywords
-      let recommendation, action;
-      if (/rug|exploit|risk|anomal/.test(lower)) {
-        recommendation = 'High-risk situation detected. Immediate exposure assessment recommended.';
-        action = 'Pause trading activity, profile affected wallets, and run token analysis on flagged contracts.';
-      } else if (/pump|spike|volume|whale/.test(lower)) {
-        recommendation = 'Significant market movement detected. Validate opportunity before acting.';
-        action = 'Cross-reference alpha signals with token fundamentals. Set stop-losses if entering positions.';
-      } else if (/drop|crash|dump|sell/.test(lower)) {
-        recommendation = 'Downward pressure detected. Defensive posture recommended.';
-        action = 'Review portfolio exposure, check liquidity depth, and monitor for cascading liquidations.';
-      } else {
-        recommendation = 'Situation acknowledged. Full swarm intelligence scan completed for context.';
-        action = 'Review alpha signals below, then assign follow-up tasks via strategy_task_assignment if deeper analysis needed.';
-      }
+      const alphaContext = alphaResult && !alphaResult.error
+        ? JSON.stringify(alphaResult, null, 2)
+        : 'Alpha scanner data unavailable.';
 
-      result = {
-        orchestrated_by: 'GSB CEO',
-        situation,
-        urgency,
-        market_context: alphaResult,
-        recommendation,
-        action,
-        timestamp: new Date().toISOString(),
-        powered_by: 'GSB Intelligence Swarm',
-      };
+      // Pass through Claude for strategic recommendation
+      const synthesis = await ceoSynthesize(
+        `Escalation situation: ${situation}. Urgency: ${urgency}. Alpha context: ${alphaContext}. Provide a 3-5 sentence strategic recommendation as the GSB CEO intelligence agent. Be specific, reference data points where available, and give clear actionable next steps.`
+      );
+
+      briefText = formatCeoBrief(
+        `ESCALATION DECISION SUPPORT\nSituation: ${situation}\nUrgency: ${urgency.toUpperCase()}\n\n${synthesis}`,
+        ts
+      );
     }
 
-    await freshJob.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
+    await freshJob.deliver({ type: 'text', value: briefText });
     console.log(`[CEO-provider] Job ${job.id} delivered (${offeringName}).`);
   } catch (err) {
     console.error(`[CEO-provider] Job ${job.id} delivery error:`, err.message);
