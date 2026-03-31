@@ -11,22 +11,26 @@ const path     = require('path');
 const { WebSocketServer } = require('ws');
 const cors     = require('cors');
 
-// ── ACP SDK ──────────────────────────────────────────────────────────────────
-const {
-  AcpContractClient,
-  baseAcpConfig,
-  FareAmount,
-  default: AcpClient,
-} = require('@virtuals-protocol/acp-node');
+// ── ACP SDK (V2) ─────────────────────────────────────────────────────────────
+let AcpContractClientV2, baseAcpConfigV2, AcpClient;
+try {
+  const acpModule = require('@virtuals-protocol/acp-node');
+  AcpContractClientV2 = acpModule.AcpContractClientV2;
+  baseAcpConfigV2 = acpModule.baseAcpConfigV2;
+  AcpClient = acpModule.default;
 
-// Patch Virtuals RPC
-const VIRTUALS_RPC = baseAcpConfig.alchemyRpcUrl;
-if (!baseAcpConfig.chain.rpcUrls.alchemy) {
-  baseAcpConfig.chain.rpcUrls.alchemy = { http: [VIRTUALS_RPC] };
-} else {
-  baseAcpConfig.chain.rpcUrls.alchemy.http = [VIRTUALS_RPC];
+  // Override RPC to avoid rate limits
+  const RPC_URL = process.env.BASE_RPC_URL || 'https://base.drpc.org';
+  if (baseAcpConfigV2) {
+    baseAcpConfigV2.rpcEndpoint = RPC_URL;
+    if (baseAcpConfigV2.chain?.rpcUrls?.default?.http) {
+      baseAcpConfigV2.chain.rpcUrls.default.http = [RPC_URL];
+    }
+  }
+  console.log('[dashboard] ACP SDK loaded');
+} catch (e) {
+  console.warn('[dashboard] ACP SDK load failed — fire-job disabled:', e.message);
 }
-baseAcpConfig.chain.rpcUrls.default.http = [VIRTUALS_RPC];
 
 // ── Anthropic (Claude) — lazy async import ──────────────────────────────────
 let anthropic = null;
@@ -312,7 +316,9 @@ wss.on('connection', ws => {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function makeFare(p) { return new FareAmount(p, baseAcpConfig.baseFare); }
+function makeFare(usdcAmount) {
+  return BigInt(Math.round(usdcAmount * 1e6));
+}
 
 function logJob(jobId, workerName, event, status) {
   const entry = { jobId, worker: workerName, event, status, ts: Date.now() };
@@ -362,10 +368,14 @@ async function initAcp() {
     console.warn('[acp] No AGENT_WALLET_PRIVATE_KEY — fire-job disabled');
     return;
   }
+  if (!AcpContractClientV2 || !baseAcpConfigV2 || !AcpClient) {
+    console.warn('[acp] ACP SDK not loaded — fire-job disabled');
+    return;
+  }
   try {
-    console.log('[acp] Initializing CEO client...');
-    const contractClient = await AcpContractClient.build(
-      PRIVATE_KEY, CEO_ENTITY_ID, CEO_WALLET_ADDRESS
+    console.log('[acp] Initializing CEO client (V2)...');
+    const contractClient = await AcpContractClientV2.build(
+      PRIVATE_KEY, CEO_ENTITY_ID, CEO_WALLET_ADDRESS, baseAcpConfigV2
     );
 
     acpClient = new AcpClient({
@@ -958,5 +968,9 @@ app.use((req, res) => {
 // ── Start ─────────────────────────────────────────────────────────────────────
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`[gsb-dashboard] Listening on port ${PORT}`);
-  await initAcp();
+  try {
+    await initAcp();
+  } catch (err) {
+    console.error('[acp] initAcp crashed — dashboard still running, fire-job disabled:', err.message);
+  }
 });
