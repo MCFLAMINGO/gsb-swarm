@@ -2,7 +2,7 @@
 aptPkgs = ["python3", "python3-pip"]
 
 [phases.build]
-cmds = ["npm install --production", "pip install reportlab xlrd openpyxl pandas -q"]
+cmds = ["npm install --production", "pip install reportlab xlrd openpyxl pandas -q --break-system-packages"]
 
 [start]
 cmd = "node --experimental-require-module index.js"
