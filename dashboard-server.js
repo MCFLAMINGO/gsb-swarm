@@ -148,6 +148,34 @@ let   acpReady       = false;
 let   acceptQueue    = Promise.resolve();
 let   evaluatedCount = 0;
 
+// ── CEO Intelligence Cache (dashboard-side) ─────────────────────────────────
+const ceoDashCache = {
+  lastAlphaScan: null,   // { data, fetchedAt }
+  totalJobsServed: 0,
+  bankStatus: 'ONLINE',
+};
+
+function refreshDashboardCache() {
+  const url = 'https://api.geckoterminal.com/api/v2/networks/base/trending_pools?page=1';
+  const req = https.get(url, { headers: { 'User-Agent': 'GSB-Dashboard/1.0', Accept: 'application/json' } }, res => {
+    let body = '';
+    res.on('data', d => body += d);
+    res.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        ceoDashCache.lastAlphaScan = { data: data?.data || data, fetchedAt: Date.now() };
+        console.log('[dash-cache] Alpha scan refreshed');
+      } catch (e) { console.warn('[dash-cache] Parse error:', e.message); }
+    });
+  });
+  req.on('error', e => console.warn('[dash-cache] Refresh failed:', e.message));
+  req.setTimeout(10000, () => req.destroy());
+}
+
+// Start cache refresh (every 5 min)
+refreshDashboardCache();
+setInterval(refreshDashboardCache, 5 * 60 * 1000);
+
 // ── Worker Status Tracking ──────────────────────────────────────────────────
 const workerStatus = {};
 function initWorkerStatus() {
@@ -949,6 +977,42 @@ app.post('/api/command', async (req, res) => {
     return res.status(400).json({ error: 'No command provided' });
   }
   const cmd = command.toLowerCase();
+
+  // ── Instant cache lane: status/heartbeat/bank queries → answer from cache ──
+  if (/\b(status|heartbeat|what.?s happening|bank|how.?s the swarm|swarm status)\b/.test(cmd)) {
+    const ip = getClientIp(req);
+    const rateErr = checkInstantRate(ip);
+    if (rateErr) return res.status(429).json({ error: rateErr });
+
+    const cacheAge = ceoDashCache.lastAlphaScan
+      ? Math.round((Date.now() - ceoDashCache.lastAlphaScan.fetchedAt) / 60000)
+      : null;
+    const workers = Object.values(workerStatus);
+    const activeWorkers = workers.filter(w => w.status === 'working').length;
+    const totalCompleted = workers.reduce((sum, w) => sum + (w.jobsCompleted || 0), 0);
+    const topPools = ceoDashCache.lastAlphaScan?.data?.slice?.(0, 3) ?? [];
+
+    const lines = [
+      `GSB Intelligence Swarm — ONLINE`,
+      `Workers: ${workers.length} registered, ${activeWorkers} active, ${workers.length - activeWorkers} idle`,
+      `Jobs completed: ${totalCompleted}`,
+      `ACP status: ${acpReady ? 'READY' : 'OFFLINE'}`,
+    ];
+    if (topPools.length > 0) {
+      lines.push(`\nTop Base pools (${cacheAge != null ? cacheAge + 'min ago' : 'cached'}):`);
+      topPools.forEach((p, i) => {
+        const attrs = p.attributes || p;
+        const name = attrs.name || attrs.symbol || `Pool ${i + 1}`;
+        const vol = attrs.volume_usd?.h24 || attrs.volume_24h || '—';
+        lines.push(`  ${i + 1}. ${name} — Vol: $${Number(vol).toLocaleString()}`);
+      });
+    }
+
+    broadcast('cmd-status', { type: 'instant', message: lines.join('\n') });
+    broadcast('cmd-status', { type: 'hint', message: 'Instant status from cache. No ACP jobs fired.' });
+    ceoDashCache.totalJobsServed++;
+    return res.json({ ok: true, lane: 'instant-cache' });
+  }
 
   // ── Fast lane: instant response for price/market queries ─────────────────
   // Public users can use this — rate limited by IP. No auth required.

@@ -110,5 +110,23 @@
       "price": 0.10,
       "outputFields": ["content", "sentiment", "keyNarratives"]
     }
+  ],
+  "GSB CEO": [
+    {
+      "skillId": "social_blast",
+      "description": "Full social coordination: scan alpha → write thread → coordinate X post + Telegram amplification plan",
+      "instruction": "Coordinate a full social blast about {topic}: 1) Get latest alpha/data, 2) Write viral X thread, 3) Generate Telegram raid message, 4) Generate bot amplification instructions",
+      "params": ["topic"],
+      "price": 0.35,
+      "outputFields": ["alphaData", "xThread", "telegramMessage", "ampInstructions"]
+    },
+    {
+      "skillId": "bank_status_report",
+      "description": "Instant GSB bank status — worker load, jobs served, active clients",
+      "instruction": "Instant swarm status from cache — no worker dispatch needed",
+      "params": [],
+      "price": 0.05,
+      "outputFields": ["status", "workerLoad", "totalJobs", "topOpportunity"]
+    }
   ]
 }

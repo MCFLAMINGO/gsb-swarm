@@ -30,6 +30,46 @@ let anthropic = null;
   }
 })();
 
+// ── CEO Intelligence Cache ────────────────────────────────────────────────
+const ceoCache = {
+  lastAlphaScan: null,      // { data, fetchedAt }
+  lastTokenData: {},        // address → { data, fetchedAt }
+  workerLoad: {             // worker name → job count in flight
+    'GSB Token Analyst': 0,
+    'GSB Wallet Profiler': 0,
+    'GSB Alpha Scanner': 0,
+    'GSB Thread Writer': 0,
+  },
+  totalJobsServed: 0,
+  bankStatus: 'ONLINE',
+};
+
+async function refreshCacheFromAlphaScanner() {
+  try {
+    const https = require('https');
+    const data = await new Promise((resolve, reject) => {
+      const req = https.get(
+        'https://api.geckoterminal.com/api/v2/networks/base/trending_pools?page=1',
+        { headers: { 'User-Agent': 'GSB-CEO/1.0', Accept: 'application/json' } },
+        res => {
+          let body = '';
+          res.on('data', d => body += d);
+          res.on('end', () => {
+            try { resolve(JSON.parse(body)); }
+            catch (e) { reject(new Error('JSON parse: ' + e.message)); }
+          });
+        }
+      );
+      req.on('error', reject);
+      req.setTimeout(10000, () => { req.destroy(); reject(new Error('timeout')); });
+    });
+    ceoCache.lastAlphaScan = { data: data?.data || data, fetchedAt: Date.now() };
+    console.log('[CEO-cache] Alpha scan refreshed (' + (ceoCache.lastAlphaScan.data?.length || '?') + ' pools)');
+  } catch (err) {
+    console.warn('[CEO-cache] Alpha scan refresh failed:', err.message);
+  }
+}
+
 // ── Config ──────────────────────────────────────────────────────────────────
 const CEO_ENTITY_ID         = 2;
 const CEO_WALLET_ADDRESS    = '0xf0d4832A4c2D33Faa1F655cd4dE5e7c551a0fE45';
@@ -228,96 +268,132 @@ async function handleProviderJob(client, job, offeringName) {
 
   try {
     if (offeringName === 'swarm_heartbeat_report') {
-      // Fire a real scan_trending job at Alpha Scanner for live market data
-      let alphaData = null;
+      // Answer INSTANTLY from cache — no worker dispatch
+      const cacheAge = ceoCache.lastAlphaScan
+        ? Math.round((Date.now() - ceoCache.lastAlphaScan.fetchedAt) / 60000)
+        : null;
+
+      const prompt = `You are the GSB CEO. Give an instant swarm status report.
+Current time: ${new Date().toISOString()}
+Bank status: ${ceoCache.bankStatus}
+Worker load: ${JSON.stringify(ceoCache.workerLoad)}
+Total jobs served: ${ceoCache.totalJobsServed}
+Latest alpha data (${cacheAge ? cacheAge + ' min ago' : 'not yet cached'}): ${JSON.stringify(ceoCache.lastAlphaScan?.data?.slice?.(0, 3) ?? 'warming up')}
+
+Write a 3-5 sentence CEO briefing. Be direct and data-driven. Include: swarm status, any active worker load, top Base opportunity from cache if available. Format: plain text, no JSON.`;
+
+      const brief = await ceoSynthesize(prompt);
+      // deliver immediately — target <3 seconds total
+      await freshJob.deliver({ type: 'text', value: formatCeoBrief(brief, new Date().toISOString()) });
+      ceoCache.totalJobsServed++;
+
+      // Post instant brief to dashboard
+      const DASHBOARD_URL_HB = process.env.RAILWAY_STATIC_URL
+        ? `https://${process.env.RAILWAY_STATIC_URL}`
+        : 'http://localhost:8080';
       try {
-        console.log(`[CEO-provider] Firing Alpha Scanner scan_trending for heartbeat...`);
-        alphaData = await dispatchToWorker(client, 'alpha_scanner', null, 'scan_trending', {});
-      } catch (err) {
-        console.warn(`[CEO-provider] Alpha Scanner failed for heartbeat: ${err.message}`);
-      }
+        const fetch = (await import('node-fetch')).default;
+        await fetch(`${DASHBOARD_URL_HB}/api/brief`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ brief: formatCeoBrief(brief, new Date().toISOString()), source: 'ceobuyer', timestamp: new Date().toISOString() }),
+        });
+      } catch (e) { console.warn('[ceo] Could not post heartbeat brief:', e.message); }
 
-      // Build market snapshot and opportunities from alpha data
-      let marketContext = '';
-      if (alphaData && !alphaData.error) {
-        marketContext = `Alpha scanner data: ${JSON.stringify(alphaData)}`;
-      } else {
-        marketContext = `Alpha scanner unavailable. Timestamp: ${ts}. All 4 swarm agents are online and operational on Base chain.`;
-      }
-
-      // Synthesize with Claude
-      const synthesis = await ceoSynthesize(
-        `You are the GSB CEO intelligence agent. Write a concise swarm heartbeat report.\n\nSwarm status: All 4 agents ONLINE (Token Analyst, Wallet Profiler, Alpha Scanner, Thread Writer) on Base chain via ACP.\nTimestamp: ${ts}\n\n${marketContext}\n\nWrite a 2-3 sentence market snapshot summarizing current Base market conditions, then list top opportunities if any. Be specific with numbers. End with a 1-sentence GSB swarm status summary.`
-      );
-
-      const agents = [
-        'Token Analyst — ONLINE (token analysis, $0.25)',
-        'Wallet Profiler — ONLINE (wallet profiling, $0.50)',
-        'Alpha Scanner — ONLINE (alpha signals, $0.10)',
-        'Thread Writer — ONLINE (content, $0.15)',
-      ];
-
-      briefText = formatCeoBrief(
-        `SWARM HEARTBEAT REPORT\nStatus: ONLINE\n\nAgents:\n${agents.map(a => `  • ${a}`).join('\n')}\n\n${synthesis}`,
-        ts
-      );
+      console.log(`[CEO-provider] Job ${job.id} delivered instantly (heartbeat from cache).`);
+      return; // done — no worker dispatch needed
 
     } else if (offeringName === 'strategy_task_assignment') {
       let goal = rawContent;
       try { const p = JSON.parse(rawContent); goal = p.goal || rawContent; } catch {}
 
-      const workerKey = routeGoalToWorker(goal);
-      const worker = WORKER_CONFIGS[workerKey];
-      const requirement = buildWorkerRequirement(workerKey, goal);
-
-      if (!requirement) {
-        const errorBrief = formatCeoBrief(
-          `STRATEGY TASK ASSIGNMENT\n\nUnable to process: please include a wallet address (0x...) in your goal so the Wallet Profiler can execute.`,
-          ts
-        );
-        await freshJob.deliver({ type: 'text', value: errorBrief });
-        console.log(`[CEO-provider] Job ${job.id} rejected — missing wallet address.`);
-
-        // Post error brief to dashboard
-        const DASHBOARD_URL_ERR = process.env.RAILWAY_STATIC_URL
-          ? `https://${process.env.RAILWAY_STATIC_URL}`
-          : 'http://localhost:8080';
-        try {
-          const fetch = (await import('node-fetch')).default;
-          await fetch(`${DASHBOARD_URL_ERR}/api/brief`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ brief: errorBrief, source: 'ceobuyer', timestamp: new Date().toISOString() }),
-          });
-          console.log('[ceo] Error brief posted to dashboard');
-        } catch (e) {
-          console.warn('[ceo] Could not post error brief to dashboard:', e.message);
-        }
-        return;
-      }
-
-      // Dispatch to the routed worker
+      const goalLower = goal.toLowerCase();
       const addressMatch = goal.match(/0x[a-fA-F0-9]{40}/);
-      let workerResult;
-      if (workerKey === 'alpha_scanner') {
-        console.log(`[CEO-provider] Routing to ${worker.name} via skill: scan_trending`);
-        workerResult = await dispatchToWorker(client, workerKey, null, 'scan_trending', {});
-      } else if (workerKey === 'token_analyst' && addressMatch) {
-        console.log(`[CEO-provider] Routing to ${worker.name} via skill: analyze_token`);
-        workerResult = await dispatchToWorker(client, workerKey, null, 'analyze_token', { address: addressMatch[0] });
+
+      // Determine if parallel dispatch is needed
+      const wantsAlpha = /alpha|trending|scan|gainers|launch/.test(goalLower);
+      const wantsThread = /thread|post|x\b|twitter|tweet|write/.test(goalLower);
+      const wantsWallet = /wallet|address|profile|who/.test(goalLower);
+      const wantsToken = /token|contract|price|analyze|ca\b/.test(goalLower);
+
+      const dispatches = [];
+      const workerNames = [];
+
+      if (wantsAlpha && wantsThread) {
+        // Parallel: Alpha Scanner + Thread Writer
+        console.log(`[CEO-provider] Parallel dispatch: Alpha Scanner + Thread Writer`);
+        ceoCache.workerLoad['GSB Alpha Scanner']++;
+        ceoCache.workerLoad['GSB Thread Writer']++;
+        dispatches.push(
+          dispatchToWorker(client, 'alpha_scanner', null, 'scan_trending', {}).finally(() => { ceoCache.workerLoad['GSB Alpha Scanner']--; }),
+          dispatchToWorker(client, 'thread_writer', `Write a thread about Base alpha opportunities: ${goal}`, undefined).finally(() => { ceoCache.workerLoad['GSB Thread Writer']--; }),
+        );
+        workerNames.push('GSB Alpha Scanner', 'GSB Thread Writer');
+      } else if (wantsWallet && wantsToken && addressMatch) {
+        // Parallel: Wallet Profiler + Token Analyst
+        console.log(`[CEO-provider] Parallel dispatch: Wallet Profiler + Token Analyst`);
+        ceoCache.workerLoad['GSB Wallet Profiler']++;
+        ceoCache.workerLoad['GSB Token Analyst']++;
+        dispatches.push(
+          dispatchToWorker(client, 'wallet_profiler', `Profile wallet ${addressMatch[0]}`, undefined).finally(() => { ceoCache.workerLoad['GSB Wallet Profiler']--; }),
+          dispatchToWorker(client, 'token_analyst', null, 'analyze_token', { address: addressMatch[0] }).finally(() => { ceoCache.workerLoad['GSB Token Analyst']--; }),
+        );
+        workerNames.push('GSB Wallet Profiler', 'GSB Token Analyst');
       } else {
-        console.log(`[CEO-provider] Routing to ${worker.name}: "${requirement}"`);
-        workerResult = await dispatchToWorker(client, workerKey, requirement);
+        // Single worker dispatch (original logic)
+        const workerKey = routeGoalToWorker(goal);
+        const worker = WORKER_CONFIGS[workerKey];
+        const requirement = buildWorkerRequirement(workerKey, goal);
+
+        if (!requirement) {
+          const errorBrief = formatCeoBrief(
+            `STRATEGY TASK ASSIGNMENT\n\nUnable to process: please include a wallet address (0x...) in your goal so the Wallet Profiler can execute.`,
+            ts
+          );
+          await freshJob.deliver({ type: 'text', value: errorBrief });
+          console.log(`[CEO-provider] Job ${job.id} rejected — missing wallet address.`);
+          const DASHBOARD_URL_ERR = process.env.RAILWAY_STATIC_URL
+            ? `https://${process.env.RAILWAY_STATIC_URL}`
+            : 'http://localhost:8080';
+          try {
+            const fetch = (await import('node-fetch')).default;
+            await fetch(`${DASHBOARD_URL_ERR}/api/brief`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ brief: errorBrief, source: 'ceobuyer', timestamp: new Date().toISOString() }),
+            });
+          } catch (e) { console.warn('[ceo] Could not post error brief:', e.message); }
+          return;
+        }
+
+        console.log(`[CEO-provider] Single dispatch: ${worker.name}`);
+        ceoCache.workerLoad[worker.name]++;
+        if (workerKey === 'alpha_scanner') {
+          dispatches.push(dispatchToWorker(client, workerKey, null, 'scan_trending', {}).finally(() => { ceoCache.workerLoad[worker.name]--; }));
+        } else if (workerKey === 'token_analyst' && addressMatch) {
+          dispatches.push(dispatchToWorker(client, workerKey, null, 'analyze_token', { address: addressMatch[0] }).finally(() => { ceoCache.workerLoad[worker.name]--; }));
+        } else {
+          dispatches.push(dispatchToWorker(client, workerKey, requirement).finally(() => { ceoCache.workerLoad[worker.name]--; }));
+        }
+        workerNames.push(worker.name);
       }
 
-      // Always pass through Claude for a clean natural-language recommendation
-      const workerDataStr = typeof workerResult === 'string' ? workerResult : JSON.stringify(workerResult, null, 2);
+      // Wait for all dispatched workers in parallel
+      const results = await Promise.all(dispatches);
+
+      // Synthesize all results into one brief
+      const allDataStr = results.map((r, i) => {
+        const data = typeof r === 'string' ? r : JSON.stringify(r, null, 2);
+        return `[${workerNames[i]}]\n${data}`;
+      }).join('\n\n');
+
       const synthesis = await ceoSynthesize(
-        `You are the GSB CEO intelligence agent. A user requested: "${goal}"\n\nThe ${worker.name} worker returned this data:\n${workerDataStr}\n\nWrite a clear, actionable strategic recommendation in 3-5 sentences. Reference specific numbers and findings from the worker data. Be direct and crypto-native.`
+        `You are the GSB CEO intelligence agent. A user requested: "${goal}"\n\n${workerNames.length} workers returned data:\n${allDataStr}\n\nWrite a clear, actionable strategic recommendation in 3-5 sentences. Reference specific numbers and findings from the worker data. Be direct and crypto-native.`
       );
 
+      ceoCache.totalJobsServed++;
       briefText = formatCeoBrief(
-        `STRATEGY TASK ASSIGNMENT\nGoal: ${goal}\nAssigned to: ${worker.name}\n\n${synthesis}`,
+        `STRATEGY TASK ASSIGNMENT\nGoal: ${goal}\nAssigned to: ${workerNames.join(' + ')}\n\n${synthesis}`,
         ts
       );
 
@@ -353,6 +429,71 @@ async function handleProviderJob(client, job, offeringName) {
         `ESCALATION DECISION SUPPORT\nSituation: ${situation}\nUrgency: ${urgency.toUpperCase()}\n\n${synthesis}`,
         ts
       );
+
+    } else if (offeringName === 'social_blast') {
+      // Full social coordination chain: Alpha Scanner + Thread Writer in PARALLEL
+      let topic = rawContent;
+      try { const p = JSON.parse(rawContent); topic = p.topic || p.params?.topic || rawContent; } catch {}
+
+      console.log(`[CEO-provider] Social blast: parallel Alpha Scanner + Thread Writer for "${topic}"`);
+      ceoCache.workerLoad['GSB Alpha Scanner']++;
+      ceoCache.workerLoad['GSB Thread Writer']++;
+
+      const [alphaResult, threadResult] = await Promise.all([
+        dispatchToWorker(client, 'alpha_scanner', null, 'scan_trending', {}).finally(() => { ceoCache.workerLoad['GSB Alpha Scanner']--; }),
+        dispatchToWorker(client, 'thread_writer', `Write a thread about ${topic}`, undefined).finally(() => { ceoCache.workerLoad['GSB Thread Writer']--; }),
+      ]);
+
+      const alphaStr = typeof alphaResult === 'string' ? alphaResult : JSON.stringify(alphaResult, null, 2);
+      const threadStr = typeof threadResult === 'string' ? threadResult : JSON.stringify(threadResult, null, 2);
+
+      const synthesis = await ceoSynthesize(
+        `You are the GSB CEO coordinating a social blast about: "${topic}"
+
+Alpha Scanner data:
+${alphaStr}
+
+Thread Writer output:
+${threadStr}
+
+Generate a unified social blast brief with these EXACT sections (plain text, no JSON):
+
+X THREAD (5 tweets):
+[Write a 5-tweet viral thread using the alpha data. Format: 1/ 2/ 3/ 4/ 5/]
+
+TELEGRAM MESSAGE:
+[Write a shorter, emoji-heavy raid-style Telegram message based on the same data]
+
+AMPLIFICATION INSTRUCTIONS:
+[Write specific bot/community amplification instructions like: "Reply to tweet 1 with: ...", "Like and RT tweet 2", etc.]`
+      );
+
+      ceoCache.totalJobsServed++;
+      briefText = formatCeoBrief(
+        `SOCIAL BLAST COORDINATION\nTopic: ${topic}\nWorkers: Alpha Scanner + Thread Writer (parallel)\n\n${synthesis}`,
+        ts
+      );
+
+    } else if (offeringName === 'bank_status_report') {
+      // Instant bank status from cache — no worker dispatch
+      const cacheAge = ceoCache.lastAlphaScan
+        ? Math.round((Date.now() - ceoCache.lastAlphaScan.fetchedAt) / 60000)
+        : null;
+
+      const prompt = `You are the GSB CEO. Give an instant bank status report.
+Bank status: ${ceoCache.bankStatus}
+Worker load: ${JSON.stringify(ceoCache.workerLoad)}
+Total jobs served: ${ceoCache.totalJobsServed}
+Cache age: ${cacheAge ? cacheAge + ' minutes' : 'not yet cached'}
+Top alpha from cache: ${JSON.stringify(ceoCache.lastAlphaScan?.data?.slice?.(0, 2) ?? 'warming up')}
+
+Write a 2-3 sentence bank status. Include worker load, jobs served, and top opportunity if cached. Plain text, no JSON.`;
+
+      const brief = await ceoSynthesize(prompt);
+      ceoCache.totalJobsServed++;
+      await freshJob.deliver({ type: 'text', value: formatCeoBrief(brief, new Date().toISOString()) });
+      console.log(`[CEO-provider] Job ${job.id} delivered instantly (bank_status_report).`);
+      return; // done — no further dispatch
     }
 
     await freshJob.deliver({ type: 'text', value: briefText });
@@ -637,10 +778,19 @@ async function main() {
         let offeringName = job.serviceName || job.serviceOffering || '';
         const rawContent = extractContent(job.requirement) || extractContent(job.memos?.[0]?.content) || '';
 
+        // Check for skill-based dispatch (e.g. social_blast, bank_status_report)
+        let skillRequest = null;
+        try { skillRequest = JSON.parse(rawContent); } catch {}
+        if (skillRequest?.skillId === 'social_blast' || skillRequest?.skillId === 'bank_status_report') {
+          offeringName = skillRequest.skillId;
+        }
+
         // Keyword fallback when serviceName/serviceOffering are empty or unknown
-        if (!offeringName || !OFFERING_SCHEMAS[offeringName]) {
+        if (!offeringName || (!OFFERING_SCHEMAS[offeringName] && offeringName !== 'social_blast' && offeringName !== 'bank_status_report')) {
           const lower = (rawContent || job.requirement || job.content || '').toLowerCase();
-          if (/heartbeat|status|swarm/.test(lower)) {
+          if (/social.?blast|raid|amplif/.test(lower)) {
+            offeringName = 'social_blast';
+          } else if (/heartbeat|status|swarm|bank/.test(lower)) {
             offeringName = 'swarm_heartbeat_report';
           } else if (/escalat|risk|situation|urgent|decision/.test(lower)) {
             offeringName = 'escalation_decision_support';
@@ -651,7 +801,7 @@ async function main() {
           }
         }
 
-        if (OFFERING_SCHEMAS[offeringName]) {
+        if (OFFERING_SCHEMAS[offeringName] || offeringName === 'social_blast' || offeringName === 'bank_status_report') {
           console.log(`[CEO-provider] Incoming job ${job.id} for offering: ${offeringName}`);
           const check = validateProviderInput(offeringName, rawContent);
           if (!check.valid) {
@@ -669,6 +819,11 @@ async function main() {
       // ── BUYER side — existing acceptRequirement logic ──
       if (memo) {
         console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} memo=${memo.id} nextPhase=${memo.nextPhase}`);
+        // Track worker load when dispatching
+        const dispatchedWorker = jobWorkerMap.get(job.id);
+        if (dispatchedWorker && ceoCache.workerLoad[dispatchedWorker.name] !== undefined) {
+          ceoCache.workerLoad[dispatchedWorker.name]++;
+        }
         queueAccept(job, memo);
       } else {
         console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} — no memo.`);
@@ -703,6 +858,12 @@ async function main() {
         } else {
           console.log(`[ceo] Job ${job.id} — no deliverable parsed (worker=${worker?.name}, memos=${memos.length})`);
         }
+
+        // Track worker load — decrement on completion
+        if (worker && ceoCache.workerLoad[worker.name] !== undefined) {
+          ceoCache.workerLoad[worker.name] = Math.max(0, ceoCache.workerLoad[worker.name] - 1);
+        }
+        ceoCache.totalJobsServed++;
 
         await job.evaluate(true, 'Intelligence received. Brief updated.');
         console.log(`[ceo] ✓ Job ${job.id} approved.`);
@@ -747,6 +908,11 @@ async function main() {
       }
     },
   });
+
+  // ── Start background cache refresh (every 5 minutes) ────────────────────
+  refreshCacheFromAlphaScanner(); // initial fetch
+  setInterval(refreshCacheFromAlphaScanner, 5 * 60 * 1000);
+  console.log('[ceo] Cache refresh started (every 5 min)');
 
   console.log('[ceo] Ready. Firing jobs at all 4 workers.\n');
 
