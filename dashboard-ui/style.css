@@ -1146,6 +1146,19 @@ body {
   padding: var(--space-3);
 }
 
+/* ── AI Badge ───────────────────────────────────────────────────────────── */
+.ai-badge {
+  font-size: 0.65rem;
+  background: var(--accent);
+  color: #000;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
 /* ── Responsive: Swarm bar ──────────────────────────────────────────────── */
 @media (max-width: 900px) {
   .swarm-status-bar { padding: var(--space-2) var(--space-3); gap: var(--space-2); }

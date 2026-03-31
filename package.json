@@ -7,6 +7,7 @@
     "start": "node --experimental-require-module index.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "@virtuals-protocol/acp-node": "latest",
     "axios": "^1.6.0",
     "dotenv": "^16.0.0",

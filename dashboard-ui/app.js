@@ -620,6 +620,20 @@ function renderCeoSynthesis(synthesis) {
     queryEl.classList.remove('hidden');
   }
 
+  // AI badge
+  const titleEl = document.getElementById('ceo-synth-title');
+  if (titleEl) {
+    const existingBadge = titleEl.querySelector('.ai-badge');
+    if (synthesis.aiPowered && !existingBadge) {
+      const badge = document.createElement('span');
+      badge.className = 'ai-badge';
+      badge.textContent = 'Claude';
+      titleEl.appendChild(badge);
+    } else if (!synthesis.aiPowered && existingBadge) {
+      existingBadge.remove();
+    }
+  }
+
   document.getElementById('ceo-synth-summary').textContent = synthesis.summary;
 
   const list = document.getElementById('ceo-synth-findings-list');
@@ -649,7 +663,7 @@ function renderCmdSynthesis(synthesis) {
 
   const header = document.createElement('div');
   header.className = 'block-header';
-  header.innerHTML = '&#9670; CEO INTELLIGENCE BRIEF';
+  header.innerHTML = '&#9670; CEO INTELLIGENCE BRIEF' + (synthesis.aiPowered ? ' <span class="ai-badge">Claude</span>' : '');
 
   const body = document.createElement('div');
   body.className = 'block-body synth-body';

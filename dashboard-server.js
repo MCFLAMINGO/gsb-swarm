@@ -27,6 +27,22 @@ if (!baseAcpConfig.chain.rpcUrls.alchemy) {
 }
 baseAcpConfig.chain.rpcUrls.default.http = [VIRTUALS_RPC];
 
+// ── Anthropic (Claude) — lazy async import ──────────────────────────────────
+let anthropic = null;
+(async () => {
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      const { default: Anthropic } = await import('@anthropic-ai/sdk');
+      anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      console.log('[CEO] ✓ Claude brain online');
+    } catch (e) {
+      console.warn('[CEO] Anthropic SDK load failed:', e.message);
+    }
+  } else {
+    console.log('[CEO] No ANTHROPIC_API_KEY — using rule-based synthesis');
+  }
+})();
+
 // ── Config ───────────────────────────────────────────────────────────────────
 const PRIVATE_KEY        = process.env.AGENT_WALLET_PRIVATE_KEY;
 const CEO_ENTITY_ID      = 2;
@@ -91,8 +107,80 @@ function setWorkerStatus(name, status, jobId) {
   broadcast('swarm-status', Object.values(workerStatus));
 }
 
-// ── CEO Synthesis Engine (rule-based, no API key needed) ────────────────────
-function ceoSynthesize(workerResults, originalCommand) {
+// ── CEO Synthesis Engine — Claude AI with rule-based fallback ───────────────
+
+function parseClaudeResponse(text) {
+  const sections = { summary: '', keyFindings: [], recommendation: '' };
+
+  // Extract Summary
+  const summaryMatch = text.match(/## Summary\s*\n([\s\S]*?)(?=\n## |$)/);
+  if (summaryMatch) sections.summary = summaryMatch[1].trim();
+
+  // Extract Key Findings
+  const findingsMatch = text.match(/## Key Findings\s*\n([\s\S]*?)(?=\n## |$)/);
+  if (findingsMatch) {
+    sections.keyFindings = findingsMatch[1]
+      .split(/\n[-•*]\s*/)
+      .map(s => s.trim())
+      .filter(Boolean);
+  }
+
+  // Extract CEO Recommendation
+  const recMatch = text.match(/## CEO Recommendation\s*\n([\s\S]*?)$/);
+  if (recMatch) sections.recommendation = recMatch[1].trim();
+
+  return sections;
+}
+
+async function ceoSynthesizeWithClaude(workerResults, originalCommand) {
+  const prompt = `You are the GSB CEO — the orchestration hub of the GSB Intelligence Swarm, a tokenized AI agent on Virtuals Protocol (Base chain). You have just received intelligence reports from your worker agents. Synthesize them into a crisp, professional CEO brief.
+
+ORIGINAL QUERY: ${originalCommand || 'Swarm intelligence brief'}
+
+WORKER REPORTS:
+${Object.entries(workerResults).map(([worker, data]) => `[${worker}]\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}`).join('\n\n')}
+
+Write a CEO Intelligence Brief with these exact sections:
+## Summary
+(2-3 sentences synthesizing ALL worker findings in CEO voice — confident, analytical, crypto-native)
+
+## Key Findings
+(5-7 bullet points — the most important facts extracted from ALL worker reports combined)
+
+## CEO Recommendation
+(1-2 sentences — one clear, specific, actionable takeaway for the user)
+
+Be direct, specific, use numbers from the data. No fluff. Sound like a sharp DeFi analyst, not a chatbot.`;
+
+  const msg = await anthropic.messages.create({
+    model: 'claude-haiku-3-5',
+    max_tokens: 600,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  const text = msg.content[0].text;
+  const parsed = parseClaudeResponse(text);
+
+  // Collect worker names for metadata
+  const workerNames = [];
+  if (workerResults.token_analysis && !workerResults.token_analysis.error) workerNames.push('Token Analyst');
+  if (workerResults.wallet_profile && !workerResults.wallet_profile.error) workerNames.push('Wallet Profiler');
+  if (workerResults.alpha_signals && !workerResults.alpha_signals.error) workerNames.push('Alpha Scanner');
+  if (workerResults.thread && workerResults.thread.thread) workerNames.push('Thread Writer');
+
+  return {
+    summary: parsed.summary || 'AI synthesis complete.',
+    keyFindings: parsed.keyFindings,
+    recommendation: parsed.recommendation || 'Review the brief above.',
+    workerCount: workerNames.length,
+    workers: workerNames,
+    query: originalCommand || null,
+    timestamp: new Date().toISOString(),
+    aiPowered: true,
+  };
+}
+
+function ceoSynthesizeRuleBased(workerResults, originalCommand) {
   const ts = new Date().toISOString();
   const workerNames = [];
   const keyFindings = [];
@@ -106,7 +194,6 @@ function ceoSynthesize(workerResults, originalCommand) {
     const price = token.price?.usd ? `$${parseFloat(token.price.usd).toFixed(6)}` : null;
     const chg = token.price?.change_24h;
     if (price) {
-      const dir = chg > 0 ? 'up' : chg < 0 ? 'down' : 'flat';
       summaryParts.push(`${sym} is trading at ${price}${chg != null ? ` (${chg > 0 ? '+' : ''}${chg.toFixed(2)}% 24h)` : ''}`);
       if (chg > 10) keyFindings.push(`${sym} showing strong bullish momentum with ${chg.toFixed(1)}% gain in 24h`);
       else if (chg > 0) keyFindings.push(`${sym} trending positive at +${chg.toFixed(1)}% over 24h`);
@@ -152,7 +239,7 @@ function ceoSynthesize(workerResults, originalCommand) {
   }
 
   if (workerNames.length === 0) {
-    return { summary: 'No worker data available yet.', keyFindings: [], recommendation: 'Deploy workers to gather intelligence.', workerCount: 0, timestamp: ts };
+    return { summary: 'No worker data available yet.', keyFindings: [], recommendation: 'Deploy workers to gather intelligence.', workerCount: 0, timestamp: ts, aiPowered: false };
   }
 
   // Build summary
@@ -179,7 +266,19 @@ function ceoSynthesize(workerResults, originalCommand) {
     workers: workerNames,
     query: originalCommand || null,
     timestamp: ts,
+    aiPowered: false,
   };
+}
+
+async function ceoSynthesize(workerResults, originalCommand) {
+  if (anthropic) {
+    try {
+      return await ceoSynthesizeWithClaude(workerResults, originalCommand);
+    } catch (err) {
+      console.warn('[CEO] Claude synthesis failed, falling back to rule-based:', err.message);
+    }
+  }
+  return ceoSynthesizeRuleBased(workerResults, originalCommand);
 }
 
 // ── Express + WS ─────────────────────────────────────────────────────────────
@@ -308,7 +407,7 @@ async function initAcp() {
           evaluatedCount++;
 
           // Run CEO synthesis on current results
-          const synthesis = ceoSynthesize(briefResults);
+          const synthesis = await ceoSynthesize(briefResults);
           broadcast('cmd-synthesis', synthesis);
 
           // Push brief after every 4th evaluation (one full round)
@@ -375,13 +474,13 @@ app.post('/api/fire-job', async (req, res) => {
 });
 
 // ── POST /api/brief (from external ceobuyer.js) ───────────────────────────────
-app.post('/api/brief', (req, res) => {
+app.post('/api/brief', async (req, res) => {
   const brief = req.body;
   if (!brief?.results) return res.status(400).json({ error: 'Missing results' });
   // Merge into briefResults
   Object.assign(briefResults, brief.results);
   latestBrief = buildBriefSnapshot();
-  latestBrief.ceoSynthesis = ceoSynthesize(briefResults);
+  latestBrief.ceoSynthesis = await ceoSynthesize(briefResults);
   broadcast('brief', latestBrief);
   broadcast('cmd-synthesis', latestBrief.ceoSynthesis);
   console.log('[api] External brief received, pushed to dashboard');
