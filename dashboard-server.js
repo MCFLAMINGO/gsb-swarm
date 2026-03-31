@@ -49,10 +49,66 @@ let anthropic = null;
 })();
 
 // ── Config ───────────────────────────────────────────────────────────────────
+const crypto             = require('crypto');
 const PRIVATE_KEY        = process.env.AGENT_WALLET_PRIVATE_KEY;
 const CEO_ENTITY_ID      = 2;
 const CEO_WALLET_ADDRESS = '0xf0d4832A4c2D33Faa1F655cd4dE5e7c551a0fE45';
 const PORT               = 8080; // Fixed — Railway domain set to 8080
+const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || null;
+
+// ── Auth — operator session tokens ──────────────────────────────────────────
+const validTokens = new Set();
+
+// ── Rate limiting ───────────────────────────────────────────────────────────
+const instantRateMap = new Map(); // ip -> { count, resetAt }
+const INSTANT_LIMIT  = 10; // per hour per IP
+
+let dailyJobCount    = 0;
+let dailyJobResetAt  = Date.now() + 86400000;
+const MAX_DAILY_JOBS = 20;
+
+function getClientIp(req) {
+  return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+}
+
+function checkInstantRate(ip) {
+  const now = Date.now();
+  let entry = instantRateMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    entry = { count: 0, resetAt: now + 3600000 };
+    instantRateMap.set(ip, entry);
+  }
+  if (entry.count >= INSTANT_LIMIT) {
+    const minsLeft = Math.ceil((entry.resetAt - now) / 60000);
+    return `Rate limit: ${INSTANT_LIMIT} instant queries/hour. Try again in ${minsLeft}m`;
+  }
+  entry.count++;
+  return null;
+}
+
+function checkDailyJobLimit() {
+  if (Date.now() > dailyJobResetAt) {
+    dailyJobCount = 0;
+    dailyJobResetAt = Date.now() + 86400000;
+  }
+  if (dailyJobCount >= MAX_DAILY_JOBS) {
+    return `Daily job limit reached (${MAX_DAILY_JOBS}/day). Resets in ${Math.ceil((dailyJobResetAt - Date.now()) / 3600000)}h`;
+  }
+  dailyJobCount++;
+  return null;
+}
+
+function requireOperator(req, res, next) {
+  if (!DASHBOARD_PASSWORD) {
+    return res.status(403).json({ error: 'Operator mode not configured' });
+  }
+  const token = req.headers['x-gsb-token']
+    || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
+  if (!token || !validTokens.has(token)) {
+    return res.status(401).json({ error: 'Operator authentication required' });
+  }
+  next();
+}
 
 const WORKER_CATALOG = {
   'GSB Token Analyst': {
@@ -449,8 +505,38 @@ async function initAcp() {
   }
 }
 
-// ── POST /api/fire-job ────────────────────────────────────────────────────────
-app.post('/api/fire-job', async (req, res) => {
+// ── POST /api/auth — password login → token ─────────────────────────────────
+app.post('/api/auth', (req, res) => {
+  if (!DASHBOARD_PASSWORD) {
+    return res.status(404).json({ error: 'Operator mode not configured' });
+  }
+  const { password } = req.body || {};
+  if (!password || password !== DASHBOARD_PASSWORD) {
+    return res.status(401).json({ error: 'Incorrect password' });
+  }
+  const token = 'gsb_' + crypto.randomBytes(16).toString('hex');
+  validTokens.add(token);
+  console.log('[auth] Operator token issued');
+  res.json({ ok: true, token });
+});
+
+// ── GET /api/auth/verify — check if token is valid ──────────────────────────
+app.get('/api/auth/verify', (req, res) => {
+  const token = req.headers['x-gsb-token']
+    || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
+  if (token && validTokens.has(token)) {
+    return res.json({ ok: true, operator: true });
+  }
+  res.status(401).json({ ok: false });
+});
+
+// ── GET /api/auth/status — public: is password configured? ──────────────────
+app.get('/api/auth/status', (req, res) => {
+  res.json({ passwordConfigured: !!DASHBOARD_PASSWORD });
+});
+
+// ── POST /api/fire-job — OPERATOR ONLY ───────────────────────────────────────
+app.post('/api/fire-job', requireOperator, async (req, res) => {
   const { worker: workerName, requirement } = req.body || {};
 
   if (!workerName || !requirement) {
@@ -463,6 +549,9 @@ app.post('/api/fire-job', async (req, res) => {
   if (!acpClient || !acpReady) {
     return res.status(503).json({ error: 'ACP client not ready — check AGENT_WALLET_PRIVATE_KEY' });
   }
+
+  const jobErr = checkDailyJobLimit();
+  if (jobErr) return res.status(429).json({ error: jobErr });
 
   try {
     console.log(`[api] Firing job → ${workerName}: "${requirement}"`);
@@ -539,7 +628,7 @@ app.get('/api/skills', (req, res) => {
   }
 });
 
-app.post('/api/skills', (req, res) => {
+app.post('/api/skills', requireOperator, (req, res) => {
   const { workerName, ...skill } = req.body;
   if (!workerName || !skill.skillId || !skill.instruction) {
     return res.status(400).json({ error: 'Missing required fields' });
@@ -561,7 +650,7 @@ app.post('/api/skills', (req, res) => {
   }
 });
 
-app.delete('/api/skills/:workerName/:skillId', (req, res) => {
+app.delete('/api/skills/:workerName/:skillId', requireOperator, (req, res) => {
   const { workerName, skillId } = req.params;
   try {
     const registry = JSON.parse(fs.readFileSync(path.join(__dirname, 'skills.json'), 'utf8'));
@@ -824,7 +913,7 @@ app.post('/api/command', async (req, res) => {
   const cmd = command.toLowerCase();
 
   // ── Fast lane: instant response for price/market queries ─────────────────
-  // Skip ACP entirely for questions answerable in <2 seconds
+  // Public users can use this — rate limited by IP. No auth required.
   const DEEP_KEYWORDS = /thread|tweet|post|write|profile|wallet|address|full brief|run all|swarm|everything/;
   const isDeepWork = DEEP_KEYWORDS.test(cmd);
 
@@ -832,6 +921,12 @@ app.post('/api/command', async (req, res) => {
     try {
       const instant = await instantQuery(command);
       if (instant) {
+        // Rate limit instant queries per IP
+        const ip = getClientIp(req);
+        const rateErr = checkInstantRate(ip);
+        if (rateErr) {
+          return res.status(429).json({ error: rateErr });
+        }
         // Stream the fast answer immediately via WebSocket
         broadcast('cmd-status', { type: 'instant', message: instant });
         broadcast('cmd-status', {
@@ -846,7 +941,18 @@ app.post('/api/command', async (req, res) => {
     }
   }
 
-  // ── Agent lane: deep work that needs the swarm ────────────────────────────
+  // ── Agent lane: deep work that needs the swarm — OPERATOR ONLY ────────────
+  // Check operator auth for ACP jobs
+  const opToken = req.headers['x-gsb-token']
+    || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
+  if (DASHBOARD_PASSWORD && (!opToken || !validTokens.has(opToken))) {
+    return res.status(401).json({ error: 'Operator authentication required to deploy agents' });
+  }
+
+  // Check daily job limit
+  const jobLimitErr = checkDailyJobLimit();
+  if (jobLimitErr) return res.status(429).json({ error: jobLimitErr });
+
   if (!acpClient || !acpReady) {
     broadcast('cmd-status', {
       type: 'error',

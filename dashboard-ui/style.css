@@ -1277,6 +1277,177 @@ body {
   outline: none;
   border-color: var(--accent);
 }
+/* ── Lock overlay (Fire Job + Skills — public mode) ─────────────────────────── */
+.section-lock {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  z-index: 10;
+}
+.section-lock.hidden { display: none !important; }
+.lock-content {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  color: var(--text-muted);
+}
+.lock-content p {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  max-width: 28ch;
+}
+.lock-content svg {
+  color: var(--text-faint);
+}
+
+/* ── Hire CTA (bottom-right, public mode) ──────────────────────────────────── */
+.hire-cta {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  z-index: 100;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+}
+.hire-cta.hidden { display: none !important; }
+.hire-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.hire-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.hire-btn {
+  background: var(--accent);
+  color: #000;
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 0.8rem;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.hire-btn:hover { opacity: 0.85; }
+
+/* ── Operator badge + login button (sidebar footer) ────────────────────────── */
+.operator-badge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-weight: 600;
+  padding: var(--space-1) 0;
+}
+.operator-badge.hidden { display: none !important; }
+
+.operator-login-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  transition: background var(--ease), color var(--ease), border-color var(--ease);
+  cursor: pointer;
+}
+.operator-login-btn:hover {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+.operator-login-btn.hidden { display: none !important; }
+
+/* ── Login page ────────────────────────────────────────────────────────────── */
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg);
+}
+.login-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2.5rem;
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.login-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+.login-title { font-size: 1.2rem; font-weight: 700; color: var(--text); }
+.login-sub { font-size: 0.8rem; color: var(--text-muted); font-family: var(--font-mono); }
+#login-pw {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: var(--font-mono);
+  box-sizing: border-box;
+  transition: border-color var(--ease);
+}
+#login-pw:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+#login-btn {
+  width: 100%;
+  padding: 0.75rem;
+  background: var(--accent);
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-family: var(--font-sans);
+  transition: opacity 0.15s;
+}
+#login-btn:hover { opacity: 0.85; }
+.login-err { color: #ff4444; font-size: 0.8rem; text-align: center; }
+.login-err.hidden { display: none; }
+.login-public-link {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  text-align: center;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.login-public-link:hover { color: var(--text); }
+
 .btn-secondary {
   display: inline-flex;
   align-items: center;

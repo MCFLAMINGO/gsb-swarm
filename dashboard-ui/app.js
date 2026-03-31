@@ -12,9 +12,89 @@ let currentThread = '';
 let acpReady     = false;
 let workers      = [];
 
+// ── Auth state ────────────────────────────────────────────────────────────────
+let operatorToken = sessionStorage.getItem('gsb_operator_token') || null;
+let isOperator = false;
+let passwordConfigured = false;
+
+async function checkAuth() {
+  // Check if password is configured on the server
+  try {
+    const statusRes = await fetch(`${API_BASE}/api/auth/status`);
+    const statusData = await statusRes.json();
+    passwordConfigured = statusData.passwordConfigured;
+  } catch (_) {}
+
+  if (!passwordConfigured) {
+    // No password set — operator features simply disabled, no login shown
+    setPublicMode(false);
+    return;
+  }
+
+  if (!operatorToken) { setPublicMode(true); return; }
+
+  // Verify token is still valid
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/verify`, {
+      headers: { 'x-gsb-token': operatorToken }
+    });
+    if (res.ok) {
+      isOperator = true;
+      setOperatorMode();
+    } else {
+      operatorToken = null;
+      sessionStorage.removeItem('gsb_operator_token');
+      setPublicMode(true);
+    }
+  } catch (_) {
+    setPublicMode(true);
+  }
+}
+
+function setPublicMode(showLogin) {
+  isOperator = false;
+  // CEO command bar: instant queries only in public mode
+  document.getElementById('cmd-input').placeholder =
+    'Ask about any token, wallet, or market trend — e.g. "what\'s trending on Base?"';
+  // Show/hide operator controls
+  document.getElementById('operator-badge').classList.add('hidden');
+  if (showLogin) {
+    document.getElementById('operator-login-btn').classList.remove('hidden');
+  } else {
+    document.getElementById('operator-login-btn').classList.add('hidden');
+  }
+  // Lock Fire Job and Skills tabs
+  document.getElementById('fire-lock').classList.remove('hidden');
+  document.getElementById('skills-lock').classList.remove('hidden');
+  // Show hire CTA
+  document.getElementById('hire-cta').classList.remove('hidden');
+  // Enable Send button for instant queries (public can still ask)
+  document.getElementById('cmd-send').disabled = false;
+  document.getElementById('cmd-input').disabled = false;
+  document.getElementById('cmd-send').textContent = 'Ask';
+}
+
+function setOperatorMode() {
+  isOperator = true;
+  document.getElementById('operator-badge').classList.remove('hidden');
+  document.getElementById('operator-login-btn').classList.add('hidden');
+  document.getElementById('fire-lock').classList.add('hidden');
+  document.getElementById('skills-lock').classList.add('hidden');
+  document.getElementById('hire-cta').classList.add('hidden');
+  document.getElementById('cmd-send').textContent = 'Send';
+  document.getElementById('cmd-input').placeholder =
+    'Tell the agents what to do — e.g. "analyze $GSB token and write a thread"';
+}
+
+function authHeaders(headers) {
+  if (operatorToken) headers['x-gsb-token'] = operatorToken;
+  return headers;
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 (async function init() {
   await loadWorkers();
+  await checkAuth();
   connectWS();
 })();
 
@@ -88,17 +168,20 @@ function setAcpStatus(data) {
   const dot   = document.getElementById('acp-dot');
   const label = document.getElementById('acp-status');
   const btn   = document.getElementById('fire-btn');
-  const cmdBtn = document.getElementById('cmd-send');
-  const cmdIn  = document.getElementById('cmd-input');
   dot.className   = 'dot ' + (acpReady ? 'connected' : 'error');
   label.textContent = acpReady ? 'CEO wallet ready' : (data.error ? 'Wallet error' : 'Initializing…');
   btn.disabled    = !acpReady;
   btn.textContent = acpReady ? 'Fire Job →' : 'Waiting for wallet…';
-  cmdBtn.disabled = !acpReady;
-  cmdIn.disabled  = !acpReady;
-  cmdIn.placeholder = acpReady
-    ? 'Tell the agents what to do — e.g. "analyze $GSB token and write a thread"'
-    : 'Waiting for CEO wallet…';
+  // In public mode, CEO command bar stays enabled for instant queries regardless of ACP
+  // Only disable if ACP is not ready AND user is operator
+  if (isOperator) {
+    document.getElementById('cmd-send').disabled = !acpReady;
+    document.getElementById('cmd-input').disabled = !acpReady;
+    if (!acpReady) {
+      document.getElementById('cmd-input').placeholder = 'Waiting for CEO wallet…';
+    }
+  }
+  // Public mode: cmd bar always enabled for instant queries — placeholder set by setPublicMode
 }
 
 // ── Render Brief ──────────────────────────────────────────────────────────────
@@ -313,7 +396,7 @@ document.getElementById('fire-btn').addEventListener('click', async () => {
     try {
       const r = await fetch(`${API_BASE}/api/fire-job`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body:    JSON.stringify({ worker: workerName, requirement }),
       });
       const data = await r.json();
@@ -393,7 +476,7 @@ document.querySelectorAll('.btn-grad').forEach(btn => {
       try {
         const r = await fetch(`${API_BASE}/api/fire-job`, {
           method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
           body:    JSON.stringify({ worker: workerName, requirement: worker.defaultReq }),
         });
         const data = await r.json();
@@ -429,7 +512,9 @@ cmdSend.addEventListener('click', sendCommand);
 
 async function sendCommand() {
   const text = cmdInput.value.trim();
-  if (!text || !acpReady) return;
+  if (!text) return;
+  // In public mode, allow sending for instant queries even without ACP
+  if (!isOperator && !text.trim()) return;
 
   // Echo user command into history
   addCmdMsg('user', `> ${text}`);
@@ -440,9 +525,10 @@ async function sendCommand() {
   cmdInput.disabled = true;
 
   try {
+    const headers = authHeaders({ 'Content-Type': 'application/json' });
     const r = await fetch(`${API_BASE}/api/command`, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body:    JSON.stringify({ command: text }),
     });
     const data = await r.json();
@@ -713,9 +799,13 @@ function renderCmdSynthesis(synthesis) {
 // Suggested commands on focus (shown once per session)
 let hintShown = false;
 cmdInput.addEventListener('focus', () => {
-  if (!hintShown && acpReady) {
+  if (!hintShown) {
     hintShown = true;
-    addCmdMsg('info', 'Try: "analyze $GSB token" · "profile wallet 0x…" · "scan for alpha" · "write a thread" · "run full brief"');
+    if (isOperator) {
+      addCmdMsg('info', 'Try: "analyze $GSB token" · "profile wallet 0x…" · "scan for alpha" · "write a thread" · "run full brief"');
+    } else {
+      addCmdMsg('info', 'Try: "price of $ETH" · "what\'s trending on Base?" · "market sentiment" · "check $SOL"');
+    }
   }
 });
 
@@ -763,7 +853,7 @@ function renderSkillCards() {
   container.querySelectorAll('.skill-delete-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (!confirm(`Delete skill ${btn.dataset.skill}?`)) return;
-      await fetch(`${API_BASE}/api/skills/${encodeURIComponent(btn.dataset.worker)}/${btn.dataset.skill}`, { method: 'DELETE' });
+      await fetch(`${API_BASE}/api/skills/${encodeURIComponent(btn.dataset.worker)}/${btn.dataset.skill}`, { method: 'DELETE', headers: authHeaders({}) });
       await loadSkillRegistry();
     });
   });
@@ -819,7 +909,7 @@ document.getElementById('sf-save')?.addEventListener('click', async () => {
 
   const res = await fetch(`${API_BASE}/api/skills`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ workerName, skillId, description, instruction, params, price })
   });
 

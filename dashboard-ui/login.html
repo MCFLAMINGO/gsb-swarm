@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GSB Intelligence — Operator Access</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="login-page">
+  <div class="login-card">
+    <div class="login-logo">
+      <svg viewBox="0 0 40 40" fill="none" width="48" height="48" aria-label="GSB">
+        <rect width="40" height="40" rx="8" fill="var(--accent)"/>
+        <text x="20" y="27" text-anchor="middle" font-family="JetBrains Mono" font-weight="700" font-size="14" fill="#000">GSB</text>
+      </svg>
+      <span class="login-title">GSB Intelligence Swarm</span>
+      <span class="login-sub">Operator Access</span>
+    </div>
+    <input type="password" id="login-pw" placeholder="Enter operator password" autocomplete="current-password">
+    <button id="login-btn">Enter Operator Mode</button>
+    <div class="login-err hidden" id="login-err">Incorrect password</div>
+    <a href="/" class="login-public-link">&larr; View public dashboard</a>
+  </div>
+  <script>
+    document.getElementById('login-btn').addEventListener('click', async () => {
+      const pw = document.getElementById('login-pw').value;
+      const errEl = document.getElementById('login-err');
+      errEl.classList.add('hidden');
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw })
+      });
+      if (res.ok) {
+        const { token } = await res.json();
+        sessionStorage.setItem('gsb_operator_token', token);
+        window.location.href = '/';
+      } else {
+        errEl.classList.remove('hidden');
+      }
+    });
+    document.getElementById('login-pw').addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('login-btn').click();
+    });
+  </script>
+</body>
+</html>

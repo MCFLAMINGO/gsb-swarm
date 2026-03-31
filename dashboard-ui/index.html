@@ -75,6 +75,14 @@
       <span id="acp-status">Initializing…</span>
     </div>
     <div class="status-row muted" id="last-update">No brief yet</div>
+    <div class="operator-badge hidden" id="operator-badge">
+      <span class="dot connected"></span>
+      <span>Operator</span>
+    </div>
+    <a href="/login.html" class="operator-login-btn hidden" id="operator-login-btn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <span>Operator Mode</span>
+    </a>
     <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
     </button>
@@ -277,7 +285,14 @@
   </section>
 
   <!-- SKILLS -->
-  <section class="section" id="section-skills">
+  <section class="section" id="section-skills" style="position:relative;">
+    <div class="section-lock hidden" id="skills-lock">
+      <div class="lock-content">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.6"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <p>Operator access required to manage skills</p>
+        <button class="btn-primary" onclick="window.location.href='/login.html'">Enter Operator Mode</button>
+      </div>
+    </div>
     <div class="section-header">
       <h2>Agent Skill Registry</h2>
       <button class="btn-primary" id="add-skill-btn">+ New Skill</button>
@@ -336,7 +351,14 @@
   </section>
 
   <!-- FIRE JOB -->
-  <section class="section" id="section-fire">
+  <section class="section" id="section-fire" style="position:relative;">
+    <div class="section-lock hidden" id="fire-lock">
+      <div class="lock-content">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.6"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <p>Operator access required to fire jobs</p>
+        <button class="btn-primary" onclick="window.location.href='/login.html'">Enter Operator Mode</button>
+      </div>
+    </div>
     <div class="section-header"><h2>Fire Custom Job</h2></div>
     <div class="fire-panel">
       <div class="form-row">
@@ -382,6 +404,16 @@
   </section>
 
 </main>
+
+<!-- Hire CTA (visible to public users) -->
+<div class="hire-cta hidden" id="hire-cta">
+  <div class="hire-content">
+    <span class="hire-label">Powered by GSB Intelligence Swarm</span>
+    <a href="https://app.virtuals.io/virtuals/68291" target="_blank" rel="noopener" class="hire-btn">
+      Hire the Swarm on Virtuals ↗
+    </a>
+  </div>
+</div>
 
 <script src="app.js"></script>
 </body>
