@@ -235,34 +235,33 @@ function formatCeoBrief(content, timestamp) {
   return `🧠 GSB CEO Intelligence Brief\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${content}\n\nPowered by GSB Intelligence Swarm | ${timestamp}`;
 }
 
-// ── Provider: waitForTransaction ────────────────────────────────────────────
-async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
-  const start = Date.now();
-  while (Date.now() - start < maxWaitMs) {
-    const fresh = await client.getJobById(jobId);
-    if (fresh && fresh.phase === 2) return fresh;
-    await new Promise(r => setTimeout(r, 2000));
+// ── Provider: determine which offering a job maps to ──────────────────────
+function determineOffering(job, rawContent) {
+  let offeringName = job.serviceName || job.serviceOffering || '';
+
+  // Check for skill-based dispatch (e.g. social_blast, bank_status_report)
+  let skillRequest = null;
+  try { skillRequest = JSON.parse(rawContent); } catch {}
+  if (skillRequest?.skillId === 'social_blast' || skillRequest?.skillId === 'bank_status_report') {
+    return skillRequest.skillId;
   }
-  throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
+
+  // Return early if offering is already known
+  if (offeringName && (OFFERING_SCHEMAS[offeringName] || offeringName === 'social_blast' || offeringName === 'bank_status_report')) {
+    return offeringName;
+  }
+
+  // Keyword fallback when serviceName/serviceOffering are empty or unknown
+  const lower = (rawContent || job.requirement || job.content || '').toLowerCase();
+  if (/social.?blast|raid|amplif/.test(lower)) return 'social_blast';
+  if (/heartbeat|status|swarm|bank/.test(lower)) return 'swarm_heartbeat_report';
+  if (/escalat|risk|situation|urgent|decision/.test(lower)) return 'escalation_decision_support';
+  if (/strateg|task|assign|alpha|scan|trend|token|wallet|thread|write/.test(lower)) return 'strategy_task_assignment';
+  return 'swarm_heartbeat_report'; // default
 }
 
-// ── Provider: handle incoming jobs on CEO offerings ─────────────────────────
-async function handleProviderJob(client, job, offeringName) {
-  const rawContent = extractContent(job.requirement) || extractContent(job.memos?.[0]?.content) || '';
-
-  // Accept the request
-  await job.respond(true, 'Processing...');
-  console.log(`[CEO-provider] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
-
-  // Wait for buyer to pay
-  let freshJob = job;
-  if (job.phase === 2) {
-    console.log(`[CEO-provider] Job ${job.id} already in TRANSACTION phase.`);
-  } else {
-    freshJob = await waitForTransaction(client, job.id);
-    console.log(`[CEO-provider] Job ${job.id} in TRANSACTION phase. Generating deliverable...`);
-  }
-
+// ── Provider: execute the offering and deliver result ──────────────────────
+async function executeAndDeliver(acpClient, job, offeringName, rawContent) {
   let briefText;
   const ts = new Date().toISOString();
 
@@ -283,25 +282,13 @@ Latest alpha data (${cacheAge ? cacheAge + ' min ago' : 'not yet cached'}): ${JS
 Write a 3-5 sentence CEO briefing. Be direct and data-driven. Include: swarm status, any active worker load, top Base opportunity from cache if available. Format: plain text, no JSON.`;
 
       const brief = await ceoSynthesize(prompt);
-      // deliver immediately — target <3 seconds total
-      await freshJob.deliver({ type: 'text', value: formatCeoBrief(brief, new Date().toISOString()) });
+      await job.deliver({ type: 'text', value: formatCeoBrief(brief, new Date().toISOString()) });
       ceoCache.totalJobsServed++;
 
       // Post instant brief to dashboard
-      const DASHBOARD_URL_HB = process.env.RAILWAY_STATIC_URL
-        ? `https://${process.env.RAILWAY_STATIC_URL}`
-        : 'http://localhost:8080';
-      try {
-        const fetch = (await import('node-fetch')).default;
-        await fetch(`${DASHBOARD_URL_HB}/api/brief`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ brief: formatCeoBrief(brief, new Date().toISOString()), source: 'ceobuyer', timestamp: new Date().toISOString() }),
-        });
-      } catch (e) { console.warn('[ceo] Could not post heartbeat brief:', e.message); }
-
+      postToDashboard(formatCeoBrief(brief, new Date().toISOString()));
       console.log(`[CEO-provider] Job ${job.id} delivered instantly (heartbeat from cache).`);
-      return; // done — no worker dispatch needed
+      return;
 
     } else if (offeringName === 'strategy_task_assignment') {
       let goal = rawContent;
@@ -320,27 +307,24 @@ Write a 3-5 sentence CEO briefing. Be direct and data-driven. Include: swarm sta
       const workerNames = [];
 
       if (wantsAlpha && wantsThread) {
-        // Parallel: Alpha Scanner + Thread Writer
         console.log(`[CEO-provider] Parallel dispatch: Alpha Scanner + Thread Writer`);
         ceoCache.workerLoad['GSB Alpha Scanner']++;
         ceoCache.workerLoad['GSB Thread Writer']++;
         dispatches.push(
-          dispatchToWorker(client, 'alpha_scanner', null, 'scan_trending', {}).finally(() => { ceoCache.workerLoad['GSB Alpha Scanner']--; }),
-          dispatchToWorker(client, 'thread_writer', `Write a thread about Base alpha opportunities: ${goal}`, undefined).finally(() => { ceoCache.workerLoad['GSB Thread Writer']--; }),
+          dispatchToWorker(acpClient, 'alpha_scanner', null, 'scan_trending', {}).finally(() => { ceoCache.workerLoad['GSB Alpha Scanner']--; }),
+          dispatchToWorker(acpClient, 'thread_writer', `Write a thread about Base alpha opportunities: ${goal}`, undefined).finally(() => { ceoCache.workerLoad['GSB Thread Writer']--; }),
         );
         workerNames.push('GSB Alpha Scanner', 'GSB Thread Writer');
       } else if (wantsWallet && wantsToken && addressMatch) {
-        // Parallel: Wallet Profiler + Token Analyst
         console.log(`[CEO-provider] Parallel dispatch: Wallet Profiler + Token Analyst`);
         ceoCache.workerLoad['GSB Wallet Profiler']++;
         ceoCache.workerLoad['GSB Token Analyst']++;
         dispatches.push(
-          dispatchToWorker(client, 'wallet_profiler', `Profile wallet ${addressMatch[0]}`, undefined).finally(() => { ceoCache.workerLoad['GSB Wallet Profiler']--; }),
-          dispatchToWorker(client, 'token_analyst', null, 'analyze_token', { address: addressMatch[0] }).finally(() => { ceoCache.workerLoad['GSB Token Analyst']--; }),
+          dispatchToWorker(acpClient, 'wallet_profiler', `Profile wallet ${addressMatch[0]}`, undefined).finally(() => { ceoCache.workerLoad['GSB Wallet Profiler']--; }),
+          dispatchToWorker(acpClient, 'token_analyst', null, 'analyze_token', { address: addressMatch[0] }).finally(() => { ceoCache.workerLoad['GSB Token Analyst']--; }),
         );
         workerNames.push('GSB Wallet Profiler', 'GSB Token Analyst');
       } else {
-        // Single worker dispatch (original logic)
         const workerKey = routeGoalToWorker(goal);
         const worker = WORKER_CONFIGS[workerKey];
         const requirement = buildWorkerRequirement(workerKey, goal);
@@ -350,38 +334,25 @@ Write a 3-5 sentence CEO briefing. Be direct and data-driven. Include: swarm sta
             `STRATEGY TASK ASSIGNMENT\n\nUnable to process: please include a wallet address (0x...) in your goal so the Wallet Profiler can execute.`,
             ts
           );
-          await freshJob.deliver({ type: 'text', value: errorBrief });
+          await job.deliver({ type: 'text', value: errorBrief });
           console.log(`[CEO-provider] Job ${job.id} rejected — missing wallet address.`);
-          const DASHBOARD_URL_ERR = process.env.RAILWAY_STATIC_URL
-            ? `https://${process.env.RAILWAY_STATIC_URL}`
-            : 'http://localhost:8080';
-          try {
-            const fetch = (await import('node-fetch')).default;
-            await fetch(`${DASHBOARD_URL_ERR}/api/brief`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ brief: errorBrief, source: 'ceobuyer', timestamp: new Date().toISOString() }),
-            });
-          } catch (e) { console.warn('[ceo] Could not post error brief:', e.message); }
+          postToDashboard(errorBrief);
           return;
         }
 
         console.log(`[CEO-provider] Single dispatch: ${worker.name}`);
         ceoCache.workerLoad[worker.name]++;
         if (workerKey === 'alpha_scanner') {
-          dispatches.push(dispatchToWorker(client, workerKey, null, 'scan_trending', {}).finally(() => { ceoCache.workerLoad[worker.name]--; }));
+          dispatches.push(dispatchToWorker(acpClient, workerKey, null, 'scan_trending', {}).finally(() => { ceoCache.workerLoad[worker.name]--; }));
         } else if (workerKey === 'token_analyst' && addressMatch) {
-          dispatches.push(dispatchToWorker(client, workerKey, null, 'analyze_token', { address: addressMatch[0] }).finally(() => { ceoCache.workerLoad[worker.name]--; }));
+          dispatches.push(dispatchToWorker(acpClient, workerKey, null, 'analyze_token', { address: addressMatch[0] }).finally(() => { ceoCache.workerLoad[worker.name]--; }));
         } else {
-          dispatches.push(dispatchToWorker(client, workerKey, requirement).finally(() => { ceoCache.workerLoad[worker.name]--; }));
+          dispatches.push(dispatchToWorker(acpClient, workerKey, requirement).finally(() => { ceoCache.workerLoad[worker.name]--; }));
         }
         workerNames.push(worker.name);
       }
 
-      // Wait for all dispatched workers in parallel
       const results = await Promise.all(dispatches);
-
-      // Synthesize all results into one brief
       const allDataStr = results.map((r, i) => {
         const data = typeof r === 'string' ? r : JSON.stringify(r, null, 2);
         return `[${workerNames[i]}]\n${data}`;
@@ -406,11 +377,10 @@ Write a 3-5 sentence CEO briefing. Be direct and data-driven. Include: swarm sta
         urgency = p.urgency || 'medium';
       } catch {}
 
-      // Dispatch to Alpha Scanner for market context
       console.log(`[CEO-provider] Dispatching Alpha Scanner for escalation context...`);
       let alphaResult;
       try {
-        alphaResult = await dispatchToWorker(client, 'alpha_scanner', 'Scan for trending tokens and risk signals on Base');
+        alphaResult = await dispatchToWorker(acpClient, 'alpha_scanner', 'Scan for trending tokens and risk signals on Base');
       } catch (err) {
         console.error(`[CEO-provider] Alpha Scanner dispatch failed: ${err.message}`);
         alphaResult = null;
@@ -420,7 +390,6 @@ Write a 3-5 sentence CEO briefing. Be direct and data-driven. Include: swarm sta
         ? JSON.stringify(alphaResult, null, 2)
         : 'Alpha scanner data unavailable.';
 
-      // Pass through Claude for strategic recommendation
       const synthesis = await ceoSynthesize(
         `Escalation situation: ${situation}. Urgency: ${urgency}. Alpha context: ${alphaContext}. Provide a 3-5 sentence strategic recommendation as the GSB CEO intelligence agent. Be specific, reference data points where available, and give clear actionable next steps.`
       );
@@ -431,7 +400,6 @@ Write a 3-5 sentence CEO briefing. Be direct and data-driven. Include: swarm sta
       );
 
     } else if (offeringName === 'social_blast') {
-      // Full social coordination chain: Alpha Scanner + Thread Writer in PARALLEL
       let topic = rawContent;
       try { const p = JSON.parse(rawContent); topic = p.topic || p.params?.topic || rawContent; } catch {}
 
@@ -440,8 +408,8 @@ Write a 3-5 sentence CEO briefing. Be direct and data-driven. Include: swarm sta
       ceoCache.workerLoad['GSB Thread Writer']++;
 
       const [alphaResult, threadResult] = await Promise.all([
-        dispatchToWorker(client, 'alpha_scanner', null, 'scan_trending', {}).finally(() => { ceoCache.workerLoad['GSB Alpha Scanner']--; }),
-        dispatchToWorker(client, 'thread_writer', `Write a thread about ${topic}`, undefined).finally(() => { ceoCache.workerLoad['GSB Thread Writer']--; }),
+        dispatchToWorker(acpClient, 'alpha_scanner', null, 'scan_trending', {}).finally(() => { ceoCache.workerLoad['GSB Alpha Scanner']--; }),
+        dispatchToWorker(acpClient, 'thread_writer', `Write a thread about ${topic}`, undefined).finally(() => { ceoCache.workerLoad['GSB Thread Writer']--; }),
       ]);
 
       const alphaStr = typeof alphaResult === 'string' ? alphaResult : JSON.stringify(alphaResult, null, 2);
@@ -475,7 +443,6 @@ AMPLIFICATION INSTRUCTIONS:
       );
 
     } else if (offeringName === 'bank_status_report') {
-      // Instant bank status from cache — no worker dispatch
       const cacheAge = ceoCache.lastAlphaScan
         ? Math.round((Date.now() - ceoCache.lastAlphaScan.fetchedAt) / 60000)
         : null;
@@ -491,29 +458,14 @@ Write a 2-3 sentence bank status. Include worker load, jobs served, and top oppo
 
       const brief = await ceoSynthesize(prompt);
       ceoCache.totalJobsServed++;
-      await freshJob.deliver({ type: 'text', value: formatCeoBrief(brief, new Date().toISOString()) });
+      await job.deliver({ type: 'text', value: formatCeoBrief(brief, new Date().toISOString()) });
       console.log(`[CEO-provider] Job ${job.id} delivered instantly (bank_status_report).`);
-      return; // done — no further dispatch
+      return;
     }
 
-    await freshJob.deliver({ type: 'text', value: briefText });
+    await job.deliver({ type: 'text', value: briefText });
     console.log(`[CEO-provider] Job ${job.id} delivered (${offeringName}).`);
-
-    // Post provider brief to dashboard
-    const DASHBOARD_URL = process.env.RAILWAY_STATIC_URL
-      ? `https://${process.env.RAILWAY_STATIC_URL}`
-      : 'http://localhost:8080';
-    try {
-      const fetch = (await import('node-fetch')).default;
-      await fetch(`${DASHBOARD_URL}/api/brief`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brief: briefText, source: 'ceobuyer', timestamp: new Date().toISOString() }),
-      });
-      console.log('[ceo] Provider brief posted to dashboard');
-    } catch (e) {
-      console.warn('[ceo] Could not post provider brief to dashboard:', e.message);
-    }
+    postToDashboard(briefText);
   } catch (err) {
     console.error(`[CEO-provider] Job ${job.id} delivery error:`, err.message);
     try {
@@ -521,6 +473,24 @@ Write a 2-3 sentence bank status. Include worker load, jobs served, and top oppo
     } catch (rejectErr) {
       console.error(`[CEO-provider] Job ${job.id} rejectPayable error:`, rejectErr.message);
     }
+  }
+}
+
+// ── Post brief to dashboard (helper) ──────────────────────────────────────
+async function postToDashboard(brief) {
+  const DASHBOARD_URL = process.env.RAILWAY_STATIC_URL
+    ? `https://${process.env.RAILWAY_STATIC_URL}`
+    : 'http://localhost:8080';
+  try {
+    const fetch = (await import('node-fetch')).default;
+    await fetch(`${DASHBOARD_URL}/api/brief`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ brief, source: 'ceobuyer', timestamp: new Date().toISOString() }),
+    });
+    console.log('[CEO-provider] Brief posted to dashboard');
+  } catch (e) {
+    console.warn('[CEO-provider] Could not post brief to dashboard:', e.message);
   }
 }
 
@@ -764,59 +734,99 @@ async function main() {
   let evaluatedCount = 0;
   const totalJobs = WORKERS.length * JOBS_PER_WORKER;
 
-  console.log('[ceo] Building ACP client for CEO (entity', CEO_ENTITY_ID, ')...');
-  const contractClient = await AcpContractClientV2.build(
+  // ── Pending provider jobs — tracks phase 0 → phase 2 delivery ──────────
+  const pendingProviderJobs = new Map(); // jobId → { offeringName, rawContent }
+
+  // ── Build TWO separate ACP clients: provider + buyer ───────────────────
+  // Buyer client reference — assigned after construction, but captured by
+  // provider closure which only executes asynchronously (after both are built).
+  let buyerClient = null;
+
+  console.log('[ceo] Building PROVIDER ACP client (entity', CEO_ENTITY_ID, ')...');
+  const providerContractClient = await AcpContractClientV2.build(
     PRIVATE_KEY, CEO_ENTITY_ID, CEO_WALLET_ADDRESS, baseAcpConfigV2
   );
 
-  const client = new AcpClient({
-    acpContractClient: contractClient,
+  const providerClient = new AcpClient({
+    acpContractClient: providerContractClient,
 
+    // ── PROVIDER onNewTask — handles incoming jobs to CEO offerings ──
     onNewTask: async (job, memo) => {
-      // ── PROVIDER side — incoming jobs to the CEO's offerings ──
-      if (job.phase === 0) {
-        let offeringName = job.serviceName || job.serviceOffering || '';
-        const rawContent = extractContent(job.requirement) || extractContent(job.memos?.[0]?.content) || '';
+      const rawContent = extractContent(job.requirement) || extractContent(memo?.content) || '';
 
-        // Check for skill-based dispatch (e.g. social_blast, bank_status_report)
-        let skillRequest = null;
-        try { skillRequest = JSON.parse(rawContent); } catch {}
-        if (skillRequest?.skillId === 'social_blast' || skillRequest?.skillId === 'bank_status_report') {
-          offeringName = skillRequest.skillId;
-        }
+      if (job.phase === 0 && memo) {
+        // Phase 0: REQUEST — determine offering, validate, accept
+        const offeringName = determineOffering(job, rawContent);
 
-        // Keyword fallback when serviceName/serviceOffering are empty or unknown
-        if (!offeringName || (!OFFERING_SCHEMAS[offeringName] && offeringName !== 'social_blast' && offeringName !== 'bank_status_report')) {
-          const lower = (rawContent || job.requirement || job.content || '').toLowerCase();
-          if (/social.?blast|raid|amplif/.test(lower)) {
-            offeringName = 'social_blast';
-          } else if (/heartbeat|status|swarm|bank/.test(lower)) {
-            offeringName = 'swarm_heartbeat_report';
-          } else if (/escalat|risk|situation|urgent|decision/.test(lower)) {
-            offeringName = 'escalation_decision_support';
-          } else if (/strateg|task|assign|alpha|scan|trend|token|wallet|thread|write/.test(lower)) {
-            offeringName = 'strategy_task_assignment';
-          } else {
-            offeringName = 'swarm_heartbeat_report';
-          }
-        }
-
-        if (OFFERING_SCHEMAS[offeringName] || offeringName === 'social_blast' || offeringName === 'bank_status_report') {
-          console.log(`[CEO-provider] Incoming job ${job.id} for offering: ${offeringName}`);
-          const check = validateProviderInput(offeringName, rawContent);
-          if (!check.valid) {
-            console.log(`[CEO-provider] Rejecting job ${job.id}: ${check.reason}`);
-            await job.reject(check.reason);
-            return;
-          }
-          handleProviderJob(client, job, offeringName).catch(err => {
-            console.error(`[CEO-provider] Job ${job.id} error:`, err.message);
-          });
+        if (!OFFERING_SCHEMAS[offeringName] && offeringName !== 'social_blast' && offeringName !== 'bank_status_report') {
+          console.log(`[CEO-provider] Unknown offering for job ${job.id}, ignoring.`);
           return;
         }
+
+        console.log(`[CEO-provider] Incoming job ${job.id} → ${offeringName}`);
+        const check = validateProviderInput(offeringName, rawContent);
+        if (!check.valid) {
+          console.log(`[CEO-provider] Rejecting job ${job.id}: ${check.reason}`);
+          try { await job.reject(check.reason); } catch (e) { console.error(`[CEO-provider] Reject failed: ${e.message}`); }
+          return;
+        }
+
+        // Store pending job details for phase 2 delivery
+        pendingProviderJobs.set(job.id, { offeringName, rawContent });
+
+        try {
+          await job.respond(true, 'GSB CEO accepting. Brief incoming.');
+          console.log(`[CEO-provider] Job ${job.id} accepted → awaiting payment`);
+        } catch (e) {
+          console.error(`[CEO-provider] Accept failed job ${job.id}: ${e.message}`);
+          pendingProviderJobs.delete(job.id);
+        }
+        return;
       }
 
-      // ── BUYER side — existing acceptRequirement logic ──
+      if (job.phase === 2) {
+        // Phase 2: TRANSACTION — payment confirmed, deliver now
+        const pending = pendingProviderJobs.get(job.id);
+        if (pending) {
+          pendingProviderJobs.delete(job.id);
+          console.log(`[CEO-provider] Payment confirmed job ${job.id} → delivering ${pending.offeringName}`);
+          // Use buyerClient for worker dispatch (CEO buying from workers)
+          const dispatchClient = buyerClient || providerClient;
+          executeAndDeliver(dispatchClient, job, pending.offeringName, pending.rawContent).catch(err => {
+            console.error(`[CEO-provider] Job ${job.id} delivery error:`, err.message);
+          });
+        } else {
+          console.log(`[CEO-provider] Phase 2 job ${job.id} — no pending record (may be buyer-side job).`);
+        }
+        return;
+      }
+
+      console.log(`[CEO-provider] Unhandled phase ${job.phase} for job ${job.id}`);
+    },
+
+    // ── PROVIDER onEvaluate — auto-approve CEO's own delivered work ──
+    onEvaluate: async (job) => {
+      console.log(`[CEO-provider] Evaluating own delivery for job ${job.id}...`);
+      try {
+        await job.evaluate(true, 'Report delivered successfully.');
+        console.log(`[CEO-provider] Job ${job.id} evaluation approved.`);
+      } catch (err) {
+        console.error(`[CEO-provider] Evaluate error job ${job.id}:`, err.message);
+        try { await job.evaluate(true, 'Approved.'); } catch (_) {}
+      }
+    },
+  });
+
+  console.log('[ceo] Building BUYER ACP client (entity', CEO_ENTITY_ID, ')...');
+  const buyerContractClient = await AcpContractClientV2.build(
+    PRIVATE_KEY, CEO_ENTITY_ID, CEO_WALLET_ADDRESS, baseAcpConfigV2
+  );
+
+  buyerClient = new AcpClient({
+    acpContractClient: buyerContractClient,
+
+    // ── BUYER onNewTask — accept worker deliverables ──
+    onNewTask: async (job, memo) => {
       if (memo) {
         console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} memo=${memo.id} nextPhase=${memo.nextPhase}`);
         // Track worker load when dispatching
@@ -830,12 +840,12 @@ async function main() {
       }
     },
 
+    // ── BUYER onEvaluate — evaluate worker results, build brief ──
     onEvaluate: async (job) => {
       console.log(`[ceo] Evaluating job ${job.id}...`);
       await sleep(2000);
 
       try {
-        // ── Read the deliverable ──────────────────────────────────────────
         const worker = jobWorkerMap.get(job.id);
         const memos = job.memos || [];
 
@@ -853,7 +863,6 @@ async function main() {
           }
           console.log('[ceo] ──────────────────────────────────────────────────\n');
 
-          // Store for brief (always overwrite — last delivery is freshest)
           briefResults[worker.role] = parsed;
         } else {
           console.log(`[ceo] Job ${job.id} — no deliverable parsed (worker=${worker?.name}, memos=${memos.length})`);
@@ -884,26 +893,11 @@ async function main() {
             fs.writeFileSync(filepath, brief, 'utf8');
             console.log(`[ceo] Brief saved → ${filepath}\n`);
 
-            // Post to dashboard
-            const DASHBOARD_URL = process.env.RAILWAY_STATIC_URL
-              ? `https://${process.env.RAILWAY_STATIC_URL}`
-              : 'http://localhost:8080';
-            try {
-              const fetch = (await import('node-fetch')).default;
-              await fetch(`${DASHBOARD_URL}/api/brief`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ brief, source: 'ceobuyer', timestamp: new Date().toISOString() }),
-              });
-              console.log('[ceo] Brief posted to dashboard');
-            } catch (e) {
-              console.warn('[ceo] Could not post brief to dashboard:', e.message);
-            }
+            postToDashboard(brief);
           }
         }
       } catch (err) {
         console.error(`[ceo] Evaluate error job ${job.id}:`, err.message);
-        // Still approve so job completes
         try { await job.evaluate(true, 'Approved.'); } catch (_) {}
       }
     },
@@ -914,15 +908,15 @@ async function main() {
   setInterval(refreshCacheFromAlphaScanner, 5 * 60 * 1000);
   console.log('[ceo] Cache refresh started (every 5 min)');
 
-  console.log('[ceo] Ready. Firing jobs at all 4 workers.\n');
+  console.log('[ceo] Provider + Buyer clients ready. Firing jobs at all 4 workers.\n');
 
-  // ── Fire all jobs ────────────────────────────────────────────────────────
+  // ── Fire all jobs via BUYER client ──────────────────────────────────────
   for (const worker of WORKERS) {
     console.log(`\n── Hiring ${worker.name} (${JOBS_PER_WORKER} × $${worker.price} USDC) ──`);
     for (let i = 1; i <= JOBS_PER_WORKER; i++) {
       try {
         console.log(`  [${i}/${JOBS_PER_WORKER}] → ${worker.address}...`);
-        const jobId = await client.initiateJob(
+        const jobId = await buyerClient.initiateJob(
           worker.address, worker.requirement,
           makeFare(worker.price), null,
           new Date(Date.now() + 1000 * 60 * 30),
@@ -952,22 +946,7 @@ async function main() {
     const filename = `brief-final-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
     fs.writeFileSync(path.join(outDir, filename), brief, 'utf8');
     console.log(`[ceo] Final brief saved → briefs/${filename}`);
-
-    // Post to dashboard
-    const DASHBOARD_URL = process.env.RAILWAY_STATIC_URL
-      ? `https://${process.env.RAILWAY_STATIC_URL}`
-      : 'http://localhost:8080';
-    try {
-      const fetch = (await import('node-fetch')).default;
-      await fetch(`${DASHBOARD_URL}/api/brief`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brief, source: 'ceobuyer', timestamp: new Date().toISOString() }),
-      });
-      console.log('[ceo] Final brief posted to dashboard');
-    } catch (e) {
-      console.warn('[ceo] Could not post final brief to dashboard:', e.message);
-    }
+    postToDashboard(brief);
   }
 
   console.log('[ceo] Done.');
