@@ -599,18 +599,29 @@ app.post('/api/job-event', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── GET /api/public — limited info for unauthenticated visitors ──────────────
+app.get('/api/public', (req, res) => {
+  res.json({
+    name: 'GSB Intelligence Swarm',
+    status: 'live',
+    agentCount: Object.keys(WORKER_CATALOG).length + 1, // workers + CEO
+    message: 'GSB Intelligence Swarm is live',
+    hireCeo: 'https://app.virtuals.io/acp/agents/itrtj5b95z14av53qoubqwcu',
+  });
+});
+
 // ── GET /api/state ────────────────────────────────────────────────────────────
-app.get('/api/state', (req, res) => {
+app.get('/api/state', requireOperator, (req, res) => {
   res.json({ brief: latestBrief, history: jobHistory, acpReady });
 });
 
 // ── GET /api/swarm-status ────────────────────────────────────────────────────
-app.get('/api/swarm-status', (req, res) => {
+app.get('/api/swarm-status', requireOperator, (req, res) => {
   res.json({ workers: Object.values(workerStatus) });
 });
 
 // ── GET /api/workers ──────────────────────────────────────────────────────────
-app.get('/api/workers', (req, res) => {
+app.get('/api/workers', requireOperator, (req, res) => {
   res.json(Object.entries(WORKER_CATALOG).map(([name, w]) => ({
     name,
     price: w.price,
@@ -620,7 +631,7 @@ app.get('/api/workers', (req, res) => {
 });
 
 // ── Skill Registry API ──────────────────────────────────────────────────────
-app.get('/api/skills', (req, res) => {
+app.get('/api/skills', requireOperator, (req, res) => {
   try {
     const registry = JSON.parse(fs.readFileSync(path.join(__dirname, 'skills.json'), 'utf8'));
     res.json(registry);

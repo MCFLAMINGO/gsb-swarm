@@ -277,6 +277,22 @@ async function handleProviderJob(client, job, offeringName) {
         );
         await freshJob.deliver({ type: 'text', value: errorBrief });
         console.log(`[CEO-provider] Job ${job.id} rejected — missing wallet address.`);
+
+        // Post error brief to dashboard
+        const DASHBOARD_URL_ERR = process.env.RAILWAY_STATIC_URL
+          ? `https://${process.env.RAILWAY_STATIC_URL}`
+          : 'http://localhost:8080';
+        try {
+          const fetch = (await import('node-fetch')).default;
+          await fetch(`${DASHBOARD_URL_ERR}/api/brief`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ brief: errorBrief, source: 'ceobuyer', timestamp: new Date().toISOString() }),
+          });
+          console.log('[ceo] Error brief posted to dashboard');
+        } catch (e) {
+          console.warn('[ceo] Could not post error brief to dashboard:', e.message);
+        }
         return;
       }
 
@@ -341,6 +357,22 @@ async function handleProviderJob(client, job, offeringName) {
 
     await freshJob.deliver({ type: 'text', value: briefText });
     console.log(`[CEO-provider] Job ${job.id} delivered (${offeringName}).`);
+
+    // Post provider brief to dashboard
+    const DASHBOARD_URL = process.env.RAILWAY_STATIC_URL
+      ? `https://${process.env.RAILWAY_STATIC_URL}`
+      : 'http://localhost:8080';
+    try {
+      const fetch = (await import('node-fetch')).default;
+      await fetch(`${DASHBOARD_URL}/api/brief`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brief: briefText, source: 'ceobuyer', timestamp: new Date().toISOString() }),
+      });
+      console.log('[ceo] Provider brief posted to dashboard');
+    } catch (e) {
+      console.warn('[ceo] Could not post provider brief to dashboard:', e.message);
+    }
   } catch (err) {
     console.error(`[CEO-provider] Job ${job.id} delivery error:`, err.message);
     try {
@@ -690,6 +722,22 @@ async function main() {
             const filepath = path.join(outDir, filename);
             fs.writeFileSync(filepath, brief, 'utf8');
             console.log(`[ceo] Brief saved → ${filepath}\n`);
+
+            // Post to dashboard
+            const DASHBOARD_URL = process.env.RAILWAY_STATIC_URL
+              ? `https://${process.env.RAILWAY_STATIC_URL}`
+              : 'http://localhost:8080';
+            try {
+              const fetch = (await import('node-fetch')).default;
+              await fetch(`${DASHBOARD_URL}/api/brief`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ brief, source: 'ceobuyer', timestamp: new Date().toISOString() }),
+              });
+              console.log('[ceo] Brief posted to dashboard');
+            } catch (e) {
+              console.warn('[ceo] Could not post brief to dashboard:', e.message);
+            }
           }
         }
       } catch (err) {
@@ -738,6 +786,22 @@ async function main() {
     const filename = `brief-final-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
     fs.writeFileSync(path.join(outDir, filename), brief, 'utf8');
     console.log(`[ceo] Final brief saved → briefs/${filename}`);
+
+    // Post to dashboard
+    const DASHBOARD_URL = process.env.RAILWAY_STATIC_URL
+      ? `https://${process.env.RAILWAY_STATIC_URL}`
+      : 'http://localhost:8080';
+    try {
+      const fetch = (await import('node-fetch')).default;
+      await fetch(`${DASHBOARD_URL}/api/brief`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brief, source: 'ceobuyer', timestamp: new Date().toISOString() }),
+      });
+      console.log('[ceo] Final brief posted to dashboard');
+    } catch (e) {
+      console.warn('[ceo] Could not post final brief to dashboard:', e.message);
+    }
   }
 
   console.log('[ceo] Done.');
