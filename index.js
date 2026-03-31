@@ -55,7 +55,7 @@ function spawnWorker({ name, file }) {
 function spawnDashboard() {
   const dashPath = path.join(__dirname, 'dashboard-server.js');
   const proc = fork(dashPath, [], {
-    env: { ...process.env },
+    env: { ...process.env, PORT: '8080' },
     stdio: 'inherit',
   });
   proc.on('exit', (code) => {

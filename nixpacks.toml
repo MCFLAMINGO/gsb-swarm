@@ -3,3 +3,6 @@ cmds = ["npm install --production"]
 
 [start]
 cmd = "node --experimental-require-module index.js"
+
+[variables]
+PORT = "8080"
