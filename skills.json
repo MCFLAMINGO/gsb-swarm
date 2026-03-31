@@ -306,7 +306,7 @@
         "tier",
         "agreedToTos"
       ],
-      "price": 0.25,
+      "price": 24.95,
       "outputFields": [
         "accessToken",
         "downloadUrl",

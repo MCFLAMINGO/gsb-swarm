@@ -132,7 +132,7 @@ const CEO_PRICES = {
   escalation_decision_support: 0.35,  // alpha scanner + analysis
   token_deep_dive:             0.35,  // Token Analyst + Wallet Profiler parallel
   daily_brief:                 0.50,  // all 4 workers parallel
-  financial_triage:            0.25,  // restaurant financial analysis — 3 PDFs via token
+  financial_triage:            24.95, // restaurant financial triage — 3 PDFs via token (retail price)
 };
 
 // ── Provider offerings ─────────────────────────────────────────────────────
@@ -196,7 +196,7 @@ const OFFERING_SCHEMAS = {
   },
   financial_triage: {
     description: 'Restaurant financial triage — upload bank statement + POS export, receive Financial Analysis Report, Vendor Credit Letter, and Bank Loan Request Letter as a 24hr download token. All data anonymized under a project codename. Files deleted after processing. Operated by MCFL Restaurant Holdings LLC.',
-    price: 0.25,
+    price: 24.95,
     parameters: {
       type: 'object',
       properties: {
