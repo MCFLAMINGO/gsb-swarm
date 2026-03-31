@@ -583,20 +583,17 @@ body {
 .mono { font-family: var(--font-mono); }
 .center { text-align: center; }
 
-/* ── Theme toggle (top-right) ────────────────────────────────────────────── */
+/* ── Theme toggle (sidebar footer) ──────────────────────────────────────── */
 .theme-toggle {
-  position: fixed;
-  top: var(--space-4);
-  right: var(--space-5);
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: var(--space-2);
   cursor: pointer;
   color: var(--text-muted);
-  z-index: 100;
   transition: background var(--ease);
   line-height: 0;
+  align-self: flex-start;
 }
 .theme-toggle:hover { background: var(--surface-3); color: var(--text); }
 

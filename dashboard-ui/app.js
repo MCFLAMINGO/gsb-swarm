@@ -1,6 +1,8 @@
 // GSB Intelligence Dashboard — Client
-const API_BASE = '__PORT_8080__'.startsWith('__') ? 'http://localhost:8080' : '__PORT_8080__';
-const WS_BASE  = API_BASE.replace(/^http/, 'ws');
+const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? `${location.protocol}//${location.hostname}:8080`
+  : `${location.protocol}//${location.host}`;
+const WS_BASE = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let latestBrief  = null;
