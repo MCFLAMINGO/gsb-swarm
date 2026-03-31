@@ -102,32 +102,66 @@ function extractContent(req) {
   return String(req);
 }
 
+// Uses Blockscout public API — no API key required
+const BLOCKSCOUT = 'https://base.blockscout.com/api';
+
 async function profileWallet(address) {
   try {
-    const txRes = await axios.get(
-      `https://api.basescan.org/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=YourApiKeyToken`,
-      { timeout: 8000 }
-    ).catch(() => ({ data: { result: [] } }));
+    // 1. Transaction list (up to 50 most recent)
+    const [txRes, tokenRes, ethRes] = await Promise.allSettled([
+      axios.get(`${BLOCKSCOUT}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=desc`, { timeout: 10000 }),
+      axios.get(`${BLOCKSCOUT}?module=account&action=tokenlist&address=${address}`, { timeout: 10000 }),
+      axios.get(`${BLOCKSCOUT}?module=account&action=balance&address=${address}`, { timeout: 10000 }),
+    ]);
 
-    const txs = txRes.data?.result || [];
+    const txs = txRes.status === 'fulfilled' ? (txRes.value.data?.result || []) : [];
+    const tokens = tokenRes.status === 'fulfilled' ? (tokenRes.value.data?.result || []) : [];
+    const ethBalRaw = ethRes.status === 'fulfilled' ? (ethRes.value.data?.result || '0') : '0';
+
     const txCount = Array.isArray(txs) ? txs.length : 0;
+    const ethBal = (parseInt(ethBalRaw) / 1e18).toFixed(6);
+
     const recentTxs = Array.isArray(txs) ? txs.slice(0, 5).map(t => ({
       hash: t.hash,
-      value_eth: (parseInt(t.value || 0) / 1e18).toFixed(4),
-      age_days: Math.floor((Date.now() / 1000 - parseInt(t.timeStamp)) / 86400),
+      value_eth: (parseInt(t.value || 0) / 1e18).toFixed(6),
+      age_days: Math.floor((Date.now() / 1000 - parseInt(t.timeStamp || 0)) / 86400),
+      direction: t.from?.toLowerCase() === address.toLowerCase() ? 'OUT' : 'IN',
     })) : [];
 
+    // Token holdings — format balances with decimals
+    const tokenHoldings = Array.isArray(tokens) ? tokens.slice(0, 10).map(t => {
+      const decimals = parseInt(t.decimals || '18');
+      const bal = (parseInt(t.balance || '0') / Math.pow(10, decimals));
+      return {
+        symbol: t.symbol,
+        name: t.name,
+        balance: bal < 0.0001 ? bal.toExponential(2) : bal.toLocaleString('en-US', { maximumFractionDigits: 4 }),
+        contract: t.contractAddress,
+      };
+    }) : [];
+
+    // Classification
     let classification = 'RETAIL — Standard wallet activity.';
-    if (txCount > 1000) classification = 'WHALE — High transaction volume.';
+    if (txCount > 1000)     classification = 'WHALE — Very high transaction volume.';
     else if (txCount > 200) classification = 'ACTIVE TRADER — Frequent on-chain activity.';
-    else if (txCount < 10) classification = 'NEW WALLET — Limited history.';
+    else if (txCount > 20)  classification = 'REGULAR USER — Moderate on-chain history.';
+    else if (txCount < 5)   classification = 'NEW WALLET — Limited history.';
+
+    // Risk flags
+    const riskFlags = [];
+    if (txCount === 0 && tokenHoldings.length === 0) riskFlags.push('EMPTY — No activity detected.');
+    if (tokenHoldings.length > 15) riskFlags.push('HIGH TOKEN COUNT — May include dust or spam tokens.');
 
     return {
       wallet: address,
+      eth_balance: `${ethBal} ETH`,
       transaction_count: txCount,
       classification,
+      token_holdings: tokenHoldings,
       recent_transactions: recentTxs,
+      risk_flags: riskFlags,
       basescan_url: `https://basescan.org/address/${address}`,
+      blockscout_url: `https://base.blockscout.com/address/${address}`,
       profiled_at: new Date().toISOString(),
       powered_by: 'GSB Intelligence Swarm',
     };
