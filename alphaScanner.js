@@ -69,9 +69,15 @@ function validateInput(raw) {
     return { valid: false, reason: 'Query contains disallowed content and cannot be processed.' };
   }
 
-  // Chain must be base if specified
+  // Chain must be base if specified in JSON
   if (chain && chain.toLowerCase() !== 'base') {
     return { valid: false, reason: `Only the Base network is supported. Received: ${chain}` };
+  }
+
+  // Also catch plain-text chain mentions (e.g. "scan solana", "alpha on ethereum")
+  const unsupportedChain = raw.match(/\b(solana|ethereum|polygon|avalanche|arbitrum|optimism|bsc|binance|tron|sui|aptos)\b/i);
+  if (unsupportedChain) {
+    return { valid: false, reason: `Only the Base network is supported. This agent cannot scan ${unsupportedChain[1]}.` };
   }
 
   // Clamp limit to 50 (do NOT reject)
