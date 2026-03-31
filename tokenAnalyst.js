@@ -3,6 +3,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { buildAcpClient } = require('./acp');
+const { CHAIN_CONFIG, resolveChain, SUPPORTED_CHAINS } = require('./chains');
 
 const AGENT_NAME = 'GSB Token Analyst';
 
@@ -52,14 +53,16 @@ const VIRTUALS_SELL_WALL = new Set([
 ]);
 
 // ── Job requirements JSON schema ──────────────────────────────────────────────
-// Defines the structured input this agent accepts.
-// Buyers must provide a contractAddress (0x... on Base).
 const REQUIREMENTS_SCHEMA = {
   type: 'object',
   properties: {
     contractAddress: {
       type: 'string',
-      description: 'EVM contract address of the token to analyze (0x... format, Base network)',
+      description: 'Token contract address to analyze (0x... for EVM, base58 for Solana)',
+    },
+    chain: {
+      type: 'string',
+      description: `Blockchain network (${SUPPORTED_CHAINS.join(', ')}). Defaults to base.`,
     },
   },
   required: ['contractAddress'],
@@ -67,24 +70,38 @@ const REQUIREMENTS_SCHEMA = {
 
 // ── Input validation ──────────────────────────────────────────────────────────
 function validateInput(raw) {
-  // Block non-Base / obviously wrong requests
-  if (/solana|bitcoin|bsc|polygon|avalanche|arbitrum|optimism/i.test(raw)) {
-    return { valid: false, reason: 'This agent only analyzes tokens on the Base network. Please provide a Base token contract address.' };
-  }
-
   // Block NSFW / harmful requests
   if (/scam|rug|hack|steal|exploit|launder|pump.?and.?dump/i.test(raw)) {
     return { valid: false, reason: 'This request cannot be processed. Please submit a legitimate token analysis request.' };
   }
 
+  // Extract chain from JSON or plain text
+  let chain = null;
+  try {
+    const parsed = JSON.parse(raw);
+    chain = parsed.chain || null;
+  } catch {
+    const chainMatch = raw.match(/\bon\s+(base|ethereum|eth|arbitrum|arb|polygon|matic|solana|sol|bsc|bnb|avalanche|avax|optimism|op)\b/i);
+    if (chainMatch) chain = chainMatch[1];
+  }
+  const resolvedChain = resolveChain(chain) || 'base';
+
+  // Solana addresses are base58 (32-44 chars, no 0x prefix)
+  if (resolvedChain === 'solana') {
+    const solMatch = raw.match(/[1-9A-HJ-NP-Za-km-z]{32,44}/);
+    if (solMatch) {
+      return { valid: true, address: solMatch[0], chain: 'solana' };
+    }
+  }
+
   // Try to extract a 0x address from JSON or plain text
   const match = raw.match(/0x[a-fA-F0-9]{40}/);
   if (match) {
-    return { valid: true, address: match[0] };
+    return { valid: true, address: match[0], chain: resolvedChain };
   }
 
   // No address found — not necessarily invalid; caller may have a ticker symbol
-  return { valid: false, reason: 'No valid contract address found. Please provide a Base token contract address in 0x format.' };
+  return { valid: false, reason: 'No valid contract address found. Please provide a token contract address (0x format for EVM, base58 for Solana).' };
 }
 
 const handledJobs = new Set();
@@ -110,19 +127,24 @@ function extractContent(req) {
   return String(req);
 }
 
-async function analyzeToken(contractAddress) {
+async function analyzeToken(contractAddress, chain = 'base') {
   try {
+    const resolvedChain = resolveChain(chain) || 'base';
     const dexRes = await axios.get(
       `https://api.dexscreener.com/latest/dex/tokens/${contractAddress}`,
       { timeout: 8000 }
     );
-    const pairs = dexRes.data?.pairs;
-    if (!pairs || pairs.length === 0) return { error: 'No trading pairs found for this contract on Base.' };
+    const allPairs = dexRes.data?.pairs;
+    if (!allPairs || allPairs.length === 0) return { error: `No trading pairs found for this contract on ${CHAIN_CONFIG[resolvedChain]?.name || resolvedChain}.` };
 
-    const pair = pairs
-      .filter(p => p.chainId === 'base')
-      .sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0]
-      || pairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0];
+    // Filter by requested chain first; fall back to best across all chains
+    let chainPairs = allPairs.filter(p => p.chainId === resolvedChain);
+    let chainNote = null;
+    if (chainPairs.length === 0) {
+      chainPairs = allPairs;
+      chainNote = '(best match across all chains)';
+    }
+    const pair = chainPairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0];
 
     const liq     = pair.liquidity?.usd  || 0;
     const vol24h  = pair.volume?.h24     || 0;
@@ -155,6 +177,7 @@ async function analyzeToken(contractAddress) {
       market_cap:      pair.marketCap || pair.fdv || 0,
       dexscreener_url: `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`,
       gsb_verdict:     verdict,
+      chain_note:      chainNote,
       sell_wall_note:  sellWallNote,
       analyzed_at:     new Date().toISOString(),
       powered_by:      'GSB Intelligence Swarm',
@@ -225,17 +248,20 @@ async function start() {
         // Prefer the directly extracted address
         if (contractAddress) check.address = contractAddress;
 
+        const jobChain = check.chain || 'base';
+        const chainName = CHAIN_CONFIG[jobChain]?.name || jobChain;
+
         let freshJob = job;
         if (job.phase === 2) {
           console.log(`[${AGENT_NAME}] Job ${job.id} already in TRANSACTION phase.`);
         } else {
-          await job.respond(true, 'Analyzing token on Base now...');
+          await job.respond(true, `Analyzing token on ${chainName} now...`);
           console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
           freshJob = await waitForTransaction(client, job.id);
           console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase.`);
         }
 
-        const report = await analyzeToken(check.address);
+        const report = await analyzeToken(check.address, jobChain);
         await freshJob.deliver({ type: 'text', value: JSON.stringify(report, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {

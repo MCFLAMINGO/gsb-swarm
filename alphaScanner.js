@@ -3,6 +3,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { buildAcpClient } = require('./acp');
+const { CHAIN_CONFIG, resolveChain, SUPPORTED_CHAINS } = require('./chains');
 
 const AGENT_NAME = 'GSB Alpha Scanner';
 
@@ -46,7 +47,7 @@ const JOB_PRICE = 0.10;
 // ── Job requirements JSON schema ──────────────────────────────────────────────
 const REQUIREMENTS_SCHEMA = {
   name: 'GSB Alpha Scanner',
-  description: 'Scans for alpha signals on Base: trending tokens, new launches, whale movements, DEX volume spikes.',
+  description: `Scans for alpha signals: trending tokens, new launches, whale movements, DEX volume spikes. Supports: ${SUPPORTED_CHAINS.join(', ')}.`,
   parameters: {
     type: 'object',
     properties: {
@@ -56,8 +57,7 @@ const REQUIREMENTS_SCHEMA = {
       },
       chain: {
         type: 'string',
-        description: "Blockchain to scan. Must be 'base'.",
-        enum: ['base'],
+        description: `Blockchain to scan (${SUPPORTED_CHAINS.join(', ')}). Defaults to base.`,
       },
       limit: {
         type: 'number',
@@ -68,11 +68,11 @@ const REQUIREMENTS_SCHEMA = {
   },
   examples: [
     { input: { query: 'trending tokens on base today' }, description: 'Scan for trending Base tokens' },
-    { input: { query: 'new launches', chain: 'base', limit: 20 }, description: 'Find new token launches' },
+    { input: { query: 'new launches', chain: 'ethereum', limit: 20 }, description: 'Find new token launches on Ethereum' },
+    { input: { query: 'trending on arbitrum' }, description: 'Scan Arbitrum for trending tokens' },
   ],
   rejection_cases: [
     'Empty or missing query',
-    'Non-Base chain specified (only Base is supported)',
     'NSFW or inappropriate query content',
   ],
 };
@@ -107,23 +107,20 @@ function validateInput(raw) {
     return { valid: false, reason: 'Query contains disallowed content and cannot be processed.' };
   }
 
-  // Chain must be base if specified in JSON
-  if (chain && chain.toLowerCase() !== 'base') {
-    return { valid: false, reason: `Only the Base network is supported. Received: ${chain}` };
+  // Resolve chain — default to 'base' if not specified or unrecognized
+  if (!chain) {
+    // Try to extract chain from plain text (e.g. "scan solana", "alpha on ethereum")
+    const textChainMatch = raw.match(/\b(base|ethereum|eth|arbitrum|arb|polygon|matic|solana|sol|bsc|bnb|binance|avalanche|avax|optimism|op)\b/i);
+    if (textChainMatch) chain = textChainMatch[1];
   }
-
-  // Also catch plain-text chain mentions (e.g. "scan solana", "alpha on ethereum")
-  const unsupportedChain = raw.match(/\b(solana|ethereum|polygon|avalanche|arbitrum|optimism|bsc|binance|tron|sui|aptos)\b/i);
-  if (unsupportedChain) {
-    return { valid: false, reason: `Only the Base network is supported. This agent cannot scan ${unsupportedChain[1]}.` };
-  }
+  const resolvedChain = resolveChain(chain) || 'base';
 
   // Clamp limit to 50 (do NOT reject)
   if (limit !== null && limit > 50) {
     limit = 50;
   }
 
-  return { valid: true, query, chain, limit };
+  return { valid: true, query, chain: resolvedChain, limit };
 }
 
 const handledJobs = new Set();
@@ -150,7 +147,7 @@ async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
 }
 
 // ── Data sources (no API keys required) ──────────────────────────────────────
-const GECKO_BASE   = 'https://api.geckoterminal.com/api/v2/networks/base';
+const GECKO_API    = 'https://api.geckoterminal.com/api/v2/networks';
 const DEX_BOOST    = 'https://api.dexscreener.com/token-boosts/latest/v1';
 const GECKO_HEADERS = { 'Accept': 'application/json', 'User-Agent': 'GSB-Alpha-Scanner/1.0' };
 
@@ -161,14 +158,19 @@ function fmt(n) {
   return `$${num.toFixed(2)}`;
 }
 
-async function scanAlpha() {
+async function scanAlpha(chain = 'base') {
   try {
+    const resolvedChain = resolveChain(chain) || 'base';
+    const geckoId = CHAIN_CONFIG[resolvedChain]?.geckoTerminalId || 'base';
+    const chainName = CHAIN_CONFIG[resolvedChain]?.name || resolvedChain;
+    const geckoBase = `${GECKO_API}/${geckoId}`;
+
     // Run all fetches in parallel
     const [trendingRes, newPoolsRes, boostRes] = await Promise.allSettled([
-      // 1. GeckoTerminal — trending pools on Base (most reliable source)
-      axios.get(`${GECKO_BASE}/trending_pools?page=1`, { headers: GECKO_HEADERS, timeout: 10000 }),
-      // 2. GeckoTerminal — newest pools on Base (new launches)
-      axios.get(`${GECKO_BASE}/new_pools?page=1`, { headers: GECKO_HEADERS, timeout: 10000 }),
+      // 1. GeckoTerminal — trending pools on target chain
+      axios.get(`${geckoBase}/trending_pools?page=1`, { headers: GECKO_HEADERS, timeout: 10000 }),
+      // 2. GeckoTerminal — newest pools on target chain
+      axios.get(`${geckoBase}/new_pools?page=1`, { headers: GECKO_HEADERS, timeout: 10000 }),
       // 3. DexScreener boosted tokens
       axios.get(DEX_BOOST, { timeout: 8000 }),
     ]);
@@ -202,7 +204,7 @@ async function scanAlpha() {
           liquidity: fmt(liq),
           volume_24h: fmt(vol24h),
           geckoterminal: a.pool_created_at
-            ? `https://www.geckoterminal.com/base/pools/${a.address}`
+            ? `https://www.geckoterminal.com/${geckoId}/pools/${a.address}`
             : null,
           fdv: fmt(a.fdv_usd || 0),
         };
@@ -231,23 +233,25 @@ async function scanAlpha() {
         };
       });
 
-    // ── DexScreener boosted tokens on Base ───────────────────────────────────
+    // ── DexScreener boosted tokens on target chain ─────────────────────────
     const boosted = boostRes.status === 'fulfilled'
       ? (boostRes.value.data || [])
-          .filter(t => t.chainId === 'base')
+          .filter(t => t.chainId === resolvedChain)
           .slice(0, 3)
           .map(t => ({ address: t.tokenAddress, url: t.url, boost: t.totalAmount }))
       : [];
 
     // ── Signal ────────────────────────────────────────────────────────────────
-    let gsb_signal = 'Market is quiet on Base right now. No high-conviction plays detected.';
+    let gsb_signal = `Market is quiet on ${chainName} right now. No high-conviction plays detected.`;
     if (topGainers.length > 0) {
       const top = topGainers[0];
-      gsb_signal = `${top.name} leading Base with ${top.change_24h} | Vol: ${top.volume_24h} | Liq: ${top.liquidity} — watch for continuation.`;
+      gsb_signal = `${top.name} leading ${chainName} with ${top.change_24h} | Vol: ${top.volume_24h} | Liq: ${top.liquidity} — watch for continuation.`;
     }
 
     return {
       scan_time: new Date().toISOString(),
+      chain: resolvedChain,
+      chain_name: chainName,
       top_gainers_base: topGainers,
       new_launches_base: newLaunches,
       boosted_tokens_base: boosted,
@@ -302,18 +306,20 @@ async function start() {
           return;
         }
 
+        const jobChain = check.chain || 'base';
+        const chainName = CHAIN_CONFIG[jobChain]?.name || jobChain;
         let freshJob = job;
 
         if (job.phase === 2) {
           console.log(`[${AGENT_NAME}] Job ${job.id} already in TRANSACTION phase.`);
         } else {
-          await job.respond(true, 'Scanning Base for alpha...');
+          await job.respond(true, `Scanning ${chainName} for alpha...`);
           console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
           freshJob = await waitForTransaction(client, job.id);
           console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase. Scanning...`);
         }
 
-        const result = await scanAlpha();
+        const result = await scanAlpha(jobChain);
         await freshJob.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
@@ -330,7 +336,7 @@ async function start() {
       try { await job.evaluate(true, 'Delivered successfully.'); } catch (_) {}
     },
   });
-  console.log(`[${AGENT_NAME}] Online. Scanning Base for alpha. $${JOB_PRICE} USDC per job.`);
+  console.log(`[${AGENT_NAME}] Online. Multi-chain alpha scanning (${SUPPORTED_CHAINS.join(', ')}). $${JOB_PRICE} USDC per job.`);
 }
 
 start().catch(console.error);

@@ -10,6 +10,7 @@ const http     = require('http');
 const path     = require('path');
 const { WebSocketServer } = require('ws');
 const cors     = require('cors');
+const { CHAIN_CONFIG, CHAIN_ALIASES, resolveChain, SUPPORTED_CHAINS } = require('./chains');
 
 // ── ACP SDK (V2) ─────────────────────────────────────────────────────────────
 let AcpContractClientV2, baseAcpConfigV2, AcpClient;
@@ -685,21 +686,21 @@ function httpGet(url) {
 }
 
 // ── Token symbol → contract address resolver (DexScreener) ──────────────────
-async function resolveTokenAddress(ticker) {
+async function resolveTokenAddress(ticker, preferredChain = 'base') {
   try {
     const data = await httpGet(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(ticker)}`);
     const pairs = data.pairs || [];
-    // Prefer Base chain matches
-    const basePair = pairs.find(p =>
-      p.chainId === 'base' &&
+    // Prefer requested chain matches, then any chain with matching symbol, then first result
+    const match = pairs.find(p =>
+      p.chainId === preferredChain &&
       p.baseToken?.symbol?.toUpperCase() === ticker.toUpperCase()
     ) || pairs.find(p =>
       p.baseToken?.symbol?.toUpperCase() === ticker.toUpperCase()
     ) || pairs[0];
 
-    if (basePair?.baseToken?.address) {
-      console.log(`[cmd] Resolved $${ticker} → ${basePair.baseToken.address} (${basePair.chainId})`);
-      return { address: basePair.baseToken.address, chain: basePair.chainId, name: basePair.baseToken.name };
+    if (match?.baseToken?.address) {
+      console.log(`[cmd] Resolved $${ticker} → ${match.baseToken.address} (${match.chainId})`);
+      return { address: match.baseToken.address, chain: match.chainId, name: match.baseToken.name };
     }
   } catch (e) {
     console.warn(`[cmd] Symbol lookup failed for $${ticker}:`, e.message);
@@ -857,7 +858,9 @@ async function instantQuery(command) {
     try {
       const searchSym = ticker || coinKey;
       const ds = await httpGet(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(searchSym)}`);
-      const pairs = (ds.pairs || []).filter(p => p.chainId === 'base').slice(0, 3);
+      // Try preferred chain first, then any chain
+      let pairs = (ds.pairs || []).filter(p => p.chainId === 'base').slice(0, 3);
+      if (!pairs.length) pairs = (ds.pairs || []).slice(0, 3);
       if (pairs.length) {
         const p = pairs[0];
         const price     = parseFloat(p.priceUsd || 0);
@@ -866,10 +869,11 @@ async function instantQuery(command) {
         const liq       = p.liquidity?.usd;
         const name      = p.baseToken?.name || searchSym.toUpperCase();
         const sym       = p.baseToken?.symbol || searchSym.toUpperCase();
+        const pChainName = CHAIN_CONFIG[p.chainId]?.name || p.chainId;
 
         const lines = [
           buildInsight(name, sym, price, change24h, vol24h, null, null),
-          `Liquidity: ${formatBigNum(liq)} · Pair: ${p.pairAddress?.slice(0,10)}… on Base`,
+          `Liquidity: ${formatBigNum(liq)} · Pair: ${p.pairAddress?.slice(0,10)}… on ${pChainName}`,
           `DexScreener: ${p.url}`,
         ];
         return lines.join('\n');
@@ -993,17 +997,22 @@ app.post('/api/command', async (req, res) => {
   const tickerMatch = command.match(/\$([A-Z]{2,10})/i);
   const ticker = tickerMatch ? tickerMatch[1].toUpperCase() : null;
 
+  // Extract chain from command — "analyze $MCFL on Arbitrum", "scan Solana for alpha"
+  const chainMatch = cmd.match(/\b(base|ethereum|eth|arbitrum|arb|polygon|matic|solana|sol|bsc|bnb|avalanche|avax|optimism|op)\b/i);
+  const requestedChain = chainMatch ? resolveChain(chainMatch[1]) : 'base';
+  const chainName = CHAIN_CONFIG[requestedChain]?.name || requestedChain;
+
   const intents = [];
 
   // Token analysis — also catches crypto tickers like bitcoin, ethereum, solana
   if (/token|analyz|price|liquidity|market|dex|mcap|\$|bitcoin|btc|ethereum|eth|solana|sol|crypto|coin|chart|up|down|pump|dump|rally|crash/.test(cmd)) {
     let requirement;
     if (customAddr) {
-      requirement = `Analyze token ${customAddr} on Base`;
+      requirement = `Analyze token ${customAddr} on ${chainName}`;
     } else if (ticker && ticker !== 'GSB') {
       // Resolve ticker symbol to contract address via DexScreener
-      broadcast('cmd-status', { type: 'info', message: `Looking up $${ticker} on DexScreener…` });
-      const resolved = await resolveTokenAddress(ticker);
+      broadcast('cmd-status', { type: 'info', message: `Looking up $${ticker} on DexScreener (${chainName})…` });
+      const resolved = await resolveTokenAddress(ticker, requestedChain);
       if (resolved) {
         requirement = `Analyze token ${resolved.address} on ${resolved.chain}`;
         broadcast('cmd-status', { type: 'info', message: `Found $${ticker} → ${resolved.address} on ${resolved.chain}` });
@@ -1019,14 +1028,17 @@ app.post('/api/command', async (req, res) => {
   // Wallet profiling
   if (/wallet|profile|who is|address|holder|tx|transaction/.test(cmd)) {
     const requirement = customAddr
-      ? `Profile wallet ${customAddr} on Base`
+      ? `Profile wallet ${customAddr} on ${chainName}`
       : WORKER_CATALOG['GSB Wallet Profiler'].defaultReq;
     intents.push({ worker: 'GSB Wallet Profiler', requirement });
   }
 
   // Alpha scanning — catches "what's hot", "what should I watch", "any plays"
   if (/alpha|scan|signal|mover|gainer|trending|opportunity|what.s moving|what.s hot|what should|any play|top token|best token|watch/.test(cmd)) {
-    intents.push({ worker: 'GSB Alpha Scanner', requirement: WORKER_CATALOG['GSB Alpha Scanner'].defaultReq });
+    const alphaReq = requestedChain !== 'base'
+      ? `Scan ${chainName} chain for alpha signals now`
+      : WORKER_CATALOG['GSB Alpha Scanner'].defaultReq;
+    intents.push({ worker: 'GSB Alpha Scanner', requirement: alphaReq });
   }
 
   // Thread writing

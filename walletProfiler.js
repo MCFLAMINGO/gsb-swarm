@@ -3,6 +3,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { buildAcpClient } = require('./acp');
+const { CHAIN_CONFIG, resolveChain, SUPPORTED_CHAINS } = require('./chains');
 
 const AGENT_NAME = 'GSB Wallet Profiler';
 
@@ -44,9 +45,11 @@ function executeSkillInstruction(skill, params) {
 const JOB_PRICE = 0.50;
 
 // ── Job requirements JSON schema ──────────────────────────────────────────────
+const EVM_CHAINS = SUPPORTED_CHAINS.filter(c => CHAIN_CONFIG[c].isEVM);
+
 const REQUIREMENTS_SCHEMA = {
   name: 'GSB Wallet Profiler',
-  description: 'Profiles a Base-network wallet address: token holdings, recent transactions, DeFi activity, risk flags.',
+  description: `Profiles an EVM wallet address: token holdings, recent transactions, DeFi activity, risk flags. Supports: ${EVM_CHAINS.join(', ')}.`,
   parameters: {
     type: 'object',
     properties: {
@@ -56,18 +59,18 @@ const REQUIREMENTS_SCHEMA = {
       },
       chain: {
         type: 'string',
-        description: "Blockchain network. Must be 'base'.",
-        enum: ['base'],
+        description: `Blockchain network (${EVM_CHAINS.join(', ')}). Defaults to base. Solana not yet supported.`,
       },
     },
     required: ['wallet_address'],
   },
   examples: [
     { input: { wallet_address: '0x1234...abcd', chain: 'base' }, description: 'Profile a Base wallet' },
+    { input: { wallet_address: '0x1234...abcd', chain: 'ethereum' }, description: 'Profile an Ethereum wallet' },
   ],
   rejection_cases: [
     'Missing or invalid wallet address (not a valid 0x EVM address)',
-    'Non-Base chain specified (only Base is supported)',
+    'Solana wallet address (non-EVM, not yet supported)',
     'NSFW or malicious intent detected in request',
   ],
 };
@@ -86,12 +89,33 @@ function validateInput(raw) {
     return { valid: false, reason: 'Request appears to contain malicious intent and cannot be processed.' };
   }
 
-  // Check for Solana address (44-char base58 starting with a letter)
+  // Parse chain if present in JSON or plain text
+  let chain = null;
+  try {
+    const parsed = JSON.parse(raw);
+    chain = parsed.chain;
+  } catch {
+    const chainMatch = raw.match(/\bon\s+(base|ethereum|eth|arbitrum|arb|polygon|matic|solana|sol|bsc|bnb|avalanche|avax|optimism|op)\b/i);
+    if (chainMatch) chain = chainMatch[1];
+  }
+  const resolvedChain = resolveChain(chain) || 'base';
+
+  // Reject Solana wallets gracefully (non-EVM)
+  if (resolvedChain === 'solana') {
+    return { valid: false, reason: 'Solana wallet profiling coming soon — use an EVM address.' };
+  }
+
+  // Check for Solana address even if chain wasn't explicitly solana
   const words = raw.trim().split(/\s+/);
   for (const w of words) {
     if (SOLANA_ADDRESS.test(w)) {
-      return { valid: false, reason: 'Solana addresses are not supported. This agent operates on Base (EVM) only.' };
+      return { valid: false, reason: 'Solana wallet profiling coming soon — use an EVM address.' };
     }
+  }
+
+  // Reject non-EVM chains
+  if (!CHAIN_CONFIG[resolvedChain]?.isEVM) {
+    return { valid: false, reason: `${CHAIN_CONFIG[resolvedChain]?.name || resolvedChain} wallet profiling is not supported. Use an EVM chain.` };
   }
 
   // Must contain a valid 0x EVM address
@@ -100,21 +124,7 @@ function validateInput(raw) {
     return { valid: false, reason: 'Missing or invalid wallet address (not a valid 0x EVM address).' };
   }
 
-  // Parse chain if present in JSON input
-  let chain = null;
-  try {
-    const parsed = JSON.parse(raw);
-    chain = parsed.chain;
-  } catch {
-    // not JSON — check for chain keyword in raw string
-    const chainMatch = raw.match(/chain[:\s]*["']?(\w+)/i);
-    if (chainMatch) chain = chainMatch[1];
-  }
-  if (chain && chain.toLowerCase() !== 'base') {
-    return { valid: false, reason: `Only the Base network is supported. Received: ${chain}` };
-  }
-
-  return { valid: true, address: match[0] };
+  return { valid: true, address: match[0], chain: resolvedChain };
 }
 
 const handledJobs = new Set();
@@ -141,15 +151,24 @@ function extractContent(req) {
 }
 
 // Uses Blockscout public API — no API key required
-const BLOCKSCOUT = 'https://base.blockscout.com/api';
+// Default URL for backwards compat; overridden per-chain in profileWallet
+const DEFAULT_BLOCKSCOUT = 'https://base.blockscout.com/api';
 
-async function profileWallet(address) {
+async function profileWallet(address, chain = 'base') {
   try {
+    const resolvedChain = resolveChain(chain) || 'base';
+    // Blockscout V2 API for the target chain (fall back to Base)
+    const blockscoutBase = CHAIN_CONFIG[resolvedChain]?.blockscoutUrl || 'https://base.blockscout.com/api/v2';
+    // V1 compat endpoint (module=account style) — use /api path
+    const blockscoutV1 = blockscoutBase.replace('/api/v2', '/api');
+    const chainName = CHAIN_CONFIG[resolvedChain]?.name || resolvedChain;
+    const nativeToken = CHAIN_CONFIG[resolvedChain]?.nativeToken || 'ETH';
+
     // 1. Transaction list (up to 50 most recent)
     const [txRes, tokenRes, ethRes] = await Promise.allSettled([
-      axios.get(`${BLOCKSCOUT}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=desc`, { timeout: 10000 }),
-      axios.get(`${BLOCKSCOUT}?module=account&action=tokenlist&address=${address}`, { timeout: 10000 }),
-      axios.get(`${BLOCKSCOUT}?module=account&action=balance&address=${address}`, { timeout: 10000 }),
+      axios.get(`${blockscoutV1}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=desc`, { timeout: 10000 }),
+      axios.get(`${blockscoutV1}?module=account&action=tokenlist&address=${address}`, { timeout: 10000 }),
+      axios.get(`${blockscoutV1}?module=account&action=balance&address=${address}`, { timeout: 10000 }),
     ]);
 
     const txs = txRes.status === 'fulfilled' ? (txRes.value.data?.result || []) : [];
@@ -192,14 +211,15 @@ async function profileWallet(address) {
 
     return {
       wallet: address,
-      eth_balance: `${ethBal} ETH`,
+      chain: resolvedChain,
+      chain_name: chainName,
+      native_balance: `${ethBal} ${nativeToken}`,
       transaction_count: txCount,
       classification,
       token_holdings: tokenHoldings,
       recent_transactions: recentTxs,
       risk_flags: riskFlags,
-      basescan_url: `https://basescan.org/address/${address}`,
-      blockscout_url: `https://base.blockscout.com/address/${address}`,
+      blockscout_url: `${blockscoutBase.replace('/api/v2', '')}/address/${address}`,
       profiled_at: new Date().toISOString(),
       powered_by: 'GSB Intelligence Swarm',
     };
@@ -208,16 +228,16 @@ async function profileWallet(address) {
   }
 }
 
-async function processJob(client, job) {
+async function processJob(client, job, chain = 'base') {
   const rawContent = extractContent(job.requirement)
     || extractContent(job.memos?.[0]?.content)
     || '';
   const match = rawContent.match(/0x[a-fA-F0-9]{40}/);
   if (!match) {
-    await job.deliver({ type: 'text', value: 'No wallet address found. Please provide a valid Base wallet address.' });
+    await job.deliver({ type: 'text', value: 'No wallet address found. Please provide a valid EVM wallet address.' });
     return;
   }
-  const profile = await profileWallet(match[0]);
+  const profile = await profileWallet(match[0], chain);
   await job.deliver({ type: 'text', value: JSON.stringify(profile, null, 2) });
   console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
 }
@@ -265,18 +285,20 @@ async function start() {
           return;
         }
 
+        const jobChain = check.chain || 'base';
+        const chainName = CHAIN_CONFIG[jobChain]?.name || jobChain;
         let freshJob = job;
 
         if (job.phase === 2) {
           console.log(`[${AGENT_NAME}] Job ${job.id} already in TRANSACTION phase.`);
         } else {
-          await job.respond(true, 'Profiling wallet now...');
+          await job.respond(true, `Profiling wallet on ${chainName} now...`);
           console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
           freshJob = await waitForTransaction(client, job.id);
           console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase.`);
         }
 
-        await processJob(client, freshJob);
+        await processJob(client, freshJob, jobChain);
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job ${job.id} error:`, err.message);
         // If we're past the REQUEST phase, use rejectPayable so the buyer is refunded
