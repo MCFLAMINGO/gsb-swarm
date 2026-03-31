@@ -61,6 +61,7 @@ function handle(msg) {
   else if (msg.type === 'cmd-status')    appendCmdStatus(msg.data);
   else if (msg.type === 'swarm-status')  updateSwarmStatus(msg.data);
   else if (msg.type === 'cmd-synthesis') renderCmdSynthesis(msg.data);
+  else if (msg.type === 'skills-updated') loadSkillRegistry();
 }
 
 async function fetchState() {
@@ -262,6 +263,7 @@ document.querySelectorAll('.nav-item').forEach(item => {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     item.classList.add('active');
     document.getElementById(`section-${sec}`)?.classList.add('active');
+    if (sec === 'skills') loadSkillRegistry();
   });
 });
 
@@ -712,5 +714,121 @@ cmdInput.addEventListener('focus', () => {
   if (!hintShown && acpReady) {
     hintShown = true;
     addCmdMsg('info', 'Try: "analyze $GSB token" · "profile wallet 0x…" · "scan for alpha" · "write a thread" · "run full brief"');
+  }
+});
+
+// ── Skills Tab ──────────────────────────────────────────────────────────────
+let currentSkillWorker = 'GSB Token Analyst';
+let skillRegistry = {};
+
+async function loadSkillRegistry() {
+  try {
+    const res = await fetch(`${API_BASE}/api/skills`);
+    skillRegistry = await res.json();
+    renderSkillCards();
+  } catch (e) {
+    console.warn('Skills load failed:', e);
+  }
+}
+
+function renderSkillCards() {
+  const container = document.getElementById('skill-cards');
+  if (!container) return;
+  const skills = skillRegistry[currentSkillWorker] || [];
+
+  if (!skills.length) {
+    container.innerHTML = '<div class="empty-state"><p class="muted">No skills yet for this worker.</p></div>';
+    return;
+  }
+
+  container.innerHTML = skills.map(skill => `
+    <div class="skill-card">
+      <div class="skill-card-head">
+        <span class="skill-id mono">${esc(skill.skillId)}</span>
+        <span class="skill-price mono">$${skill.price} USDC</span>
+        <button class="skill-delete-btn" data-worker="${esc(currentSkillWorker)}" data-skill="${esc(skill.skillId)}">×</button>
+      </div>
+      <div class="skill-desc">${esc(skill.description)}</div>
+      <div class="skill-instruction muted">${esc(skill.instruction)}</div>
+      ${skill.params?.length ? `<div class="skill-params">params: ${skill.params.map(p => `<code>{${esc(p)}}</code>`).join(', ')}</div>` : ''}
+      <button class="btn-preset skill-fire-btn" data-worker="${esc(currentSkillWorker)}" data-skill="${esc(skill.skillId)}" data-params='${JSON.stringify(skill.params||[])}'>
+        Fire this skill
+      </button>
+    </div>
+  `).join('');
+
+  // Delete handlers
+  container.querySelectorAll('.skill-delete-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm(`Delete skill ${btn.dataset.skill}?`)) return;
+      await fetch(`${API_BASE}/api/skills/${encodeURIComponent(btn.dataset.worker)}/${btn.dataset.skill}`, { method: 'DELETE' });
+      await loadSkillRegistry();
+    });
+  });
+
+  // Fire handlers
+  container.querySelectorAll('.skill-fire-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const params = JSON.parse(btn.dataset.params || '[]');
+      const paramVals = {};
+      for (const p of params) {
+        const val = prompt(`Enter value for {${p}}:`);
+        if (!val) return;
+        paramVals[p] = val;
+      }
+      const requirement = JSON.stringify({ skillId: btn.dataset.skill, params: paramVals });
+      document.getElementById('fire-worker').value = btn.dataset.worker;
+      document.getElementById('fire-requirement').value = requirement;
+      document.getElementById('fire-requirement').dataset.edited = '1';
+      document.querySelector('[data-section="fire"]').click();
+    });
+  });
+}
+
+// Worker tab switching
+document.querySelectorAll('.skill-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.skill-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    currentSkillWorker = tab.dataset.worker;
+    renderSkillCards();
+  });
+});
+
+// Add skill form
+document.getElementById('add-skill-btn')?.addEventListener('click', () => {
+  document.getElementById('skill-form').classList.remove('hidden');
+});
+document.getElementById('sf-cancel')?.addEventListener('click', () => {
+  document.getElementById('skill-form').classList.add('hidden');
+});
+document.getElementById('sf-save')?.addEventListener('click', async () => {
+  const workerName = document.getElementById('sf-worker').value;
+  const skillId = document.getElementById('sf-id').value.trim().replace(/\s+/g, '_');
+  const description = document.getElementById('sf-desc').value.trim();
+  const instruction = document.getElementById('sf-instruction').value.trim();
+  const price = parseFloat(document.getElementById('sf-price').value) || 0.10;
+  const params = document.getElementById('sf-params').value.split(',').map(p => p.trim()).filter(Boolean);
+
+  if (!skillId || !instruction) {
+    alert('Skill ID and Instruction are required');
+    return;
+  }
+
+  const res = await fetch(`${API_BASE}/api/skills`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workerName, skillId, description, instruction, params, price })
+  });
+
+  if (res.ok) {
+    document.getElementById('skill-form').classList.add('hidden');
+    // Reset form
+    document.getElementById('sf-id').value = '';
+    document.getElementById('sf-desc').value = '';
+    document.getElementById('sf-instruction').value = '';
+    document.getElementById('sf-params').value = '';
+    document.getElementById('sf-price').value = '0.10';
+    await loadSkillRegistry();
   }
 });

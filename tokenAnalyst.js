@@ -1,8 +1,46 @@
 require('dotenv').config();
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const { buildAcpClient } = require('./acp');
 
 const AGENT_NAME = 'GSB Token Analyst';
+
+// ── Skill Registry ───────────────────────────────────────────────────────────
+function loadSkills(workerName) {
+  try {
+    const registry = JSON.parse(fs.readFileSync(path.join(__dirname, 'skills.json'), 'utf8'));
+    return registry[workerName] || [];
+  } catch (e) {
+    console.warn('[skills] Could not load skills.json, using defaults');
+    return [];
+  }
+}
+
+function parseJobRequirement(requirement) {
+  try {
+    const parsed = JSON.parse(requirement);
+    if (parsed.skillId) return parsed;
+  } catch {}
+  if (typeof requirement === 'string' && requirement.includes('skillId:')) {
+    const parts = requirement.split(/\s+/);
+    const result = {};
+    parts.forEach(part => {
+      const [key, ...rest] = part.split(':');
+      if (key && rest.length) result[key] = rest.join(':');
+    });
+    if (result.skillId) return { skillId: result.skillId, params: result };
+  }
+  return { skillId: null, params: {}, rawText: requirement };
+}
+
+function executeSkillInstruction(skill, params) {
+  let instruction = skill.instruction;
+  Object.entries(params).forEach(([key, val]) => {
+    instruction = instruction.replace(new RegExp(`\\{${key}\\}`, 'g'), val);
+  });
+  return instruction;
+}
 const JOB_PRICE  = 0.25;
 
 // ── Virtuals Protocol sell wall addresses ─────────────────────────────────────
@@ -144,10 +182,22 @@ async function start() {
       handledJobs.add(job.id);
 
       try {
-        const rawContent = extractContent(job.requirement)
+        let rawContent = extractContent(job.requirement)
           || extractContent(job.memos?.[0]?.content)
           || '';
         console.log(`[${AGENT_NAME}] Job ${job.id} content: ${rawContent.slice(0, 120)}`);
+
+        // ── Skill registry routing ───────────────────────────────────────────
+        const parsed = parseJobRequirement(rawContent);
+        const skills = loadSkills(AGENT_NAME);
+        if (parsed.skillId) {
+          const skillDef = skills.find(s => s.skillId === parsed.skillId);
+          if (skillDef) {
+            const instruction = executeSkillInstruction(skillDef, parsed.params || {});
+            console.log(`[${AGENT_NAME}] Skill ${parsed.skillId} → "${instruction.slice(0, 100)}"`);
+            rawContent = instruction;
+          }
+        }
 
         // ── Validate BEFORE accepting ────────────────────────────────────────
         const check = validateInput(rawContent);

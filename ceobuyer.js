@@ -60,6 +60,15 @@ const WORKER_CONFIGS = {
   thread_writer:   { name: 'GSB Thread Writer',   address: '0x4ab8320491A1FD8396F7F23c212cd6fC978C8Ad0', price: 0.15 },
 };
 
+// ── Skill Registry ─────────────────────────────────────────────────────────
+function loadSkillRegistry() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, 'skills.json'), 'utf8'));
+  } catch (e) {
+    return {};
+  }
+}
+
 // ── CEO pricing (must exceed worker costs for margin) ──────────────────────
 const CEO_PRICES = {
   swarm_heartbeat_report:      0.10,  // no worker needed, pure margin
@@ -213,8 +222,19 @@ async function handleProviderJob(client, job, offeringName) {
         return;
       }
 
-      console.log(`[CEO-provider] Routing to ${worker.name}: "${requirement}"`);
-      const workerResult = await dispatchToWorker(client, workerKey, requirement);
+      // Try skill-based dispatch based on the routed worker
+      const addressMatch = goal.match(/0x[a-fA-F0-9]{40}/);
+      let workerResult;
+      if (workerKey === 'alpha_scanner') {
+        console.log(`[CEO-provider] Routing to ${worker.name} via skill: scan_trending`);
+        workerResult = await dispatchToWorker(client, workerKey, null, 'scan_trending', {});
+      } else if (workerKey === 'token_analyst' && addressMatch) {
+        console.log(`[CEO-provider] Routing to ${worker.name} via skill: analyze_token`);
+        workerResult = await dispatchToWorker(client, workerKey, null, 'analyze_token', { address: addressMatch[0] });
+      } else {
+        console.log(`[CEO-provider] Routing to ${worker.name}: "${requirement}"`);
+        workerResult = await dispatchToWorker(client, workerKey, requirement);
+      }
 
       result = {
         orchestrated_by: 'GSB CEO',
@@ -322,15 +342,38 @@ function parseDeliverable(rawValue) {
 }
 
 // ── Dispatch a job to a worker and wait for the deliverable ────────────────
-async function dispatchToWorker(acpClient, workerKey, requirement) {
+// Supports both legacy plain-text and skill-based dispatch:
+//   dispatchToWorker(client, 'alpha_scanner', 'Scan for trending tokens')
+//   dispatchToWorker(client, 'alpha_scanner', null, 'scan_trending', {})
+async function dispatchToWorker(acpClient, workerKey, requirement, skillId, skillParams) {
   const worker = WORKER_CONFIGS[workerKey];
+
+  // If skillId provided, build JSON requirement from registry
+  if (skillId) {
+    const registry = loadSkillRegistry();
+    const workerSkills = registry[worker.name] || [];
+    const skill = workerSkills.find(s => s.skillId === skillId);
+    if (skill) {
+      requirement = JSON.stringify({ skillId, params: skillParams || {} });
+    } else if (!requirement) {
+      throw new Error(`Unknown skill: ${skillId} for worker ${worker.name}`);
+    }
+  }
+
   console.log(`[CEO-dispatch] Hiring ${worker.name} for: ${requirement.slice(0, 80)}`);
 
   return new Promise(async (resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('Worker timeout after 3 min')), 180000);
 
     try {
-      const fare = new FareAmount(worker.price, baseAcpConfigV2.baseFare);
+      // Use skill price from registry if available
+      let price = worker.price;
+      if (skillId) {
+        const registry = loadSkillRegistry();
+        const skill = (registry[worker.name] || []).find(s => s.skillId === skillId);
+        if (skill) price = skill.price;
+      }
+      const fare = new FareAmount(price, baseAcpConfigV2.baseFare);
       const expiry = new Date(Date.now() + 1000 * 60 * 30);
 
       const jobId = await acpClient.initiateJob(

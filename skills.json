@@ -1,0 +1,114 @@
+{
+  "GSB Token Analyst": [
+    {
+      "skillId": "analyze_token",
+      "description": "Full token analysis — price, liquidity, volume, 24h change, verdict",
+      "instruction": "Analyze token {address} on Base — fetch price, 24h change, liquidity, volume, market cap, and give a buy/hold/avoid verdict",
+      "params": ["address"],
+      "price": 0.10,
+      "outputFields": ["token", "price", "change24h", "liquidity", "volume", "marketCap", "verdict"]
+    },
+    {
+      "skillId": "track_whale_wallets",
+      "description": "Find top holders of a token and classify each wallet",
+      "instruction": "Find the top 10 holders of token {address} on Base using Blockscout. For each wallet show: address, % held, wallet class (whale/smart money/retail/bot), last activity",
+      "params": ["address"],
+      "price": 0.15,
+      "outputFields": ["address", "percentHeld", "walletClass", "lastActivity"]
+    },
+    {
+      "skillId": "monitor_liquidity",
+      "description": "Track liquidity changes and detect pool health",
+      "instruction": "Check liquidity pool health for token {address} on Base. Report: current liquidity, 24h liquidity change, LP token distribution, rug risk score (low/medium/high)",
+      "params": ["address"],
+      "price": 0.12,
+      "outputFields": ["liquidity", "change24h", "lpDistribution", "rugRisk"]
+    }
+  ],
+  "GSB Wallet Profiler": [
+    {
+      "skillId": "profile_wallet",
+      "description": "Full wallet profile — tx history, holdings, classification",
+      "instruction": "Profile wallet {address} on Base — fetch ETH balance, token holdings, tx count, wallet age, and classify as: whale/smart money/retail/bot/new",
+      "params": ["address"],
+      "price": 0.10,
+      "outputFields": ["address", "ethBalance", "tokenHoldings", "txCount", "walletClass", "age"]
+    },
+    {
+      "skillId": "detect_smart_money",
+      "description": "Detect if a wallet is smart money based on win rate and PnL",
+      "instruction": "Analyze wallet {address} trading history on Base. Calculate: win rate on token trades, estimated PnL, tokens bought early (within 24h of launch), smart money score (0-100)",
+      "params": ["address"],
+      "price": 0.20,
+      "outputFields": ["winRate", "estimatedPnL", "earlyBuys", "smartMoneyScore"]
+    },
+    {
+      "skillId": "track_wallet_activity",
+      "description": "Monitor recent transactions and flag notable moves",
+      "instruction": "Get the last 20 transactions for wallet {address} on Base. Flag any: large transfers >$10k, new token positions, DEX trades, contract interactions. Summarize the pattern",
+      "params": ["address"],
+      "price": 0.12,
+      "outputFields": ["recentTxs", "largeTransfers", "newPositions", "pattern"]
+    }
+  ],
+  "GSB Alpha Scanner": [
+    {
+      "skillId": "scan_trending",
+      "description": "Scan Base for trending tokens with momentum",
+      "instruction": "Scan Base chain for trending tokens right now using GeckoTerminal. Return top 5 by volume with: symbol, price, 24h change, volume, why it's trending",
+      "params": [],
+      "price": 0.10,
+      "outputFields": ["symbol", "price", "change24h", "volume", "reason"]
+    },
+    {
+      "skillId": "find_new_launches",
+      "description": "Find newly launched tokens in the last 24h with strong early signals",
+      "instruction": "Find tokens launched in the last 24 hours on Base with: liquidity >$50k, volume >$100k, holders >100. For each: symbol, contract address, launch time, liquidity, initial signal (strong/moderate/weak)",
+      "params": [],
+      "price": 0.12,
+      "outputFields": ["symbol", "address", "launchTime", "liquidity", "signal"]
+    },
+    {
+      "skillId": "detect_volume_spikes",
+      "description": "Detect tokens with unusual volume spikes in the last hour",
+      "instruction": "Find tokens on Base with volume spikes in the last 1 hour — look for tokens where 1h volume is >3x their 6h average. Return: symbol, address, spike multiplier, current price, 1h change",
+      "params": [],
+      "price": 0.12,
+      "outputFields": ["symbol", "address", "spikeMultiplier", "price", "change1h"]
+    },
+    {
+      "skillId": "scan_chain",
+      "description": "Scan a specific chain for alpha signals",
+      "instruction": "Scan {chain} chain for trending tokens and alpha signals. Return top opportunities with price momentum and volume confirmation",
+      "params": ["chain"],
+      "price": 0.10,
+      "outputFields": ["symbol", "price", "momentum", "volume"]
+    }
+  ],
+  "GSB Thread Writer": [
+    {
+      "skillId": "write_thread",
+      "description": "Write a crypto Twitter thread about any topic",
+      "instruction": "Write a 5-tweet crypto Twitter thread about: {topic}. Make it engaging, use data where possible, end with a strong CTA. Format as Tweet 1:, Tweet 2:, etc.",
+      "params": ["topic"],
+      "price": 0.10,
+      "outputFields": ["tweet1", "tweet2", "tweet3", "tweet4", "tweet5"]
+    },
+    {
+      "skillId": "write_alpha_report",
+      "description": "Write a formatted alpha report for a token or opportunity",
+      "instruction": "Write a crypto alpha report about {topic}. Include: thesis, key metrics, entry considerations, risks, price targets. Format for CT (Crypto Twitter) — punchy and data-driven",
+      "params": ["topic"],
+      "price": 0.15,
+      "outputFields": ["thesis", "metrics", "entry", "risks", "targets"]
+    },
+    {
+      "skillId": "write_market_update",
+      "description": "Write a market update post summarizing current conditions",
+      "instruction": "Write a crypto market update post for right now covering: overall sentiment, top movers on Base, key narrative, what to watch. Keep it under 280 chars for a single tweet or expand to thread if needed",
+      "params": [],
+      "price": 0.10,
+      "outputFields": ["content", "sentiment", "keyNarratives"]
+    }
+  ]
+}

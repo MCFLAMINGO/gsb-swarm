@@ -57,6 +57,12 @@
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
       <span>Fire Job</span>
     </a>
+    <a href="#skills" class="nav-item" data-section="skills">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+      </svg>
+      <span>Skills</span>
+    </a>
   </nav>
 
   <div class="sidebar-footer">
@@ -269,6 +275,65 @@
         <thead><tr><th>Time</th><th>Job ID</th><th>Worker</th><th>Event</th><th>Status</th></tr></thead>
         <tbody id="jobs-tbody"><tr><td colspan="5" class="muted center">No jobs yet.</td></tr></tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- SKILLS -->
+  <section class="section" id="section-skills">
+    <div class="section-header">
+      <h2>Agent Skill Registry</h2>
+      <button class="btn-primary" id="add-skill-btn">+ New Skill</button>
+    </div>
+
+    <!-- Worker skill tabs -->
+    <div class="skill-worker-tabs" id="skill-worker-tabs">
+      <button class="skill-tab active" data-worker="GSB Token Analyst">Token Analyst</button>
+      <button class="skill-tab" data-worker="GSB Wallet Profiler">Wallet Profiler</button>
+      <button class="skill-tab" data-worker="GSB Alpha Scanner">Alpha Scanner</button>
+      <button class="skill-tab" data-worker="GSB Thread Writer">Thread Writer</button>
+    </div>
+
+    <!-- Skill cards list -->
+    <div class="skill-cards" id="skill-cards"></div>
+
+    <!-- Add skill form (hidden by default) -->
+    <div class="skill-form hidden" id="skill-form">
+      <div class="section-header"><h3>Add New Skill</h3></div>
+      <div class="form-group">
+        <label>Worker</label>
+        <select id="sf-worker">
+          <option>GSB Token Analyst</option>
+          <option>GSB Wallet Profiler</option>
+          <option>GSB Alpha Scanner</option>
+          <option>GSB Thread Writer</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group flex-1">
+          <label>Skill ID (no spaces, use_underscores)</label>
+          <input type="text" id="sf-id" placeholder="e.g. track_whale_wallets">
+        </div>
+        <div class="form-group flex-none">
+          <label>Price (USDC)</label>
+          <input type="number" id="sf-price" value="0.10" step="0.01" min="0.01">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Description (one line)</label>
+        <input type="text" id="sf-desc" placeholder="What this skill does">
+      </div>
+      <div class="form-group">
+        <label>Instruction Template (use {param} for dynamic values)</label>
+        <textarea id="sf-instruction" rows="3" placeholder="Analyze token {address} on Base and return price, liquidity, verdict"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Params (comma separated, match {placeholders} above)</label>
+        <input type="text" id="sf-params" placeholder="address, chain">
+      </div>
+      <div class="fire-actions">
+        <button class="btn-primary" id="sf-save">Save Skill</button>
+        <button class="btn-secondary" id="sf-cancel">Cancel</button>
+      </div>
     </div>
   </section>
 

@@ -4,6 +4,7 @@ require('dotenv').config();
 
 const https = require('https');
 
+const fs       = require('fs');
 const express  = require('express');
 const http     = require('http');
 const path     = require('path');
@@ -516,6 +517,53 @@ app.get('/api/workers', (req, res) => {
     role: w.role,
     defaultReq: w.defaultReq,
   })));
+});
+
+// ── Skill Registry API ──────────────────────────────────────────────────────
+app.get('/api/skills', (req, res) => {
+  try {
+    const registry = JSON.parse(fs.readFileSync(path.join(__dirname, 'skills.json'), 'utf8'));
+    res.json(registry);
+  } catch (e) {
+    res.json({});
+  }
+});
+
+app.post('/api/skills', (req, res) => {
+  const { workerName, ...skill } = req.body;
+  if (!workerName || !skill.skillId || !skill.instruction) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  try {
+    const registry = JSON.parse(fs.readFileSync(path.join(__dirname, 'skills.json'), 'utf8'));
+    if (!registry[workerName]) registry[workerName] = [];
+    const existing = registry[workerName].findIndex(s => s.skillId === skill.skillId);
+    if (existing >= 0) {
+      registry[workerName][existing] = skill;
+    } else {
+      registry[workerName].push(skill);
+    }
+    fs.writeFileSync(path.join(__dirname, 'skills.json'), JSON.stringify(registry, null, 2));
+    broadcast('skills-updated', { workerName, skillId: skill.skillId, action: 'added' });
+    res.json({ ok: true, skill });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/skills/:workerName/:skillId', (req, res) => {
+  const { workerName, skillId } = req.params;
+  try {
+    const registry = JSON.parse(fs.readFileSync(path.join(__dirname, 'skills.json'), 'utf8'));
+    if (registry[workerName]) {
+      registry[workerName] = registry[workerName].filter(s => s.skillId !== skillId);
+      fs.writeFileSync(path.join(__dirname, 'skills.json'), JSON.stringify(registry, null, 2));
+      broadcast('skills-updated', { workerName, skillId, action: 'deleted' });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── Instant query engine (fast lane — no ACP) ───────────────────────────────
