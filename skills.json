@@ -127,6 +127,22 @@
       "params": [],
       "price": 0.05,
       "outputFields": ["status", "workerLoad", "totalJobs", "topOpportunity"]
+    },
+    {
+      "skillId": "token_deep_dive",
+      "description": "Full token intelligence — Token Analyst + Wallet Profiler running in parallel. Price, liquidity, whale holders, smart money score.",
+      "instruction": "Run a full deep dive on token {address} — parallel Token Analyst + Wallet Profiler, synthesized into one investment brief with BUY/HOLD/AVOID verdict",
+      "params": ["address"],
+      "price": 0.35,
+      "outputFields": ["tokenData", "smartMoneyData", "verdict", "recommendation"]
+    },
+    {
+      "skillId": "daily_brief",
+      "description": "Full swarm morning report — all 4 workers run in parallel, CEO synthesizes into one actionable brief.",
+      "instruction": "Run full swarm daily brief — trending tokens, volume spikes, market narrative, and one clear action recommendation",
+      "params": [],
+      "price": 0.50,
+      "outputFields": ["sentiment", "opportunities", "volumeAlerts", "narrative", "action"]
     }
   ]
 }

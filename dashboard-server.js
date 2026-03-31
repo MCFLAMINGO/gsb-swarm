@@ -700,7 +700,70 @@ app.get('/api/resource/:name', (req, res) => {
     });
   }
 
-  return res.status(404).json({ error: 'Unknown resource', available: ['market_snapshot', 'swarm_status', 'latest_brief'] });
+  if (name === 'top_alpha') {
+    const pools = ceoDashCache.lastAlphaScan?.data ?? [];
+    const top3 = pools.slice(0, 3).map(p => ({
+      symbol: p.attributes?.name ?? 'Unknown',
+      price_usd: p.attributes?.base_token_price_usd ?? '0',
+      volume_24h: p.attributes?.volume_usd?.h24 ?? '0',
+      change_24h: p.attributes?.price_change_percentage?.h24 ?? '0',
+      fdv: p.attributes?.fdv_usd ?? '0',
+      address: p.relationships?.base_token?.data?.id ?? '',
+    }));
+    return res.json({
+      resource: 'top_alpha',
+      opportunities: top3,
+      narrative: top3.length > 0
+        ? `Top opportunity: ${top3[0]?.symbol} with $${Number(top3[0]?.volume_24h ?? 0).toLocaleString()} 24h volume`
+        : 'Cache warming — check back in 60 seconds',
+      updatedAt: ceoDashCache.lastAlphaScan?.fetchedAt ?? null,
+      chain: 'Base',
+    });
+  }
+
+  if (name === 'gsb_offerings') {
+    return res.json({
+      resource: 'gsb_offerings',
+      agent: 'GSB CEO Agent',
+      agentId: 40779,
+      description: 'GSB CEO orchestrates a full intelligence swarm on Base. Hire for instant alpha, deep token analysis, wallet profiling, social coordination, and strategic briefs.',
+      offerings: [
+        { name: 'swarm_heartbeat_report', price_usdc: 0.10, description: 'Instant swarm status + live Base market snapshot from cache. Response in <5 seconds.' },
+        { name: 'strategy_task_assignment', price_usdc: 0.25, description: 'CEO routes your goal to the best worker(s) and synthesizes results. Alpha scans, token analysis, thread writing.' },
+        { name: 'escalation_decision_support', price_usdc: 0.35, description: 'High-urgency situation analysis — CEO + Alpha Scanner assess risk and give strategic recommendation.' },
+        { name: 'token_deep_dive', price_usdc: 0.35, description: 'Full token intelligence — Token Analyst + Wallet Profiler running in parallel. Price, liquidity, whale holders, smart money score.' },
+        { name: 'daily_brief', price_usdc: 0.50, description: 'Full swarm morning report — all 4 workers run in parallel, CEO synthesizes into one actionable brief. Best value.' },
+        { name: 'social_blast', price_usdc: 0.35, description: 'Alpha scan + viral X thread + Telegram raid message + bot amplification plan. Full social coordination.' },
+        { name: 'bank_status_report', price_usdc: 0.05, description: 'Instant GSB bank status — worker load, jobs served, swarm health. Cheapest offering.' },
+      ],
+      hire_url: 'https://app.virtuals.io/acp/agents/itrtj5b95z14av53qoubqwcu',
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  if (name === 'whale_activity') {
+    // Pull top pools by volume as proxy for whale activity
+    const pools = ceoDashCache.lastAlphaScan?.data ?? [];
+    const whaleSignals = pools.slice(0, 5).map(p => ({
+      token: p.attributes?.name ?? 'Unknown',
+      volume_1h: p.attributes?.volume_usd?.h1 ?? '0',
+      volume_24h: p.attributes?.volume_usd?.h24 ?? '0',
+      change_1h: p.attributes?.price_change_percentage?.h1 ?? '0',
+      signal: Number(p.attributes?.volume_usd?.h1 ?? 0) > 50000 ? 'HIGH_ACTIVITY' :
+              Number(p.attributes?.volume_usd?.h1 ?? 0) > 10000 ? 'MODERATE' : 'LOW',
+      address: p.relationships?.base_token?.data?.id?.replace('base_', '') ?? '',
+    }));
+    return res.json({
+      resource: 'whale_activity',
+      signals: whaleSignals,
+      summary: `${whaleSignals.filter(s => s.signal === 'HIGH_ACTIVITY').length} tokens showing high whale activity on Base in the last hour`,
+      updatedAt: ceoDashCache.lastAlphaScan?.fetchedAt ?? null,
+      chain: 'Base',
+      note: 'Volume-based whale proxy — hire CEO strategy_task_assignment for full wallet profiling',
+    });
+  }
+
+  return res.status(404).json({ error: 'Unknown resource', available: ['market_snapshot', 'swarm_status', 'latest_brief', 'top_alpha', 'gsb_offerings', 'whale_activity'] });
 });
 
 // ── GET /api/state ────────────────────────────────────────────────────────────

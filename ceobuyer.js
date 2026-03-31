@@ -130,6 +130,8 @@ const CEO_PRICES = {
   swarm_heartbeat_report:      0.10,  // no worker needed, pure margin
   strategy_task_assignment:    0.25,  // routes to best worker
   escalation_decision_support: 0.35,  // alpha scanner + analysis
+  token_deep_dive:             0.35,  // Token Analyst + Wallet Profiler parallel
+  daily_brief:                 0.50,  // all 4 workers parallel
 };
 
 // ── Provider offerings ─────────────────────────────────────────────────────
@@ -168,6 +170,28 @@ const OFFERING_SCHEMAS = {
       required: ['situation']
     },
     rejection_cases: ['Empty or missing situation description', 'NSFW or harmful content', 'Too short (under 10 chars)']
+  },
+  token_deep_dive: {
+    description: 'Full token intelligence — Token Analyst + Wallet Profiler in parallel',
+    price: 0.35,
+    parameters: {
+      type: 'object',
+      properties: {
+        address: { type: 'string', description: 'Token contract address (0x...)' }
+      },
+      required: ['address']
+    },
+    rejection_cases: ['No token address provided', 'NSFW or malicious content']
+  },
+  daily_brief: {
+    description: 'Full swarm morning report — all 4 workers in parallel',
+    price: 0.50,
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: []
+    },
+    rejection_cases: ['NSFW or malicious content']
   }
 };
 
@@ -239,10 +263,11 @@ function formatCeoBrief(content, timestamp) {
 function determineOffering(job, rawContent) {
   let offeringName = job.serviceName || job.serviceOffering || '';
 
-  // Check for skill-based dispatch (e.g. social_blast, bank_status_report)
+  // Check for skill-based dispatch (e.g. social_blast, bank_status_report, token_deep_dive, daily_brief)
   let skillRequest = null;
   try { skillRequest = JSON.parse(rawContent); } catch {}
-  if (skillRequest?.skillId === 'social_blast' || skillRequest?.skillId === 'bank_status_report') {
+  if (skillRequest?.skillId === 'social_blast' || skillRequest?.skillId === 'bank_status_report'
+      || skillRequest?.skillId === 'token_deep_dive' || skillRequest?.skillId === 'daily_brief') {
     return skillRequest.skillId;
   }
 
@@ -254,6 +279,8 @@ function determineOffering(job, rawContent) {
   // Keyword fallback when serviceName/serviceOffering are empty or unknown
   const lower = (rawContent || job.requirement || job.content || '').toLowerCase();
   if (/social.?blast|raid|amplif/.test(lower)) return 'social_blast';
+  if (/deep.?dive|deep.?analysis|full.?token|token.?intel|whale.?holders/.test(lower)) return 'token_deep_dive';
+  if (/daily.?brief|morning.?report|full.?swarm|all.?agents|everything/.test(lower)) return 'daily_brief';
   if (/heartbeat|status|swarm|bank/.test(lower)) return 'swarm_heartbeat_report';
   if (/escalat|risk|situation|urgent|decision/.test(lower)) return 'escalation_decision_support';
   if (/strateg|task|assign|alpha|scan|trend|token|wallet|thread|write/.test(lower)) return 'strategy_task_assignment';
@@ -441,6 +468,91 @@ AMPLIFICATION INSTRUCTIONS:
         `SOCIAL BLAST COORDINATION\nTopic: ${topic}\nWorkers: Alpha Scanner + Thread Writer (parallel)\n\n${synthesis}`,
         ts
       );
+
+    } else if (offeringName === 'token_deep_dive') {
+      const addressMatch = rawContent.match(/0x[a-fA-F0-9]{40}/);
+      if (!addressMatch) {
+        await job.deliver({ type: 'text', value: formatCeoBrief('Please include a token contract address (0x...) for a deep dive analysis.', new Date().toISOString()) });
+        return;
+      }
+      const tokenAddress = addressMatch[0];
+
+      // Parallel dispatch — Token Analyst + Wallet Profiler simultaneously
+      console.log(`[CEO-provider] token_deep_dive: parallel Token Analyst + Wallet Profiler for ${tokenAddress}`);
+      ceoCache.workerLoad['GSB Token Analyst']++;
+      ceoCache.workerLoad['GSB Wallet Profiler']++;
+
+      const [tokenResult, walletResult] = await Promise.allSettled([
+        dispatchToWorker(acpClient, 'token_analyst', null, 'analyze_token', { address: tokenAddress }),
+        dispatchToWorker(acpClient, 'wallet_profiler', null, 'detect_smart_money', { address: tokenAddress }),
+      ]);
+
+      ceoCache.workerLoad['GSB Token Analyst']--;
+      ceoCache.workerLoad['GSB Wallet Profiler']--;
+
+      const tokenData = tokenResult.status === 'fulfilled' ? tokenResult.value : 'Token analysis unavailable';
+      const walletData = walletResult.status === 'fulfilled' ? walletResult.value : 'Smart money data unavailable';
+
+      const prompt = `You are the GSB CEO delivering a token deep dive report.
+Token Analysis: ${JSON.stringify(tokenData)}
+Smart Money / Whale Data: ${JSON.stringify(walletData)}
+Token Address: ${tokenAddress}
+
+Write a comprehensive 5-7 sentence investment intelligence brief. Include: current price/liquidity verdict, smart money activity, whale concentration risk, and a clear BUY/HOLD/AVOID recommendation with reasoning. Be direct and data-driven.`;
+
+      const brief = await ceoSynthesize(prompt);
+      await job.deliver({ type: 'text', value: formatCeoBrief(brief, new Date().toISOString()) });
+      ceoCache.totalJobsServed++;
+      global.latestCeoBrief = brief;
+      global.latestCeoBriefAt = new Date().toISOString();
+      console.log(`[CEO-provider] Job ${job.id} delivered (token_deep_dive)`);
+      return;
+
+    } else if (offeringName === 'daily_brief') {
+      console.log(`[CEO-provider] daily_brief: dispatching all 4 workers in parallel`);
+      ceoCache.workerLoad['GSB Alpha Scanner']++;
+      ceoCache.workerLoad['GSB Token Analyst']++;
+      ceoCache.workerLoad['GSB Wallet Profiler']++;
+      ceoCache.workerLoad['GSB Thread Writer']++;
+
+      const [alphaResult, trendResult, whaleResult, threadResult] = await Promise.allSettled([
+        dispatchToWorker(acpClient, 'alpha_scanner', null, 'scan_trending', {}),
+        dispatchToWorker(acpClient, 'alpha_scanner', null, 'detect_volume_spikes', {}),
+        dispatchToWorker(acpClient, 'wallet_profiler', null, 'track_wallet_activity', { address: '0x6dA1A9793Ebe96975c240501A633ab8B3c83D14A' }),
+        dispatchToWorker(acpClient, 'thread_writer', null, 'write_market_update', {}),
+      ]);
+
+      ceoCache.workerLoad['GSB Alpha Scanner']--;
+      ceoCache.workerLoad['GSB Token Analyst']--;
+      ceoCache.workerLoad['GSB Wallet Profiler']--;
+      ceoCache.workerLoad['GSB Thread Writer']--;
+
+      const alpha = alphaResult.status === 'fulfilled' ? alphaResult.value : null;
+      const trend = trendResult.status === 'fulfilled' ? trendResult.value : null;
+      const thread = threadResult.status === 'fulfilled' ? threadResult.value : null;
+
+      const prompt = `You are the GSB CEO delivering a full daily intelligence brief.
+Trending tokens: ${JSON.stringify(alpha)}
+Volume spikes: ${JSON.stringify(trend)}
+Market narrative (Thread Writer): ${JSON.stringify(thread)}
+Timestamp: ${new Date().toISOString()}
+
+Write a complete daily brief in this format:
+MARKET SENTIMENT: [one line]
+TOP OPPORTUNITIES: [2-3 bullet points with token names and why]
+VOLUME ALERTS: [any unusual volume from spike data]
+NARRATIVE: [1-2 sentences on the dominant story today]
+ACTION: [one clear recommendation for traders]
+
+Be specific, data-driven, and under 200 words total.`;
+
+      const brief = await ceoSynthesize(prompt);
+      await job.deliver({ type: 'text', value: formatCeoBrief(brief, new Date().toISOString()) });
+      ceoCache.totalJobsServed++;
+      global.latestCeoBrief = brief;
+      global.latestCeoBriefAt = new Date().toISOString();
+      console.log(`[CEO-provider] Job ${job.id} delivered (daily_brief)`);
+      return;
 
     } else if (offeringName === 'bank_status_report') {
       const cacheAge = ceoCache.lastAlphaScan
@@ -920,11 +1032,15 @@ async function main() {
   const RESOURCE_BASE = process.env.RAILWAY_STATIC_URL
     ? `https://${process.env.RAILWAY_STATIC_URL}`
     : 'https://gsb-swarm-production.up.railway.app';
-  console.log(`[CEO] Public resources available:`);
-  console.log(`  ${RESOURCE_BASE}/api/resource/market_snapshot`);
-  console.log(`  ${RESOURCE_BASE}/api/resource/swarm_status`);
-  console.log(`  ${RESOURCE_BASE}/api/resource/latest_brief`);
-  console.log(`[CEO] Register these URLs in Virtuals ACP dashboard under CEO → Resources`);
+  console.log(`[CEO] ═══ Public Resources ═══`);
+  console.log(`[CEO]   market_snapshot  → ${RESOURCE_BASE}/api/resource/market_snapshot`);
+  console.log(`[CEO]   swarm_status     → ${RESOURCE_BASE}/api/resource/swarm_status`);
+  console.log(`[CEO]   latest_brief     → ${RESOURCE_BASE}/api/resource/latest_brief`);
+  console.log(`[CEO]   top_alpha        → ${RESOURCE_BASE}/api/resource/top_alpha`);
+  console.log(`[CEO]   gsb_offerings    → ${RESOURCE_BASE}/api/resource/gsb_offerings`);
+  console.log(`[CEO]   whale_activity   → ${RESOURCE_BASE}/api/resource/whale_activity`);
+  console.log(`[CEO] ════════════════════════`);
+  console.log(`[CEO] Register these in Virtuals ACP → CEO Agent → Resources`);
 
   console.log('[ceo] Provider + Buyer clients ready. Firing jobs at all 4 workers.\n');
 
