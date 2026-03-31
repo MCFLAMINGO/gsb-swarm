@@ -70,6 +70,118 @@ let   acpReady       = false;
 let   acceptQueue    = Promise.resolve();
 let   evaluatedCount = 0;
 
+// ── Worker Status Tracking ──────────────────────────────────────────────────
+const workerStatus = {};
+function initWorkerStatus() {
+  const agents = ['CEO', ...Object.keys(WORKER_CATALOG)];
+  agents.forEach(name => {
+    workerStatus[name] = { name, status: 'idle', currentJobId: null, lastJobAt: null, jobsCompleted: 0 };
+  });
+}
+
+function setWorkerStatus(name, status, jobId) {
+  if (!workerStatus[name]) return;
+  workerStatus[name].status = status;
+  if (jobId !== undefined) workerStatus[name].currentJobId = jobId;
+  if (status === 'idle') {
+    workerStatus[name].currentJobId = null;
+    workerStatus[name].lastJobAt = new Date().toISOString();
+    workerStatus[name].jobsCompleted++;
+  }
+  broadcast('swarm-status', Object.values(workerStatus));
+}
+
+// ── CEO Synthesis Engine (rule-based, no API key needed) ────────────────────
+function ceoSynthesize(workerResults, originalCommand) {
+  const ts = new Date().toISOString();
+  const workerNames = [];
+  const keyFindings = [];
+  const summaryParts = [];
+
+  // Token Analysis
+  const token = workerResults.token_analysis;
+  if (token && !token.error) {
+    workerNames.push('Token Analyst');
+    const sym = token.token?.symbol || 'TOKEN';
+    const price = token.price?.usd ? `$${parseFloat(token.price.usd).toFixed(6)}` : null;
+    const chg = token.price?.change_24h;
+    if (price) {
+      const dir = chg > 0 ? 'up' : chg < 0 ? 'down' : 'flat';
+      summaryParts.push(`${sym} is trading at ${price}${chg != null ? ` (${chg > 0 ? '+' : ''}${chg.toFixed(2)}% 24h)` : ''}`);
+      if (chg > 10) keyFindings.push(`${sym} showing strong bullish momentum with ${chg.toFixed(1)}% gain in 24h`);
+      else if (chg > 0) keyFindings.push(`${sym} trending positive at +${chg.toFixed(1)}% over 24h`);
+      else if (chg < -10) keyFindings.push(`${sym} under significant selling pressure, down ${Math.abs(chg).toFixed(1)}% in 24h`);
+      else if (chg < 0) keyFindings.push(`${sym} showing mild weakness at ${chg.toFixed(1)}% over 24h`);
+    }
+    if (token.liquidity_usd) keyFindings.push(`Liquidity pool: $${Number(token.liquidity_usd).toLocaleString()}`);
+    if (token.gsb_verdict) keyFindings.push(`Verdict: ${token.gsb_verdict}`);
+  }
+
+  // Wallet Profile
+  const wallet = workerResults.wallet_profile;
+  if (wallet && !wallet.error) {
+    workerNames.push('Wallet Profiler');
+    const cls = wallet.classification || 'Unknown';
+    const txCount = wallet.transaction_count || 0;
+    summaryParts.push(`Target wallet classified as "${cls}" with ${txCount} transactions`);
+    keyFindings.push(`Wallet classification: ${cls} (${txCount} total transactions)`);
+    if (wallet.wallet) keyFindings.push(`Address: ${wallet.wallet}`);
+  }
+
+  // Alpha Signals
+  const alpha = workerResults.alpha_signals;
+  if (alpha && !alpha.error) {
+    workerNames.push('Alpha Scanner');
+    if (alpha.gsb_signal) {
+      summaryParts.push(`Alpha scanner reports: ${alpha.gsb_signal.split('.')[0]}`);
+      keyFindings.push(alpha.gsb_signal);
+    }
+    if (alpha.top_gainers_base?.length) {
+      const top = alpha.top_gainers_base.slice(0, 3);
+      keyFindings.push(`Top movers on Base: ${top.map(g => `${g.symbol} (${g.change_24h})`).join(', ')}`);
+    }
+  }
+
+  // Thread
+  const thread = workerResults.thread;
+  if (thread && thread.thread) {
+    workerNames.push('Thread Writer');
+    const tweetCount = (thread.thread.match(/\d+\//g) || []).length || 'multi';
+    summaryParts.push(`${tweetCount}-tweet thread drafted and ready to post`);
+    keyFindings.push(`Content thread generated (${tweetCount} tweets) — ready for review`);
+  }
+
+  if (workerNames.length === 0) {
+    return { summary: 'No worker data available yet.', keyFindings: [], recommendation: 'Deploy workers to gather intelligence.', workerCount: 0, timestamp: ts };
+  }
+
+  // Build summary
+  const summary = summaryParts.length > 0
+    ? summaryParts.join('. ') + '.'
+    : `Intelligence gathered from ${workerNames.length} workers.`;
+
+  // Build recommendation
+  let recommendation = 'Continue monitoring and gather more data points.';
+  if (token && !token.error) {
+    const chg = token.price?.change_24h;
+    if (chg > 10) recommendation = 'Strong upward momentum detected. Consider taking partial profits or tightening stops if already positioned.';
+    else if (chg > 0 && alpha?.gsb_signal?.toLowerCase().includes('bullish')) recommendation = 'Positive signals across multiple indicators. Favorable conditions for accumulation with proper risk management.';
+    else if (chg < -10) recommendation = 'Significant drawdown in progress. Wait for stabilization before entering. Look for volume confirmation on any bounce.';
+    else if (chg < 0) recommendation = 'Mild bearish pressure. Not alarming but warrant caution. Set alerts at key support levels.';
+    else recommendation = 'Market in consolidation. Good time to research and prepare entries at clearly defined levels.';
+  }
+
+  return {
+    summary,
+    keyFindings,
+    recommendation,
+    workerCount: workerNames.length,
+    workers: workerNames,
+    query: originalCommand || null,
+    timestamp: ts,
+  };
+}
+
 // ── Express + WS ─────────────────────────────────────────────────────────────
 const app    = express();
 const server = http.createServer(app);
@@ -93,6 +205,7 @@ wss.on('connection', ws => {
   ws.send(JSON.stringify({ type: 'acp_status', data: { ready: acpReady }, ts: Date.now() }));
   if (latestBrief) ws.send(JSON.stringify({ type: 'brief', data: latestBrief, ts: Date.now() }));
   if (jobHistory.length) ws.send(JSON.stringify({ type: 'history', data: jobHistory, ts: Date.now() }));
+  if (Object.keys(workerStatus).length) ws.send(JSON.stringify({ type: 'swarm-status', data: Object.values(workerStatus), ts: Date.now() }));
   ws.on('close', () => console.log('[ws] client disconnected'));
 });
 
@@ -144,6 +257,7 @@ function queueAccept(job, memo) {
 
 // ── Boot ACP client ──────────────────────────────────────────────────────────
 async function initAcp() {
+  initWorkerStatus();
   if (!PRIVATE_KEY) {
     console.warn('[acp] No AGENT_WALLET_PRIVATE_KEY — fire-job disabled');
     return;
@@ -186,18 +300,27 @@ async function initAcp() {
             if (parsed.classification) console.log(`  → Wallet: ${parsed.classification}`);
           }
 
+          // Update worker status to idle on delivery
+          if (workerName) setWorkerStatus(workerName, 'idle', null);
+
           await job.evaluate(true, 'Intelligence received.');
           logJob(job.id, workerName || '?', 'delivered', 'delivered');
           evaluatedCount++;
 
+          // Run CEO synthesis on current results
+          const synthesis = ceoSynthesize(briefResults);
+          broadcast('cmd-synthesis', synthesis);
+
           // Push brief after every 4th evaluation (one full round)
           if (evaluatedCount % 4 === 0 && Object.keys(briefResults).length > 0) {
             latestBrief = buildBriefSnapshot();
+            latestBrief.ceoSynthesis = synthesis;
             broadcast('brief', latestBrief);
             console.log('[ceo] Brief pushed to dashboard');
           } else {
             // Push partial brief immediately so dashboard updates as each worker delivers
             latestBrief = buildBriefSnapshot();
+            latestBrief.ceoSynthesis = synthesis;
             broadcast('brief', latestBrief);
           }
         } catch (err) {
@@ -241,6 +364,7 @@ app.post('/api/fire-job', async (req, res) => {
       new Date(Date.now() + 1000 * 60 * 30),
     );
     jobWorkerMap.set(jobId, workerName);
+    setWorkerStatus(workerName, 'working', jobId);
     logJob(jobId, workerName, 'fired', 'fired');
     console.log(`[api] ✓ Job fired: ${jobId}`);
     res.json({ ok: true, jobId });
@@ -257,7 +381,9 @@ app.post('/api/brief', (req, res) => {
   // Merge into briefResults
   Object.assign(briefResults, brief.results);
   latestBrief = buildBriefSnapshot();
+  latestBrief.ceoSynthesis = ceoSynthesize(briefResults);
   broadcast('brief', latestBrief);
+  broadcast('cmd-synthesis', latestBrief.ceoSynthesis);
   console.log('[api] External brief received, pushed to dashboard');
   res.json({ ok: true });
 });
@@ -276,6 +402,11 @@ app.post('/api/job-event', (req, res) => {
 // ── GET /api/state ────────────────────────────────────────────────────────────
 app.get('/api/state', (req, res) => {
   res.json({ brief: latestBrief, history: jobHistory, acpReady });
+});
+
+// ── GET /api/swarm-status ────────────────────────────────────────────────────
+app.get('/api/swarm-status', (req, res) => {
+  res.json({ workers: Object.values(workerStatus) });
 });
 
 // ── GET /api/workers ──────────────────────────────────────────────────────────
@@ -632,11 +763,12 @@ app.post('/api/command', async (req, res) => {
   }
 
   // ── Acknowledge immediately, then fire async ──────────────────────────────
-  const workerNames = intents.map(i => i.worker).join(', ');
+  setWorkerStatus('CEO', 'working', null);
+  const workerNamesList = intents.map(i => i.worker).join(', ');
   broadcast('cmd-status', {
     type: 'ack',
     command,
-    message: `CEO parsed intent → hiring: ${workerNames}`,
+    message: `CEO parsed intent → hiring: ${workerNamesList}`,
     workers: intents.map(i => i.worker),
   });
   res.json({ ok: true, workers: intents.map(i => i.worker) });
@@ -653,6 +785,7 @@ app.post('/api/command', async (req, res) => {
         new Date(Date.now() + 1000 * 60 * 30),
       );
       jobWorkerMap.set(jobId, intent.worker);
+      setWorkerStatus(intent.worker, 'working', jobId);
       logJob(jobId, intent.worker, 'fired', 'fired');
       broadcast('cmd-status', { type: 'fired', message: `${intent.worker} hired → job ${jobId}`, jobId });
       console.log(`[cmd] ✓ ${intent.worker} → job ${jobId}`);
@@ -663,6 +796,7 @@ app.post('/api/command', async (req, res) => {
     await sleep(3000);
   }
 
+  setWorkerStatus('CEO', 'idle', null);
   broadcast('cmd-status', {
     type: 'done',
     message: `All ${intents.length} job${intents.length > 1 ? 's' : ''} fired. Watch the Jobs tab for deliveries.`,

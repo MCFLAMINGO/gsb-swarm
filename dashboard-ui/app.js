@@ -54,11 +54,13 @@ function connectWS() {
 }
 
 function handle(msg) {
-  if      (msg.type === 'brief')      { latestBrief = msg.data; renderBrief(msg.data); renderBriefInCmd(msg.data); }
-  else if (msg.type === 'history')    renderHistory(msg.data);
-  else if (msg.type === 'job-event')  appendJobEvent(msg.data);
-  else if (msg.type === 'acp_status') setAcpStatus(msg.data);
-  else if (msg.type === 'cmd-status') appendCmdStatus(msg.data);
+  if      (msg.type === 'brief')         { latestBrief = msg.data; renderBrief(msg.data); renderBriefInCmd(msg.data); }
+  else if (msg.type === 'history')       renderHistory(msg.data);
+  else if (msg.type === 'job-event')     appendJobEvent(msg.data);
+  else if (msg.type === 'acp_status')    setAcpStatus(msg.data);
+  else if (msg.type === 'cmd-status')    appendCmdStatus(msg.data);
+  else if (msg.type === 'swarm-status')  updateSwarmStatus(msg.data);
+  else if (msg.type === 'cmd-synthesis') renderCmdSynthesis(msg.data);
 }
 
 async function fetchState() {
@@ -68,6 +70,7 @@ async function fetchState() {
     setAcpStatus({ ready: data.acpReady });
     if (data.brief)           renderBrief(data.brief);
     if (data.history?.length) renderHistory(data.history);
+    fetchSwarmStatus();
   } catch (_) {}
 }
 
@@ -110,6 +113,9 @@ function renderBrief(brief) {
   if (r.alpha_signals)  renderAlpha(r.alpha_signals);
   if (r.thread)         renderThread(r.thread);
   updateKPIs(r);
+
+  // Render CEO synthesis panel if available
+  if (brief.ceoSynthesis) renderCeoSynthesis(brief.ceoSynthesis);
 }
 
 function renderToken(d) {
@@ -485,23 +491,41 @@ function renderBriefInCmd(brief) {
     const price = t.price?.usd ? `$${parseFloat(t.price.usd).toFixed(6)}` : null;
     const chg   = t.price?.change_24h;
     const chgStr = chg != null ? ` ${chg > 0 ? '▲' : '▼'} ${Math.abs(chg).toFixed(2)}%` : '';
-    if (price) lines.push(`📊 ${sym} ${price}${chgStr}  ${t.gsb_verdict || ''}`);
+    if (price) lines.push(`Token: ${sym} ${price}${chgStr}  ${t.gsb_verdict || ''}`);
   }
   if (r.alpha_signals && !r.alpha_signals.error) {
     const a = r.alpha_signals;
-    if (a.gsb_signal) lines.push(`⚡ ${a.gsb_signal}`);
+    if (a.gsb_signal) lines.push(`Alpha: ${a.gsb_signal}`);
   }
   if (r.thread && r.thread.thread) {
-    lines.push(`🧵 Thread ready — check the Intel tab`);
+    lines.push(`Thread: Ready — check the Thread tab`);
   }
   if (r.wallet_profile && !r.wallet_profile.error) {
     const w = r.wallet_profile;
-    lines.push(`👤 Wallet: ${w.classification || 'profiled'} — ${w.transaction_count || '?'} txs`);
+    lines.push(`Wallet: ${w.classification || 'profiled'} — ${w.transaction_count || '?'} txs`);
   }
 
   if (lines.length) {
-    addCmdBlock('result', lines.join('\n'));
-    addCmdMsg('done', 'Agent intel delivered → Intel tab updated');
+    // Show raw worker outputs in a collapsible section
+    const wrapper = document.createElement('div');
+    wrapper.className = 'cmd-raw-toggle';
+    const toggle = document.createElement('button');
+    toggle.className = 'raw-toggle-btn';
+    toggle.textContent = 'View Raw Worker Data';
+    const rawContent = document.createElement('div');
+    rawContent.className = 'raw-content hidden';
+    const pre = document.createElement('pre');
+    pre.className = 'block-body';
+    pre.textContent = lines.join('\n');
+    rawContent.appendChild(pre);
+    toggle.addEventListener('click', () => {
+      rawContent.classList.toggle('hidden');
+      toggle.textContent = rawContent.classList.contains('hidden') ? 'View Raw Worker Data' : 'Hide Raw Worker Data';
+    });
+    wrapper.appendChild(toggle);
+    wrapper.appendChild(rawContent);
+    cmdHistory.appendChild(wrapper);
+    cmdHistory.scrollTop = cmdHistory.scrollHeight;
   }
 }
 
@@ -546,6 +570,121 @@ function addCmdBlock(type, text) {
   const body = document.createElement('pre');
   body.className = 'block-body';
   body.textContent = text;
+
+  el.appendChild(header);
+  el.appendChild(body);
+  cmdHistory.appendChild(el);
+  cmdHistory.scrollTop = cmdHistory.scrollHeight;
+}
+
+// ── Swarm Status ─────────────────────────────────────────────────────────────
+function updateSwarmStatus(workers) {
+  if (!Array.isArray(workers)) return;
+  workers.forEach(w => {
+    const el = document.querySelector(`.swarm-agent[data-agent="${w.name}"]`);
+    if (!el) return;
+    const dot = el.querySelector('.swarm-dot');
+    if (!dot) return;
+    dot.className = 'swarm-dot ' + (w.status || 'idle');
+    // Update tooltip
+    let tip = w.name;
+    if (w.status === 'working' && w.currentJobId) tip += ` — Job ${w.currentJobId}`;
+    else if (w.lastJobAt) tip += ` — Last: ${new Date(w.lastJobAt).toLocaleTimeString()}`;
+    if (w.jobsCompleted > 0) tip += ` (${w.jobsCompleted} completed)`;
+    el.title = tip;
+
+    // Update sidebar nav worker dots
+    const navDot = document.querySelector(`.nav-worker-dot[data-nav-worker="${w.name}"]`);
+    if (navDot) navDot.className = 'nav-worker-dot ' + (w.status || 'idle');
+  });
+}
+
+// Poll swarm status on connect
+async function fetchSwarmStatus() {
+  try {
+    const r = await fetch(`${API_BASE}/api/swarm-status`);
+    const data = await r.json();
+    if (data.workers) updateSwarmStatus(data.workers);
+  } catch (_) {}
+}
+
+// ── CEO Synthesis Panel (Brief section) ──────────────────────────────────────
+function renderCeoSynthesis(synthesis) {
+  if (!synthesis || !synthesis.summary) return;
+  const panel = document.getElementById('ceo-synthesis-panel');
+  panel.classList.remove('hidden');
+
+  if (synthesis.query) {
+    const queryEl = document.getElementById('ceo-synth-query');
+    queryEl.textContent = `Query: ${synthesis.query}`;
+    queryEl.classList.remove('hidden');
+  }
+
+  document.getElementById('ceo-synth-summary').textContent = synthesis.summary;
+
+  const list = document.getElementById('ceo-synth-findings-list');
+  list.innerHTML = '';
+  (synthesis.keyFindings || []).forEach(f => {
+    const li = document.createElement('li');
+    li.textContent = f;
+    list.appendChild(li);
+  });
+
+  document.getElementById('ceo-synth-recommendation').textContent = synthesis.recommendation || '';
+
+  const meta = document.getElementById('ceo-synth-meta');
+  const workers = synthesis.workers ? synthesis.workers.join(', ') : `${synthesis.workerCount} workers`;
+  const ts = synthesis.timestamp ? new Date(synthesis.timestamp).toLocaleTimeString() : '';
+  meta.textContent = `Workers: ${workers} | ${ts}`;
+
+  document.getElementById('ceo-synth-ts').textContent = ts;
+}
+
+// ── CEO Synthesis in Command History ─────────────────────────────────────────
+function renderCmdSynthesis(synthesis) {
+  if (!synthesis || !synthesis.summary) return;
+
+  const el = document.createElement('div');
+  el.className = 'cmd-block synthesis';
+
+  const header = document.createElement('div');
+  header.className = 'block-header';
+  header.innerHTML = '&#9670; CEO INTELLIGENCE BRIEF';
+
+  const body = document.createElement('div');
+  body.className = 'block-body synth-body';
+
+  const summary = document.createElement('p');
+  summary.className = 'synth-summary';
+  summary.textContent = synthesis.summary;
+  body.appendChild(summary);
+
+  if (synthesis.keyFindings && synthesis.keyFindings.length) {
+    const findTitle = document.createElement('div');
+    findTitle.className = 'synth-section-title';
+    findTitle.textContent = 'Key Findings';
+    body.appendChild(findTitle);
+
+    const ul = document.createElement('ul');
+    ul.className = 'synth-findings';
+    synthesis.keyFindings.forEach(f => {
+      const li = document.createElement('li');
+      li.textContent = f;
+      ul.appendChild(li);
+    });
+    body.appendChild(ul);
+  }
+
+  if (synthesis.recommendation) {
+    const recTitle = document.createElement('div');
+    recTitle.className = 'synth-section-title';
+    recTitle.textContent = 'Recommendation';
+    body.appendChild(recTitle);
+    const rec = document.createElement('p');
+    rec.className = 'synth-recommendation';
+    rec.textContent = synthesis.recommendation;
+    body.appendChild(rec);
+  }
 
   el.appendChild(header);
   el.appendChild(body);

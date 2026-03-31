@@ -29,21 +29,25 @@
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
       <span>Brief</span>
     </a>
-    <a href="#token"  class="nav-item" data-section="token">
+    <a href="#token"  class="nav-item" data-section="token" data-worker="GSB Token Analyst">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
       <span>Token</span>
+      <span class="nav-worker-dot" data-nav-worker="GSB Token Analyst"></span>
     </a>
-    <a href="#wallet" class="nav-item" data-section="wallet">
+    <a href="#wallet" class="nav-item" data-section="wallet" data-worker="GSB Wallet Profiler">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/></svg>
       <span>Wallet</span>
+      <span class="nav-worker-dot" data-nav-worker="GSB Wallet Profiler"></span>
     </a>
-    <a href="#alpha"  class="nav-item" data-section="alpha">
+    <a href="#alpha"  class="nav-item" data-section="alpha" data-worker="GSB Alpha Scanner">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
       <span>Alpha</span>
+      <span class="nav-worker-dot" data-nav-worker="GSB Alpha Scanner"></span>
     </a>
-    <a href="#thread" class="nav-item" data-section="thread">
+    <a href="#thread" class="nav-item" data-section="thread" data-worker="GSB Thread Writer">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       <span>Thread</span>
+      <span class="nav-worker-dot" data-nav-worker="GSB Thread Writer"></span>
     </a>
     <a href="#jobs"   class="nav-item" data-section="jobs">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
@@ -112,12 +116,62 @@
     </div>
   </div>
 
+  <!-- Swarm Status Bar -->
+  <div class="swarm-status-bar" id="swarm-status-bar">
+    <span class="swarm-label">SWARM</span>
+    <div class="swarm-agents">
+      <div class="swarm-agent" data-agent="CEO">
+        <span class="swarm-dot idle"></span>
+        <span class="swarm-name">CEO</span>
+      </div>
+      <div class="swarm-agent" data-agent="GSB Token Analyst">
+        <span class="swarm-dot idle"></span>
+        <span class="swarm-name">Token Analyst</span>
+      </div>
+      <div class="swarm-agent" data-agent="GSB Wallet Profiler">
+        <span class="swarm-dot idle"></span>
+        <span class="swarm-name">Wallet Profiler</span>
+      </div>
+      <div class="swarm-agent" data-agent="GSB Alpha Scanner">
+        <span class="swarm-dot idle"></span>
+        <span class="swarm-name">Alpha Scanner</span>
+      </div>
+      <div class="swarm-agent" data-agent="GSB Thread Writer">
+        <span class="swarm-dot idle"></span>
+        <span class="swarm-name">Thread Writer</span>
+      </div>
+    </div>
+  </div>
+
   <!-- BRIEF -->
   <section class="section active" id="section-brief">
     <div class="section-header">
       <h2>Latest Intelligence Brief</h2>
       <span class="badge" id="brief-ts">—</span>
     </div>
+
+    <!-- CEO Intelligence Brief Synthesis Panel -->
+    <div class="ceo-synthesis-panel hidden" id="ceo-synthesis-panel">
+      <div class="ceo-synth-header">
+        <span class="ceo-synth-icon">&#9670;</span>
+        <span class="ceo-synth-title">CEO Intelligence Brief</span>
+        <span class="ceo-synth-ts" id="ceo-synth-ts"></span>
+      </div>
+      <div class="ceo-synth-body">
+        <div class="ceo-synth-query" id="ceo-synth-query"></div>
+        <div class="ceo-synth-summary" id="ceo-synth-summary"></div>
+        <div class="ceo-synth-findings">
+          <div class="ceo-synth-section-title">Key Findings</div>
+          <ul id="ceo-synth-findings-list"></ul>
+        </div>
+        <div class="ceo-synth-recommendation">
+          <div class="ceo-synth-section-title">Recommendation</div>
+          <p id="ceo-synth-recommendation"></p>
+        </div>
+        <div class="ceo-synth-meta" id="ceo-synth-meta"></div>
+      </div>
+    </div>
+
     <div class="empty-state" id="brief-empty">
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.25"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
       <p>Waiting for worker deliveries…</p>
