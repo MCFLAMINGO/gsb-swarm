@@ -12,6 +12,8 @@ const { WebSocketServer } = require('ws');
 const cors     = require('cors');
 const multer   = require('multer');
 const { execSync } = require('child_process');
+const crypto   = require('crypto');
+const axios    = require('axios');
 const { CHAIN_CONFIG, CHAIN_ALIASES, resolveChain, SUPPORTED_CHAINS } = require('./chains');
 
 // ── ACP SDK (V2) ─────────────────────────────────────────────────────────────
@@ -1314,6 +1316,121 @@ app.post('/api/command', async (req, res) => {
   });
 });
 
+// ── BasaltSurge Payment Integration ──────────────────────────────────────────
+const BASALT_BASE = 'https://surge.basalthq.com';
+const BASALT_API_KEY = process.env.BASALT_API_KEY || '';
+
+// In-memory stores for pending orders and upload tokens
+const pendingOrders = new Map(); // receiptId → { projectName, period, email, status, createdAt }
+const uploadTokens  = new Map(); // uploadToken → receiptId
+
+// Clean up orders older than 24h every 30 minutes
+setInterval(() => {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [receiptId, order] of pendingOrders) {
+    if (order.createdAt < cutoff) {
+      pendingOrders.delete(receiptId);
+      console.log(`[basalt] Order ${receiptId} expired and cleaned up.`);
+    }
+  }
+  for (const [token, receiptId] of uploadTokens) {
+    if (!pendingOrders.has(receiptId)) {
+      uploadTokens.delete(token);
+    }
+  }
+}, 30 * 60 * 1000);
+
+// Ensure BasaltSurge inventory item exists (fire-and-forget on startup)
+if (BASALT_API_KEY) {
+  axios.post(`${BASALT_BASE}/api/inventory`, {
+    sku: 'TRIAGE-001',
+    name: 'Restaurant Financial Triage',
+    priceUsd: 24.95,
+    description: 'Full financial analysis + vendor credit letter + bank loan letter. 3 PDFs delivered via secure token.',
+  }, {
+    headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY },
+  }).then(() => console.log('[basalt] Inventory item TRIAGE-001 ensured.'))
+    .catch(err => console.log('[basalt] Inventory setup (may already exist):', err.response?.status || err.message));
+} else {
+  console.warn('[basalt] No BASALT_API_KEY — payment endpoints will fail.');
+}
+
+// POST /api/create-triage-order — create a BasaltSurge order
+app.post('/api/create-triage-order', express.json(), async (req, res) => {
+  try {
+    const { projectName, period, email } = req.body || {};
+    if (!projectName || !email) {
+      return res.status(400).json({ error: 'projectName and email are required' });
+    }
+
+    const orderRes = await axios.post(`${BASALT_BASE}/basaltsurge/api/orders`, {
+      items: [{ sku: 'TRIAGE-001', qty: 1 }],
+    }, {
+      headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY },
+    });
+
+    const { receipt } = orderRes.data;
+    const receiptId = receipt.receiptId;
+    const paymentUrl = `${BASALT_BASE}/basaltsurge/pay/${receiptId}`;
+
+    pendingOrders.set(receiptId, {
+      projectName: projectName.trim(),
+      period: period || '',
+      email: email.trim(),
+      status: 'pending',
+      createdAt: Date.now(),
+    });
+
+    console.log(`[basalt] Order created: ${receiptId} for ${projectName}`);
+    res.json({ receiptId, paymentUrl, orderId: receiptId });
+  } catch (err) {
+    console.error('[basalt] Create order error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to create payment order' });
+  }
+});
+
+// GET /api/check-payment?receiptId=xxx — poll BasaltSurge payment status
+app.get('/api/check-payment', async (req, res) => {
+  try {
+    const { receiptId } = req.query;
+    if (!receiptId) {
+      return res.status(400).json({ error: 'receiptId is required' });
+    }
+
+    const order = pendingOrders.get(receiptId);
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    // If already marked paid, return the stored upload token
+    if (order.status === 'paid') {
+      const existingToken = [...uploadTokens.entries()].find(([, rid]) => rid === receiptId)?.[0];
+      return res.json({ paid: true, receiptId, uploadToken: existingToken });
+    }
+
+    const statusRes = await axios.get(`${BASALT_BASE}/api/receipts/status`, {
+      params: { receiptId },
+      headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY },
+    });
+
+    const payStatus = statusRes.data.status;
+    const paidStatuses = ['completed', 'tx_mined', 'recipient_validated'];
+
+    if (paidStatuses.includes(payStatus)) {
+      order.status = 'paid';
+      const uploadToken = crypto.randomBytes(6).toString('hex'); // 12-char hex token
+      uploadTokens.set(uploadToken, receiptId);
+      console.log(`[basalt] Payment confirmed for ${receiptId}. Upload token: ${uploadToken}`);
+      return res.json({ paid: true, receiptId, uploadToken });
+    }
+
+    res.json({ paid: false, status: payStatus });
+  } catch (err) {
+    console.error('[basalt] Check payment error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to check payment status' });
+  }
+});
+
 // ── Financial Triage API ─────────────────────────────────────────────────────
 const triageUpload = multer({ dest: '/tmp/triage-uploads/' });
 const triageJobStore = new Map(); // accessToken -> { pdfs: [{name, buffer}], createdAt, expiresAt }
@@ -1334,7 +1451,17 @@ app.post('/api/financial-triage', triageUpload.fields([
   { name: 'posFile', maxCount: 1 },
 ]), async (req, res) => {
   try {
-    const { projectName, period, tier, agreedToTos } = req.body || {};
+    const { projectName, period, tier, agreedToTos, uploadToken } = req.body || {};
+
+    // Validate payment via uploadToken
+    if (!uploadToken || !uploadTokens.has(uploadToken)) {
+      return res.status(402).json({ error: 'Payment required. Please complete payment before uploading files.' });
+    }
+    const paidReceiptId = uploadTokens.get(uploadToken);
+    const paidOrder = pendingOrders.get(paidReceiptId);
+    if (!paidOrder || paidOrder.status !== 'paid') {
+      return res.status(402).json({ error: 'Payment not confirmed. Please complete payment first.' });
+    }
 
     if (agreedToTos !== 'true') {
       return res.status(400).json({ error: 'Must agree to Terms of Service' });
@@ -1401,6 +1528,9 @@ app.post('/api/financial-triage', triageUpload.fields([
       createdAt: now,
       expiresAt,
     });
+
+    // Invalidate upload token after successful use
+    uploadTokens.delete(uploadToken);
 
     console.log(`[triage] Job ${jobId} complete. Token: ${accessToken}. Files: ${pdfs.length}`);
     res.json({
