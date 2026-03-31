@@ -70,7 +70,7 @@ let dashProc = spawnDashboard();
 
 // ── Internal health-check server (fixed port, not Railway's PORT) ─────────────
 const app = express();
-const HEALTH_PORT = 3000;
+const HEALTH_PORT = 3001;
 
 app.get('/', (req, res) => res.json({
   status: 'ONLINE',
