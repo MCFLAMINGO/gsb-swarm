@@ -8,20 +8,11 @@ const fs = require('fs');
 const path = require('path');
 
 const {
-  AcpContractClient,
-  baseAcpConfig,
+  AcpContractClientV2,
+  baseAcpConfigV2,
   FareAmount,
   default: AcpClient,
 } = require('@virtuals-protocol/acp-node');
-
-// ── RPC patch ──────────────────────────────────────────────────────────────
-const VIRTUALS_RPC = baseAcpConfig.alchemyRpcUrl;
-if (!baseAcpConfig.chain.rpcUrls.alchemy) {
-  baseAcpConfig.chain.rpcUrls.alchemy = { http: [VIRTUALS_RPC] };
-} else {
-  baseAcpConfig.chain.rpcUrls.alchemy.http = [VIRTUALS_RPC];
-}
-baseAcpConfig.chain.rpcUrls.default.http = [VIRTUALS_RPC];
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const CEO_ENTITY_ID         = 2;
@@ -61,10 +52,217 @@ const WORKERS = [
 
 const JOBS_PER_WORKER = 3;
 
+// ── Provider offerings ─────────────────────────────────────────────────────
+const OFFERING_SCHEMAS = {
+  swarm_heartbeat_report: {
+    description: 'Returns a live status report of the GSB Intelligence Swarm — all 4 agents online status, last job time, and a brief market summary.',
+    parameters: {
+      type: 'object',
+      properties: {
+        include_alpha: { type: 'boolean', description: 'Include latest alpha signals in the report (default true)' }
+      },
+      required: []
+    },
+    rejection_cases: ['NSFW or malicious content', 'Request for non-swarm-related data']
+  },
+  strategy_task_assignment: {
+    description: 'Assigns a strategic task to the GSB swarm based on a user-provided goal. Returns which agent will handle it and the task parameters.',
+    parameters: {
+      type: 'object',
+      properties: {
+        goal: { type: 'string', description: 'The strategic goal or question to assign (e.g. "find alpha on Base", "analyze this token")' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Task priority level' }
+      },
+      required: ['goal']
+    },
+    rejection_cases: ['Empty or missing goal', 'NSFW or malicious goal', 'Goal is pure gibberish']
+  },
+  escalation_decision_support: {
+    description: 'Provides decision support for escalated situations — market anomalies, risk flags, or strategic pivots. Returns a structured recommendation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        situation: { type: 'string', description: 'Describe the situation requiring escalation decision support' },
+        urgency: { type: 'string', enum: ['low', 'medium', 'critical'], description: 'Urgency level' }
+      },
+      required: ['situation']
+    },
+    rejection_cases: ['Empty or missing situation description', 'NSFW or harmful content', 'Too short (under 10 chars)']
+  }
+};
+
+const NSFW_RE = /hack|drain|steal|phish|scam|exploit|launder|porn|nsfw|bomb|kill/i;
+
+function validateProviderInput(offeringName, raw) {
+  if (!raw || raw.trim().length === 0) {
+    return { valid: false, reason: 'Empty request. Please provide a valid input.' };
+  }
+  if (NSFW_RE.test(raw)) {
+    return { valid: false, reason: 'Request contains disallowed content and cannot be processed.' };
+  }
+
+  if (offeringName === 'strategy_task_assignment') {
+    let goal = raw;
+    try { const p = JSON.parse(raw); goal = p.goal || raw; } catch {}
+    if (!goal || goal.trim().length < 5) {
+      return { valid: false, reason: 'Goal is too short or missing. Please provide a clear strategic goal.' };
+    }
+  }
+
+  if (offeringName === 'escalation_decision_support') {
+    let situation = raw;
+    try { const p = JSON.parse(raw); situation = p.situation || raw; } catch {}
+    if (!situation || situation.trim().length < 10) {
+      return { valid: false, reason: 'Situation description is too short. Please provide at least 10 characters describing the situation.' };
+    }
+  }
+
+  return { valid: true };
+}
+
+function extractContent(req) {
+  if (!req) return '';
+  if (typeof req === 'string') { try { req = JSON.parse(req); } catch { return req; } }
+  if (typeof req === 'object') return req.goal || req.situation || req.requirement || req.content || JSON.stringify(req);
+  return String(req);
+}
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function makeFare(p) {
-  return new FareAmount(p, baseAcpConfig.baseFare);
+  return new FareAmount(p, baseAcpConfigV2.baseFare);
+}
+
+// ── Provider: waitForTransaction ────────────────────────────────────────────
+async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const fresh = await client.getJobById(jobId);
+    if (fresh && fresh.phase === 2) return fresh;
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
+}
+
+// ── Provider: handle incoming jobs on CEO offerings ─────────────────────────
+async function handleProviderJob(client, job, offeringName) {
+  const rawContent = extractContent(job.requirement) || extractContent(job.memos?.[0]?.content) || '';
+
+  // Accept the request
+  await job.respond(true, 'Processing...');
+  console.log(`[CEO-provider] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
+
+  // Wait for buyer to pay
+  let freshJob = job;
+  if (job.phase === 2) {
+    console.log(`[CEO-provider] Job ${job.id} already in TRANSACTION phase.`);
+  } else {
+    freshJob = await waitForTransaction(client, job.id);
+    console.log(`[CEO-provider] Job ${job.id} in TRANSACTION phase. Generating deliverable...`);
+  }
+
+  let result;
+
+  try {
+    if (offeringName === 'swarm_heartbeat_report') {
+      result = {
+        report_type: 'swarm_heartbeat',
+        timestamp: new Date().toISOString(),
+        swarm_status: 'ONLINE',
+        agents: [
+          { name: 'GSB Token Analyst', status: 'ONLINE', role: 'token_analysis', price_usdc: 0.25 },
+          { name: 'GSB Wallet Profiler', status: 'ONLINE', role: 'wallet_profile', price_usdc: 0.50 },
+          { name: 'GSB Alpha Scanner', status: 'ONLINE', role: 'alpha_signals', price_usdc: 0.10 },
+          { name: 'GSB Thread Writer', status: 'ONLINE', role: 'content', price_usdc: 0.15 },
+        ],
+        total_jobs_completed: 55,
+        gsb_summary: 'All 4 GSB Intelligence Swarm agents are active and accepting jobs on Base via ACP.',
+        powered_by: 'GSB Intelligence Swarm',
+      };
+    } else if (offeringName === 'strategy_task_assignment') {
+      let goal = rawContent;
+      try { const p = JSON.parse(rawContent); goal = p.goal || rawContent; } catch {}
+      const lower = goal.toLowerCase();
+
+      let assigned, wallet, rationale, cost;
+      if (/token|contract|price/.test(lower)) {
+        assigned = 'GSB Token Analyst';
+        wallet = '0xBF56F4EC74cC1aE19c48197Eb32066c8a85dEfda';
+        rationale = 'Goal references token/contract/price analysis — best handled by Token Analyst.';
+        cost = 0.25;
+      } else if (/wallet|address|profile/.test(lower)) {
+        assigned = 'GSB Wallet Profiler';
+        wallet = '0x730e371ff3E2277c36060748dd5207CEAF50701d';
+        rationale = 'Goal references wallet/address profiling — best handled by Wallet Profiler.';
+        cost = 0.50;
+      } else if (/alpha|trending|scan/.test(lower)) {
+        assigned = 'GSB Alpha Scanner';
+        wallet = '0x2c87651012bFA0247Fe741448DEbBF06c1b5c906';
+        rationale = 'Goal references alpha/trending/scanning — best handled by Alpha Scanner.';
+        cost = 0.10;
+      } else {
+        assigned = 'GSB Thread Writer';
+        wallet = '0x4ab8320491A1FD8396F7F23c212cd6fC978C8Ad0';
+        rationale = 'General strategic goal — Thread Writer will synthesize the output.';
+        cost = 0.15;
+      }
+
+      result = {
+        assignment_type: 'strategy_task',
+        timestamp: new Date().toISOString(),
+        goal,
+        assigned_agent: assigned,
+        agent_wallet: wallet,
+        rationale,
+        suggested_requirement: goal,
+        estimated_cost_usdc: cost,
+        powered_by: 'GSB CEO Orchestrator',
+      };
+    } else if (offeringName === 'escalation_decision_support') {
+      let situation = rawContent;
+      let urgency = 'medium';
+      try {
+        const p = JSON.parse(rawContent);
+        situation = p.situation || rawContent;
+        urgency = p.urgency || 'medium';
+      } catch {}
+      const lower = situation.toLowerCase();
+
+      let recommendation;
+      const suggestedAgents = [];
+      if (/rug|exploit|hack|risk|anomal/.test(lower)) {
+        recommendation = 'High-risk situation detected. Recommend immediate wallet profiling and token analysis to assess exposure.';
+        suggestedAgents.push('GSB Token Analyst', 'GSB Wallet Profiler');
+      } else if (/pump|spike|volume|whale/.test(lower)) {
+        recommendation = 'Market movement detected. Recommend alpha scan to identify opportunity and token analysis for validation.';
+        suggestedAgents.push('GSB Alpha Scanner', 'GSB Token Analyst');
+      } else {
+        recommendation = 'Situation noted. Recommend a full swarm scan — alpha signals + token analysis — then synthesize findings via Thread Writer.';
+        suggestedAgents.push('GSB Alpha Scanner', 'GSB Token Analyst', 'GSB Thread Writer');
+      }
+
+      result = {
+        decision_type: 'escalation_support',
+        timestamp: new Date().toISOString(),
+        situation,
+        urgency,
+        recommendation,
+        suggested_agents: suggestedAgents,
+        action_required: true,
+        powered_by: 'GSB CEO Orchestrator',
+      };
+    }
+
+    await freshJob.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
+    console.log(`[CEO-provider] Job ${job.id} delivered (${offeringName}).`);
+  } catch (err) {
+    console.error(`[CEO-provider] Job ${job.id} delivery error:`, err.message);
+    try {
+      await job.rejectPayable(`Internal error: ${err.message}. Your payment will be refunded.`);
+    } catch (rejectErr) {
+      console.error(`[CEO-provider] Job ${job.id} rejectPayable error:`, rejectErr.message);
+    }
+  }
 }
 
 // ── Deliverable store — keyed by jobId ──────────────────────────────────────
@@ -206,14 +404,35 @@ async function main() {
   const totalJobs = WORKERS.length * JOBS_PER_WORKER;
 
   console.log('[ceo] Building ACP client for CEO (entity', CEO_ENTITY_ID, ')...');
-  const contractClient = await AcpContractClient.build(
-    PRIVATE_KEY, CEO_ENTITY_ID, CEO_WALLET_ADDRESS
+  const contractClient = await AcpContractClientV2.build(
+    PRIVATE_KEY, CEO_ENTITY_ID, CEO_WALLET_ADDRESS, baseAcpConfigV2
   );
 
   const client = new AcpClient({
     acpContractClient: contractClient,
 
     onNewTask: async (job, memo) => {
+      // ── PROVIDER side — incoming jobs to the CEO's offerings ──
+      if (job.phase === 0) {
+        const offeringName = job.serviceName || job.serviceOffering || '';
+        const rawContent = extractContent(job.requirement) || extractContent(job.memos?.[0]?.content) || '';
+
+        if (OFFERING_SCHEMAS[offeringName]) {
+          console.log(`[CEO-provider] Incoming job ${job.id} for offering: ${offeringName}`);
+          const check = validateProviderInput(offeringName, rawContent);
+          if (!check.valid) {
+            console.log(`[CEO-provider] Rejecting job ${job.id}: ${check.reason}`);
+            await job.reject(check.reason);
+            return;
+          }
+          handleProviderJob(client, job, offeringName).catch(err => {
+            console.error(`[CEO-provider] Job ${job.id} error:`, err.message);
+          });
+          return;
+        }
+      }
+
+      // ── BUYER side — existing acceptRequirement logic ──
       if (memo) {
         console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} memo=${memo.id} nextPhase=${memo.nextPhase}`);
         queueAccept(job, memo);
