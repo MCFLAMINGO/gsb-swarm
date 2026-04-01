@@ -1,5 +1,6 @@
 require('dotenv').config();
 const axios = require('axios');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { buildAcpClient } = require('./acp');
@@ -246,6 +247,90 @@ async function writeThread(jobRequest) {
   };
 }
 
+// ── OAuth 1.0a for Twitter API v2 ────────────────────────────────────────────
+
+function percentEncode(str) {
+  return encodeURIComponent(str)
+    .replace(/!/g, '%21')
+    .replace(/\*/g, '%2A')
+    .replace(/'/g, '%27')
+    .replace(/\(/g, '%28')
+    .replace(/\)/g, '%29');
+}
+
+function signOAuth1(method, url, params, body) {
+  const oauthParams = {
+    oauth_consumer_key: process.env.X_API_KEY,
+    oauth_nonce: crypto.randomBytes(16).toString('hex'),
+    oauth_signature_method: 'HMAC-SHA1',
+    oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
+    oauth_token: process.env.X_ACCESS_TOKEN,
+    oauth_version: '1.0',
+  };
+
+  // Collect all params for signature base string (oauth params + query params)
+  const allParams = { ...oauthParams, ...params };
+
+  // Sort and encode
+  const paramString = Object.keys(allParams)
+    .sort()
+    .map(k => `${percentEncode(k)}=${percentEncode(allParams[k])}`)
+    .join('&');
+
+  const baseString = [
+    method.toUpperCase(),
+    percentEncode(url),
+    percentEncode(paramString),
+  ].join('&');
+
+  const signingKey = `${percentEncode(process.env.X_API_SECRET)}&${percentEncode(process.env.X_ACCESS_TOKEN_SECRET)}`;
+  const signature = crypto.createHmac('sha1', signingKey).update(baseString).digest('base64');
+
+  oauthParams.oauth_signature = signature;
+
+  const authHeader = 'OAuth ' + Object.keys(oauthParams)
+    .sort()
+    .map(k => `${percentEncode(k)}="${percentEncode(oauthParams[k])}"`)
+    .join(', ');
+
+  return authHeader;
+}
+
+async function postTweet(text, replyToId = null) {
+  const url = 'https://api.twitter.com/2/tweets';
+  const body = { text };
+  if (replyToId) body.reply = { in_reply_to_tweet_id: replyToId };
+
+  const authHeader = signOAuth1('POST', url, {}, JSON.stringify(body));
+
+  const res = await axios.post(url, body, {
+    headers: {
+      'Authorization': authHeader,
+      'Content-Type': 'application/json',
+    },
+  });
+  return res.data.data.id;
+}
+
+async function postThread(tweets) {
+  let lastId = null;
+  let firstId = null;
+  for (const text of tweets) {
+    const id = await postTweet(text, lastId);
+    if (!firstId) firstId = id;
+    lastId = id;
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  return `https://x.com/ErikOsol43597/status/${firstId}`;
+}
+
+function parseThreadToTweets(threadResult) {
+  const raw = threadResult.thread || threadResult.content || String(threadResult);
+  return raw.split('\n\n').map(t => t.trim()).filter(t => t.length > 0 && t.length <= 280);
+}
+
+// ── ACP Provider ─────────────────────────────────────────────────────────────
+
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
   let client;
@@ -302,7 +387,28 @@ async function start() {
         }
 
         const result = await writeThread(content);
-        await freshJob.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
+        let threadUrl = null;
+
+        // If X credentials are configured, post to X
+        if (process.env.X_API_KEY && process.env.X_ACCESS_TOKEN) {
+          try {
+            const tweets = parseThreadToTweets(result);
+            if (tweets.length > 0) {
+              threadUrl = await postThread(tweets);
+              console.log(`[${AGENT_NAME}] Thread posted to X: ${threadUrl}`);
+            }
+          } catch (err) {
+            console.error(`[${AGENT_NAME}] X posting failed (delivering text only):`, err.message);
+          }
+        }
+
+        // Deliver result with thread URL if available
+        const deliverable = {
+          ...result,
+          threadUrl: threadUrl || null,
+          posted: !!threadUrl,
+        };
+        await freshJob.deliver({ type: 'text', value: JSON.stringify(deliverable, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job ${job.id} error:`, err.message);
@@ -321,7 +427,22 @@ async function start() {
   console.log(`[${AGENT_NAME}] Online. Writing threads for $${JOB_PRICE} USDC each.`);
 }
 
-start().catch((err) => {
-  console.error(`[${AGENT_NAME}] Fatal startup error:`, err.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  // If run directly with --test-post flag, post a test thread to X
+  if (process.argv.includes('--test-post')) {
+    const testThread = [
+      'Testing $GSB Thread Writer autonomous posting. 1/3',
+      'This thread was written and posted by an AI agent on Virtuals Protocol. Zero human involvement. 2/3',
+      'The future of content is autonomous. $GSB $VIRTUAL #Base 3/3',
+    ];
+    postThread(testThread)
+      .then(url => console.log('Posted:', url))
+      .catch(console.error);
+  } else {
+    // Normal startup — run ACP provider
+    start().catch((err) => {
+      console.error(`[${AGENT_NAME}] Fatal startup error:`, err.message);
+      process.exit(1);
+    });
+  }
+}
