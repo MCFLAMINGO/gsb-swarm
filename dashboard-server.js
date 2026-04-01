@@ -569,7 +569,7 @@ app.get('/api/auth/status', (req, res) => {
 
 // ── POST /api/fire-job — OPERATOR ONLY ───────────────────────────────────────
 app.post('/api/fire-job', requireOperator, async (req, res) => {
-  const { worker: workerName, requirement } = req.body || {};
+  const { worker: workerName, requirement, direct } = req.body || {};
 
   if (!workerName || !requirement) {
     return res.status(400).json({ error: 'Missing worker or requirement' });
@@ -578,9 +578,59 @@ app.post('/api/fire-job', requireOperator, async (req, res) => {
   if (!worker) {
     return res.status(400).json({ error: `Unknown worker: ${workerName}` });
   }
-  if (!acpClient || !acpReady) {
-    return res.status(503).json({ error: 'ACP client not ready — check AGENT_WALLET_PRIVATE_KEY' });
+
+  // ── DIRECT MODE: bypass ACP, call Claude directly ──────────────────────────
+  if (direct || !acpClient || !acpReady) {
+    try {
+      console.log(`[api] Direct fire → ${workerName}: "${requirement}"`);
+      const jobId = 'direct_' + Date.now();
+      setWorkerStatus(workerName, 'working', jobId);
+      logJob(jobId, workerName, 'fired', 'direct');
+
+      // Build prompt based on worker role
+      const rolePrompt = {
+        'GSB Thread Writer': `You are the GSB Thread Writer. Write a crypto Twitter/X thread. Format as numbered tweets separated by blank lines. Each tweet max 280 chars.\n\nRequirement: ${requirement}`,
+        'GSB Token Analyst': `You are the GSB Token Analyst. Analyze the requested token and provide a detailed report with BUY/HOLD/AVOID recommendation.\n\nRequirement: ${requirement}`,
+        'GSB Wallet Profiler': `You are the GSB Wallet Profiler. Profile the requested wallet — classify as whale/degen/institutional, describe activity patterns.\n\nRequirement: ${requirement}`,
+        'GSB Alpha Scanner': `You are the GSB Alpha Scanner. Scan for alpha signals on Base chain. Return top opportunities with risk/reward assessment.\n\nRequirement: ${requirement}`,
+      }[workerName] || `You are ${workerName}. Complete this task:\n\nRequirement: ${requirement}`;
+
+      const msg = await anthropic.messages.create({
+        model: 'claude-opus-4-5',
+        max_tokens: 1500,
+        messages: [{ role: 'user', content: rolePrompt }],
+      });
+      const result = msg.content[0]?.text || '';
+
+      // If Thread Writer + X keys configured, attempt to post
+      let threadUrl = null;
+      if (workerName === 'GSB Thread Writer' && process.env.X_API_KEY && process.env.X_ACCESS_TOKEN) {
+        try {
+          const tweets = result.split('\n\n').map(t => t.trim()).filter(t => t.length > 0 && t.length <= 280);
+          if (tweets.length > 0) {
+            // Post first tweet
+            const { postThread } = require('./threadWriter');
+            if (typeof postThread === 'function') {
+              threadUrl = await postThread(tweets);
+              console.log(`[api] Thread posted: ${threadUrl}`);
+            }
+          }
+        } catch (xErr) {
+          console.warn('[api] X posting failed (text-only):', xErr.message);
+        }
+      }
+
+      setWorkerStatus(workerName, 'idle');
+      logJob(jobId, workerName, 'completed', 'direct');
+      broadcast('job-result', { jobId, worker: workerName, result, threadUrl });
+      return res.json({ ok: true, jobId, result, threadUrl });
+    } catch (err) {
+      setWorkerStatus(workerName, 'idle');
+      console.error('[api] direct fire error:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
   }
+  // ── ACP MODE ───────────────────────────────────────────────────────────────
 
   const jobErr = checkDailyJobLimit();
   if (jobErr) return res.status(429).json({ error: jobErr });
