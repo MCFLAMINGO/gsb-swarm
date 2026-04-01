@@ -170,8 +170,8 @@ function setAcpStatus(data) {
   const btn   = document.getElementById('fire-btn');
   dot.className   = 'dot ' + (acpReady ? 'connected' : 'error');
   label.textContent = acpReady ? 'CEO wallet ready' : (data.error ? 'Wallet error' : 'Initializing…');
-  btn.disabled    = !acpReady;
-  btn.textContent = acpReady ? 'Fire Job →' : 'Waiting for wallet…';
+  btn.disabled    = false;  // always enabled — uses direct mode if ACP not ready
+  btn.textContent = acpReady ? 'Fire Job →' : 'Fire Job (Direct) →';
   // In public mode, CEO command bar stays enabled for instant queries regardless of ACP
   // Only disable if ACP is not ready AND user is operator
   if (isOperator) {
@@ -397,7 +397,7 @@ document.getElementById('fire-btn').addEventListener('click', async () => {
       const r = await fetch(`${API_BASE}/api/fire-job`, {
         method:  'POST',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body:    JSON.stringify({ worker: workerName, requirement }),
+        body:    JSON.stringify({ worker: workerName, requirement, direct: !acpReady }),
       });
       const data = await r.json();
       if (data.ok) { fired++; showFire(`Job ${fired}/${count} fired → ${data.jobId}`, 'ok'); }
