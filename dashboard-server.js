@@ -1366,7 +1366,7 @@ app.post('/api/command', async (req, res) => {
 });
 
 // ── BasaltSurge Payment Integration ──────────────────────────────────────────
-const BASALT_BASE = 'https://surge.basalthq.com';
+const BASALT_BASE = 'https://surge.basalthq.com/basaltsurge';
 const BASALT_API_KEY = process.env.BASALT_API_KEY || '';
 
 // In-memory stores for pending orders and upload tokens
@@ -1413,7 +1413,7 @@ app.post('/api/create-triage-order', express.json(), async (req, res) => {
       return res.status(400).json({ error: 'projectName and email are required' });
     }
 
-    const orderRes = await axios.post(`${BASALT_BASE}/basaltsurge/api/orders`, {
+    const orderRes = await axios.post(`${BASALT_BASE}/api/orders`, {
       items: [{ sku: 'TRIAGE-001', qty: 1 }],
     }, {
       headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY },
@@ -1421,7 +1421,7 @@ app.post('/api/create-triage-order', express.json(), async (req, res) => {
 
     const { receipt } = orderRes.data;
     const receiptId = receipt.receiptId;
-    const paymentUrl = `${BASALT_BASE}/basaltsurge/pay/${receiptId}`;
+    const paymentUrl = `${BASALT_BASE}/pay/${receiptId}`;
 
     pendingOrders.set(receiptId, {
       projectName: projectName.trim(),
