@@ -1534,7 +1534,7 @@ app.post('/api/financial-triage', triageUpload.fields([
   { name: 'posFile', maxCount: 1 },
 ]), async (req, res) => {
   try {
-    const { projectName, period, tier, agreedToTos, uploadToken, mode, personalInfo } = req.body || {};
+    const { projectName, period, tier, agreedToTos, uploadToken, mode, personalInfo, signatureData, selectedForms, signerName } = req.body || {};
 
     // Validate payment via uploadToken
     if (!uploadToken || !uploadTokens.has(uploadToken)) {
@@ -1605,6 +1605,33 @@ app.post('/api/financial-triage', triageUpload.fields([
         console.warn('[triage] Could not parse personalInfo JSON:', e.message);
       }
     }
+
+    // Signature data — draw (base64 PNG) or typed (typed:Name)
+    if (signatureData) {
+      const sigObj = {
+        signer_name: signerName || projectName || '',
+        date: new Date().toLocaleDateString('en-US', {month:'2-digit',day:'2-digit',year:'numeric'}),
+        ip_address: req.ip || req.connection?.remoteAddress || 'N/A',
+        timestamp: new Date().toISOString(),
+      };
+      if (typeof signatureData === 'string' && signatureData.startsWith('typed:')) {
+        sigObj.typed_name = signatureData.slice(6).trim();
+        sigObj.image_base64 = '';  // backend renders typed sig via signature_engine.render_typed_signature
+      } else {
+        sigObj.image_base64 = typeof signatureData === 'string' ? signatureData : '';
+      }
+      contextObj.signature_data = sigObj;
+      console.log('[triage] Signature provided — will embed in all forms');
+    }
+
+    // Selected forms
+    if (selectedForms) {
+      contextObj.selected_forms = typeof selectedForms === 'string'
+        ? selectedForms.split(',').map(s => s.trim()).filter(Boolean)
+        : selectedForms;
+      console.log('[triage] Selected forms:', contextObj.selected_forms);
+    }
+
     const contextArg = ` --context '${JSON.stringify(contextObj).replace(/'/g, "'\"'\"'")}'`;
 
     // Install Python deps if needed (includes pypdf for form filling)

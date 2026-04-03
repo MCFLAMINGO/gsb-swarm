@@ -164,6 +164,12 @@ def embed_signature_in_pdf(input_pdf_path: str, output_pdf_path: str,
     timestamp = signature_data.get('timestamp', datetime.now().isoformat())
     image_b64 = signature_data.get('image_base64', '')
 
+    # Handle typed signature — render to PNG
+    typed_name = signature_data.get('typed_name', '')
+    if typed_name and not image_b64:
+        b64 = render_typed_signature(typed_name)
+        image_b64 = b64
+
     # Decode signature image
     sig_img = _decode_sig_image(image_b64) if image_b64 else None
 

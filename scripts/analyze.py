@@ -2348,26 +2348,23 @@ def main():
         generate_lender_letter(metrics, project_name, args.address, args.period, lender_path, font_name)
         generated.append(lender_path)
 
-        # ── OPTIONAL: SBA Form 413 + Truist PFS auto-population ──
-        # Only generated when context includes 'personal_info' key
+        # ── OPTIONAL: Universal bank form auto-population ──
+        # Triggered when context includes 'personal_info' key
+        # Generates all selected bank PFS forms + applies e-signature
         if context.get("personal_info"):
             try:
-                from generate_forms import generate_sba_413, generate_truist_pfs, build_financial_data_from_context
-                print("\n[4/5] SBA Form 413 (Personal Financial Statement)...")
+                from generate_forms import generate_all_forms, build_financial_data_from_context
+                print("\n[4+] Generating bank PFS forms...")
                 fd = build_financial_data_from_context(context, metrics)
-                sba_path = str(output_dir / f"{slug}-sba-413-{ym}.pdf")
-                generate_sba_413(fd, sba_path)
-                generated.append(sba_path)
-
-                print("\n[5/5] Truist Personal Financial Statement...")
-                truist_path = str(output_dir / f"{slug}-truist-pfs-{ym}.pdf")
-                generate_truist_pfs(fd, truist_path, font_name)
-                generated.append(truist_path)
+                selected = context.get("selected_forms", None)  # None = all forms
+                sig_data = context.get("signature_data", None)
+                form_paths = generate_all_forms(fd, output_dir, slug, ym, font_name, selected, sig_data)
+                generated.extend(form_paths)
             except Exception as e:
                 print(f"[forms] WARNING: Could not generate bank forms: {e}")
         else:
-            print("\n[INFO] No personal_info in context — skipping SBA 413 + Truist PFS.")
-            print("       Pass personal_info in context JSON to enable form auto-population.")
+            print("\n[INFO] No personal_info in context — skipping bank form auto-population.")
+            print("       Pass personal_info in context JSON to enable form generation.")
 
     else:
         # ── RESTAURANT MODE (existing) ──
@@ -2405,23 +2402,19 @@ def main():
         generate_bank_loan_letter(metrics, project_name, args.address, args.period, loan_path, font_name, context)
         generated.append(loan_path)
 
-        # ── OPTIONAL: SBA Form 413 + Truist PFS auto-population (restaurant mode) ──
+        # ── OPTIONAL: Universal bank form auto-population (restaurant mode) ──
         # Triggered when client provides personal_info in context JSON
         if context.get("personal_info"):
             try:
-                from generate_forms import generate_sba_413, generate_truist_pfs, build_financial_data_from_context
-                print("\n[4/5] SBA Form 413 (Personal Financial Statement)...")
+                from generate_forms import generate_all_forms, build_financial_data_from_context
+                print("\n[4+] Generating bank PFS forms...")
                 # For restaurant mode, derive closing_balance from bank metrics
                 form_metrics = {"closing_balance": metrics.get("closing_balance", 0)}
                 fd = build_financial_data_from_context(context, form_metrics)
-                sba_path = str(output_dir / f"{slug}-sba-413-{ym}.pdf")
-                generate_sba_413(fd, sba_path)
-                generated.append(sba_path)
-
-                print("\n[5/5] Truist Personal Financial Statement...")
-                truist_path = str(output_dir / f"{slug}-truist-pfs-{ym}.pdf")
-                generate_truist_pfs(fd, truist_path, font_name)
-                generated.append(truist_path)
+                selected = context.get("selected_forms", None)
+                sig_data = context.get("signature_data", None)
+                form_paths = generate_all_forms(fd, output_dir, slug, ym, font_name, selected, sig_data)
+                generated.extend(form_paths)
             except Exception as e:
                 print(f"[forms] WARNING: Could not generate bank forms: {e}")
 
