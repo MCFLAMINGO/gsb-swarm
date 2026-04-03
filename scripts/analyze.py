@@ -1,4 +1,22 @@
 #!/usr/bin/env python3
+# Auto-install missing deps before anything else
+import subprocess, sys
+def _ensure_deps():
+    required = ['reportlab', 'openpyxl', 'pandas', 'xlrd', 'pypdf', 'PIL', 'pypdfium2']
+    missing = []
+    for pkg in required:
+        try:
+            __import__(pkg)
+        except ImportError:
+            missing.append('Pillow' if pkg == 'PIL' else pkg)
+    if missing:
+        print(f'[analyze] Installing missing packages: {missing}')
+        subprocess.check_call([
+            sys.executable, '-m', 'pip', 'install', '--quiet',
+            '--break-system-packages', '--no-warn-script-location'
+        ] + missing, stderr=subprocess.DEVNULL)
+_ensure_deps()
+
 """
 analyze.py — Restaurant Financial Triage Engine
 MCFL Restaurant Holdings LLC
