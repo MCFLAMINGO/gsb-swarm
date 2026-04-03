@@ -1,11 +1,11 @@
 [phases.setup]
-aptPkgs = ["python3", "python3-pip", "python3-reportlab", "python3-pil"]
+aptPkgs = ["python3", "python3-pip"]
 
 [phases.install]
 cmds = ["npm install --production"]
 
 [phases.build]
-cmds = ["pip3 install reportlab xlrd openpyxl pandas pypdf Pillow pypdfium2 --break-system-packages --quiet || pip install reportlab xlrd openpyxl pandas pypdf Pillow pypdfium2 --user --quiet", "python3 -c 'import reportlab, openpyxl, pandas, pypdf; print(\"Python deps OK\")' "]
+cmds = ["pip3 install reportlab xlrd openpyxl pandas pypdf Pillow pypdfium2 --break-system-packages --quiet"]
 
 [start]
 cmd = "node --experimental-require-module index.js"
