@@ -1404,6 +1404,24 @@ if (BASALT_API_KEY) {
   console.warn('[basalt] No BASALT_API_KEY — payment endpoints will fail.');
 }
 
+// GET /api/test-token — generate a free test upload token (no payment required)
+// Only works when TEST_MODE=true in env
+app.get('/api/test-token', async (req, res) => {
+  if (process.env.TEST_MODE !== 'true') {
+    return res.status(403).json({ error: 'Test mode not enabled' });
+  }
+  const testToken = 'TEST-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+  const testReceiptId = 'test-' + Date.now();
+  uploadTokens.set(testToken, testReceiptId);
+  console.log('[test] Free test token generated:', testToken);
+  return res.json({ 
+    ok: true, 
+    uploadToken: testToken, 
+    receiptId: testReceiptId,
+    message: 'Free test token — skips payment. Use this uploadToken to test /api/financial-triage'
+  });
+});
+
 // POST /api/create-triage-order — create a BasaltSurge order
 app.post('/api/create-triage-order', express.json(), async (req, res) => {
   try {
