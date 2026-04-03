@@ -1634,13 +1634,6 @@ app.post('/api/financial-triage', triageUpload.fields([
 
     const contextArg = ` --context '${JSON.stringify(contextObj).replace(/'/g, "'\"'\"'")}'`;
 
-    // Install Python deps if needed (includes pypdf for form filling)
-    try {
-      execSync('python3 -c "import reportlab, openpyxl, pandas, pypdf"', { stdio: 'pipe' });
-    } catch {
-      execSync('pip install reportlab xlrd openpyxl pandas pypdf -q', { stdio: 'inherit' });
-    }
-
     // Run analyze.py
     const scriptPath = path.join(__dirname, 'scripts', 'analyze.py');
     const cmd = `python3 ${scriptPath} --project-name "${projectName.replace(/"/g, '')}" --bank "${bankPath}" --period "${(period || 'Current').replace(/"/g, '')}" --output-dir "${outputDir}"${posArg}${modeArg}${contextArg}`;

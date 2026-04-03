@@ -4,7 +4,8 @@
   "description": "GSB Intelligence Swarm - 4 ACP provider agents for Agent Gas Bible",
   "main": "index.js",
   "scripts": {
-    "start": "node --experimental-require-module index.js"
+    "start": "node --experimental-require-module index.js",
+    "postinstall": "pip install -r requirements.txt -q 2>/dev/null || pip3 install -r requirements.txt -q"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
