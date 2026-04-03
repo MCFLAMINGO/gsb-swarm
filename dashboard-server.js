@@ -2,6 +2,20 @@
 // Express 4 + WebSocket + ACP SDK for live job firing
 require('dotenv').config();
 
+// ── Resend (bleeding.cash email delivery) ────────────────────────────────────
+let resendClient = null;
+if (process.env.RESEND_API_KEY) {
+  try {
+    const { Resend } = require('resend');
+    resendClient = new Resend(process.env.RESEND_API_KEY);
+    console.log('[resend] Client initialized — sending from reports@bleeding.cash');
+  } catch (e) {
+    console.warn('[resend] Could not initialize:', e.message);
+  }
+} else {
+  console.warn('[resend] No RESEND_API_KEY — email delivery disabled.');
+}
+
 const https = require('https');
 
 const fs       = require('fs');
@@ -1629,12 +1643,69 @@ app.post('/api/financial-triage', triageUpload.fields([
     uploadTokens.delete(uploadToken);
 
     console.log(`[triage] Job ${jobId} complete. Token: ${accessToken}. Files: ${pdfs.length}`);
+
+    // ── Send delivery email via Resend ──
+    const clientEmail = req.body?.email;
+    if (resendClient && clientEmail) {
+      const downloadLink = `https://www.bleeding.cash/download?token=${accessToken}`;
+      const expiryDate = new Date(expiresAt).toLocaleDateString('en-US', {
+        month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+      resendClient.emails.send({
+        from: 'bleeding.cash Reports <reports@bleeding.cash>',
+        to: clientEmail,
+        subject: `Your Financial Report is Ready — Token: ${accessToken}`,
+        html: `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#F7F6F2;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F7F6F2;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+        <!-- Header -->
+        <tr><td style="background:#1B474D;padding:32px 40px;">
+          <p style="margin:0;color:#BCE2E7;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;">bleeding.cash</p>
+          <h1 style="margin:8px 0 0;color:#ffffff;font-size:24px;font-weight:700;">Your Report is Ready</h1>
+        </td></tr>
+        <!-- Body -->
+        <tr><td style="padding:40px;">
+          <p style="margin:0 0 16px;color:#28251D;font-size:15px;line-height:1.6;">Your financial triage analysis has been completed. Your documents are ready to download.</p>
+          <div style="background:#F7F6F2;border-radius:6px;padding:16px 20px;margin:24px 0;">
+            <p style="margin:0 0 4px;color:#7A7974;font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Your Access Token</p>
+            <p style="margin:0;color:#1B474D;font-size:22px;font-weight:700;letter-spacing:2px;">${accessToken}</p>
+          </div>
+          <p style="margin:0 0 8px;color:#7A7974;font-size:13px;">Save this token — you\'ll need it to access your reports. Link expires <strong>${expiryDate}</strong>.</p>
+          <table cellpadding="0" cellspacing="0" style="margin:28px 0;">
+            <tr><td style="background:#1B474D;border-radius:6px;">
+              <a href="${downloadLink}" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">Download My Reports &rarr;</a>
+            </td></tr>
+          </table>
+          <p style="margin:0 0 8px;color:#7A7974;font-size:13px;">Or copy this link:</p>
+          <p style="margin:0;color:#01696F;font-size:13px;word-break:break-all;">${downloadLink}</p>
+        </td></tr>
+        <!-- Footer -->
+        <tr><td style="background:#F7F6F2;padding:24px 40px;border-top:1px solid #D4D1CA;">
+          <p style="margin:0;color:#7A7974;font-size:11px;line-height:1.6;">bleeding.cash is a financial triage service operated by MCFL Restaurant Holdings LLC. This report is for informational purposes only and does not constitute financial, legal, or tax advice. Always consult a licensed professional before making financial decisions.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`,
+      }).then(r => console.log(`[resend] Email sent to ${clientEmail} — id: ${r.data?.id}`))
+        .catch(e => console.warn(`[resend] Email failed: ${e.message}`));
+    } else if (!clientEmail) {
+      console.log('[resend] No email address provided — skipping delivery email.');
+    }
+
     res.json({
       jobId,
       accessToken,
       status: 'complete',
       downloadUrl: `/api/financial-triage/download/${accessToken}`,
       expiresAt: new Date(expiresAt).toISOString(),
+      emailSent: !!(resendClient && clientEmail),
     });
   } catch (err) {
     console.error('[triage] Error:', err.message);
