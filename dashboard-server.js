@@ -1520,15 +1520,17 @@ app.post('/api/financial-triage', triageUpload.fields([
   { name: 'posFile', maxCount: 1 },
 ]), async (req, res) => {
   try {
-    const { projectName, period, tier, agreedToTos, uploadToken, mode } = req.body || {};
+    const { projectName, period, tier, agreedToTos, uploadToken, mode, personalInfo } = req.body || {};
 
     // Validate payment via uploadToken
     if (!uploadToken || !uploadTokens.has(uploadToken)) {
       return res.status(402).json({ error: 'Payment required. Please complete payment before uploading files.' });
     }
     const paidReceiptId = uploadTokens.get(uploadToken);
+    const isTestToken = uploadToken.startsWith('TEST-');
     const paidOrder = pendingOrders.get(paidReceiptId);
-    if (!paidOrder || paidOrder.status !== 'paid') {
+    // Test tokens (TEST-XXXX) bypass payment check — real tokens require paid order
+    if (!isTestToken && (!paidOrder || paidOrder.status !== 'paid')) {
       return res.status(402).json({ error: 'Payment not confirmed. Please complete payment first.' });
     }
 
@@ -1566,22 +1568,43 @@ app.post('/api/financial-triage', triageUpload.fields([
       posArg = ` --pos "${posPath}"`;
     }
 
-    // Install Python deps if needed
-    try {
-      execSync('python3 -c "import reportlab, openpyxl, pandas"', { stdio: 'pipe' });
-    } catch {
-      execSync('pip install reportlab xlrd openpyxl pandas -q', { stdio: 'inherit' });
-    }
-
     // Resolve triage mode from form data or stored order
-    const triageMode = (mode === 'personal' || paidOrder.mode === 'personal') ? 'personal' : 'restaurant';
+    const triageMode = (mode === 'personal' || paidOrder?.mode === 'personal') ? 'personal' : 'restaurant';
     const modeArg = ` --mode ${triageMode}`;
+
+    // Build context JSON — includes personalInfo if provided
+    const contextObj = {};
+    if (personalInfo) {
+      try {
+        const pi = typeof personalInfo === 'string' ? JSON.parse(personalInfo) : personalInfo;
+        // personal_info triggers SBA 413 + Truist PFS generation
+        contextObj.personal_info = pi.personal_info || pi;
+        if (pi.assets) contextObj.assets = pi.assets;
+        if (pi.liabilities) contextObj.liabilities = pi.liabilities;
+        if (pi.income) contextObj.income = pi.income;
+        if (pi.notes_payable_list) contextObj.notes_payable_list = pi.notes_payable_list;
+        if (pi.real_estate_list) contextObj.real_estate_list = pi.real_estate_list;
+        if (pi.stocks_list) contextObj.stocks_list = pi.stocks_list;
+        if (pi.sections) contextObj.sections = pi.sections;
+        console.log('[triage] personal_info provided — will generate SBA 413 + Truist PFS');
+      } catch (e) {
+        console.warn('[triage] Could not parse personalInfo JSON:', e.message);
+      }
+    }
+    const contextArg = ` --context '${JSON.stringify(contextObj).replace(/'/g, "'\"'\"'")}'`;
+
+    // Install Python deps if needed (includes pypdf for form filling)
+    try {
+      execSync('python3 -c "import reportlab, openpyxl, pandas, pypdf"', { stdio: 'pipe' });
+    } catch {
+      execSync('pip install reportlab xlrd openpyxl pandas pypdf -q', { stdio: 'inherit' });
+    }
 
     // Run analyze.py
     const scriptPath = path.join(__dirname, 'scripts', 'analyze.py');
-    const cmd = `python3 ${scriptPath} --project-name "${projectName.replace(/"/g, '')}" --bank "${bankPath}" --period "${(period || 'Current').replace(/"/g, '')}" --output-dir "${outputDir}"${posArg}${modeArg}`;
+    const cmd = `python3 ${scriptPath} --project-name "${projectName.replace(/"/g, '')}" --bank "${bankPath}" --period "${(period || 'Current').replace(/"/g, '')}" --output-dir "${outputDir}"${posArg}${modeArg}${contextArg}`;
     console.log(`[triage] Running: ${cmd}`);
-    execSync(cmd, { stdio: 'inherit', timeout: 120000 });
+    execSync(cmd, { stdio: 'inherit', timeout: 180000 });
 
     // Read PDFs into memory
     const pdfFiles = fs.readdirSync(outputDir).filter(f => f.endsWith('.pdf'));

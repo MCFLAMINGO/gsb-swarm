@@ -2348,6 +2348,27 @@ def main():
         generate_lender_letter(metrics, project_name, args.address, args.period, lender_path, font_name)
         generated.append(lender_path)
 
+        # ── OPTIONAL: SBA Form 413 + Truist PFS auto-population ──
+        # Only generated when context includes 'personal_info' key
+        if context.get("personal_info"):
+            try:
+                from generate_forms import generate_sba_413, generate_truist_pfs, build_financial_data_from_context
+                print("\n[4/5] SBA Form 413 (Personal Financial Statement)...")
+                fd = build_financial_data_from_context(context, metrics)
+                sba_path = str(output_dir / f"{slug}-sba-413-{ym}.pdf")
+                generate_sba_413(fd, sba_path)
+                generated.append(sba_path)
+
+                print("\n[5/5] Truist Personal Financial Statement...")
+                truist_path = str(output_dir / f"{slug}-truist-pfs-{ym}.pdf")
+                generate_truist_pfs(fd, truist_path, font_name)
+                generated.append(truist_path)
+            except Exception as e:
+                print(f"[forms] WARNING: Could not generate bank forms: {e}")
+        else:
+            print("\n[INFO] No personal_info in context — skipping SBA 413 + Truist PFS.")
+            print("       Pass personal_info in context JSON to enable form auto-population.")
+
     else:
         # ── RESTAURANT MODE (existing) ──
         print("\n[MODE] Restaurant financial triage")
@@ -2383,6 +2404,26 @@ def main():
         print("\n[3/3] Bank Loan Request Letter...")
         generate_bank_loan_letter(metrics, project_name, args.address, args.period, loan_path, font_name, context)
         generated.append(loan_path)
+
+        # ── OPTIONAL: SBA Form 413 + Truist PFS auto-population (restaurant mode) ──
+        # Triggered when client provides personal_info in context JSON
+        if context.get("personal_info"):
+            try:
+                from generate_forms import generate_sba_413, generate_truist_pfs, build_financial_data_from_context
+                print("\n[4/5] SBA Form 413 (Personal Financial Statement)...")
+                # For restaurant mode, derive closing_balance from bank metrics
+                form_metrics = {"closing_balance": metrics.get("closing_balance", 0)}
+                fd = build_financial_data_from_context(context, form_metrics)
+                sba_path = str(output_dir / f"{slug}-sba-413-{ym}.pdf")
+                generate_sba_413(fd, sba_path)
+                generated.append(sba_path)
+
+                print("\n[5/5] Truist Personal Financial Statement...")
+                truist_path = str(output_dir / f"{slug}-truist-pfs-{ym}.pdf")
+                generate_truist_pfs(fd, truist_path, font_name)
+                generated.append(truist_path)
+            except Exception as e:
+                print(f"[forms] WARNING: Could not generate bank forms: {e}")
 
     # --- Security: delete input files ---
     secure_delete_inputs(args.bank, args.pos)
