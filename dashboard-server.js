@@ -1489,6 +1489,7 @@ app.post('/api/generate-forms', express.json({ limit: '2mb' }), async (req, res)
       expiresAt: Date.now() + 24 * 60 * 60 * 1000,
       email: clientEmail,
     });
+    saveJobStore(); // persist to disk immediately
 
     // Wipe output dir immediately
     try { fs.rmSync(outputDir, { recursive: true, force: true }); } catch(e) {}
@@ -1622,9 +1623,41 @@ app.get('/api/check-payment', async (req, res) => {
 
 // ── Financial Triage API ─────────────────────────────────────────────────────
 const triageUpload = multer({ dest: '/tmp/triage-uploads/' });
-const triageJobStore = new Map(); // accessToken -> { pdfs: [{name, buffer}], createdAt, expiresAt }
+// ── Persistent triage job store ──────────────────────────────────────────────────
+// Survives Railway restarts by writing to /tmp/triage-jobs.json
+const JOBS_FILE = path.join(os.tmpdir(), 'bleeding-cash-jobs.json');
 
-// Clean expired triage tokens every 30 minutes
+function loadJobStore() {
+  try {
+    if (fs.existsSync(JOBS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'));
+      const map = new Map();
+      const now = Date.now();
+      for (const [k, v] of Object.entries(data)) {
+        if (v.expiresAt > now) map.set(k, v); // skip expired
+      }
+      console.log(`[jobs] Loaded ${map.size} active jobs from disk`);
+      return map;
+    }
+  } catch (e) {
+    console.warn('[jobs] Could not load job store:', e.message);
+  }
+  return new Map();
+}
+
+function saveJobStore() {
+  try {
+    const obj = {};
+    for (const [k, v] of triageJobStore) obj[k] = v;
+    fs.writeFileSync(JOBS_FILE, JSON.stringify(obj));
+  } catch (e) {
+    console.warn('[jobs] Could not save job store:', e.message);
+  }
+}
+
+const triageJobStore = loadJobStore();
+
+// Clean expired tokens every 30 minutes + save to disk
 setInterval(() => {
   const now = Date.now();
   for (const [token, entry] of triageJobStore) {
@@ -1633,6 +1666,7 @@ setInterval(() => {
       console.log(`[triage] Token ${token} expired and cleaned up.`);
     }
   }
+  saveJobStore();
 }, 30 * 60 * 1000);
 
 app.post('/api/financial-triage', triageUpload.fields([
@@ -1761,9 +1795,11 @@ app.post('/api/financial-triage', triageUpload.fields([
 
     triageJobStore.set(accessToken, {
       pdfs,
+      email: clientEmail || null,
       createdAt: now,
       expiresAt,
     });
+    saveJobStore(); // persist to disk immediately
 
     // Invalidate upload token after successful use
     uploadTokens.delete(uploadToken);
