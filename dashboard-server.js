@@ -1649,7 +1649,16 @@ function loadJobStore() {
 function saveJobStore() {
   try {
     const obj = {};
-    for (const [k, v] of triageJobStore) obj[k] = v;
+    for (const [k, v] of triageJobStore) {
+      // Convert Buffers to base64 for JSON serialization
+      obj[k] = {
+        ...v,
+        pdfs: (v.pdfs || []).map(p => ({
+          name: p.name,
+          data: p.buffer ? p.buffer.toString('base64') : (p.data || ''),
+        })),
+      };
+    }
     fs.writeFileSync(JOBS_FILE, JSON.stringify(obj));
   } catch (e) {
     console.warn('[jobs] Could not save job store:', e.message);
@@ -1840,10 +1849,10 @@ app.post('/api/financial-triage', triageUpload.fields([
       const expiryDate = new Date(expiresAt).toLocaleDateString('en-US', {
         month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
       });
-      // Build PDF attachments — Resend expects Buffer, not base64 string
+      // Build PDF attachments — pdfs stored as Buffer objects
       const attachments = pdfs.map(pdf => ({
         filename: pdf.name,
-        content: Buffer.from(pdf.data, 'base64'),
+        content: pdf.buffer || Buffer.from(pdf.data || '', 'base64'),
       }));
 
       const formsLink = `https://www.bleeding.cash/my-forms?token=${accessToken}`;
