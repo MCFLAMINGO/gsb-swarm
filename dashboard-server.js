@@ -1940,12 +1940,13 @@ app.post('/api/financial-triage', triageUpload.fields([
     console.log(`[triage] Running: ${cmd}`);
     execSync(cmd, { stdio: 'inherit', timeout: 180000 });
 
-    // Read PDFs into memory
-    const pdfFiles = fs.readdirSync(outputDir).filter(f => f.endsWith('.pdf'));
-    const pdfs = pdfFiles.map(name => ({
+    // Read PDFs + Excel into memory
+    const allFiles = fs.readdirSync(outputDir).filter(f => f.endsWith('.pdf') || f.endsWith('.xlsx'));
+    const pdfs = allFiles.map(name => ({
       name,
       buffer: fs.readFileSync(path.join(outputDir, name)),
     }));
+    const pdfFiles = allFiles.filter(f => f.endsWith('.pdf')); // for logging
 
     // Clean up temp files
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1984,7 +1985,7 @@ app.post('/api/financial-triage', triageUpload.fields([
       resendClient.emails.send({
         from: 'bleeding.cash Reports <reports@bleeding.cash>',
         to: clientEmail,
-        subject: `Your Financial Reports — ${pdfs.length} PDFs attached`,
+        subject: `Your Financial Reports — ${pdfs.length} files attached (PDF + Excel)`,
         attachments,
         html: `
 <!DOCTYPE html>
