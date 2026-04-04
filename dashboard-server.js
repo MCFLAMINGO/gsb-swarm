@@ -19,6 +19,7 @@ if (process.env.RESEND_API_KEY) {
 const https = require('https');
 
 const fs       = require('fs');
+const os       = require('os');
 const express  = require('express');
 const http     = require('http');
 const path     = require('path');
