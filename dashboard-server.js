@@ -1840,10 +1840,10 @@ app.post('/api/financial-triage', triageUpload.fields([
       const expiryDate = new Date(expiresAt).toLocaleDateString('en-US', {
         month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
       });
-      // Build PDF attachments directly from generated files
+      // Build PDF attachments — Resend expects Buffer, not base64 string
       const attachments = pdfs.map(pdf => ({
         filename: pdf.name,
-        content: pdf.data, // base64
+        content: Buffer.from(pdf.data, 'base64'),
       }));
 
       const formsLink = `https://www.bleeding.cash/my-forms?token=${accessToken}`;
@@ -1885,8 +1885,13 @@ app.post('/api/financial-triage', triageUpload.fields([
   </table>
 </body>
 </html>`,
-      }).then(r => console.log(`[resend] Email sent to ${clientEmail} with ${attachments.length} PDFs — id: ${r.data?.id}`))
-        .catch(e => console.warn(`[resend] Email failed: ${e.message}`));
+      }).then(r => {
+        if (r.error) {
+          console.warn(`[resend] Email error: ${JSON.stringify(r.error)}`);
+        } else {
+          console.log(`[resend] Email sent to ${clientEmail} with ${attachments.length} PDFs — id: ${r.data?.id}`);
+        }
+      }).catch(e => console.warn(`[resend] Email failed: ${e.message} | ${e.statusCode || ''}`, e.response || ''));
     } else if (!clientEmail) {
       console.log('[resend] No email address provided — skipping delivery email.');
     }
