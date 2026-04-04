@@ -631,7 +631,7 @@ app.post('/api/fire-job', requireOperator, async (req, res) => {
             }
           }
         } catch (xErr) {
-          console.warn('[api] X posting failed (text-only):', xErr.message);
+          console.warn('[api] X posting failed:', xErr.message, xErr.response?.data || xErr.response?.status || '');
         }
       }
 
