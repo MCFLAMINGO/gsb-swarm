@@ -468,6 +468,67 @@ def parse_pos_export(path: str) -> pd.DataFrame:
     # Strip whitespace from column names
     df.columns = [str(c).strip() for c in df.columns]
 
+    # ── 3PD extraction: if this is a Toast multi-sheet file, pull dining options ──
+    # Store on the module-level so calculate_metrics can access it
+    _tpd_data = None
+    if ext in ('.xls', '.xlsx'):
+        try:
+            import openpyxl as _opx
+            _wb = _opx.load_workbook(path, read_only=True, data_only=True)
+            _sheet_names_lower = {s.lower(): s for s in _wb.sheetnames}
+
+            # Dining options summary — has DoorDash/Uber Eats/Grubhub rows
+            for _candidate in ['dining options summary', 'dining options', 'dining option summary']:
+                if _candidate in _sheet_names_lower:
+                    _ws = _wb[_sheet_names_lower[_candidate]]
+                    _rows = list(_ws.iter_rows(values_only=True))
+                    if _rows:
+                        _headers = [str(v).strip().lower() if v else '' for v in _rows[0]]
+                        _tpd_platforms = {}
+                        _IN_HOUSE_KEYS = {'dine in', 'take out', 'takeout', 'delivery',
+                                          'online ordering - takeout', 'toast delivery services',
+                                          'counter service', 'drive thru'}
+                        _3PD_KEYWORDS = ['doordash', 'uber eats', 'ubereats', 'grubhub',
+                                         'postmates', 'delivery.com', 'seamless', 'caviar',
+                                         'instacart', 'gopuff']
+                        for _row in _rows[1:]:
+                            if not any(_row):
+                                continue
+                            _vals = [str(v).strip() if v is not None else '' for v in _row]
+                            _opt = _vals[0].lower() if _vals else ''
+                            if _opt in ('total', 'grand total', ''):
+                                continue
+                            _orders_i = next((i for i, h in enumerate(_headers) if 'orders' in h), 1)
+                            _sales_i  = next((i for i, h in enumerate(_headers) if 'net sales' in h or 'net_sales' in h), 2)
+                            try:
+                                _ord = float(str(_vals[_orders_i]).replace(',','')) if _orders_i < len(_vals) else 0
+                                _sal = float(str(_vals[_sales_i]).replace(',',''))  if _sales_i  < len(_vals) else 0
+                            except (ValueError, IndexError):
+                                continue
+                            # Detect 3PD
+                            _is_3pd = any(kw in _opt for kw in _3PD_KEYWORDS)
+                            if _is_3pd:
+                                # Normalize platform name
+                                if 'doordash' in _opt:   _plat = 'DoorDash'
+                                elif 'uber' in _opt:     _plat = 'Uber Eats'
+                                elif 'grubhub' in _opt:  _plat = 'Grubhub'
+                                elif 'postmates' in _opt:_plat = 'Postmates'
+                                else:                    _plat = _vals[0].strip()
+                                if _plat not in _tpd_platforms:
+                                    _tpd_platforms[_plat] = {'orders': 0, 'net_sales': 0.0}
+                                _tpd_platforms[_plat]['orders']    += _ord
+                                _tpd_platforms[_plat]['net_sales'] += _sal
+                        if _tpd_platforms:
+                            _tpd_data = _tpd_platforms
+                            print(f"  3PD platforms found: {list(_tpd_platforms.keys())}")
+                    break
+            _wb.close()
+        except Exception as _e:
+            print(f"  [3pd] Could not extract dining options: {_e}")
+
+    # Attach to result for later use by calculate_metrics
+    _tpd_attr = _tpd_data  # captured in closure
+
     date_col = find_column(df, ["date", "business date", "sale date"])
     net_sales_col = find_column(df, ["net sales", "net sale", "net revenue"])
     gross_sales_col = find_column(df, ["gross sales", "gross sale", "gross revenue", "total sales"])
@@ -505,6 +566,12 @@ def parse_pos_export(path: str) -> pd.DataFrame:
 
     net_sales_total = result["net_sales"].sum()
     print(f"  Total net sales: ${net_sales_total:,.2f}")
+
+    # Attach 3PD data as a DataFrame attribute so calculate_metrics can use it
+    if _tpd_attr:
+        result.attrs['tpd_platforms'] = _tpd_attr
+        print(f"  3PD data attached: {list(_tpd_attr.keys())}")
+
     return result
 
 
@@ -561,6 +628,52 @@ def calculate_metrics(bank_df: Optional[pd.DataFrame], pos_df: Optional[pd.DataF
         metrics["total_guests"] = pos_df["guests"].sum()
         if metrics["total_orders"] > 0:
             metrics["avg_ticket"] = metrics["net_sales_total"] / metrics["total_orders"]
+
+        # --- 3PD analysis from dining options sheet ---
+        tpd = pos_df.attrs.get('tpd_platforms', {})
+        if tpd:
+            ns = metrics["net_sales_total"]
+            total_3pd_orders = sum(v['orders']    for v in tpd.values())
+            total_3pd_sales  = sum(v['net_sales'] for v in tpd.values())
+            # Commission rate estimates by platform
+            _comm_rates = {'DoorDash': 0.25, 'Uber Eats': 0.25, 'Grubhub': 0.15,
+                           'Postmates': 0.25, 'Seamless': 0.20}
+            total_comm_est = sum(
+                v['net_sales'] * _comm_rates.get(k, 0.25)
+                for k, v in tpd.items()
+            )
+            # Days in period (from bank_df or estimate 91 days)
+            days = 91
+            if bank_df is not None and len(bank_df) > 0 and bank_df['date'].notna().any():
+                d_min = bank_df['date'].min()
+                d_max = bank_df['date'].max()
+                days = max(1, (d_max - d_min).days)
+            delivery_orders_per_day = total_3pd_orders / days
+            # In-house metrics
+            in_house_orders = metrics["total_orders"] - total_3pd_orders
+            in_house_sales  = ns - total_3pd_sales
+            in_house_avg    = in_house_sales / in_house_orders if in_house_orders > 0 else 0
+            tpd_avg         = total_3pd_sales / total_3pd_orders if total_3pd_orders > 0 else 0
+            # Driver ROI (annualized)
+            annual_comm = total_comm_est * (365 / days)
+            driver_annual_cost = (18.0 * 4 * 365) + 3600  # $18/hr x 4hrs + insurance
+            net_driver_roi = annual_comm - driver_annual_cost
+            metrics['tpd'] = {
+                'platforms':              tpd,
+                'total_3pd_orders':       int(total_3pd_orders),
+                'total_3pd_sales':        total_3pd_sales,
+                'tpd_pct_of_sales':       (total_3pd_sales / ns * 100) if ns > 0 else 0,
+                'total_commission_est':   total_comm_est,
+                'annual_commission_est':  annual_comm,
+                'delivery_per_day':       delivery_orders_per_day,
+                'in_house_avg_ticket':    in_house_avg,
+                'tpd_avg_ticket':         tpd_avg,
+                'driver_annual_cost':     driver_annual_cost,
+                'net_driver_roi':         net_driver_roi,
+                'hire_driver':            net_driver_roi > 0,
+                'days':                   days,
+            }
+            print(f"  3PD: {total_3pd_sales:,.0f} sales ({total_3pd_sales/ns*100:.1f}%), est commission ${total_comm_est:,.0f}, driver ROI ${net_driver_roi:,.0f}")
 
     # --- Bank metrics ---
     if bank_df is not None and len(bank_df) > 0:
@@ -704,6 +817,25 @@ def generate_key_findings(metrics: Dict) -> List[str]:
             f"LOW ENDING BALANCE: The closing balance of ${cb:,.2f} provides minimal runway. "
             "Working capital relief or a line of credit should be considered urgently."
         )
+
+    # 3PD finding
+    tpd = metrics.get('tpd')
+    if tpd:
+        pct = tpd['tpd_pct_of_sales']
+        ann = tpd['annual_commission_est']
+        if tpd['hire_driver']:
+            findings.append(
+                f"THIRD-PARTY DELIVERY COST: {pct:.0f}% of sales flow through 3PD platforms "
+                f"(DoorDash/Uber Eats/Grubhub), costing an estimated ${ann:,.0f}/year in commissions. "
+                f"At your current delivery volume, hiring an in-house driver would save approximately "
+                f"${tpd['net_driver_roi']:,.0f}/year net of wages and insurance."
+            )
+        else:
+            findings.append(
+                f"THIRD-PARTY DELIVERY: {pct:.0f}% of sales through 3PD platforms, "
+                f"estimated ${ann:,.0f}/year in commissions. "
+                f"Current delivery volume does not yet justify a dedicated in-house driver."
+            )
 
     if not findings:
         findings.append("No critical findings. Financial metrics are within acceptable ranges.")
@@ -1876,6 +2008,108 @@ def generate_analysis_report(
             styles["small"],
         ))
         story.append(build_vendor_table(metrics["top_vendors"], styles, ns))
+        story.append(Spacer(1, 0.3 * inch))
+
+    # --- 3PD Analysis ---
+    tpd = metrics.get('tpd')
+    if tpd:
+        story.append(Paragraph("THIRD-PARTY DELIVERY ANALYSIS", styles["h2"]))
+        story.append(Paragraph(
+            f"Platform commissions estimated at 25% (DoorDash/Uber Eats) and 15% (Grubhub). "
+            f"Actual rates may vary. Review your platform agreements for exact figures.",
+            styles["small"],
+        ))
+        story.append(Spacer(1, 0.1 * inch))
+
+        # Platform breakdown table
+        plat_rows = [["Platform", "Orders", "Net Sales", "% of Sales", "Est. Commission"]]
+        ns_total = metrics.get("net_sales_total", 1)
+        _comm_rates = {'DoorDash': 0.25, 'Uber Eats': 0.25, 'Grubhub': 0.15,
+                       'Postmates': 0.25, 'Seamless': 0.20}
+        for plat, pdata in sorted(tpd['platforms'].items(), key=lambda x: -x[1]['net_sales']):
+            rate = _comm_rates.get(plat, 0.25)
+            comm = pdata['net_sales'] * rate
+            pct  = pdata['net_sales'] / ns_total * 100 if ns_total > 0 else 0
+            plat_rows.append([
+                plat,
+                f"{int(pdata['orders']):,}",
+                f"${pdata['net_sales']:,.2f}",
+                f"{pct:.1f}%",
+                f"${comm:,.2f}",
+            ])
+        # Totals row
+        plat_rows.append([
+            "TOTAL 3PD",
+            f"{tpd['total_3pd_orders']:,}",
+            f"${tpd['total_3pd_sales']:,.2f}",
+            f"{tpd['tpd_pct_of_sales']:.1f}%",
+            f"${tpd['total_commission_est']:,.2f}",
+        ])
+
+        plat_col_w = [1.4*inch, 0.8*inch, 1.2*inch, 0.9*inch, 1.3*inch]
+        plat_t = Table(plat_rows, colWidths=plat_col_w, hAlign="LEFT", repeatRows=1)
+        plat_t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
+            ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+            ("FONTNAME", (0, 0), (-1, 0), f"{FONT_NAME}-Bold" if FONT_NAME != "Helvetica" else "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("ALIGN", (0, 0), (0, -1), "LEFT"),
+            ("GRID", (0, 0), (-1, -1), 0.3, BORDER),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -2), [WHITE, SURFACE]),
+            # Totals row styling
+            ("BACKGROUND", (0, -1), (-1, -1), SURFACE),
+            ("FONTNAME", (0, -1), (-1, -1), f"{FONT_NAME}-Bold" if FONT_NAME != "Helvetica" else "Helvetica-Bold"),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(plat_t)
+        story.append(Spacer(1, 0.15 * inch))
+
+        # Key stats row
+        story.append(Paragraph(
+            f"<b>Annualized commission estimate: ${tpd['annual_commission_est']:,.0f}/year</b> — "
+            f"3PD avg ticket ${tpd['tpd_avg_ticket']:.2f} vs in-house avg ${tpd['in_house_avg_ticket']:.2f} "
+            f"({tpd['delivery_per_day']:.1f} 3PD orders/day avg over {tpd['days']} days).",
+            styles["body"]
+        ))
+        story.append(Spacer(1, 0.15 * inch))
+
+        # Driver ROI table
+        verdict_color = PRIMARY if tpd['hire_driver'] else WARNING
+        verdict_text  = (
+            f"HIRE A DRIVER — estimated net annual savings of ${tpd['net_driver_roi']:,.0f}"
+            if tpd['hire_driver'] else
+            f"NOT YET — delivery volume doesn\'t justify a driver at current levels"
+        )
+        roi_rows = [
+            ["In-House Driver ROI", ""],
+            ["Est. annual commission saved", f"${tpd['annual_commission_est']:,.0f}"],
+            ["Driver cost (wages + insurance)", f"${tpd['driver_annual_cost']:,.0f}"],
+            ["Net annual savings", f"${tpd['net_driver_roi']:,.0f}"],
+            ["Recommendation", verdict_text],
+        ]
+        roi_t = Table(roi_rows, colWidths=[2.8*inch, 2.8*inch], hAlign="LEFT")
+        roi_t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
+            ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+            ("SPAN", (0, 0), (-1, 0)),
+            ("FONTNAME", (0, 0), (-1, 0), f"{FONT_NAME}-Bold" if FONT_NAME != "Helvetica" else "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("ALIGN", (1, 1), (1, -1), "RIGHT"),
+            ("GRID", (0, 0), (-1, -1), 0.3, BORDER),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -2), [WHITE, SURFACE]),
+            ("BACKGROUND", (0, -1), (-1, -1), verdict_color),
+            ("TEXTCOLOR", (0, -1), (-1, -1), WHITE),
+            ("FONTNAME", (0, -1), (-1, -1), f"{FONT_NAME}-Bold" if FONT_NAME != "Helvetica" else "Helvetica-Bold"),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(roi_t)
         story.append(Spacer(1, 0.3 * inch))
 
     # --- Benchmark Comparison ---
