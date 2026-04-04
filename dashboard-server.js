@@ -748,6 +748,90 @@ app.post('/api/job-event', (req, res) => {
 });
 
 // ── GET /api/public — limited info for unauthenticated visitors ──────────────
+// ── MASTER CONTEXT PROVIDER (MCP) ──────────────────────────────────────────────────
+// Centralized key-value store. All agents (Railway + Vercel) read from here.
+// Keys prefixed with env: auto-resolve to process.env
+// Persisted to /tmp/gsb-mcp.json across restarts.
+
+const MCP_FILE = path.join(os.tmpdir(), 'gsb-mcp.json');
+const mcpStore = (() => {
+  try {
+    if (fs.existsSync(MCP_FILE)) return JSON.parse(fs.readFileSync(MCP_FILE, 'utf8'));
+  } catch(e) {}
+  return {};
+})();
+
+function mcpSave() {
+  try { fs.writeFileSync(MCP_FILE, JSON.stringify(mcpStore, null, 2)); } catch(e) {}
+}
+
+function mcpGet(key) {
+  // env: prefix pulls from process.env first
+  if (key.startsWith('env:')) {
+    const envKey = key.slice(4);
+    return process.env[envKey] ?? mcpStore[key] ?? null;
+  }
+  return mcpStore[key] ?? null;
+}
+
+// Seed env vars into MCP on startup (so agents can fetch them)
+const MCP_ENV_SEEDS = [
+  'ANTHROPIC_API_KEY', 'X_API_KEY', 'X_API_SECRET', 'X_ACCESS_TOKEN',
+  'X_ACCESS_TOKEN_SECRET', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHANNEL_ID',
+  'RESEND_API_KEY', 'BASALT_API_KEY', 'DISPATCH_SECRET'
+];
+MCP_ENV_SEEDS.forEach(k => { if (process.env[k]) mcpStore[`env:${k}`] = process.env[k]; });
+mcpSave();
+console.log('[mcp] Initialized with', Object.keys(mcpStore).length, 'keys');
+
+// GET /api/mcp — read one or all keys
+// Auth: public keys readable without auth, secret keys (env:*) require operator
+app.get('/api/mcp', (req, res) => {
+  const { key, secret } = req.query;
+  const isOperator = validTokens.has(req.headers['x-gsb-token']);
+  const mcpSecret = process.env.MCP_SECRET || 'gsb-mcp-2026';
+  const hasSecret = secret === mcpSecret || isOperator;
+
+  if (key) {
+    // Single key lookup
+    const isEnvKey = key.startsWith('env:');
+    if (isEnvKey && !hasSecret) return res.status(401).json({ error: 'Secret required for env keys' });
+    return res.json({ key, value: mcpGet(key) });
+  }
+
+  // Return all — filter env keys for unauthenticated
+  const result = {};
+  for (const [k, v] of Object.entries(mcpStore)) {
+    if (k.startsWith('env:') && !hasSecret) continue;
+    result[k] = v;
+  }
+  res.json({ keys: Object.keys(result).length, data: result });
+});
+
+// POST /api/mcp — write a key (operator or MCP_SECRET required)
+app.post('/api/mcp', express.json(), (req, res) => {
+  const { key, value, secret } = req.body || {};
+  const isOperator = validTokens.has(req.headers['x-gsb-token']);
+  const mcpSecret = process.env.MCP_SECRET || 'gsb-mcp-2026';
+  if (secret !== mcpSecret && !isOperator) return res.status(401).json({ error: 'Unauthorized' });
+  if (!key) return res.status(400).json({ error: 'key required' });
+  mcpStore[key] = value;
+  mcpSave();
+  console.log(`[mcp] Set ${key}`);
+  res.json({ ok: true, key, value });
+});
+
+// DELETE /api/mcp?key=X — remove a key
+app.delete('/api/mcp', (req, res) => {
+  const { key, secret } = req.query;
+  const isOperator = validTokens.has(req.headers['x-gsb-token']);
+  const mcpSecret = process.env.MCP_SECRET || 'gsb-mcp-2026';
+  if (secret !== mcpSecret && !isOperator) return res.status(401).json({ error: 'Unauthorized' });
+  delete mcpStore[key];
+  mcpSave();
+  res.json({ ok: true, deleted: key });
+});
+
 app.get('/api/public', (req, res) => {
   res.json({
     name: 'GSB Intelligence Swarm',
