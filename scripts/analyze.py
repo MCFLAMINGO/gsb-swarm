@@ -387,20 +387,86 @@ def parse_pos_export(path: str) -> pd.DataFrame:
     Parse a POS export file (XLS, XLSX, CSV).
     Returns a DataFrame with standardized columns:
       date, net_sales, gross_sales, orders, guests
+
+    Handles Toast/Square/Clover exports which often have metadata rows
+    before the actual column headers.
     """
     print(f"Parsing POS export: {path}")
     ext = Path(path).suffix.lower()
+
+    SALES_KEYWORDS = ["net sales", "net sale", "net revenue", "gross sales",
+                      "gross sale", "gross revenue", "total sales", "sales",
+                      "orders", "transactions", "checks", "date", "business date"]
+
+    def _looks_like_header_row(row) -> bool:
+        """Returns True if this row looks like column headers."""
+        row_lower = [str(v).lower().strip() for v in row if str(v) not in ('nan', '', 'None')]
+        return any(any(kw in cell for kw in SALES_KEYWORDS) for cell in row_lower)
+
+    def _load_best_header(filepath, sheet=0):
+        """Try loading with default header, then scan first 10 rows for real headers."""
+        # First try: normal load
+        if ext == ".csv":
+            df = pd.read_csv(filepath, thousands=",", skipinitialspace=True)
+        else:
+            df = pd.read_excel(filepath, thousands=",", sheet_name=sheet)
+
+        # Check if the default header row has recognizable sales columns
+        if any(any(kw in str(col).lower() for kw in SALES_KEYWORDS) for col in df.columns):
+            return df
+
+        # Scan first 10 rows to find real header
+        if ext == ".csv":
+            raw = pd.read_csv(filepath, header=None, nrows=15, skipinitialspace=True)
+        else:
+            raw = pd.read_excel(filepath, header=None, nrows=15, sheet_name=sheet)
+
+        for i, row in raw.iterrows():
+            if _looks_like_header_row(row.values):
+                print(f"  Found header row at index {i} — re-reading from there")
+                if ext == ".csv":
+                    return pd.read_csv(filepath, header=i, thousands=",", skipinitialspace=True)
+                else:
+                    return pd.read_excel(filepath, header=i, thousands=",", sheet_name=sheet)
+
+        # Last resort: return the default parse
+        return df
+
     try:
         if ext == ".csv":
-            df = pd.read_csv(path, thousands=",", skipinitialspace=True)
+            df = _load_best_header(path)
         elif ext in (".xls", ".xlsx"):
-            df = pd.read_excel(path, thousands=",")
+            # Try all sheets, use the one with the most recognizable columns
+            import openpyxl
+            try:
+                wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+                sheets = wb.sheetnames
+                wb.close()
+            except Exception:
+                sheets = [0]
+
+            best_df = None
+            best_score = -1
+            for sheet in sheets:
+                try:
+                    candidate = _load_best_header(path, sheet=sheet)
+                    score = sum(1 for col in candidate.columns
+                                if any(kw in str(col).lower() for kw in SALES_KEYWORDS))
+                    print(f"  Sheet '{sheet}': {score} matching columns — {list(candidate.columns)[:8]}")
+                    if score > best_score:
+                        best_score = score
+                        best_df = candidate
+                except Exception as e:
+                    print(f"  Sheet '{sheet}' skipped: {e}")
+            df = best_df if best_df is not None else _load_best_header(path)
         else:
             raise ValueError(f"Unsupported file extension: {ext}")
     except Exception as e:
         raise RuntimeError(f"Failed to read POS export: {e}")
 
     print(f"  Columns found: {list(df.columns)}")
+    # Strip whitespace from column names
+    df.columns = [str(c).strip() for c in df.columns]
 
     date_col = find_column(df, ["date", "business date", "sale date"])
     net_sales_col = find_column(df, ["net sales", "net sale", "net revenue"])
@@ -517,9 +583,11 @@ def calculate_metrics(bank_df: Optional[pd.DataFrame], pos_df: Optional[pd.DataF
             metrics["min_balance"] = bank_df.loc[min_idx, "balance"]
             metrics["min_balance_date"] = bank_df.loc[min_idx, "date"].date()
 
-            # Near-zero events
+            # Near-zero events — deduplicate by date, keep lowest balance per day
             near_zero = bank_df[bank_df["balance"] < 500][["date", "balance"]].copy()
             near_zero["date"] = near_zero["date"].dt.date
+            near_zero = near_zero.groupby("date", as_index=False)["balance"].min()
+            near_zero = near_zero.sort_values("date")
             metrics["near_zero_events"] = list(near_zero.itertuples(index=False, name=None))
 
         # Monthly breakdown
@@ -702,6 +770,8 @@ def calculate_personal_metrics(bank_df: Optional[pd.DataFrame]) -> Dict:
 
         near_zero = bank_df[bank_df["balance"] < 500][["date", "balance"]].copy()
         near_zero["date"] = near_zero["date"].dt.date
+        near_zero = near_zero.groupby("date", as_index=False)["balance"].min()
+        near_zero = near_zero.sort_values("date")
         metrics["near_zero_events"] = list(near_zero.itertuples(index=False, name=None))
 
     # Monthly breakdown
@@ -1927,8 +1997,13 @@ def generate_vendor_letter(
             f"We owe you a direct and candid conversation. {business_name} has experienced "
             f"significant cash flow pressure during {period}, and we want to present an honest "
             f"financial picture alongside a concrete repayment plan. Despite these challenges, "
-            f"our net sales reached ${ns:,.2f} for the period, and we have taken meaningful steps "
-            f"to stabilize operations and address root causes."
+            + (
+                f"our net sales reached ${ns:,.2f} for the period, and we have taken meaningful steps "
+                f"to stabilize operations and address root causes."
+                if ns > 0 else
+                f"our total cash inflow reached ${metrics.get('total_cash_in', 0):,.2f} for the period, "
+                f"and we have taken meaningful steps to stabilize operations and address root causes."
+            )
         )
 
     story.append(Paragraph(opening, styles["body"]))
@@ -2054,9 +2129,10 @@ def generate_bank_loan_letter(
     else:
         opening = (
             f"We are writing to formally request a business loan on behalf of {business_name}. "
-            f"During {period}, the business generated net sales of ${ns:,.2f}. We are seeking "
-            f"capital to consolidate existing debt obligations and provide working capital "
-            f"to sustain and grow operations."
+            f"During {period}, the business generated "
+            + (f"net sales of ${ns:,.2f}" if ns > 0 else f"total cash inflow of ${metrics.get('total_cash_in', 0):,.2f}")
+            + ". We are seeking capital to consolidate existing debt obligations and provide "
+            "working capital to sustain and grow operations."
         )
 
     story.append(Paragraph("EXECUTIVE SUMMARY", styles["h2"]))
@@ -2187,8 +2263,13 @@ def generate_bank_loan_letter(
     # Why this loan makes sense
     story.append(Paragraph("WHY THIS LOAN MAKES SENSE", styles["h2"]))
     rationale = [
-        f"Revenue base is established: ${ns:,.2f} in net sales over {period} demonstrates "
-        f"a viable, customer-supported operation.",
+        (
+            f"Revenue base is established: ${ns:,.2f} in net sales over {period} demonstrates "
+            f"a viable, customer-supported operation."
+            if ns > 0 else
+            f"Cash flow is established: ${metrics.get('total_cash_in', 0):,.2f} in total cash inflow "
+            f"over {period} demonstrates an active, operating business."
+        ),
         f"Debt service is the primary cash flow problem: At {ds_pct:.1f}% of revenue, current "
         f"debt obligations — likely MCA instruments at effective rates of 80–200% APR — are the "
         f"principal drag on profitability.",
