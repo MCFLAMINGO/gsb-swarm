@@ -1750,7 +1750,39 @@ app.get('/api/check-payment', async (req, res) => {
 const triageUpload = multer({ dest: '/tmp/triage-uploads/' });
 // ── Persistent triage job store ──────────────────────────────────────────────────
 // Survives Railway restarts by writing to /tmp/triage-jobs.json
-const JOBS_FILE = path.join(os.tmpdir(), 'bleeding-cash-jobs.json');
+const JOBS_FILE    = path.join(os.tmpdir(), 'bleeding-cash-jobs.json');
+const FAILURE_FILE = path.join(os.tmpdir(), 'bleeding-cash-failures.json');
+
+// ── Failure store ─────────────────────────────────────────────────────────────
+let failedJobs = {};
+try {
+  if (fs.existsSync(FAILURE_FILE)) {
+    failedJobs = JSON.parse(fs.readFileSync(FAILURE_FILE, 'utf8'));
+    console.log(`[failures] Loaded ${Object.keys(failedJobs).length} past failures`);
+  }
+} catch (e) { console.warn('[failures] Could not load failure store:', e.message); }
+
+function saveFailure(token, data) {
+  failedJobs[token] = { ...data, savedAt: new Date().toISOString() };
+  // Keep last 200 failures
+  const keys = Object.keys(failedJobs);
+  if (keys.length > 200) delete failedJobs[keys[0]];
+  try { fs.writeFileSync(FAILURE_FILE, JSON.stringify(failedJobs, null, 2)); } catch (e) {}
+}
+
+function tgAlert(msg) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chat  = process.env.TELEGRAM_CHANNEL_ID;
+  if (!token || !chat) return;
+  const data = JSON.stringify({ chat_id: chat, text: msg, parse_mode: 'Markdown' });
+  const opts = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: data };
+  const https = require('https');
+  try {
+    const u = new URL(`https://api.telegram.org/bot${token}/sendMessage`);
+    const req = https.request(u, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    req.write(data); req.end();
+  } catch (e) { console.warn('[tg-alert]', e.message); }
+}
 
 function loadJobStore() {
   try {
@@ -1938,7 +1970,92 @@ app.post('/api/financial-triage', triageUpload.fields([
     const scriptPath = path.join(__dirname, 'scripts', 'analyze.py');
     const cmd = `python3 ${scriptPath} --project-name "${projectName.replace(/"/g, '')}" --bank "${bankPath}" --period "${(period || 'Current').replace(/"/g, '')}" --output-dir "${outputDir}"${posArg}${modeArg}${contextArg}`;
     console.log(`[triage] Running: ${cmd}`);
-    execSync(cmd, { stdio: 'inherit', timeout: 180000 });
+
+    let analyzeOutput = '';
+    try {
+      analyzeOutput = execSync(cmd, { stdio: 'pipe', timeout: 180000 }).toString();
+    } catch (analyzeErr) {
+      // ── FAILURE CAPTURE ────────────────────────────────────────────────────
+      const stderr   = (analyzeErr.stderr || '').toString().slice(0, 2000);
+      const stdout   = (analyzeErr.stdout || '').toString().slice(0, 2000);
+      const errMsg   = analyzeErr.message || 'Unknown error';
+
+      // Sniff file metadata without reading full content
+      let fileMeta = {};
+      try {
+        const bankExt  = path.extname(bankPath).toLowerCase();
+        const bankSize = fs.existsSync(bankPath) ? fs.statSync(bankPath).size : 0;
+        fileMeta.bankExt  = bankExt;
+        fileMeta.bankSize = bankSize;
+        // Try to read first 3 lines for format sniffing (no PII — just headers)
+        if (['.csv','.tsv'].includes(bankExt)) {
+          const firstLines = fs.readFileSync(bankPath, 'utf8').split('\n').slice(0,3).join(' | ');
+          fileMeta.bankHeaders = firstLines.replace(/[\d]{4,}/g, 'XXXX').slice(0, 300);
+        }
+      } catch (e) { fileMeta.sniffError = e.message; }
+
+      // Save to failure store
+      const failToken = accessToken;
+      saveFailure(failToken, {
+        token:       failToken,
+        email:       req.body?.email || null,
+        projectName,
+        period:      period || 'Current',
+        mode:        triageMode,
+        error:       errMsg,
+        stderr:      stderr,
+        stdout:      stdout,
+        fileMeta,
+        bankPath,   // Keep path so re-run can use it if file still exists
+        posPath:     req.files?.posFile?.[0]?.path || null,
+        cmd:         cmd.replace(/--bank "[^"]+"/, '--bank "[REDACTED]"'),
+        outputDir,
+      });
+
+      // Send Telegram alert
+      tgAlert(
+        `⚠️ *bleeding.cash FAILED JOB*\n\n` +
+        `Token: \`${failToken}\`\n` +
+        `Email: ${req.body?.email || 'none'}\n` +
+        `File: ${fileMeta.bankExt || 'unknown'} (${Math.round((fileMeta.bankSize||0)/1024)}KB)\n` +
+        `Headers: \`${(fileMeta.bankHeaders || 'N/A').slice(0,150)}\`\n\n` +
+        `Error: \`${errMsg.slice(0,300)}\`\n` +
+        `Stderr: \`${stderr.slice(0,400)}\`\n\n` +
+        `Re-run after fix:\n` +
+        `POST /api/rerun-job \`{"token":"${failToken}"}\``
+      );
+
+      // Send failure email to customer
+      if (resendClient && req.body?.email) {
+        resendClient.emails.send({
+          from: 'bleeding.cash Reports <reports@bleeding.cash>',
+          to: req.body.email,
+          subject: 'Your report hit an issue — we\'re on it',
+          html: `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#F7F6F2;font-family:Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;"><tr><td align="center">
+<table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;">
+<tr><td style="background:#1B474D;padding:28px 40px;">
+  <p style="margin:0;color:#BCE2E7;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;">bleeding.cash</p>
+  <h1 style="margin:6px 0 0;color:#fff;font-size:22px;font-weight:700;">We hit an issue with your file</h1>
+</td></tr>
+<tr><td style="padding:32px 40px;">
+  <p style="color:#28251D;font-size:15px;line-height:1.6;margin:0 0 16px;">Your file format wasn't one we recognized automatically. Our team has been alerted and we'll process your report manually within 24 hours.</p>
+  <p style="color:#28251D;font-size:15px;line-height:1.6;margin:0 0 16px;">Your access token: <strong style="font-family:monospace;">${failToken}</strong></p>
+  <p style="color:#7A7974;font-size:13px;margin:0;">Questions? Reply to this email or contact <a href="mailto:support@bleeding.cash" style="color:#01696F;">support@bleeding.cash</a></p>
+</td></tr>
+<tr><td style="background:#F7F6F2;padding:20px 40px;border-top:1px solid #D4D1CA;">
+  <p style="margin:0;color:#7A7974;font-size:11px;">bleeding.cash is operated by MCFL Restaurant Holdings LLC. Informational purposes only.</p>
+</td></tr></table></td></tr></table></body></html>`,
+        }).catch(e => console.warn('[resend] Failure email error:', e.message));
+      }
+
+      console.error('[triage] analyze.py FAILED:', errMsg);
+      return res.status(500).json({
+        error: 'Analysis failed — your file format may not be supported yet. Support has been notified.',
+        token: failToken,
+        support: 'support@bleeding.cash',
+      });
+    }
 
     // Read PDFs + Excel into memory
     const allFiles = fs.readdirSync(outputDir).filter(f => f.endsWith('.pdf') || f.endsWith('.xlsx'));
@@ -2070,6 +2187,121 @@ app.get('/api/financial-triage/file/:token/:index', (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${pdf.name}"`);
   res.send(pdf.buffer);
+});
+
+// ── /api/failures — view all captured failures (operator only) ───────────────────
+app.get('/api/failures', requireOperator, (req, res) => {
+  const list = Object.values(failedJobs)
+    .sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt))
+    .map(f => ({
+      token:       f.token,
+      email:       f.email,
+      savedAt:     f.savedAt,
+      mode:        f.mode,
+      fileExt:     f.fileMeta?.bankExt,
+      fileSize:    f.fileMeta?.bankSize,
+      headers:     f.fileMeta?.bankHeaders,
+      error:       f.error?.slice(0, 300),
+      stderr:      f.stderr?.slice(0, 500),
+      canRerun:    !!f.bankPath && fs.existsSync(f.bankPath),
+    }));
+  res.json({ count: list.length, failures: list });
+});
+
+// ── /api/rerun-job — retrigger a failed job after parser fix ───────────────────
+app.post('/api/rerun-job', requireOperator, express.json(), async (req, res) => {
+  const { token } = req.body || {};
+  if (!token) return res.status(400).json({ error: 'token required' });
+
+  const failed = failedJobs[token];
+  if (!failed) return res.status(404).json({ error: 'No failed job found for that token' });
+
+  const bankPath = failed.bankPath;
+  if (!bankPath || !fs.existsSync(bankPath)) {
+    return res.status(400).json({
+      error: 'Original file no longer available — customer must resubmit',
+      token,
+      email: failed.email,
+    });
+  }
+
+  // Reconstruct the output dir
+  const rerunJobId  = `rerun_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+  const outputDir   = `/tmp/${rerunJobId}/output`;
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const scriptPath  = path.join(__dirname, 'scripts', 'analyze.py');
+  const posArg      = failed.posPath && fs.existsSync(failed.posPath) ? ` --pos "${failed.posPath}"` : '';
+  const modeArg     = ` --mode ${failed.mode || 'restaurant'}`;
+  const cmd = `python3 ${scriptPath} --project-name "${(failed.projectName || 'Project').replace(/"/g,'')}" --bank "${bankPath}" --period "${(failed.period || 'Current').replace(/"/g,'')}" --output-dir "${outputDir}"${posArg}${modeArg}`;
+
+  console.log(`[rerun] Re-running failed job ${token}:`, cmd);
+
+  try {
+    execSync(cmd, { stdio: 'pipe', timeout: 180000 });
+  } catch (rerunErr) {
+    const stderr = (rerunErr.stderr || '').toString().slice(0, 1000);
+    console.error('[rerun] Still failing:', rerunErr.message);
+    // Update failure record with new error
+    saveFailure(token, { ...failed, error: rerunErr.message, stderr, reruns: (failed.reruns || 0) + 1 });
+    return res.status(500).json({ error: 'Re-run still failing', stderr, message: rerunErr.message });
+  }
+
+  // Success — read output files
+  const allFiles = fs.readdirSync(outputDir).filter(f => f.endsWith('.pdf') || f.endsWith('.xlsx'));
+  const pdfs = allFiles.map(name => ({
+    name,
+    buffer: fs.readFileSync(path.join(outputDir, name)),
+  }));
+
+  // Store in job store under original token so customer download link works
+  const now       = Date.now();
+  const expiresAt = now + 24 * 60 * 60 * 1000;
+  triageJobStore.set(token, { pdfs, email: failed.email, createdAt: now, expiresAt });
+  saveJobStore();
+
+  // Clean up rerun dir
+  fs.rmSync(`/tmp/${rerunJobId}`, { recursive: true, force: true });
+
+  // Remove from failures
+  delete failedJobs[token];
+  try { fs.writeFileSync(FAILURE_FILE, JSON.stringify(failedJobs, null, 2)); } catch (e) {}
+
+  // Send delivery email if we have the customer email
+  if (resendClient && failed.email) {
+    const attachments = pdfs.map(p => ({ filename: p.name, content: p.buffer }));
+    resendClient.emails.send({
+      from: 'bleeding.cash Reports <reports@bleeding.cash>',
+      to: failed.email,
+      subject: `Your Financial Reports Are Ready — ${pdfs.length} files attached`,
+      attachments,
+      html: `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#F7F6F2;font-family:Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;"><tr><td align="center">
+<table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;">
+<tr><td style="background:#1B474D;padding:28px 40px;">
+  <p style="margin:0;color:#BCE2E7;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;">bleeding.cash</p>
+  <h1 style="margin:6px 0 0;color:#fff;font-size:22px;font-weight:700;">Your reports are attached — sorry for the wait</h1>
+</td></tr>
+<tr><td style="padding:32px 40px;">
+  <p style="color:#28251D;font-size:15px;line-height:1.6;margin:0 0 16px;">We processed your file manually and your <strong>${pdfs.length} reports</strong> are now attached to this email.</p>
+  <p style="color:#28251D;font-size:15px;line-height:1.6;margin:0 0 16px;">Access token: <strong style="font-family:monospace;">${token}</strong></p>
+  <p style="color:#7A7974;font-size:13px;margin:0;">Thank you for your patience. Contact <a href="mailto:support@bleeding.cash" style="color:#01696F;">support@bleeding.cash</a> with any questions.</p>
+</td></tr>
+<tr><td style="background:#F7F6F2;padding:20px 40px;border-top:1px solid #D4D1CA;">
+  <p style="margin:0;color:#7A7974;font-size:11px;">bleeding.cash is operated by MCFL Restaurant Holdings LLC. Informational purposes only.</p>
+</td></tr></table></td></tr></table></body></html>`,
+    }).catch(e => console.warn('[resend] Rerun delivery error:', e.message));
+  }
+
+  tgAlert(`✅ *Re-run SUCCESS* \`${token}\`\n${pdfs.length} files delivered to ${failed.email || 'no email'}`);
+
+  res.json({
+    ok: true,
+    token,
+    files: pdfs.length,
+    emailSent: !!(resendClient && failed.email),
+    message: 'Re-run complete. Reports delivered.',
+  });
 });
 
 // ── /api/copy-trader — start / stop / status ─────────────────────────────────
