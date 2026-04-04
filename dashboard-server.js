@@ -604,7 +604,7 @@ app.post('/api/fire-job', requireOperator, async (req, res) => {
 
       // Build prompt based on worker role
       const rolePrompt = {
-        'GSB Thread Writer': `You are the GSB Thread Writer. Write a crypto Twitter/X thread. Format as numbered tweets separated by blank lines. Each tweet max 280 chars.\n\nRequirement: ${requirement}`,
+        'GSB Thread Writer': `You are the GSB Thread Writer. Write a crypto Twitter/X thread. Format as numbered tweets separated by blank lines. Each tweet max 280 chars.\n\nIMPORTANT FACTS — use these exactly, never invent handles or URLs:\n- Virtuals Protocol Twitter: @virtuals_io\n- GSB token page: app.virtuals.io/virtuals/68291\n- GSB ticker: $GSB\n- Chain: Base\n- Treasury wallet: 0x8E223841aA396d36a6727EfcEAFC61d691692a37\n\nRequirement: ${requirement}`,
         'GSB Token Analyst': `You are the GSB Token Analyst. Analyze the requested token and provide a detailed report with BUY/HOLD/AVOID recommendation.\n\nRequirement: ${requirement}`,
         'GSB Wallet Profiler': `You are the GSB Wallet Profiler. Profile the requested wallet — classify as whale/degen/institutional, describe activity patterns.\n\nRequirement: ${requirement}`,
         'GSB Alpha Scanner': `You are the GSB Alpha Scanner. Scan for alpha signals on Base chain. Return top opportunities with risk/reward assessment.\n\nRequirement: ${requirement}`,
