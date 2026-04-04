@@ -1813,10 +1813,19 @@ app.post('/api/financial-triage', triageUpload.fields([
       const expiryDate = new Date(expiresAt).toLocaleDateString('en-US', {
         month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
       });
+      // Build PDF attachments directly from generated files
+      const attachments = pdfs.map(pdf => ({
+        filename: pdf.name,
+        content: pdf.data, // base64
+      }));
+
+      const formsLink = `https://www.bleeding.cash/my-forms?token=${accessToken}`;
+
       resendClient.emails.send({
         from: 'bleeding.cash Reports <reports@bleeding.cash>',
         to: clientEmail,
-        subject: `Your Financial Report is Ready — Token: ${accessToken}`,
+        subject: `Your Financial Reports — ${pdfs.length} PDFs attached`,
+        attachments,
         html: `
 <!DOCTYPE html>
 <html>
@@ -1825,33 +1834,22 @@ app.post('/api/financial-triage', triageUpload.fields([
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#F7F6F2;padding:40px 20px;">
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-        <!-- Header -->
         <tr><td style="background:#1B474D;padding:32px 40px;">
           <p style="margin:0;color:#BCE2E7;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;">bleeding.cash</p>
-          <h1 style="margin:8px 0 0;color:#ffffff;font-size:24px;font-weight:700;">Your Report is Ready</h1>
+          <h1 style="margin:8px 0 0;color:#ffffff;font-size:24px;font-weight:700;">Your Reports Are Attached</h1>
         </td></tr>
-        <!-- Body -->
         <tr><td style="padding:40px;">
-          <p style="margin:0 0 16px;color:#28251D;font-size:15px;line-height:1.6;">Your financial triage analysis has been completed. Your documents are ready to download.</p>
-          <div style="background:#F7F6F2;border-radius:6px;padding:16px 20px;margin:24px 0;">
-            <p style="margin:0 0 4px;color:#7A7974;font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">Your Access Token</p>
-            <p style="margin:0;color:#1B474D;font-size:22px;font-weight:700;letter-spacing:2px;">${accessToken}</p>
-          </div>
-          <p style="margin:0 0 8px;color:#7A7974;font-size:13px;">Save this token — you\'ll need it to access your reports. Link expires <strong>${expiryDate}</strong>.</p>
-          <div style="background:#F7F6F2;border-radius:6px;padding:14px 18px;margin:16px 0;border-left:3px solid #1B474D;">
+          <p style="margin:0 0 16px;color:#28251D;font-size:15px;line-height:1.6;">Your financial triage is complete. <strong>${pdfs.length} PDF${pdfs.length > 1 ? 's are' : ' is'} attached</strong> to this email — open them directly.</p>
+          <ul style="margin:0 0 24px;padding-left:20px;color:#28251D;font-size:14px;line-height:2;">
+            ${pdfs.map(p => `<li>${p.name.replace(/-[a-z0-9]{4,}-/i, ' ').replace('.pdf','').replace(/-/g,' ')}</li>`).join('')}
+          </ul>
+          <div style="background:#F7F6F2;border-radius:6px;padding:14px 18px;margin:0 0 16px;border-left:3px solid #1B474D;">
             <p style="margin:0 0 4px;color:#28251D;font-size:14px;font-weight:600;">Want your bank forms pre-filled?</p>
-            <p style="margin:0 0 10px;color:#7A7974;font-size:13px;">Use your access token to generate pre-filled PFS forms for Chase, BofA, Wells Fargo, Truist, SBA 413, and more.</p>
-            <a href="https://www.bleeding.cash/my-forms?token=${accessToken}" style="color:#01696F;font-size:13px;font-weight:600;">Get My Bank Forms &rarr;</a>
+            <p style="margin:0 0 8px;color:#7A7974;font-size:13px;">Generate pre-filled PFS forms for Chase, BofA, Wells Fargo, Truist, SBA 413, and more using your access token.</p>
+            <a href="${formsLink}" style="color:#01696F;font-size:13px;font-weight:600;">Get My Bank Forms &rarr;</a>
           </div>
-          <table cellpadding="0" cellspacing="0" style="margin:28px 0;">
-            <tr><td style="background:#1B474D;border-radius:6px;">
-              <a href="${downloadLink}" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">Download My Reports &rarr;</a>
-            </td></tr>
-          </table>
-          <p style="margin:0 0 8px;color:#7A7974;font-size:13px;">Or copy this link:</p>
-          <p style="margin:0;color:#01696F;font-size:13px;word-break:break-all;">${downloadLink}</p>
+          <p style="margin:0;color:#7A7974;font-size:12px;">Access token: <strong style="font-family:monospace;">${accessToken}</strong> (save this for the bank forms link)</p>
         </td></tr>
-        <!-- Footer -->
         <tr><td style="background:#F7F6F2;padding:24px 40px;border-top:1px solid #D4D1CA;">
           <p style="margin:0;color:#7A7974;font-size:11px;line-height:1.6;">bleeding.cash is a financial triage service operated by MCFL Restaurant Holdings LLC. This report is for informational purposes only and does not constitute financial, legal, or tax advice. Always consult a licensed professional before making financial decisions.</p>
         </td></tr>
@@ -1860,7 +1858,7 @@ app.post('/api/financial-triage', triageUpload.fields([
   </table>
 </body>
 </html>`,
-      }).then(r => console.log(`[resend] Email sent to ${clientEmail} — id: ${r.data?.id}`))
+      }).then(r => console.log(`[resend] Email sent to ${clientEmail} with ${attachments.length} PDFs — id: ${r.data?.id}`))
         .catch(e => console.warn(`[resend] Email failed: ${e.message}`));
     } else if (!clientEmail) {
       console.log('[resend] No email address provided — skipping delivery email.');
