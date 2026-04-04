@@ -2283,8 +2283,8 @@ def main():
     parser.add_argument("--address", default="N/A", help="Business address")
     parser.add_argument("--period", required=True, help="Analysis period (e.g. 'Q1 2026')")
     parser.add_argument("--output-dir", default=".", help="Output directory for PDFs")
-    parser.add_argument("--mode", default="restaurant", choices=["restaurant", "personal"],
-                        help="Analysis mode: 'restaurant' (default) or 'personal'")
+    parser.add_argument("--mode", default="restaurant", choices=["restaurant", "personal", "forms"],
+                        help="Analysis mode: 'restaurant' (default), 'personal', or 'forms' (Phase 2 bank forms only)")
     parser.add_argument(
         "--context",
         default="{}",
@@ -2330,6 +2330,30 @@ def main():
     ym = period_to_ym(args.period)
 
     generated = []
+
+    # ── FORMS-ONLY MODE (Phase 2) ──
+    # Generates bank PFS forms directly from context JSON — no bank statement needed
+    if args.mode == "forms":
+        print("\n[MODE] Forms-only (Phase 2 bank form generation)")
+        if not context.get("personal_info"):
+            print("[ERROR] No personal_info in context — cannot generate forms")
+            sys.exit(1)
+        try:
+            from generate_forms import generate_all_forms, build_financial_data_from_context
+            fd = build_financial_data_from_context(context, {})
+            selected = context.get("selected_forms", None)
+            sig_data = context.get("signature_data", None)
+            form_paths = generate_all_forms(fd, output_dir, slug, ym, font_name, selected, sig_data)
+            generated.extend(form_paths)
+            print(f"\n[forms] Generated {len(generated)} form(s)")
+        except Exception as e:
+            print(f"[forms] ERROR: {e}")
+            sys.exit(1)
+        # Skip all other processing
+        print(f"\n[DONE] {len(generated)} PDF(s) written to {output_dir}")
+        for p in generated:
+            print(f"  {os.path.basename(p)}")
+        sys.exit(0)
 
     if args.mode == "personal":
         # ── PERSONAL MODE ──

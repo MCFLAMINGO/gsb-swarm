@@ -1420,6 +1420,112 @@ if (BASALT_API_KEY) {
 
 // GET /api/test-token — generate a free test upload token (no payment required)
 // Only works when TEST_MODE=true in env
+// ── Phase 2: Generate bank forms from personal financial data ──────────────
+// Called from bleeding.cash/my-forms after Phase 1 triage is complete
+// Receives personal_info JSON, generates all selected PFS forms, emails ZIP, wipes data
+app.post('/api/generate-forms', express.json({ limit: '2mb' }), async (req, res) => {
+  try {
+    const { accessToken, personalInfo, selectedForms, signatureData, signerName } = req.body || {};
+
+    if (!accessToken) return res.status(400).json({ error: 'accessToken required' });
+
+    // Look up email from original triage job
+    const job = triageJobStore.get(accessToken);
+    const clientEmail = job?.email || null;
+
+    // Build context for generate_all_forms
+    let piObj = {};
+    try { piObj = typeof personalInfo === 'string' ? JSON.parse(personalInfo) : (personalInfo || {}); } catch(e) {}
+
+    const contextObj = {
+      personal_info: piObj.personal_info || piObj,
+      assets: piObj.assets || {},
+      liabilities: piObj.liabilities || {},
+      income: piObj.income || {},
+      notes_payable_list: piObj.notes_payable_list || [],
+      real_estate_list: piObj.real_estate_list || [],
+      stocks_list: piObj.stocks_list || [],
+      selected_forms: typeof selectedForms === 'string' ? selectedForms.split(',').map(s => s.trim()).filter(Boolean) : (selectedForms || null),
+    };
+
+    if (signatureData) {
+      contextObj.signature_data = {
+        signer_name: signerName || piObj.personal_info?.full_name || '',
+        date: new Date().toLocaleDateString('en-US', {month:'2-digit',day:'2-digit',year:'numeric'}),
+        ip_address: req.ip || 'N/A',
+        timestamp: new Date().toISOString(),
+        ...(typeof signatureData === 'string' && signatureData.startsWith('typed:')
+          ? { typed_name: signatureData.slice(6).trim(), image_base64: '' }
+          : { image_base64: typeof signatureData === 'string' ? signatureData : '' })
+      };
+    }
+
+    // Generate forms via analyze.py --mode forms
+    const outputDir = path.join(os.tmpdir(), `forms_${accessToken}_${Date.now()}`);
+    fs.mkdirSync(outputDir, { recursive: true });
+
+    const slug = (contextObj.personal_info?.full_name || 'client').replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 20);
+    const ym = new Date().toISOString().slice(0, 7).replace('-', '');
+    const contextArg = ` --context '${JSON.stringify(contextObj).replace(/'/g, "'\"'\"'")}'`;
+    const scriptPath = path.join(__dirname, 'scripts', 'analyze.py');
+    const cmd = `python3 ${scriptPath} --mode forms --project-name "${slug}" --output-dir "${outputDir}" --period "Current"${contextArg}`;
+
+    console.log('[generate-forms] Running:', cmd.slice(0, 120) + '...');
+    execSync(cmd, { stdio: 'pipe', timeout: 120000 });
+
+    // Collect generated PDFs
+    const pdfFiles = fs.readdirSync(outputDir).filter(f => f.endsWith('.pdf'));
+    const pdfs = pdfFiles.map(name => ({
+      name,
+      data: fs.readFileSync(path.join(outputDir, name)).toString('base64'),
+      size: fs.statSync(path.join(outputDir, name)).size,
+    }));
+
+    // Store for download
+    const dlToken = accessToken + '-forms';
+    triageJobStore.set(dlToken, {
+      pdfs,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+      email: clientEmail,
+    });
+
+    // Wipe output dir immediately
+    try { fs.rmSync(outputDir, { recursive: true, force: true }); } catch(e) {}
+
+    // Send email if we have address
+    if (resendClient && clientEmail) {
+      const formNames = pdfFiles.map(f => f.replace(slug + '-', '').replace(`-${ym}.pdf`, '').replace(/-/g,' ')).join(', ');
+      const dlLink = `https://www.bleeding.cash/download?token=${dlToken}`;
+      resendClient.emails.send({
+        from: 'bleeding.cash Reports <reports@bleeding.cash>',
+        to: clientEmail,
+        subject: `Your Bank Forms Are Ready — ${pdfFiles.length} forms generated`,
+        html: `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#F7F6F2;font-family:Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;"><tr><td align="center">
+<table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;">
+<tr><td style="background:#1B474D;padding:28px 40px;"><p style="margin:0;color:#BCE2E7;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;">bleeding.cash</p>
+<h1 style="margin:6px 0 0;color:#fff;font-size:22px;">Your Bank Forms Are Ready</h1></td></tr>
+<tr><td style="padding:32px 40px;">
+<p style="color:#28251D;font-size:15px;">${pdfFiles.length} pre-filled forms are ready for download: <strong>${formNames}</strong>.</p>
+<p style="color:#7A7974;font-size:13px;">SSN fields are intentionally blank — hand-write them before submitting to any lender.</p>
+<table cellpadding="0" cellspacing="0" style="margin:20px 0;">
+<tr><td style="background:#1B474D;border-radius:6px;"><a href="${dlLink}" style="display:inline-block;padding:12px 28px;color:#fff;font-size:15px;font-weight:600;text-decoration:none;">Download My Forms &rarr;</a></td></tr></table>
+<p style="color:#7A7974;font-size:12px;">Your personal financial data has been wiped from our servers. This link expires in 24 hours.</p>
+</td></tr></table></td></tr></table></body></html>`,
+      }).then(r => console.log(`[generate-forms] Email sent — ${r.data?.id}`))
+        .catch(e => console.warn('[generate-forms] Email failed:', e.message));
+    }
+
+    const forms = pdfFiles.map(f => f.replace(slug + '-', '').replace(`-${ym}.pdf`, '').replace(/-/g,' '));
+    res.json({ ok: true, forms, downloadToken: dlToken, emailSent: !!(resendClient && clientEmail) });
+
+  } catch (err) {
+    console.error('[generate-forms] Error:', err.message);
+    res.status(500).json({ error: `Form generation failed: ${err.message}` });
+  }
+});
+
 app.get('/api/test-token', async (req, res) => {
   if (process.env.TEST_MODE !== 'true') {
     return res.status(403).json({ error: 'Test mode not enabled' });
@@ -1696,6 +1802,11 @@ app.post('/api/financial-triage', triageUpload.fields([
             <p style="margin:0;color:#1B474D;font-size:22px;font-weight:700;letter-spacing:2px;">${accessToken}</p>
           </div>
           <p style="margin:0 0 8px;color:#7A7974;font-size:13px;">Save this token — you\'ll need it to access your reports. Link expires <strong>${expiryDate}</strong>.</p>
+          <div style="background:#F7F6F2;border-radius:6px;padding:14px 18px;margin:16px 0;border-left:3px solid #1B474D;">
+            <p style="margin:0 0 4px;color:#28251D;font-size:14px;font-weight:600;">Want your bank forms pre-filled?</p>
+            <p style="margin:0 0 10px;color:#7A7974;font-size:13px;">Use your access token to generate pre-filled PFS forms for Chase, BofA, Wells Fargo, Truist, SBA 413, and more.</p>
+            <a href="https://www.bleeding.cash/my-forms?token=${accessToken}" style="color:#01696F;font-size:13px;font-weight:600;">Get My Bank Forms &rarr;</a>
+          </div>
           <table cellpadding="0" cellspacing="0" style="margin:28px 0;">
             <tr><td style="background:#1B474D;border-radius:6px;">
               <a href="${downloadLink}" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">Download My Reports &rarr;</a>
