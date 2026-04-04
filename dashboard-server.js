@@ -1775,6 +1775,32 @@ app.post('/api/financial-triage', triageUpload.fields([
 
     const contextArg = ` --context '${JSON.stringify(contextObj).replace(/'/g, "'\"'\"'")}'`;
 
+    // ── Send immediate confirmation email before analysis starts ──
+    const confirmEmail = req.body?.email || null;
+    if (resendClient && confirmEmail) {
+      resendClient.emails.send({
+        from: 'bleeding.cash Reports <reports@bleeding.cash>',
+        to: confirmEmail,
+        subject: 'Your reports are being generated — bleeding.cash',
+        html: `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#F7F6F2;font-family:Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;"><tr><td align="center">
+<table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;">
+<tr><td style="background:#1B474D;padding:28px 40px;">
+  <p style="margin:0;color:#BCE2E7;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;">bleeding.cash</p>
+  <h1 style="margin:6px 0 0;color:#fff;font-size:22px;font-weight:700;">We received your files ✓</h1>
+</td></tr>
+<tr><td style="padding:32px 40px;">
+  <p style="color:#28251D;font-size:15px;line-height:1.6;margin:0 0 16px;">Your financial triage is in progress. Analysis usually takes under 60 seconds.</p>
+  <p style="color:#28251D;font-size:15px;line-height:1.6;margin:0 0 24px;">We\'ll send your reports in a second email as PDF attachments the moment they\'re ready.</p>
+  <p style="color:#7A7974;font-size:13px;margin:0;">Questions? Reply to this email or contact <a href="mailto:support@bleeding.cash" style="color:#01696F;">support@bleeding.cash</a></p>
+</td></tr>
+<tr><td style="background:#F7F6F2;padding:20px 40px;border-top:1px solid #D4D1CA;">
+  <p style="margin:0;color:#7A7974;font-size:11px;line-height:1.6;">bleeding.cash is operated by MCFL Restaurant Holdings LLC. Informational purposes only. Not financial, legal, or accounting advice.</p>
+</td></tr></table></td></tr></table></body></html>`,
+      }).catch(e => console.warn('[resend] Confirmation email failed:', e.message));
+      console.log(`[triage] Confirmation email sent to ${confirmEmail}`);
+    }
+
     // Run analyze.py
     const scriptPath = path.join(__dirname, 'scripts', 'analyze.py');
     const cmd = `python3 ${scriptPath} --project-name "${projectName.replace(/"/g, '')}" --bank "${bankPath}" --period "${(period || 'Current').replace(/"/g, '')}" --output-dir "${outputDir}"${posArg}${modeArg}${contextArg}`;
