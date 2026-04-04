@@ -1528,20 +1528,126 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000);
 
-// Ensure BasaltSurge inventory item exists (fire-and-forget on startup)
+// Ensure BasaltSurge inventory items exist (fire-and-forget on startup)
 if (BASALT_API_KEY) {
-  axios.post(`${BASALT_BASE}/api/inventory`, {
-    sku: 'TRIAGE-001',
-    name: 'Restaurant Financial Triage',
-    priceUsd: 24.95,
-    description: 'Full financial analysis + vendor credit letter + bank loan letter. 3 PDFs delivered via secure token.',
-  }, {
-    headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY },
-  }).then(() => console.log('[basalt] Inventory item TRIAGE-001 ensured.'))
-    .catch(err => console.log('[basalt] Inventory setup (may already exist):', err.response?.status || err.message));
+  const ensureItems = [
+    { sku: 'TRIAGE-001',     name: 'Restaurant Financial Triage',          priceUsd: 24.95,  description: 'Full financial analysis + vendor credit letter + bank loan letter. 3 PDFs delivered via secure token.' },
+    { sku: 'PRO-TRIAL-001',  name: 'bleeding.cash Pro — 3-Day Trial',       priceUsd: 24.95,  description: '3-day trial of bleeding.cash Pro consultant portal. Unlimited client reports during trial.' },
+    { sku: 'PRO-MONTHLY-001',name: 'bleeding.cash Pro — Monthly',           priceUsd: 149.00, description: 'bleeding.cash Pro monthly subscription. Unlimited restaurant financial triage reports for consultants.' },
+  ];
+  ensureItems.forEach(item => {
+    axios.post(`${BASALT_BASE}/api/inventory`, item, {
+      headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY },
+    }).then(() => console.log(`[basalt] Inventory item ${item.sku} ensured.`))
+      .catch(err => console.log(`[basalt] Inventory setup ${item.sku} (may already exist):`, err.response?.status || err.message));
+  });
 } else {
   console.warn('[basalt] No BASALT_API_KEY — payment endpoints will fail.');
 }
+
+// ── POST /api/pro/create-order — create Basalt order for pro signup/renewal ────────────
+app.post('/api/pro/create-order', express.json(), async (req, res) => {
+  try {
+    const { email, firmName, type } = req.body || {};
+    if (!email || !firmName) return res.status(400).json({ error: 'email and firmName required' });
+    const sku = type === 'monthly' ? 'PRO-MONTHLY-001' : 'PRO-TRIAL-001';
+    if (!BASALT_API_KEY) return res.status(503).json({ error: 'Payment not configured' });
+
+    const orderRes = await axios.post(`${BASALT_BASE}/api/orders`, {
+      items: [{ sku, qty: 1 }],
+    }, { headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY } });
+
+    const { receipt } = orderRes.data;
+    const receiptId = receipt.receiptId;
+    const paymentUrl = `${BASALT_BASE}/pay/${receiptId}`;
+
+    // Store pending pro order
+    pendingOrders.set(receiptId, {
+      email: email.trim().toLowerCase(),
+      firmName: firmName.trim(),
+      type: type || 'trial',
+      status: 'pending',
+      createdAt: Date.now(),
+    });
+
+    console.log(`[pro] Order ${receiptId} created for ${email} (${type || 'trial'})`);
+    res.json({ receiptId, paymentUrl });
+  } catch (err) {
+    console.error('[pro] Create order error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to create payment order' });
+  }
+});
+
+// ── GET /api/pro/check-payment?receiptId=xxx — poll until paid, then activate account ────
+app.get('/api/pro/check-payment', async (req, res) => {
+  try {
+    const { receiptId } = req.query;
+    if (!receiptId) return res.status(400).json({ error: 'receiptId required' });
+
+    const order = pendingOrders.get(receiptId);
+    if (!order || !order.email) return res.status(404).json({ error: 'Order not found' });
+
+    // Already activated?
+    if (order.status === 'paid') {
+      const account = proAccounts[order.email];
+      return res.json({ paid: true, token: account?.token || null, firmName: order.firmName });
+    }
+
+    // Check Basalt
+    const statusRes = await axios.get(`${BASALT_BASE}/api/receipts/status`, {
+      params: { receiptId },
+      headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY },
+    });
+    const payStatus = statusRes.data.status;
+    const paidStatuses = ['completed', 'tx_mined', 'recipient_validated', 'paid'];
+
+    if (paidStatuses.includes(payStatus)) {
+      order.status = 'paid';
+
+      // Activate or extend the pro account
+      const email = order.email;
+      let account = proAccounts[email];
+      if (!account) {
+        // Should not happen (signup creates account) but handle gracefully
+        const token = generateProToken();
+        proAccounts[email] = {
+          firmName: order.firmName,
+          email,
+          passwordHash: '',  // no password — they'll need to set one via reset
+          token,
+          plan: order.type === 'monthly' ? 'pro' : 'trial',
+          trialStart: Date.now(),
+          paidMonthly: order.type === 'monthly',
+          runsUsed: 0,
+          runs: [],
+          createdAt: new Date().toISOString(),
+        };
+        account = proAccounts[email];
+      } else {
+        // Upgrade existing account
+        if (order.type === 'monthly') {
+          account.plan = 'pro';
+          account.paidMonthly = true;
+          account.monthlyRenewAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
+        } else {
+          // Trial payment confirmed
+          account.plan = 'trial';
+          account.trialStart = Date.now();
+          account.paidTrial = true;
+        }
+        account.token = generateProToken(); // refresh token on payment
+      }
+      saveProAccounts();
+      console.log(`[pro] Account activated: ${email} (${order.type})`);
+      return res.json({ paid: true, token: account.token, firmName: account.firmName });
+    }
+
+    res.json({ paid: false, status: payStatus });
+  } catch (err) {
+    console.error('[pro] Check payment error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to check payment' });
+  }
+});
 
 // GET /api/test-token — generate a free test upload token (no payment required)
 // Only works when TEST_MODE=true in env
