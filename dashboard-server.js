@@ -1793,10 +1793,11 @@ app.post('/api/financial-triage', triageUpload.fields([
 
     const now = Date.now();
     const expiresAt = now + 24 * 60 * 60 * 1000;
+    const clientEmail = req.body?.email || null;
 
     triageJobStore.set(accessToken, {
       pdfs,
-      email: clientEmail || null,
+      email: clientEmail,
       createdAt: now,
       expiresAt,
     });
@@ -1808,7 +1809,6 @@ app.post('/api/financial-triage', triageUpload.fields([
     console.log(`[triage] Job ${jobId} complete. Token: ${accessToken}. Files: ${pdfs.length}`);
 
     // ── Send delivery email via Resend ──
-    const clientEmail = req.body?.email;
     if (resendClient && clientEmail) {
       const downloadLink = `https://www.bleeding.cash/download?token=${accessToken}`;
       const expiryDate = new Date(expiresAt).toLocaleDateString('en-US', {
