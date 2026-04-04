@@ -1752,6 +1752,145 @@ const triageUpload = multer({ dest: '/tmp/triage-uploads/' });
 // Survives Railway restarts by writing to /tmp/triage-jobs.json
 const JOBS_FILE    = path.join(os.tmpdir(), 'bleeding-cash-jobs.json');
 const FAILURE_FILE = path.join(os.tmpdir(), 'bleeding-cash-failures.json');
+const PRO_ACCOUNTS_FILE = path.join(os.tmpdir(), 'bleeding-cash-pro-accounts.json');
+
+// ── Pro Account Store ───────────────────────────────────────────────────────────
+let proAccounts = {}; // email → { firmName, passwordHash, token, plan, trialStart, runsUsed, runs[] }
+try {
+  if (fs.existsSync(PRO_ACCOUNTS_FILE)) {
+    proAccounts = JSON.parse(fs.readFileSync(PRO_ACCOUNTS_FILE, 'utf8'));
+    console.log(`[pro] Loaded ${Object.keys(proAccounts).length} pro accounts`);
+  }
+} catch (e) { console.warn('[pro] Could not load accounts:', e.message); }
+
+function saveProAccounts() {
+  try { fs.writeFileSync(PRO_ACCOUNTS_FILE, JSON.stringify(proAccounts, null, 2)); } catch (e) {}
+}
+
+function hashPassword(pw) {
+  return crypto.createHash('sha256').update(pw + 'bcash-pro-2026').digest('hex');
+}
+
+function generateProToken() {
+  return 'PRO-' + crypto.randomBytes(20).toString('hex');
+}
+
+function getProAccountByToken(token) {
+  return Object.values(proAccounts).find(a => a.token === token) || null;
+}
+
+function requirePro(req, res, next) {
+  const auth = req.headers.authorization;
+  const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'Pro authentication required' });
+  const account = getProAccountByToken(token);
+  if (!account) return res.status(401).json({ error: 'Invalid or expired pro token' });
+  // Check trial/plan status
+  if (account.plan === 'trial') {
+    const daysSinceStart = (Date.now() - account.trialStart) / (1000 * 60 * 60 * 24);
+    if (daysSinceStart > 3 && !account.paidMonthly) {
+      return res.status(402).json({ error: 'Trial expired. Please upgrade to Pro ($149/month).' });
+    }
+  }
+  req.proAccount = account;
+  next();
+}
+
+// ── POST /api/pro/signup ────────────────────────────────────────────────────
+app.post('/api/pro/signup', express.json(), (req, res) => {
+  const { firmName, email, password, respAccepted } = req.body || {};
+  if (!firmName || !email || !password) return res.status(400).json({ error: 'firmName, email, and password are required' });
+  if (!respAccepted) return res.status(400).json({ error: 'Must accept responsibility statement' });
+  if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  if (proAccounts[email.toLowerCase()]) return res.status(409).json({ error: 'An account with this email already exists' });
+
+  const token = generateProToken();
+  proAccounts[email.toLowerCase()] = {
+    firmName,
+    email: email.toLowerCase(),
+    passwordHash: hashPassword(password),
+    token,
+    plan: 'trial',
+    trialStart: Date.now(),
+    paidMonthly: false,
+    respAcceptedAt: new Date().toISOString(),
+    runsUsed: 0,
+    runs: [],
+    createdAt: new Date().toISOString(),
+  };
+  saveProAccounts();
+  console.log(`[pro] New account: ${email} (${firmName})`);
+  res.json({ ok: true, token, firmName, plan: 'trial' });
+});
+
+// ── POST /api/pro/login ─────────────────────────────────────────────────────
+app.post('/api/pro/login', express.json(), (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+  const account = proAccounts[email.toLowerCase()];
+  if (!account || account.passwordHash !== hashPassword(password)) {
+    return res.status(401).json({ error: 'Invalid email or password' });
+  }
+  // Refresh token on each login
+  account.token = generateProToken();
+  saveProAccounts();
+  res.json({ ok: true, token: account.token, firmName: account.firmName, plan: account.plan });
+});
+
+// ── GET /api/pro/account ────────────────────────────────────────────────────
+app.get('/api/pro/account', requirePro, (req, res) => {
+  const a = req.proAccount;
+  const daysSinceStart = (Date.now() - a.trialStart) / (1000 * 60 * 60 * 24);
+  const trialDaysLeft = Math.max(0, Math.ceil(3 - daysSinceStart));
+  res.json({
+    firmName:      a.firmName,
+    email:         a.email,
+    plan:          a.plan,
+    trialDaysLeft: a.plan === 'trial' ? trialDaysLeft : null,
+    runsUsed:      a.runsUsed || 0,
+  });
+});
+
+// ── GET /api/pro/run-token ──────────────────────────────────────────────────
+app.get('/api/pro/run-token', requirePro, (req, res) => {
+  // Generate an upload token for a pro triage run (bypasses payment)
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let uploadToken = 'PRO-';
+  for (let i = 0; i < 8; i++) uploadToken += chars.charAt(Math.floor(Math.random() * chars.length));
+  const receiptId = `pro-run-${Date.now()}`;
+  uploadTokens.set(uploadToken, receiptId);
+  // Mark as pro run in pending orders so it's recognized
+  pendingOrders.set(receiptId, { status: 'paid', mode: 'restaurant', proEmail: req.proAccount.email });
+  res.json({ ok: true, uploadToken, receiptId });
+});
+
+// ── GET /api/pro/history ───────────────────────────────────────────────────
+app.get('/api/pro/history', requirePro, (req, res) => {
+  const a = req.proAccount;
+  const runs = (a.runs || []).map(r => ({
+    token:       r.token,
+    clientLabel: r.clientLabel,
+    projectName: r.projectName,
+    period:      r.period,
+    createdAt:   r.createdAt,
+    files:       r.fileCount || 0,
+    expired:     Date.now() > (r.expiresAt || 0),
+  })).reverse(); // newest first
+  res.json({ runs });
+});
+
+// Hook: after a successful triage run, if it was a pro run, log it to the account
+// This is called from inside the financial-triage endpoint after reports are generated
+function recordProRun(proEmail, token, clientLabel, projectName, period, fileCount, expiresAt) {
+  const account = proAccounts[proEmail?.toLowerCase()];
+  if (!account) return;
+  if (!account.runs) account.runs = [];
+  account.runs.push({ token, clientLabel, projectName, period, fileCount, expiresAt, createdAt: new Date().toISOString() });
+  account.runsUsed = (account.runsUsed || 0) + 1;
+  // Keep last 200 runs per account
+  if (account.runs.length > 200) account.runs = account.runs.slice(-200);
+  saveProAccounts();
+}
 
 // ── Failure store ─────────────────────────────────────────────────────────────
 let failedJobs = {};
@@ -2084,6 +2223,13 @@ app.post('/api/financial-triage', triageUpload.fields([
     uploadTokens.delete(uploadToken);
 
     console.log(`[triage] Job ${jobId} complete. Token: ${accessToken}. Files: ${pdfs.length}`);
+
+    // Record pro run if this came from a pro account
+    const proOrderRecord = pendingOrders.get(paidReceiptId);
+    if (proOrderRecord?.proEmail) {
+      const clientLabel = req.body?.clientLabel || projectName;
+      recordProRun(proOrderRecord.proEmail, accessToken, clientLabel, projectName, period || 'Current', pdfs.length, expiresAt);
+    }
 
     // ── Send delivery email via Resend ──
     if (resendClient && clientEmail) {
