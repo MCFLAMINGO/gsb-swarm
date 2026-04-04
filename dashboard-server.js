@@ -621,17 +621,57 @@ app.post('/api/fire-job', requireOperator, async (req, res) => {
       let threadUrl = null;
       if (workerName === 'GSB Thread Writer' && process.env.X_API_KEY && process.env.X_ACCESS_TOKEN) {
         try {
-          const tweets = result.split('\n\n').map(t => t.trim()).filter(t => t.length > 0 && t.length <= 280);
+          const tweets = result.split('\n\n')
+            .map(t => t.trim())
+            .filter(t => t.length > 0 && t.length <= 280);
+          console.log(`[api] Thread Writer: ${tweets.length} tweets to post`);
           if (tweets.length > 0) {
-            // Post first tweet
-            const { postThread } = require('./threadWriter');
-            if (typeof postThread === 'function') {
-              threadUrl = await postThread(tweets);
-              console.log(`[api] Thread posted: ${threadUrl}`);
+            // Inline tweet posting to avoid module cache issues
+            const _crypto = require('crypto');
+            const _axios = require('axios');
+            const X_API_KEY = process.env.X_API_KEY;
+            const X_API_SECRET = process.env.X_API_SECRET;
+            const X_ACCESS_TOKEN = process.env.X_ACCESS_TOKEN;
+            const X_ACCESS_TOKEN_SECRET = process.env.X_ACCESS_TOKEN_SECRET;
+
+            const _pctEnc = s => encodeURIComponent(String(s));
+            const _signOAuth = (method, url) => {
+              const op = {
+                oauth_consumer_key: X_API_KEY,
+                oauth_nonce: _crypto.randomBytes(16).toString('hex'),
+                oauth_signature_method: 'HMAC-SHA1',
+                oauth_timestamp: Math.floor(Date.now()/1000).toString(),
+                oauth_token: X_ACCESS_TOKEN,
+                oauth_version: '1.0',
+              };
+              const paramStr = Object.keys(op).sort().map(k => `${_pctEnc(k)}=${_pctEnc(op[k])}`).join('&');
+              const base = [method.toUpperCase(), _pctEnc(url), _pctEnc(paramStr)].join('&');
+              const key = `${_pctEnc(X_API_SECRET)}&${_pctEnc(X_ACCESS_TOKEN_SECRET)}`;
+              op.oauth_signature = _crypto.createHmac('sha1', key).update(base).digest('base64');
+              return 'OAuth ' + Object.keys(op).sort().map(k => `${_pctEnc(k)}="${_pctEnc(op[k])}"`).join(', ');
+            };
+            const _postTweet = async (text, replyId) => {
+              const url = 'https://api.twitter.com/2/tweets';
+              const body = replyId ? { text, reply: { in_reply_to_tweet_id: replyId } } : { text };
+              const res = await _axios.post(url, body, {
+                headers: { 'Authorization': _signOAuth('POST', url), 'Content-Type': 'application/json' },
+              });
+              return res.data.data.id;
+            };
+            let lastId = null, firstId = null;
+            for (const tweet of tweets) {
+              console.log(`[api] Posting tweet (${tweet.length} chars): ${tweet.slice(0,60)}...`);
+              const id = await _postTweet(tweet, lastId);
+              if (!firstId) firstId = id;
+              lastId = id;
+              await new Promise(r => setTimeout(r, 1500));
             }
+            threadUrl = `https://x.com/ErikOsol43597/status/${firstId}`;
+            console.log(`[api] Thread posted: ${threadUrl}`);
           }
         } catch (xErr) {
-          console.warn('[api] X posting failed:', xErr.message, xErr.response?.data || xErr.response?.status || '');
+          console.warn('[api] X posting failed:', xErr.message,
+            JSON.stringify(xErr.response?.data || xErr.response?.status || ''));
         }
       }
 
