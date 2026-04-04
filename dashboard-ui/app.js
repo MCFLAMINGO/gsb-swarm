@@ -379,7 +379,7 @@ document.getElementById('fire-requirement').addEventListener('input', function()
 
 // ── Fire Job ──────────────────────────────────────────────────────────────────
 document.getElementById('fire-btn').addEventListener('click', async () => {
-  if (!acpReady) return;
+  // Fire in direct mode if ACP not ready — backend handles it
 
   const workerName  = document.getElementById('fire-worker').value;
   const requirement = document.getElementById('fire-requirement').value.trim();
@@ -397,7 +397,7 @@ document.getElementById('fire-btn').addEventListener('click', async () => {
       const r = await fetch(`${API_BASE}/api/fire-job`, {
         method:  'POST',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body:    JSON.stringify({ worker: workerName, requirement, direct: !acpReady }),
+        body:    JSON.stringify({ worker: workerName, requirement, direct: true }),
       });
       const data = await r.json();
       if (data.ok) { fired++; showFire(`Job ${fired}/${count} fired → ${data.jobId}`, 'ok'); }
@@ -448,21 +448,37 @@ function verdictClass(v) {
 
 // ── Preset buttons ────────────────────────────────────────────────────────────
 document.querySelectorAll('.btn-preset').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const sel = document.getElementById('fire-worker');
-    const ta  = document.getElementById('fire-requirement');
-    sel.value = btn.dataset.worker;
-    ta.value  = btn.dataset.req;
-    ta.dataset.edited = '1';
-    // Scroll to fire button
-    document.getElementById('fire-btn').scrollIntoView({ behavior: 'smooth' });
+  btn.addEventListener('click', async () => {
+    const workerName = btn.dataset.worker;
+    const requirement = btn.dataset.req;
+    if (!workerName || !requirement) return;
+    btn.disabled = true;
+    btn.textContent = 'Firing…';
+    try {
+      const r = await fetch(`${API_BASE}/api/fire-job`, {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ worker: workerName, requirement, direct: true }),
+      });
+      const data = await r.json();
+      if (data.ok) {
+        showFire(`✓ ${workerName.split(' ').pop()} job fired → ${data.jobId}`, 'ok');
+        document.getElementById('section-fire').scrollIntoView({ behavior: 'smooth' });
+      } else {
+        showFire(data.error || 'Fire failed', 'err');
+      }
+    } catch (e) {
+      showFire('Network error: ' + e.message, 'err');
+    }
+    btn.disabled = false;
+    btn.textContent = btn.dataset.worker.split(' ').pop();
   });
 });
 
 // ── Graduation buttons ────────────────────────────────────────────────────────
 document.querySelectorAll('.btn-grad').forEach(btn => {
   btn.addEventListener('click', async () => {
-    if (!acpReady || btn.disabled) return;
+    if (btn.disabled) return;
     const workerName = btn.dataset.worker;
     const count      = parseInt(btn.dataset.count) || 1;
     const worker     = workers.find(w => w.name === workerName);
@@ -477,7 +493,7 @@ document.querySelectorAll('.btn-grad').forEach(btn => {
         const r = await fetch(`${API_BASE}/api/fire-job`, {
           method:  'POST',
           headers: authHeaders({ 'Content-Type': 'application/json' }),
-          body:    JSON.stringify({ worker: workerName, requirement: worker.defaultReq }),
+          body:    JSON.stringify({ worker: workerName, requirement: worker.defaultReq, direct: true }),
         });
         const data = await r.json();
         if (data.ok) fired++;
