@@ -2591,6 +2591,87 @@ app.post('/api/rerun-job', requireOperator, express.json(), async (req, res) => 
   });
 });
 
+// ── /api/create-order — consumer triage payment (public) ──────────────────────────
+app.post('/api/create-order', express.json(), async (req, res) => {
+  try {
+    const { projectName, email, period } = req.body || {};
+    if (!projectName || !email) return res.status(400).json({ error: 'projectName and email required' });
+    if (!BASALT_API_KEY) return res.status(503).json({ error: 'Payment not configured' });
+
+    const orderRes = await axios.post(`${BASALT_BASE}/api/orders`, {
+      items: [{ sku: '4GVZVPZG7', qty: 1 }],
+    }, { headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY } });
+
+    const { receipt } = orderRes.data;
+    const receiptId = receipt?.receiptId;
+    if (!receiptId) return res.status(500).json({ error: 'Order creation failed', detail: orderRes.data });
+
+    const paymentUrl = `${BASALT_BASE}/basaltsurge/pay/${receiptId}`;
+
+    // Store pending order
+    pendingOrders.set(receiptId, {
+      projectName: projectName.trim(),
+      period: period || '',
+      email: email.trim(),
+      mode: 'restaurant',
+      status: 'pending',
+      createdAt: Date.now(),
+    });
+
+    console.log(`[create-order] ${receiptId} for ${email} — ${projectName}`);
+    res.json({ ok: true, receiptId, paymentUrl });
+  } catch (err) {
+    console.error('[create-order]', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to create order', detail: err.message });
+  }
+});
+
+// ── /api/check-payment — poll Basalt for payment status, return uploadToken when paid ──
+app.get('/api/check-payment', async (req, res) => {
+  try {
+    const { receiptId } = req.query;
+    if (!receiptId) return res.status(400).json({ error: 'receiptId required' });
+
+    const order = pendingOrders.get(receiptId);
+    if (!order) return res.status(404).json({ error: 'Order not found', receiptId });
+
+    // Already confirmed?
+    if (order.status === 'paid' && order.uploadToken) {
+      return res.json({ paid: true, uploadToken: order.uploadToken });
+    }
+
+    // Check Basalt receipt status
+    const statusRes = await axios.get(`${BASALT_BASE}/api/receipts/status`, {
+      params: { receiptId },
+      headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY },
+    });
+    const payStatus = statusRes.data?.status || statusRes.data?.state || '';
+    const paidStatuses = ['completed', 'tx_mined', 'recipient_validated', 'paid', 'PAID', 'COMPLETED'];
+    const isPaid = paidStatuses.some(s => payStatus.toLowerCase().includes(s.toLowerCase()));
+
+    if (isPaid) {
+      // Generate upload token
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      let uploadToken = 'TKN-';
+      for (let i = 0; i < 8; i++) uploadToken += chars[Math.floor(Math.random() * chars.length)];
+      const receiptIdInternal = `paid-${Date.now()}`;
+
+      uploadTokens.set(uploadToken, receiptIdInternal);
+      pendingOrders.set(receiptIdInternal, { ...order, status: 'paid' });
+      order.status = 'paid';
+      order.uploadToken = uploadToken;
+
+      console.log(`[check-payment] ${receiptId} PAID → token ${uploadToken}`);
+      return res.json({ paid: true, uploadToken });
+    }
+
+    res.json({ paid: false, status: payStatus });
+  } catch (err) {
+    console.error('[check-payment]', err.response?.data || err.message);
+    res.status(500).json({ error: 'Payment check failed', detail: err.message });
+  }
+});
+
 // ── /api/gflop-scan — fire Alpha Scanner + Token Analyst with compute signal mission ──────
 // Scans for compute tokens (AKT/RNDR/IO) momentum AND correlates with Base DEX activity
 // Returns GFLOP signal: which tokens on Base are moving when compute demand is high
