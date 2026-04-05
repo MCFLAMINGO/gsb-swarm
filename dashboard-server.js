@@ -611,7 +611,7 @@ app.post('/api/fire-job', requireOperator, async (req, res) => {
       }[workerName] || `You are ${workerName}. Complete this task:\n\nRequirement: ${requirement}`;
 
       const msg = await anthropic.messages.create({
-        model: 'claude-opus-4-5',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 1500,
         messages: [{ role: 'user', content: rolePrompt }],
       });
