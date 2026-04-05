@@ -2623,6 +2623,38 @@ app.post('/api/create-order', express.json(), async (req, res) => {
     });
 
     console.log(`[create-order] ${receiptId} for ${email} — ${projectName}`);
+
+    // Send instant confirmation email with receipt ID and recovery link
+    if (resendClient && email) {
+      resendClient.emails.send({
+        from: 'bleeding.cash <support@bleeding.cash>',
+        to: email,
+        subject: 'Complete your bleeding.cash order — save your receipt',
+        html: `
+          <!DOCTYPE html><html><body style="margin:0;padding:0;background:#F7F6F2;font-family:Arial,sans-serif;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;"><tr><td align="center">
+          <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;">
+          <tr><td style="background:#1B474D;padding:28px 40px;">
+            <p style="margin:0;color:#BCE2E7;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;">bleeding.cash</p>
+            <h1 style="margin:6px 0 0;color:#fff;font-size:22px;font-weight:700;">Your order is ready for payment</h1>
+          </td></tr>
+          <tr><td style="padding:32px 40px;">
+            <p style="color:#28251D;font-size:15px;line-height:1.6;">Hi, you started a financial triage order for <strong>${projectName}</strong>.</p>
+            <p style="color:#28251D;font-size:15px;line-height:1.6;">Your receipt ID is: <strong style="font-family:monospace;font-size:16px;">${receiptId}</strong></p>
+            <p style="color:#28251D;font-size:15px;line-height:1.6;"><strong>Save this email.</strong> If anything goes wrong after payment, visit:</p>
+            <p style="text-align:center;margin:24px 0;">
+              <a href="https://www.bleeding.cash/recover" style="background:#c0392b;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;">bleeding.cash/recover</a>
+            </p>
+            <p style="color:#28251D;font-size:15px;line-height:1.6;">Enter your receipt ID <strong>${receiptId}</strong> and email address and we'll deliver your reports.</p>
+            <p style="color:#7A7974;font-size:13px;">Questions? Reply to this email or contact support@bleeding.cash</p>
+          </td></tr>
+          <tr><td style="background:#F7F6F2;padding:20px 40px;border-top:1px solid #D4D1CA;">
+            <p style="margin:0;color:#7A7974;font-size:11px;">bleeding.cash is operated by MCFL Restaurant Holdings LLC. Informational purposes only.</p>
+          </td></tr></table></td></tr></table></body></html>
+        `,
+      }).catch(e => console.warn('[create-order] Email error:', e.message));
+    }
+
     res.json({ ok: true, receiptId, paymentUrl });
   } catch (err) {
     console.error('[create-order]', err.response?.data || err.message);
@@ -2673,6 +2705,118 @@ app.get('/api/check-payment', async (req, res) => {
     console.error('[check-payment]', err.response?.data || err.message);
     res.status(500).json({ error: 'Payment check failed', detail: err.message });
   }
+});
+
+// ── /api/recover — customer self-serve recovery by receipt ID ──────────────────────
+app.post('/api/recover', express.json(), async (req, res) => {
+  const { receiptId, email, projectName } = req.body || {};
+  if (!receiptId || !email) return res.status(400).json({ error: 'receiptId and email required' });
+
+  try {
+    // Verify payment with Basalt
+    const statusRes = await axios.get(`${BASALT_BASE}/api/receipts/status`, {
+      params: { receiptId },
+      headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY },
+    });
+    const payStatus = (statusRes.data?.status || '').toLowerCase();
+    const isPaid = ['paid','completed','tx_mined','recipient_validated'].some(s => payStatus.includes(s));
+
+    if (!isPaid) {
+      return res.status(402).json({
+        error: `Payment not confirmed. Receipt ${receiptId} status: ${payStatus || 'unknown'}. If you paid, please wait 5 minutes and try again.`
+      });
+    }
+
+    // Check if we have reports stored for this receipt
+    const existingJob = [...triageJobStore.entries()].find(([, job]) => job.receiptId === receiptId);
+    if (existingJob) {
+      const [token, job] = existingJob;
+      // Re-send delivery email
+      if (resendClient && job.pdfs?.length) {
+        const attachments = job.pdfs.map(p => ({ filename: p.name, content: p.buffer }));
+        await resendClient.emails.send({
+          from: 'bleeding.cash Reports <reports@bleeding.cash>',
+          to: email,
+          subject: `Your Financial Reports — Recovery Delivery`,
+          attachments,
+          html: `<p>Here are your recovered reports for receipt ${receiptId}. Your access token: <strong>${token}</strong></p>`,
+        });
+        return res.json({ ok: true, message: `Reports re-sent to ${email}. Check your inbox (and spam folder).` });
+      }
+    }
+
+    // No reports found in store — send manual processing email
+    if (resendClient) {
+      await resendClient.emails.send({
+        from: 'bleeding.cash Support <support@bleeding.cash>',
+        to: email,
+        subject: 'Your bleeding.cash report is being processed',
+        html: `
+          <p>Hi,</p>
+          <p>We confirmed your payment for receipt <strong>${receiptId}</strong>.</p>
+          <p>Your financial triage reports are being processed and will be emailed to you within the next 30 minutes.</p>
+          <p>If you don't receive them, reply to this email and we'll process manually.</p>
+          <p>Project: ${projectName || 'Not specified'}</p>
+          <br><p>bleeding.cash — operated by MCFL Restaurant Holdings LLC</p>
+        `,
+      });
+
+      // Alert operator to manually rerun
+      tgAlert(
+        `⚠️ *Recovery Request*\n\n` +
+        `Receipt: \`${receiptId}\`\n` +
+        `Email: ${email}\n` +
+        `Project: ${projectName || 'not given'}\n` +
+        `Status: Basalt confirms PAID — no reports in store\n` +
+        `Action: Customer needs files re-uploaded or manual processing`
+      );
+    }
+
+    res.json({ ok: true, message: `Payment confirmed. Reports will be emailed to ${email} within 30 minutes. You\'ll also receive a confirmation email shortly.` });
+  } catch (err) {
+    console.error('[recover]', err.message);
+    res.status(500).json({ error: 'Recovery failed. Email support@bleeding.cash with receipt: ' + receiptId });
+  }
+});
+
+// ── /api/recover-by-email — find orders by email ────────────────────────────────
+app.post('/api/recover-by-email', express.json(), async (req, res) => {
+  const { email } = req.body || {};
+  if (!email) return res.status(400).json({ error: 'email required' });
+
+  // Search job store for matching email
+  const matches = [...triageJobStore.entries()]
+    .filter(([, job]) => job.email?.toLowerCase() === email.toLowerCase())
+    .sort(([, a], [, b]) => b.createdAt - a.createdAt);
+
+  if (!matches.length) {
+    // Search pending orders too
+    const pendingMatch = [...pendingOrders.entries()]
+      .find(([, o]) => o.email?.toLowerCase() === email.toLowerCase() && o.status === 'paid');
+
+    if (!pendingMatch) {
+      return res.status(404).json({ error: 'No paid orders found for that email. Try your Basalt receipt ID instead.' });
+    }
+    // Found pending order but no reports
+    tgAlert(`⚠️ *Email Recovery*\n\n${email} found in pending orders but no reports stored. Manual action needed.`);
+    return res.json({ ok: true, message: 'Order found. Reports will be emailed within 30 minutes.' });
+  }
+
+  // Found job with reports — re-send
+  const [token, job] = matches[0];
+  if (resendClient && job.pdfs?.length) {
+    const attachments = job.pdfs.map(p => ({ filename: p.name, content: p.buffer }));
+    await resendClient.emails.send({
+      from: 'bleeding.cash Reports <reports@bleeding.cash>',
+      to: email,
+      subject: 'Your Financial Reports — Re-sent',
+      attachments,
+      html: `<p>Your reports have been re-sent. Access token: <strong>${token}</strong></p><p><a href="https://www.bleeding.cash/my-forms?token=${token}">Get your bank forms →</a></p>`,
+    });
+    return res.json({ ok: true, message: `Reports re-sent to ${email}. Check your inbox.` });
+  }
+
+  res.json({ ok: true, message: `Order found (token: ${token}). Processing re-delivery.` });
 });
 
 // ── /api/gflop-scan — fire Alpha Scanner + Token Analyst with compute signal mission ──────
