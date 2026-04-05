@@ -431,25 +431,8 @@ async function swap() {{
   const ROUTER = '{UNISWAP_V3_ROUTER}';
   const amountIn = parseUnits('{usd_amount:.2f}', 6);
 
-  // Step 1: Check + set USDC allowance for router
-  const allowance = await publicClient.readContract({{
-    address: USDC, abi: ERC20_ABI,
-    functionName: 'allowance',
-    args: [account.address, ROUTER],
-  }});
-
-  if (allowance < amountIn) {{
-    console.log('APPROVING USDC for Uniswap router...');
-    const approveTx = await walletClient.writeContract({{
-      address: USDC, abi: ERC20_ABI,
-      functionName: 'approve',
-      args: [ROUTER, maxUint256],
-    }});
-    await publicClient.waitForTransactionReceipt({{ hash: approveTx }});
-    console.log('APPROVED:' + approveTx);
-  }}
-
-  // Step 2: Execute swap USDC → token
+  // Approval is pre-done via /api/copy-trader/approve — swap immediately
+  // Step 1: Execute swap USDC → token
   const params = {{
     tokenIn: USDC,
     tokenOut: '{token_out_addr}',
