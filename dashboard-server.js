@@ -2556,6 +2556,68 @@ app.post('/api/rerun-job', requireOperator, express.json(), async (req, res) => 
   });
 });
 
+// ── /api/tweet — post a single tweet via Railway X credentials ──────────────────
+app.post('/api/tweet', express.json(), async (req, res) => {
+  // Light auth — same secret as dispatch
+  const token = req.headers['x-gsb-token'] || req.headers['authorization']?.replace('Bearer ','');
+  if (token !== 'gsb-dispatch-2026' && token !== process.env.DASHBOARD_PASSWORD) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { text } = req.body || {};
+  if (!text) return res.status(400).json({ error: 'text required' });
+
+  const X_API_KEY    = process.env.X_API_KEY;
+  const X_API_SECRET = process.env.X_API_SECRET;
+  const X_ACC_TOKEN  = process.env.X_ACCESS_TOKEN;
+  const X_ACC_SECRET = process.env.X_ACCESS_TOKEN_SECRET;
+
+  if (!X_API_KEY || !X_ACC_TOKEN) {
+    return res.status(503).json({ error: 'X credentials not configured' });
+  }
+
+  try {
+    const crypto = require('crypto');
+    const tweetUrl = 'https://api.twitter.com/2/tweets';
+    const nonce = crypto.randomBytes(16).toString('hex');
+    const ts    = Math.floor(Date.now() / 1000).toString();
+
+    const oauthParams = {
+      oauth_consumer_key:     X_API_KEY,
+      oauth_nonce:            nonce,
+      oauth_signature_method: 'HMAC-SHA1',
+      oauth_timestamp:        ts,
+      oauth_token:            X_ACC_TOKEN,
+      oauth_version:          '1.0',
+    };
+
+    const sortedStr = Object.keys(oauthParams).sort()
+      .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(oauthParams[k])}`)
+      .join('&');
+    const baseString  = `POST&${encodeURIComponent(tweetUrl)}&${encodeURIComponent(sortedStr)}`;
+    const signingKey  = `${encodeURIComponent(X_API_SECRET)}&${encodeURIComponent(X_ACC_SECRET)}`;
+    const signature   = crypto.createHmac('sha1', signingKey).update(baseString).digest('base64');
+    const authHeader  = 'OAuth ' + Object.keys({ ...oauthParams, oauth_signature: signature })
+      .sort()
+      .map(k => `${k}="${encodeURIComponent({ ...oauthParams, oauth_signature: signature }[k])}"`)
+      .join(', ');
+
+    const xRes = await axios.post(tweetUrl,
+      { text: text.slice(0, 280) },
+      { headers: { Authorization: authHeader, 'Content-Type': 'application/json' } }
+    );
+
+    const tweetId = xRes.data?.data?.id;
+    const url = tweetId ? `https://x.com/ErikOsol43597/status/${tweetId}` : null;
+    console.log('[tweet] Posted:', url);
+    res.json({ ok: true, id: tweetId, url });
+  } catch (err) {
+    const detail = err.response?.data || err.message;
+    console.error('[tweet] Failed:', detail);
+    res.status(500).json({ error: 'Tweet failed', detail });
+  }
+});
+
 // ── /api/copy-trader — start / stop / status ─────────────────────────────────
 let copyTraderProcess = null;
 let copyTraderState = { running: false, log: [], startedAt: null, budget: 0 };
