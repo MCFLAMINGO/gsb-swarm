@@ -390,28 +390,69 @@ async def watch_and_copy(targets, budget_usd):
 
         await asyncio.sleep(check_interval)
 
-def execute_swap(usd_amount, pool_address, private_key):
+def execute_swap(usd_amount, pool_address, private_key, token_out=None):
     """
-    Execute actual swap via Uniswap v3 using viem (Node.js subprocess).
+    Execute actual swap via Uniswap v3: USDC → target token.
+    Approves Uniswap router for USDC first, then swaps.
     Returns tx hash on success, None on failure.
     """
+    token_out_addr = token_out or WETH_BASE
     script = f"""
-const {{ createWalletClient, createPublicClient, http, parseUnits, encodeFunctionData }} = require('viem');
+const {{ createWalletClient, createPublicClient, http, parseUnits, maxUint256 }} = require('viem');
 const {{ base }} = require('viem/chains');
 const {{ privateKeyToAccount }} = require('viem/accounts');
+
+const ERC20_ABI = [
+  {{ name:'approve', type:'function', inputs:[{{name:'spender',type:'address'}},{{name:'amount',type:'uint256'}}], outputs:[{{name:'',type:'bool'}}] }},
+  {{ name:'allowance', type:'function', inputs:[{{name:'owner',type:'address'}},{{name:'spender',type:'address'}}], outputs:[{{name:'',type:'uint256'}}] }},
+];
+
+const ROUTER_ABI = [{{
+  name: 'exactInputSingle',
+  type: 'function',
+  inputs: [{{ name: 'params', type: 'tuple', components: [
+    {{name:'tokenIn',type:'address'}},
+    {{name:'tokenOut',type:'address'}},
+    {{name:'fee',type:'uint24'}},
+    {{name:'recipient',type:'address'}},
+    {{name:'amountIn',type:'uint256'}},
+    {{name:'amountOutMinimum',type:'uint256'}},
+    {{name:'sqrtPriceLimitX96',type:'uint160'}},
+  ]}}],
+  outputs: [{{name:'amountOut',type:'uint256'}}],
+}}];
 
 async function swap() {{
   const account = privateKeyToAccount('{private_key}');
   const walletClient = createWalletClient({{ account, chain: base, transport: http('{BASE_RPC}') }});
   const publicClient = createPublicClient({{ chain: base, transport: http('{BASE_RPC}') }});
 
-  // USDC approval + swap on Uniswap v3
-  const amountIn = parseUnits('{usd_amount:.2f}', 6); // USDC has 6 decimals
+  const USDC = '{USDC_BASE}';
+  const ROUTER = '{UNISWAP_V3_ROUTER}';
+  const amountIn = parseUnits('{usd_amount:.2f}', 6);
 
-  // ExactInputSingle params for Uniswap v3
+  // Step 1: Check + set USDC allowance for router
+  const allowance = await publicClient.readContract({{
+    address: USDC, abi: ERC20_ABI,
+    functionName: 'allowance',
+    args: [account.address, ROUTER],
+  }});
+
+  if (allowance < amountIn) {{
+    console.log('APPROVING USDC for Uniswap router...');
+    const approveTx = await walletClient.writeContract({{
+      address: USDC, abi: ERC20_ABI,
+      functionName: 'approve',
+      args: [ROUTER, maxUint256],
+    }});
+    await publicClient.waitForTransactionReceipt({{ hash: approveTx }});
+    console.log('APPROVED:' + approveTx);
+  }}
+
+  // Step 2: Execute swap USDC → token
   const params = {{
-    tokenIn: '{USDC_BASE}',
-    tokenOut: '{WETH_BASE}',
+    tokenIn: USDC,
+    tokenOut: '{token_out_addr}',
     fee: 3000,
     recipient: account.address,
     amountIn,
@@ -421,30 +462,17 @@ async function swap() {{
 
   try {{
     const hash = await walletClient.writeContract({{
-      address: '{UNISWAP_V3_ROUTER}',
-      abi: [{{
-        name: 'exactInputSingle',
-        type: 'function',
-        inputs: [{{ name: 'params', type: 'tuple', components: [
-          {{name:'tokenIn',type:'address'}},
-          {{name:'tokenOut',type:'address'}},
-          {{name:'fee',type:'uint24'}},
-          {{name:'recipient',type:'address'}},
-          {{name:'amountIn',type:'uint256'}},
-          {{name:'amountOutMinimum',type:'uint256'}},
-          {{name:'sqrtPriceLimitX96',type:'uint160'}},
-        ]}}],
-        outputs: [{{name:'amountOut',type:'uint256'}}],
-      }}],
+      address: ROUTER, abi: ROUTER_ABI,
       functionName: 'exactInputSingle',
       args: [params],
     }});
+    await publicClient.waitForTransactionReceipt({{ hash }});
     console.log('TX_HASH:' + hash);
   }} catch(e) {{
     console.error('SWAP_ERROR:' + e.message);
   }}
 }}
-swap();
+swap().catch(e => console.error('FATAL:' + e.message));
 """
     try:
         import subprocess
