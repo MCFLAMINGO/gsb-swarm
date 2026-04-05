@@ -2731,7 +2731,6 @@ app.post('/api/recover', express.json(), async (req, res) => {
     const existingJob = [...triageJobStore.entries()].find(([, job]) => job.receiptId === receiptId);
     if (existingJob) {
       const [token, job] = existingJob;
-      // Re-send delivery email
       if (resendClient && job.pdfs?.length) {
         const attachments = job.pdfs.map(p => ({ filename: p.name, content: p.buffer }));
         await resendClient.emails.send({
@@ -2739,40 +2738,54 @@ app.post('/api/recover', express.json(), async (req, res) => {
           to: email,
           subject: `Your Financial Reports — Recovery Delivery`,
           attachments,
-          html: `<p>Here are your recovered reports for receipt ${receiptId}. Your access token: <strong>${token}</strong></p>`,
+          html: `<p>Here are your recovered reports. Access token: <strong>${token}</strong></p>`,
         });
-        return res.json({ ok: true, message: `Reports re-sent to ${email}. Check your inbox (and spam folder).` });
+        return res.json({ ok: true, reportsDelivered: true, message: `Reports re-sent to ${email}.` });
       }
     }
 
-    // No reports found in store — send manual processing email
+    // Payment confirmed but files not in memory — issue a new upload token
+    // Customer can re-upload files right on the recovery page
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let uploadToken = 'TKN-';
+    for (let i = 0; i < 8; i++) uploadToken += chars[Math.floor(Math.random() * chars.length)];
+    const rcpId = `recovery-${Date.now()}`;
+    uploadTokens.set(uploadToken, rcpId);
+    pendingOrders.set(rcpId, {
+      projectName: projectName || 'Your Restaurant',
+      period: '',
+      email,
+      mode: 'restaurant',
+      status: 'paid',
+      receiptId,
+      createdAt: Date.now(),
+    });
+
+    // Send confirmation email
     if (resendClient) {
-      await resendClient.emails.send({
+      resendClient.emails.send({
         from: 'bleeding.cash Support <support@bleeding.cash>',
         to: email,
-        subject: 'Your bleeding.cash report is being processed',
+        subject: 'Action required — re-upload your files at bleeding.cash/recover',
         html: `
           <p>Hi,</p>
           <p>We confirmed your payment for receipt <strong>${receiptId}</strong>.</p>
-          <p>Your financial triage reports are being processed and will be emailed to you within the next 30 minutes.</p>
-          <p>If you don't receive them, reply to this email and we'll process manually.</p>
-          <p>Project: ${projectName || 'Not specified'}</p>
-          <br><p>bleeding.cash — operated by MCFL Restaurant Holdings LLC</p>
+          <p>We need you to re-upload your bank statement to generate your reports.</p>
+          <p style="text-align:center;margin:24px 0;">
+            <a href="https://www.bleeding.cash/recover" style="background:#c0392b;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;">Re-upload at bleeding.cash/recover</a>
+          </p>
+          <p>Enter receipt <strong>${receiptId}</strong> and your email to re-upload and get your reports instantly.</p>
+          <p>bleeding.cash — operated by MCFL Restaurant Holdings LLC</p>
         `,
-      });
-
-      // Alert operator to manually rerun
-      tgAlert(
-        `⚠️ *Recovery Request*\n\n` +
-        `Receipt: \`${receiptId}\`\n` +
-        `Email: ${email}\n` +
-        `Project: ${projectName || 'not given'}\n` +
-        `Status: Basalt confirms PAID — no reports in store\n` +
-        `Action: Customer needs files re-uploaded or manual processing`
-      );
+      }).catch(() => {});
     }
 
-    res.json({ ok: true, message: `Payment confirmed. Reports will be emailed to ${email} within 30 minutes. You\'ll also receive a confirmation email shortly.` });
+    res.json({
+      ok: true,
+      needsFiles: true,
+      uploadToken,
+      message: `Payment confirmed for receipt ${receiptId}. Please re-upload your files below.`,
+    });
   } catch (err) {
     console.error('[recover]', err.message);
     res.status(500).json({ error: 'Recovery failed. Email support@bleeding.cash with receipt: ' + receiptId });
