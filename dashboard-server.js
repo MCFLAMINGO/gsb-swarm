@@ -1539,7 +1539,8 @@ app.post('/api/command', async (req, res) => {
 });
 
 // ── BasaltSurge Payment Integration ──────────────────────────────────────────
-const BASALT_BASE = 'https://surge.basalthq.com/basaltsurge';
+const BASALT_BASE    = 'https://surge.basalthq.com';
+const BASALT_PAY_URL = 'https://surge.basalthq.com/basaltsurge/pay'; // UI payment page
 const BASALT_API_KEY = process.env.BASALT_API_KEY || '';
 
 // In-memory stores for pending orders and upload tokens
@@ -1594,7 +1595,7 @@ app.post('/api/pro/create-order', express.json(), async (req, res) => {
 
     const { receipt } = orderRes.data;
     const receiptId = receipt.receiptId;
-    const paymentUrl = `${BASALT_BASE}/pay/${receiptId}`;
+    const paymentUrl = `${BASALT_PAY_URL}/${receiptId}`;
 
     // Store pending pro order
     pendingOrders.set(receiptId, {
@@ -1826,7 +1827,7 @@ app.post('/api/create-triage-order', express.json(), async (req, res) => {
 
     const { receipt } = orderRes.data;
     const receiptId = receipt.receiptId;
-    const paymentUrl = `${BASALT_BASE}/pay/${receiptId}`;
+    const paymentUrl = `${BASALT_PAY_URL}/${receiptId}`;
 
     pendingOrders.set(receiptId, {
       projectName: projectName.trim(),
@@ -2606,7 +2607,7 @@ app.post('/api/create-order', express.json(), async (req, res) => {
     const receiptId = receipt?.receiptId;
     if (!receiptId) return res.status(500).json({ error: 'Order creation failed', detail: orderRes.data });
 
-    const paymentUrl = `${BASALT_BASE}/basaltsurge/pay/${receiptId}`;
+    const paymentUrl = `${BASALT_PAY_URL}/${receiptId}`;
 
     // Store pending order
     pendingOrders.set(receiptId, {
