@@ -1564,10 +1564,11 @@ setInterval(() => {
 
 // Ensure BasaltSurge inventory items exist (fire-and-forget on startup)
 if (BASALT_API_KEY) {
+  // SKUs must match what's actually created in the Basalt admin dashboard
   const ensureItems = [
-    { sku: 'TRIAGE-001',     name: 'Restaurant Financial Triage',          priceUsd: 24.95,  description: 'Full financial analysis + vendor credit letter + bank loan letter. 3 PDFs delivered via secure token.' },
-    { sku: 'PRO-TRIAL-001',  name: 'bleeding.cash Pro — 3-Day Trial',       priceUsd: 24.95,  description: '3-day trial of bleeding.cash Pro consultant portal. Unlimited client reports during trial.' },
-    { sku: 'PRO-MONTHLY-001',name: 'bleeding.cash Pro — Monthly',           priceUsd: 149.00, description: 'bleeding.cash Pro monthly subscription. Unlimited restaurant financial triage reports for consultants.' },
+    { sku: '4GVZVPZG7',  name: 'Triage Report',            priceUsd: 24.95,  description: 'Full financial analysis + vendor credit letter + bank loan letter. 3 PDFs + Excel delivered via secure token.' },
+    { sku: 'JKUPMTSQU', name: 'Triage 3 day trial Pro',    priceUsd: 24.95,  description: '3-day trial of bleeding.cash Pro consultant portal. Unlimited client reports during trial, then $149/mo.' },
+    { sku: 'L8XUWC8ZF', name: 'Monthly Pro Plan',          priceUsd: 149.00, description: 'bleeding.cash Pro monthly subscription. Unlimited restaurant financial triage reports for consultants.' },
   ];
   ensureItems.forEach(item => {
     axios.post(`${BASALT_BASE}/api/inventory`, item, {
@@ -1584,7 +1585,7 @@ app.post('/api/pro/create-order', express.json(), async (req, res) => {
   try {
     const { email, firmName, type } = req.body || {};
     if (!email || !firmName) return res.status(400).json({ error: 'email and firmName required' });
-    const sku = type === 'monthly' ? 'PRO-MONTHLY-001' : 'PRO-TRIAL-001';
+    const sku = type === 'monthly' ? 'L8XUWC8ZF' : 'JKUPMTSQU';
     if (!BASALT_API_KEY) return res.status(503).json({ error: 'Payment not configured' });
 
     const orderRes = await axios.post(`${BASALT_BASE}/api/orders`, {
@@ -1818,7 +1819,7 @@ app.post('/api/create-triage-order', express.json(), async (req, res) => {
     }
 
     const orderRes = await axios.post(`${BASALT_BASE}/api/orders`, {
-      items: [{ sku: 'TRIAGE-001', qty: 1 }],
+      items: [{ sku: '4GVZVPZG7', qty: 1 }],
     }, {
       headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY },
     });
