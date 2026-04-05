@@ -2818,6 +2818,25 @@ buyToken().catch(e => console.error('BUY_ERROR:' + e.message));
   }
 });
 
+// ── /api/analyze — public token analysis (Ethy-compatible output) ─────────────────
+app.get('/api/analyze', async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).json({ error: 'token query param required. e.g. /api/analyze?token=FETCHR' });
+  try {
+    const scriptPath = path.join(__dirname, 'scripts', 'token_analysis.js');
+    const output = execSync(`node ${scriptPath} "${token.replace(/"/g, '')}"`, {
+      cwd: __dirname,
+      env: { ...process.env },
+      timeout: 30000,
+    }).toString();
+    const line = output.split('\n').find(l => l.startsWith('ANALYSIS_RESULT:'));
+    if (line) return res.json(JSON.parse(line.replace('ANALYSIS_RESULT:', '')));
+    return res.status(500).json({ error: 'Analysis failed', output: output.slice(0, 300) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── /api/trade-signal — latest ACP-generated trade signal ──────────────────────
 app.get('/api/trade-signal', requireOperator, (req, res) => {
   res.json(global.latestTradeSignal || { signal: null, message: 'No signal yet' });
@@ -3089,6 +3108,30 @@ app.use((req, res) => {
 // ── Start ─────────────────────────────────────────────────────────────────────
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`[gsb-dashboard] Listening on port ${PORT}`);
+
+  // Start Telegram bot as background process
+  if (process.env.TELEGRAM_BOT_TOKEN) {
+    try {
+      const botPath = path.join(__dirname, 'scripts', 'telegram_bot.js');
+      if (fs.existsSync(botPath)) {
+        const botProc = spawn('node', [botPath], {
+          cwd: __dirname,
+          env: { ...process.env },
+          stdio: ['ignore', 'pipe', 'pipe'],
+          detached: false,
+        });
+        botProc.stdout.on('data', d => d.toString().split('\n').filter(Boolean).forEach(l => console.log('[tg-bot]', l.trim())));
+        botProc.stderr.on('data', d => console.error('[tg-bot-err]', d.toString().trim()));
+        botProc.on('close', code => console.log('[tg-bot] Exited:', code));
+        console.log('[tg-bot] GSB Swap Bot started PID:', botProc.pid);
+      }
+    } catch (e) {
+      console.warn('[tg-bot] Failed to start:', e.message);
+    }
+  } else {
+    console.warn('[tg-bot] No TELEGRAM_BOT_TOKEN — bot disabled');
+  }
+
   try {
     await initAcp();
   } catch (err) {
