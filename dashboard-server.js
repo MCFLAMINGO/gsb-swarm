@@ -1540,7 +1540,7 @@ app.post('/api/command', async (req, res) => {
 
 // ── BasaltSurge Payment Integration ──────────────────────────────────────────
 const BASALT_BASE    = 'https://surge.basalthq.com';
-const BASALT_PAY_URL = 'https://surge.basalthq.com/basaltsurge/pay'; // UI payment page
+// Pay URL comes from order response as portalLink — no hardcoded path needed
 const BASALT_API_KEY = process.env.BASALT_API_KEY || '';
 
 // In-memory stores for pending orders and upload tokens
@@ -1593,9 +1593,10 @@ app.post('/api/pro/create-order', express.json(), async (req, res) => {
       items: [{ sku, qty: 1 }],
     }, { headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY } });
 
-    const { receipt } = orderRes.data;
+    const { receipt, portalLink } = orderRes.data;
     const receiptId = receipt.receiptId;
-    const paymentUrl = `${BASALT_PAY_URL}/${receiptId}`;
+    // portalLink comes from Basalt as the correct payment UI URL
+    const paymentUrl = (portalLink || '').split(', ').pop().trim() || `https://surge.basalthq.com/portal/${receiptId}?recipient=0x6e1d0e78b2577c0106ae5935ea0e40464690bd3b`;
 
     // Store pending pro order
     pendingOrders.set(receiptId, {
@@ -1825,9 +1826,10 @@ app.post('/api/create-triage-order', express.json(), async (req, res) => {
       headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY },
     });
 
-    const { receipt } = orderRes.data;
+    const { receipt, portalLink } = orderRes.data;
     const receiptId = receipt.receiptId;
-    const paymentUrl = `${BASALT_PAY_URL}/${receiptId}`;
+    // portalLink comes from Basalt as the correct payment UI URL
+    const paymentUrl = (portalLink || '').split(', ').pop().trim() || `https://surge.basalthq.com/portal/${receiptId}?recipient=0x6e1d0e78b2577c0106ae5935ea0e40464690bd3b`;
 
     pendingOrders.set(receiptId, {
       projectName: projectName.trim(),
@@ -2603,11 +2605,12 @@ app.post('/api/create-order', express.json(), async (req, res) => {
       items: [{ sku: '4GVZVPZG7', qty: 1 }],
     }, { headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY } });
 
-    const { receipt } = orderRes.data;
+    const { receipt, portalLink } = orderRes.data;
     const receiptId = receipt?.receiptId;
     if (!receiptId) return res.status(500).json({ error: 'Order creation failed', detail: orderRes.data });
 
-    const paymentUrl = `${BASALT_PAY_URL}/${receiptId}`;
+    // portalLink from Basalt is the correct payment page URL
+    const paymentUrl = (portalLink || '').split(', ').pop().trim() || `https://surge.basalthq.com/portal/${receiptId}?recipient=0x6e1d0e78b2577c0106ae5935ea0e40464690bd3b`;
 
     // Store pending order
     pendingOrders.set(receiptId, {
