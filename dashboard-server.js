@@ -2747,9 +2747,9 @@ buyToken().catch(e => console.error('BUY_ERROR:' + e.message));
 
   try {
     const { execSync } = require('child_process');
-    const tmpFile = `/tmp/buy_signal_${Date.now()}.js`;
+    const tmpFile = path.join(__dirname, `buy_signal_${Date.now()}.js`);
     require('fs').writeFileSync(tmpFile, script);
-    const output = execSync(`node ${tmpFile}`, { timeout: 60000, env: process.env }).toString();
+    const output = execSync(`node ${tmpFile}`, { timeout: 60000, env: process.env, cwd: __dirname }).toString();
     require('fs').unlinkSync(tmpFile);
 
     const txLine = output.split('\n').find(l => l.startsWith('TX_HASH:'));
