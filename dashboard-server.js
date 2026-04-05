@@ -2603,6 +2603,22 @@ app.post('/api/copy-trader/stop', requireOperator, (req, res) => {
   res.json({ ok: true, message: 'Copy trader stopped' });
 });
 
+// POST /api/copy-trader/approve — one-time USDC approval for Uniswap router
+app.post('/api/copy-trader/approve', requireOperator, async (req, res) => {
+  const { execSync } = require('child_process');
+  try {
+    const output = execSync('node scripts/approve_usdc.js', {
+      cwd: __dirname,
+      env: { ...process.env },
+      timeout: 30000,
+    }).toString();
+    const approved = output.includes('APPROVED') || output.includes('Already approved');
+    res.json({ ok: approved, output: output.trim().slice(0, 500) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message, output: (err.stdout || '').toString().slice(0, 300) });
+  }
+});
+
 // POST /api/copy-trader/rehunt — fresh wallet scan
 app.post('/api/copy-trader/rehunt', requireOperator, (req, res) => {
   const budget = req.body?.budget || copyTraderState.budget || 10;
