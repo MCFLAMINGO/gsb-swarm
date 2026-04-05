@@ -2631,8 +2631,11 @@ Your mission:
 
 Focus on actionable signals. If compute tokens are up = look for AI/agent token momentum on Base. If down = flag caution.`;
 
+  // Reuse /api/fire-job internal logic — same code path that works
   try {
     const alphaWorker = WORKER_CATALOG['GSB Alpha Scanner'];
+    if (!acpClient) return res.status(503).json({ error: 'ACP client not ready — Railway may be starting up' });
+
     const jobId = await acpClient.initiateJob(
       alphaWorker.address,
       gflopRequirement,
@@ -2646,8 +2649,135 @@ Focus on actionable signals. If compute tokens are up = look for AI/agent token 
     console.log(`[gflop-scan] Job fired: ${jobId}`);
     res.json({ ok: true, jobId, computeData, message: 'GFLOP scan fired to Alpha Scanner' });
   } catch (err) {
-    console.error('[gflop-scan] Error:', err.message);
-    res.status(500).json({ error: err.message });
+    const msg = err.message || String(err);
+    console.error('[gflop-scan] Error:', msg);
+    // If ACP client issue, return helpful message
+    if (msg.includes('contractAddress') || msg.includes('undefined')) {
+      return res.status(503).json({
+        error: 'ACP contract client not initialized — the CEO wallet may need to be funded or Railway restarted',
+        detail: msg,
+      });
+    }
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ── /api/copy-trader/buy-signal — execute a direct buy from CEO alpha signal ──────────
+app.post('/api/copy-trader/buy-signal', requireOperator, express.json(), async (req, res) => {
+  const { tokenAddress, tokenName, usdAmount } = req.body || {};
+  if (!tokenAddress) return res.status(400).json({ error: 'tokenAddress required' });
+
+  const amount = Math.min(parseFloat(usdAmount) || 2.5, copyTraderState.budget || 10);
+  const PRIVATE_KEY_TRADE = process.env.AGENT_WALLET_PRIVATE_KEY;
+  if (!PRIVATE_KEY_TRADE) return res.status(503).json({ error: 'No wallet key configured' });
+
+  console.log(`[buy-signal] Buying ${tokenName || tokenAddress} with $${amount}`);
+
+  // Multi-hop: USDC → WETH → token via Uniswap v3 SwapRouter
+  const WETH_BASE = '0x4200000000000000000000000000000000000006';
+  const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+  const ROUTER   = '0x2626664c2603336E57B271c5C0b26F421741e481';
+  const BASE_RPC  = process.env.BASE_RPC_URL || 'https://base.drpc.org';
+
+  const script = `
+const { createWalletClient, createPublicClient, http, parseUnits, maxUint256, encodeFunctionData } = require('viem');
+const { base } = require('viem/chains');
+const { privateKeyToAccount } = require('viem/accounts');
+
+const ERC20_ABI = [
+  { name:'approve', type:'function', inputs:[{name:'spender',type:'address'},{name:'amount',type:'uint256'}], outputs:[{name:'',type:'bool'}] },
+  { name:'allowance', type:'function', inputs:[{name:'owner',type:'address'},{name:'spender',type:'address'}], outputs:[{name:'',type:'uint256'}] },
+];
+
+const MULTIHOP_ABI = [{
+  name: 'exactInput',
+  type: 'function',
+  inputs: [{ name: 'params', type: 'tuple', components: [
+    {name:'path',type:'bytes'},
+    {name:'recipient',type:'address'},
+    {name:'amountIn',type:'uint256'},
+    {name:'amountOutMinimum',type:'uint256'},
+  ]}],
+  outputs: [{name:'amountOut',type:'uint256'}],
+}];
+
+async function buyToken() {
+  const account = privateKeyToAccount('${PRIVATE_KEY_TRADE}');
+  const walletClient = createWalletClient({ account, chain: base, transport: http('${BASE_RPC}') });
+  const publicClient = createPublicClient({ chain: base, transport: http('${BASE_RPC}') });
+
+  const USDC   = '${USDC_BASE}';
+  const WETH   = '${WETH_BASE}';
+  const TOKEN  = '${tokenAddress}';
+  const ROUTER = '${ROUTER}';
+  const amountIn = parseUnits('${amount.toFixed(6)}', 6);
+
+  // Approve USDC if needed
+  const allowance = await publicClient.readContract({ address: USDC, abi: ERC20_ABI, functionName: 'allowance', args: [account.address, ROUTER] });
+  if (allowance < amountIn) {
+    const approveTx = await walletClient.writeContract({ address: USDC, abi: ERC20_ABI, functionName: 'approve', args: [ROUTER, maxUint256] });
+    await publicClient.waitForTransactionReceipt({ hash: approveTx });
+    console.log('APPROVED:' + approveTx);
+  }
+
+  // Encode path: USDC (fee 500) -> WETH (fee 3000) -> TOKEN
+  // Path encoding: token0 + fee + token1 + fee + token2
+  const encodePath = (tokens, fees) => {
+    let encoded = tokens[0].slice(2).toLowerCase();
+    for (let i = 0; i < fees.length; i++) {
+      encoded += fees[i].toString(16).padStart(6, '0');
+      encoded += tokens[i+1].slice(2).toLowerCase();
+    }
+    return '0x' + encoded;
+  };
+  const path = encodePath([USDC, WETH, TOKEN], [500, 3000]);
+
+  const hash = await walletClient.writeContract({
+    address: ROUTER,
+    abi: MULTIHOP_ABI,
+    functionName: 'exactInput',
+    args: [{ path, recipient: account.address, amountIn, amountOutMinimum: 0n }],
+  });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+  console.log('TX_HASH:' + hash);
+  console.log('GAS_USED:' + receipt.gasUsed.toString());
+}
+buyToken().catch(e => console.error('BUY_ERROR:' + e.message));
+`;
+
+  try {
+    const { execSync } = require('child_process');
+    const tmpFile = `/tmp/buy_signal_${Date.now()}.js`;
+    require('fs').writeFileSync(tmpFile, script);
+    const output = execSync(`node ${tmpFile}`, { timeout: 60000, env: process.env }).toString();
+    require('fs').unlinkSync(tmpFile);
+
+    const txLine = output.split('\n').find(l => l.startsWith('TX_HASH:'));
+    const txHash = txLine?.replace('TX_HASH:', '').trim();
+    const buyError = output.split('\n').find(l => l.startsWith('BUY_ERROR:'));
+
+    if (buyError) {
+      const errMsg = buyError.replace('BUY_ERROR:', '');
+      console.error('[buy-signal] Failed:', errMsg);
+      return res.status(500).json({ ok: false, error: errMsg });
+    }
+
+    if (txHash) {
+      const explorerUrl = `https://basescan.org/tx/${txHash}`;
+      console.log(`[buy-signal] ✅ Bought ${tokenName} tx: ${txHash}`);
+      tgAlert(`✅ *CEO Signal Trade Executed*\n\nBought: ${tokenName || tokenAddress.slice(0,10)}\nAmount: $${amount}\nTx: ${explorerUrl}`);
+
+      // Track in copy trader state
+      copyTraderState.log.push(`[CEO-signal] Bought ${tokenName} $${amount} tx:${txHash.slice(0,16)}...`);
+      if (copyTraderState.log.length > 200) copyTraderState.log.shift();
+
+      return res.json({ ok: true, txHash, explorerUrl, token: tokenName, amount });
+    }
+
+    return res.status(500).json({ ok: false, error: 'No tx hash returned', output: output.slice(0, 300) });
+  } catch (err) {
+    console.error('[buy-signal] Exec error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
