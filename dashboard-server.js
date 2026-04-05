@@ -2636,15 +2636,14 @@ app.get('/api/check-payment', async (req, res) => {
     const { receiptId } = req.query;
     if (!receiptId) return res.status(400).json({ error: 'receiptId required' });
 
-    const order = pendingOrders.get(receiptId);
-    if (!order) return res.status(404).json({ error: 'Order not found', receiptId });
+    const order = pendingOrders.get(receiptId) || {};
 
-    // Already confirmed?
+    // Already confirmed in memory?
     if (order.status === 'paid' && order.uploadToken) {
       return res.json({ paid: true, uploadToken: order.uploadToken });
     }
 
-    // Check Basalt receipt status
+    // Check Basalt receipt status (source of truth)
     const statusRes = await axios.get(`${BASALT_BASE}/api/receipts/status`, {
       params: { receiptId },
       headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY },
