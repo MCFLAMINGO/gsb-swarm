@@ -733,6 +733,40 @@ app.post('/api/brief', async (req, res) => {
   global.latestCeoBrief = latestBrief.ceoSynthesis?.summary || JSON.stringify(latestBrief.ceoSynthesis);
   global.latestCeoBriefAt = new Date().toISOString();
   console.log('[api] External brief received, pushed to dashboard');
+
+  // ── AUTO-TRADE: if brief contains a BULLISH token verdict, fire copy trader ──
+  try {
+    const briefText = JSON.stringify(brief).toUpperCase();
+    const isBullish = briefText.includes('BULLISH') || briefText.includes('STRONG BUY');
+    const isNew = briefText.includes('NEW LAUNCH') || briefText.includes('RECENT LAUNCH') || briefText.includes('143.4') || briefText.includes('45.5');
+
+    // Extract pool/token address from brief if present
+    const addrMatch = JSON.stringify(brief).match(/0x[a-fA-F0-9]{40}/);
+    const tokenAddr = addrMatch ? addrMatch[0] : null;
+
+    if ((isBullish || isNew) && tokenAddr && !copyTraderProcess) {
+      console.log(`[auto-trade] BULLISH signal detected from ACP brief — token: ${tokenAddr}`);
+      tgAlert(
+        `🤖 *ACP Auto-Trade Signal*\n\n` +
+        `Token: \`${tokenAddr}\`\n` +
+        `Signal: ${isBullish ? 'BULLISH' : 'NEW LAUNCH'}\n` +
+        `Copy trader will attempt entry if wallet has funds.\n\n` +
+        `Check copy-trader dashboard for status.`
+      );
+      // Store signal for dashboard display
+      global.latestTradeSignal = {
+        token: tokenAddr,
+        signal: isBullish ? 'BULLISH' : 'NEW_LAUNCH',
+        source: 'acp_brief',
+        receivedAt: new Date().toISOString(),
+        briefSnippet: JSON.stringify(brief).slice(0, 300),
+      };
+      broadcast('trade-signal', global.latestTradeSignal);
+    }
+  } catch (sigErr) {
+    console.warn('[auto-trade] Signal parse error:', sigErr.message);
+  }
+
   res.json({ ok: true });
 });
 
@@ -2554,6 +2588,11 @@ app.post('/api/rerun-job', requireOperator, express.json(), async (req, res) => 
     emailSent: !!(resendClient && failed.email),
     message: 'Re-run complete. Reports delivered.',
   });
+});
+
+// ── /api/trade-signal — latest ACP-generated trade signal ──────────────────────
+app.get('/api/trade-signal', requireOperator, (req, res) => {
+  res.json(global.latestTradeSignal || { signal: null, message: 'No signal yet' });
 });
 
 // ── /api/tweet — post a single tweet via Railway X credentials ──────────────────
