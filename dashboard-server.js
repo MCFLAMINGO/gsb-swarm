@@ -2603,29 +2603,64 @@ app.post('/api/copy-trader/stop', requireOperator, (req, res) => {
   res.json({ ok: true, message: 'Copy trader stopped' });
 });
 
-// POST /api/copy-trader/rehunt — wipe state file and restart with fresh wallet scan
+// POST /api/copy-trader/rehunt — fresh wallet scan
 app.post('/api/copy-trader/rehunt', requireOperator, (req, res) => {
-  const { spawn } = require('child_process');
-  // Delete the state file so hunter runs fresh
-  try { require('fs').unlinkSync('/tmp/gsb-copy-trader-state.json'); } catch (_) {}
-  // If running, kill and restart with hunt flag
+  const budget = req.body?.budget || copyTraderState.budget || 10;
+
+  // Gracefully stop existing process
   if (copyTraderProcess) {
-    copyTraderProcess.kill('SIGTERM');
+    try { copyTraderProcess.kill('SIGTERM'); } catch (_) {}
     copyTraderProcess = null;
-    copyTraderState.running = false;
   }
-  const budget = copyTraderState.budget || 10;
-  copyTraderState = { running: true, log: ['[rehunt] Fresh wallet scan started...'], startedAt: new Date().toISOString(), budget };
-  const scriptPath = require('path').join(__dirname, 'scripts', 'copy_trader.py');
-  copyTraderProcess = spawn('python3', [scriptPath, '--budget', String(budget), '--hunt'], { cwd: __dirname, env: { ...process.env } });
-  copyTraderProcess.stdout.on('data', d => {
-    const line = d.toString().trim();
-    copyTraderState.log.push(line);
-    if (copyTraderState.log.length > 200) copyTraderState.log.shift();
+
+  // Clear state file
+  try { fs.unlinkSync('/tmp/gsb-copy-trader-state.json'); } catch (_) {}
+
+  copyTraderState = {
+    running: true,
+    log: ['[rehunt] Scanning Base chain for active wallets...'],
+    startedAt: new Date().toISOString(),
+    budget,
+  };
+
+  const scriptPath = path.join(__dirname, 'scripts', 'copy_trader.py');
+  const args = ['scripts/copy_trader.py', '--budget', String(budget), '--hunt'];
+
+  copyTraderProcess = spawn('python3', args, {
+    cwd: __dirname,
+    env: { ...process.env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: false,
   });
-  copyTraderProcess.stderr.on('data', d => { copyTraderState.log.push('[ERR] ' + d.toString().trim()); });
-  copyTraderProcess.on('close', code => { copyTraderState.running = false; copyTraderProcess = null; });
-  res.json({ ok: true, message: 'Rehunting wallets — fresh scan started', pid: copyTraderProcess.pid });
+
+  copyTraderProcess.stdout.on('data', d => {
+    d.toString().split('\n').filter(Boolean).forEach(line => {
+      copyTraderState.log.push(line.trim());
+      if (copyTraderState.log.length > 200) copyTraderState.log.shift();
+      console.log('[rehunt]', line.trim());
+    });
+  });
+  copyTraderProcess.stderr.on('data', d => {
+    d.toString().split('\n').filter(Boolean).forEach(line => {
+      const l = '[ERR] ' + line.trim();
+      copyTraderState.log.push(l);
+      console.error('[rehunt]', l);
+    });
+  });
+  copyTraderProcess.on('close', (code, signal) => {
+    const msg = signal ? `[process killed by ${signal}]` : `[process exited code ${code}]`;
+    copyTraderState.log.push(msg);
+    copyTraderState.running = false;
+    copyTraderProcess = null;
+    console.log('[rehunt] Process ended:', msg);
+  });
+  copyTraderProcess.on('error', err => {
+    copyTraderState.log.push('[spawn error] ' + err.message);
+    copyTraderState.running = false;
+    copyTraderProcess = null;
+  });
+
+  res.json({ ok: true, message: 'Fresh wallet scan started', pid: copyTraderProcess.pid, budget });
 });
 
 app.get('/api/copy-trader/status', requireOperator, (req, res) => {
