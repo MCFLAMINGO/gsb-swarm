@@ -2765,13 +2765,50 @@ buyToken().catch(e => console.error('BUY_ERROR:' + e.message));
     if (txHash) {
       const explorerUrl = `https://basescan.org/tx/${txHash}`;
       console.log(`[buy-signal] ✅ Bought ${tokenName} tx: ${txHash}`);
-      tgAlert(`✅ *CEO Signal Trade Executed*\n\nBought: ${tokenName || tokenAddress.slice(0,10)}\nAmount: $${amount}\nTx: ${explorerUrl}`);
 
-      // Track in copy trader state
-      copyTraderState.log.push(`[CEO-signal] Bought ${tokenName} $${amount} tx:${txHash.slice(0,16)}...`);
+      // Get current price for position tracking
+      let buyPrice = 0;
+      try {
+        const priceRes = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
+        const pairs = priceRes.data?.pairs || [];
+        pairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+        buyPrice = parseFloat(pairs[0]?.priceUsd || '0');
+      } catch (_) {}
+
+      // Save position for exit monitor
+      const posId = `${tokenAddress.slice(0,10)}_${Date.now()}`;
+      savePosition(posId, {
+        posId,
+        tokenAddress,
+        tokenName: tokenName || tokenAddress.slice(0,10),
+        buyPrice,
+        amountUsd: amount,
+        buyTimestamp: Date.now(),
+        buyTx: txHash,
+        status: 'open',
+        createdAt: new Date().toISOString(),
+      });
+
+      // Start exit monitor if not already running
+      startExitMonitor();
+
+      tgAlert(
+        `✅ *CEO Signal Trade Executed*\n\n` +
+        `Bought: ${tokenName || tokenAddress.slice(0,10)}\n` +
+        `Amount: $${amount}\n` +
+        `Entry price: $${buyPrice.toFixed(8)}\n` +
+        `Stop loss: -20% → $${(buyPrice * 0.80).toFixed(8)}\n` +
+        `Take profit: +50% → $${(buyPrice * 1.50).toFixed(8)}\n` +
+        `Time stop: 4 hours\n` +
+        `GFLOP exit: if AKT+RNDR both drop >3%\n\n` +
+        `Tx: ${explorerUrl}`
+      );
+
+      // Track in copy trader state log
+      copyTraderState.log.push(`[CEO-signal] Bought ${tokenName} $${amount} @ $${buyPrice.toFixed(8)} | exit monitor active`);
       if (copyTraderState.log.length > 200) copyTraderState.log.shift();
 
-      return res.json({ ok: true, txHash, explorerUrl, token: tokenName, amount });
+      return res.json({ ok: true, txHash, explorerUrl, token: tokenName, amount, buyPrice, posId });
     }
 
     return res.status(500).json({ ok: false, error: 'No tx hash returned', output: output.slice(0, 300) });
@@ -2846,6 +2883,52 @@ app.post('/api/tweet', express.json(), async (req, res) => {
     console.error('[tweet] Failed:', detail);
     res.status(500).json({ error: 'Tweet failed', detail });
   }
+});
+
+// ── Position tracker + exit monitor ───────────────────────────────────────────────
+const POSITIONS_FILE = '/tmp/gsb-open-positions.json';
+let exitMonitorProcess = null;
+
+function loadPositions() {
+  try { return JSON.parse(fs.readFileSync(POSITIONS_FILE, 'utf8')); } catch { return {}; }
+}
+
+function savePosition(posId, posData) {
+  const positions = loadPositions();
+  positions[posId] = posData;
+  fs.writeFileSync(POSITIONS_FILE, JSON.stringify(positions, null, 2));
+}
+
+function startExitMonitor() {
+  if (exitMonitorProcess) return; // already running
+  const monitorPath = path.join(__dirname, 'scripts', 'exit_monitor.js');
+  if (!fs.existsSync(monitorPath)) {
+    console.warn('[exit-monitor] Script not found:', monitorPath);
+    return;
+  }
+  exitMonitorProcess = spawn('node', [monitorPath, POSITIONS_FILE], {
+    cwd: __dirname,
+    env: { ...process.env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  exitMonitorProcess.stdout.on('data', d => {
+    d.toString().split('\n').filter(Boolean).forEach(l => {
+      console.log('[exit-monitor]', l);
+      copyTraderState.log.push('[exit] ' + l.trim());
+      if (copyTraderState.log.length > 200) copyTraderState.log.shift();
+    });
+  });
+  exitMonitorProcess.stderr.on('data', d => console.error('[exit-monitor]', d.toString().trim()));
+  exitMonitorProcess.on('close', (code) => {
+    console.log('[exit-monitor] Exited:', code);
+    exitMonitorProcess = null;
+  });
+  console.log('[exit-monitor] Started PID:', exitMonitorProcess.pid);
+}
+
+// GET /api/copy-trader/positions — all open/closed positions
+app.get('/api/copy-trader/positions', requireOperator, (req, res) => {
+  res.json({ positions: loadPositions() });
 });
 
 // ── /api/copy-trader — start / stop / status ─────────────────────────────────
