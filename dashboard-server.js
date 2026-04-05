@@ -2590,6 +2590,67 @@ app.post('/api/rerun-job', requireOperator, express.json(), async (req, res) => 
   });
 });
 
+// ── /api/gflop-scan — fire Alpha Scanner + Token Analyst with compute signal mission ──────
+// Scans for compute tokens (AKT/RNDR/IO) momentum AND correlates with Base DEX activity
+// Returns GFLOP signal: which tokens on Base are moving when compute demand is high
+app.post('/api/gflop-scan', requireOperator, async (req, res) => {
+  if (!acpClient) return res.status(503).json({ error: 'ACP client not ready' });
+
+  // Fetch real compute token data first
+  let computeData = '';
+  try {
+    const cgRes = await axios.get(
+      'https://api.coingecko.com/api/v3/simple/price?ids=akash-network,render-token,io&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true',
+      { timeout: 8000 }
+    );
+    const d = cgRes.data;
+    const akt  = d['akash-network'];
+    const rndr = d['render-token'];
+    const io   = d['io'];
+    const lines = [
+      akt  && `AKT (Akash):  $${akt.usd?.toFixed(4)}  ${akt.usd_24h_change?.toFixed(2)}%  vol $${Number(akt.usd_24h_vol||0).toLocaleString()}`,
+      rndr && `RNDR (Render): $${rndr.usd?.toFixed(4)}  ${rndr.usd_24h_change?.toFixed(2)}%  vol $${Number(rndr.usd_24h_vol||0).toLocaleString()}`,
+      io   && `IO (io.net):   $${io.usd?.toFixed(4)}  ${io.usd_24h_change?.toFixed(2)}%  vol $${Number(io.usd_24h_vol||0).toLocaleString()}`,
+    ].filter(Boolean);
+    computeData = lines.join('\n');
+  } catch (e) {
+    computeData = 'Compute token data unavailable';
+  }
+
+  const gflopRequirement = `GFLOP COMPUTE SIGNAL SCAN
+
+Real-time compute token prices:
+${computeData}
+
+Your mission:
+1. Based on these compute token prices, determine if compute demand is rising or falling
+2. Scan Base chain DEX for tokens that correlate with compute/AI demand (look for tokens with "AI", "AGENT", "COMPUTE", "GPU" themes or tokens in the Virtuals Protocol ecosystem)
+3. Find any recent launches or volume spikes on Base that align with the compute signal
+4. Rate each opportunity: STRONG BUY / BUY / NEUTRAL / AVOID
+5. For STRONG BUY signals include the token contract address on Base
+
+Focus on actionable signals. If compute tokens are up = look for AI/agent token momentum on Base. If down = flag caution.`;
+
+  try {
+    const alphaWorker = WORKER_CATALOG['GSB Alpha Scanner'];
+    const jobId = await acpClient.initiateJob(
+      alphaWorker.address,
+      gflopRequirement,
+      makeFare(alphaWorker.price),
+      null,
+      new Date(Date.now() + 1000 * 60 * 30),
+    );
+    jobWorkerMap.set(jobId, 'GSB Alpha Scanner');
+    setWorkerStatus('GSB Alpha Scanner', 'working', jobId);
+    logJob(jobId, 'GSB Alpha Scanner', 'gflop-scan', 'fired');
+    console.log(`[gflop-scan] Job fired: ${jobId}`);
+    res.json({ ok: true, jobId, computeData, message: 'GFLOP scan fired to Alpha Scanner' });
+  } catch (err) {
+    console.error('[gflop-scan] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── /api/trade-signal — latest ACP-generated trade signal ──────────────────────
 app.get('/api/trade-signal', requireOperator, (req, res) => {
   res.json(global.latestTradeSignal || { signal: null, message: 'No signal yet' });
