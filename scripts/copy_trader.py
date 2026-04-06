@@ -12,8 +12,8 @@ Usage:
 
 Flow:
   1. Hunt: Pull top performers from DexScreener/defined.fi, score by win rate
-  2. Watch: Monitor target wallet via Alchemy WebSocket for swaps
-  3. Copy:  Mirror buy/sell on Uniswap v3 proportionally to budget
+  2. Watch: Monitor target wallet via RPC polling for swaps
+  3. Copy:  Mirror buy/sell on Uniswap v3 — decode real tokenOut from swap log
   4. Report: Telegram alert on every trade with running P&L
 """
 
@@ -23,12 +23,14 @@ import os
 import sys
 import time
 import argparse
+import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 import urllib.request
 import urllib.error
 
-# ── Config ──────────────────────────────────────────────────────────────────
+# ── Config ───────────────────────────────────────────────────────────────────
 BASE_RPC    = os.environ.get('BASE_RPC_URL', 'https://base.drpc.org')
 ALCHEMY_KEY = os.environ.get('ALCHEMY_API_KEY', '')
 AGENT_KEY   = os.environ.get('AGENT_WALLET_PRIVATE_KEY', '')
@@ -45,14 +47,26 @@ USDC_BASE         = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 WETH_BASE         = '0x4200000000000000000000000000000000000006'
 
 # Hunt parameters
-MIN_WIN_RATE    = 0.60   # 60% wins
-MIN_TRADES      = 15     # at least 15 trades
-MIN_AVG_TRADE   = 200    # avg trade size $200+
-MIN_COPY_BUY    = 200    # only copy buys > $200
+MIN_WIN_RATE    = 0.55   # 55% real wins (conservative — real data)
+MIN_TRADES      = 5      # at least 5 observed swaps in window
+MIN_COPY_BUY    = 50     # copy buys > $50 (lowered — $25 budget)
 STOP_LOSS_PCT   = -0.15  # -15% stop loss
 TAKE_PROFIT_PCT =  0.20  # +20% take profit
 
-# ── Telegram ─────────────────────────────────────────────────────────────────
+# Uniswap v3 Swap event topic
+SWAP_TOPIC = '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67'
+
+# Known aggregators/routers to skip when hunting wallets
+SKIP_ADDRS = {
+    '0x2626664c2603336e57b271c5c0b26f421741e481',  # Uniswap v3 router
+    '0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24',  # Uniswap v2 router
+    '0x6131b5fae19ea4f9d964eac0408e4408b66337b5',  # KyberSwap
+    '0x1111111254eeb25477b68fb85ed929f73a960582',  # 1inch
+    '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad',  # Uniswap UniversalRouter
+    '0x0000000000000000000000000000000000000000',
+}
+
+# ── Telegram ──────────────────────────────────────────────────────────────────
 def tg_send(msg: str):
     if not TG_TOKEN or not TG_CHAT:
         print(f'[tg] {msg}')
@@ -67,7 +81,7 @@ def tg_send(msg: str):
     except Exception as e:
         print(f'[tg] send failed: {e}')
 
-# ── State persistence ─────────────────────────────────────────────────────────
+# ── State persistence ──────────────────────────────────────────────────────────
 def load_state():
     try:
         if STATE_FILE.exists():
@@ -87,7 +101,7 @@ def load_state():
 def save_state(state):
     STATE_FILE.write_text(json.dumps(state, indent=2))
 
-# ── HTTP helpers ─────────────────────────────────────────────────────────────
+# ── HTTP helpers ──────────────────────────────────────────────────────────────
 def http_get(url, timeout=10):
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'GSB-Trader/1.0'})
@@ -110,7 +124,7 @@ def http_post(url, payload, headers=None, timeout=10):
         print(f'[http] POST {url[:60]} failed: {e}')
         return None
 
-# ── RPC calls ─────────────────────────────────────────────────────────────────
+# ── RPC calls ──────────────────────────────────────────────────────────────────
 def rpc_call(method, params=None):
     payload = {'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params or []}
     return http_post(BASE_RPC, payload)
@@ -121,25 +135,165 @@ def get_eth_balance(address):
         return int(r['result'], 16) / 1e18
     return 0
 
-# ── WALLET HUNTER ─────────────────────────────────────────────────────────────
+# ── POOL → TOKEN RESOLVER ─────────────────────────────────────────────────────
+# Cache pool token lookups so we don't hammer RPC
+_pool_token_cache = {}
+
+POOL_ABI_TOKEN0 = {
+    'jsonrpc': '2.0', 'id': 1, 'method': 'eth_call',
+    'params': [{'to': None, 'data': '0x0dfe1681'}, 'latest']  # token0()
+}
+POOL_ABI_TOKEN1 = {
+    'jsonrpc': '2.0', 'id': 2, 'method': 'eth_call',
+    'params': [{'to': None, 'data': '0xd21220a7'}, 'latest']  # token1()
+}
+
+def get_pool_tokens(pool_address):
+    """Return (token0, token1) checksummed addresses for a Uniswap v3 pool."""
+    key = pool_address.lower()
+    if key in _pool_token_cache:
+        return _pool_token_cache[key]
+
+    def call_fn(selector):
+        r = http_post(BASE_RPC, {
+            'jsonrpc': '2.0', 'id': 1, 'method': 'eth_call',
+            'params': [{'to': pool_address, 'data': selector}, 'latest']
+        })
+        if r and 'result' in r and len(r['result']) >= 66:
+            # ABI-decode address: last 20 bytes of 32-byte result
+            return '0x' + r['result'][-40:]
+        return None
+
+    t0 = call_fn('0x0dfe1681')  # token0()
+    t1 = call_fn('0xd21220a7')  # token1()
+
+    result = (t0, t1)
+    _pool_token_cache[key] = result
+    return result
+
+def decode_token_out_from_swap(log):
+    """
+    Decode the output token from a Uniswap v3 Swap log.
+
+    Uniswap v3 Swap event data layout (5 x int256/uint160/uint128):
+      amount0 (int256)   — negative means tokens flowing OUT of pool to recipient
+      amount1 (int256)
+      sqrtPriceX96 (uint160)
+      liquidity (uint128)
+      tick (int24)
+
+    If amount0 < 0 → token0 is going OUT (being bought by trader)
+    If amount1 < 0 → token1 is going OUT (being bought by trader)
+
+    Returns the token address the target wallet received, or None.
+    """
+    try:
+        data = log.get('data', '0x')
+        pool = log.get('address', '')
+        if len(data) < 2 + 5 * 64:
+            return None
+
+        raw = data[2:]  # strip 0x
+
+        def to_int256(hex_str):
+            val = int(hex_str, 16)
+            if val >= 2**255:
+                val -= 2**256
+            return val
+
+        amount0 = to_int256(raw[0:64])
+        amount1 = to_int256(raw[64:128])
+
+        t0, t1 = get_pool_tokens(pool)
+        if not t0 or not t1:
+            return None
+
+        # The token with negative amount is leaving the pool → going to buyer
+        if amount0 < 0:
+            return t0  # token0 is the output (what was bought)
+        elif amount1 < 0:
+            return t1  # token1 is the output
+
+        return None
+    except Exception as e:
+        print(f'[decode] tokenOut error: {e}')
+        return None
+
+
+def estimate_swap_usd(log_data_hex):
+    """Rough USD estimate of swap size from Uniswap v3 log data."""
+    try:
+        raw = log_data_hex[2:] if log_data_hex.startswith('0x') else log_data_hex
+        if len(raw) < 64:
+            return 0
+
+        def to_int256(hex_str):
+            val = int(hex_str, 16)
+            if val >= 2**255:
+                val -= 2**256
+            return val
+
+        amount0 = to_int256(raw[0:64])
+        amount1 = to_int256(raw[64:128])
+
+        # The positive amount is the input (what was spent)
+        input_raw = max(abs(amount0), abs(amount1))
+
+        # Try USDC scale (6 decimals) first
+        usd = input_raw / 1e6
+        if usd < 0.01 or usd > 10_000_000:
+            # Try ETH scale (18 decimals) × $2500
+            usd = input_raw / 1e18 * 2500
+
+        return min(usd, 1_000_000)
+    except Exception:
+        return 0
+
+# ── WALLET HUNTER — real scoring via DexScreener ─────────────────────────────
+def score_wallet_via_dexscreener(address):
+    """
+    Pull recent trades for a wallet from DexScreener's trader endpoint.
+    Returns dict with real win_rate, avg_pnl, trade_count or None.
+    """
+    url = f'https://api.dexscreener.com/latest/dex/trades/{address}?chain=base'
+    data = http_get(url, timeout=8)
+    if not data:
+        return None
+
+    trades = data if isinstance(data, list) else data.get('trades', [])
+    if not trades:
+        return None
+
+    wins = 0
+    total = len(trades)
+    total_pnl = 0.0
+
+    for t in trades:
+        pnl = float(t.get('pnl', 0) or 0)
+        total_pnl += pnl
+        if pnl > 0:
+            wins += 1
+
+    if total < 3:
+        return None
+
+    return {
+        'win_rate': wins / total,
+        'trade_count': total,
+        'avg_pnl': total_pnl / total,
+        'total_pnl': total_pnl,
+    }
+
+
 def hunt_top_wallets(max_results=5):
     """
     Find actively-trading wallets on Base by scanning recent Uniswap v3 swap events.
-    Extracts real sender addresses from live on-chain transactions.
+    Scores them with real DexScreener trade history where available.
     Returns list of {address, win_rate, trades, tx_count, source}
     """
     print('[hunter] Scanning Base chain for active swap wallets...')
     candidates = {}
 
-    # ── Source 1: Scan recent Uniswap v3 Swap events ──────────────────────────
-    SWAP_TOPIC = '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67'
-    SKIP_ADDRS = {
-        '0x2626664c2603336e57b271c5c0b26f421741e481',  # Uniswap v3 router
-        '0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24',  # Uniswap v2 router
-        '0x6131b5fae19ea4f9d964eac0408e4408b66337b5',  # KyberSwap
-        '0x1111111254eeb25477b68fb85ed929f73a960582',  # 1inch
-        '0x0000000000000000000000000000000000000000',
-    }
     try:
         r = rpc_call('eth_blockNumber')
         current_block = int(r['result'], 16) if r and 'result' in r else 0
@@ -155,9 +309,9 @@ def hunt_top_wallets(max_results=5):
             logs = logs_r['result']
             print(f'[hunter] {len(logs)} swap events in last ~2000 blocks')
 
-            # Sample every Nth log to avoid hitting RPC too hard
-            step = max(1, len(logs) // 40)
-            sampled = logs[::step][:50]
+            # Sample to avoid hammering RPC
+            step = max(1, len(logs) // 50)
+            sampled = logs[::step][:60]
 
             for log in sampled:
                 tx_hash = log.get('transactionHash', '')
@@ -169,7 +323,7 @@ def hunt_top_wallets(max_results=5):
                 sender = tx_r['result'].get('from', '').lower()
                 if not sender or sender in SKIP_ADDRS:
                     continue
-                # Skip if looks like a contract (heuristic: check nonce)
+
                 if sender not in candidates:
                     candidates[sender] = {
                         'address': sender,
@@ -180,15 +334,11 @@ def hunt_top_wallets(max_results=5):
                         'trades': 0,
                     }
                 candidates[sender]['tx_count'] += 1
-                # Rough volume estimate from log data
+
+                # Rough volume estimate
                 try:
-                    data = log.get('data', '0x')
-                    if len(data) >= 66:
-                        amount = abs(int(data[2:66], 16))
-                        usd = min(amount / 1e6, 1_000_000) if amount < 2**128 else 0
-                        if usd < 1:
-                            usd = abs(amount) / 1e18 * 2000
-                        candidates[sender]['volume_est'] += min(usd, 100_000)
+                    usd = estimate_swap_usd(log.get('data', '0x'))
+                    candidates[sender]['volume_est'] += min(usd, 100_000)
                 except Exception:
                     pass
 
@@ -197,48 +347,61 @@ def hunt_top_wallets(max_results=5):
     except Exception as e:
         print(f'[hunter] RPC scan error: {e}')
 
-    # ── Score: wallets active in 2+ swaps are worth watching ──────────────────
+    # Filter to wallets with enough activity
     active = [c for c in candidates.values() if c['tx_count'] >= 2]
     active.sort(key=lambda x: x['tx_count'] * 10 + x['volume_est'] / 1000, reverse=True)
 
-    for w in active:
-        # Heuristic win rate based on activity frequency
-        w['win_rate'] = min(0.78, 0.52 + w['tx_count'] * 0.025)
-        w['trades'] = w['tx_count']
+    # Score top candidates with real DexScreener data
+    scored = []
+    for w in active[:20]:
+        ds = score_wallet_via_dexscreener(w['address'])
+        if ds and ds['trade_count'] >= MIN_TRADES and ds['win_rate'] >= MIN_WIN_RATE:
+            w['win_rate'] = ds['win_rate']
+            w['trades'] = ds['trade_count']
+            w['avg_pnl'] = ds['avg_pnl']
+            w['source'] = 'dexscreener_scored'
+            scored.append(w)
+            print(f'  [scored] {w["address"][:12]}... WR={w["win_rate"]:.0%} trades={w["trades"]} avgPnL=${w.get("avg_pnl",0):.2f}')
+        else:
+            # Fallback heuristic — only include if very active
+            if w['tx_count'] >= 5:
+                w['win_rate'] = min(0.65, 0.50 + w['tx_count'] * 0.02)
+                w['trades'] = w['tx_count']
+                w['source'] = 'heuristic'
+                scored.append(w)
 
-    print(f'[hunter] {len(active)} wallets with 2+ swaps — top candidates:')
-    for w in active[:max_results]:
-        print(f'  {w["address"][:12]}... swaps={w["tx_count"]} vol~${w["volume_est"]:.0f}')
+    scored.sort(key=lambda x: x['win_rate'] * x['trades'], reverse=True)
 
-    # ── Fallback: known smart money if scan returns nothing ────────────────────
-    if not active:
-        print('[hunter] No live wallets found — falling back to known smart money')
-        active = [
+    print(f'[hunter] {len(scored)} viable wallets — top candidates:')
+    for w in scored[:max_results]:
+        print(f'  {w["address"][:12]}... WR={w["win_rate"]:.0%} vol~${w["volume_est"]:.0f} src={w["source"]}')
+
+    # Fallback: known smart money if scan returns nothing
+    if not scored:
+        print('[hunter] No live wallets scored — falling back to known smart money')
+        scored = [
             {'address': '0x3DdfA8eC3052539b6C9549F12cEA2C295cfF5296', 'source': 'base_leaderboard', 'win_rate': 0.72, 'trades': 89, 'tx_count': 89, 'volume_est': 0},
             {'address': '0xa7E6B2CE535B83e52dE7D74DF9d72e36c6399f32', 'source': 'base_leaderboard', 'win_rate': 0.68, 'trades': 54, 'tx_count': 54, 'volume_est': 0},
             {'address': '0xf23Eed93c31D7EB7CB9b2f13C2E5cB10B0e3FE7a', 'source': 'defined_fi',      'win_rate': 0.74, 'trades': 127, 'tx_count': 127, 'volume_est': 0},
         ]
 
-    return active[:max_results]
-# ── TRADE MONITOR ─────────────────────────────────────────────────────────────
+    return scored[:max_results]
+
+# ── TRADE MONITOR ──────────────────────────────────────────────────────────────
 def get_wallet_recent_swaps(wallet_address, since_block=None):
     """
     Check if a wallet executed a swap recently.
     Uses eth_getLogs to find Uniswap v3 Swap events involving this wallet.
+    Returns list of swaps with decoded tokenOut.
     """
-    # Uniswap V3 Pool Swap event signature
-    SWAP_TOPIC = '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67'
-
     if not since_block:
-        # Get current block
         r = rpc_call('eth_blockNumber')
         if r and 'result' in r:
             current = int(r['result'], 16)
-            since_block = hex(current - 50)  # last ~100 seconds
+            since_block = hex(current - 50)  # last ~100 seconds on Base
         else:
             since_block = 'latest'
 
-    # Get logs
     r = rpc_call('eth_getLogs', [{
         'fromBlock': since_block,
         'toBlock': 'latest',
@@ -250,44 +413,153 @@ def get_wallet_recent_swaps(wallet_address, since_block=None):
 
     swaps = []
     for log in r['result']:
-        # Check if this wallet is involved via transaction sender
         tx_hash = log.get('transactionHash', '')
-        if tx_hash:
-            tx = rpc_call('eth_getTransactionByHash', [tx_hash])
-            if tx and tx.get('result', {}).get('from', '').lower() == wallet_address.lower():
-                swaps.append({
-                    'hash': tx_hash,
-                    'block': int(log['blockNumber'], 16),
-                    'pool': log['address'],
-                    'data': log['data'],
-                })
+        if not tx_hash:
+            continue
+        tx = rpc_call('eth_getTransactionByHash', [tx_hash])
+        if not tx or tx.get('result', {}).get('from', '').lower() != wallet_address.lower():
+            continue
+
+        # Decode the actual output token from this swap
+        token_out = decode_token_out_from_swap(log)
+
+        swaps.append({
+            'hash': tx_hash,
+            'block': int(log['blockNumber'], 16),
+            'pool': log['address'],
+            'data': log['data'],
+            'token_out': token_out,  # ← the actual token being bought
+        })
 
     return swaps
 
-def estimate_swap_usd(swap_data):
-    """Rough USD estimate of swap size from log data."""
-    # Parse amounts from Uniswap v3 swap data (simplified)
+# ── SWAP EXECUTION ────────────────────────────────────────────────────────────
+def execute_swap(usd_amount, token_out_addr, private_key):
+    """
+    Execute actual swap via Uniswap v3: USDC → target token.
+    Writes a temp JS file and runs it with node from the app root.
+    Returns tx hash on success, None on failure.
+
+    FIXED:
+    - Uses a temp file instead of node -e (avoids shell quoting issues)
+    - cwd is set to /app so viem node_modules resolve correctly
+    - token_out_addr is the real decoded token (not always WETH)
+    - Logs full error output for debugging
+    """
+    # Safety: default to WETH if token resolution failed
+    if not token_out_addr or len(token_out_addr) != 42:
+        print(f'[swap] Invalid token_out {token_out_addr} — defaulting to WETH')
+        token_out_addr = WETH_BASE
+
+    # Skip stable-to-stable (USDC → USDC would revert)
+    if token_out_addr.lower() == USDC_BASE.lower():
+        print('[swap] token_out is USDC — skipping (stable-to-stable)')
+        return None
+
+    # Format private key: viem requires 0x prefix
+    pk = private_key if private_key.startswith('0x') else '0x' + private_key
+
+    script = f"""
+const {{ createWalletClient, createPublicClient, http, parseUnits, maxUint256 }} = require('viem');
+const {{ base }} = require('viem/chains');
+const {{ privateKeyToAccount }} = require('viem/accounts');
+
+const ROUTER_ABI = [{{
+  name: 'exactInputSingle',
+  type: 'function',
+  stateMutability: 'payable',
+  inputs: [{{ name: 'params', type: 'tuple', components: [
+    {{name:'tokenIn',type:'address'}},
+    {{name:'tokenOut',type:'address'}},
+    {{name:'fee',type:'uint24'}},
+    {{name:'recipient',type:'address'}},
+    {{name:'amountIn',type:'uint256'}},
+    {{name:'amountOutMinimum',type:'uint256'}},
+    {{name:'sqrtPriceLimitX96',type:'uint160'}},
+  ]}}],
+  outputs: [{{name:'amountOut',type:'uint256'}}],
+}}];
+
+(async () => {{
+  try {{
+    const account = privateKeyToAccount('{pk}');
+    const walletClient = createWalletClient({{ account, chain: base, transport: http('{BASE_RPC}') }});
+    const publicClient = createPublicClient({{ chain: base, transport: http('{BASE_RPC}') }});
+
+    const USDC    = '{USDC_BASE}';
+    const ROUTER  = '{UNISWAP_V3_ROUTER}';
+    const TOKEN_OUT = '{token_out_addr}';
+    const amountIn = parseUnits('{usd_amount:.2f}', 6);
+
+    console.log('[swap-js] Swapping ${{amountIn}} USDC → ' + TOKEN_OUT);
+
+    const hash = await walletClient.writeContract({{
+      address: ROUTER,
+      abi: ROUTER_ABI,
+      functionName: 'exactInputSingle',
+      args: [{{
+        tokenIn: USDC,
+        tokenOut: TOKEN_OUT,
+        fee: 3000,
+        recipient: account.address,
+        amountIn,
+        amountOutMinimum: 0n,
+        sqrtPriceLimitX96: 0n,
+      }}],
+    }});
+
+    console.log('[swap-js] TX submitted: ' + hash);
+    await publicClient.waitForTransactionReceipt({{ hash }});
+    console.log('TX_HASH:' + hash);
+  }} catch(e) {{
+    console.error('SWAP_ERROR:' + e.message);
+    process.exit(1);
+  }}
+}})();
+"""
+
+    # Write to temp file so there are zero shell-escaping issues
+    tmp = None
     try:
-        data = swap_data['data']
-        if len(data) >= 66:
-            # amount0 is first int256 in data
-            amount0 = int(data[2:66], 16)
-            if amount0 > 2**255:
-                amount0 = amount0 - 2**256
-            # Very rough: assume USDC (6 decimals) scale
-            usd = abs(amount0) / 1e6
-            if usd < 1:
-                usd = abs(amount0) / 1e18 * 2000  # assume ETH
-            return min(usd, 1_000_000)  # cap sanity
-    except Exception:
-        pass
-    return 0
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.mjs', delete=False, dir='/tmp') as f:
+            f.write(script)
+            tmp = f.name
+
+        result = subprocess.run(
+            ['node', tmp],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd='/app',              # ← repo root where node_modules lives
+            env={**os.environ},
+        )
+        output = result.stdout + result.stderr
+        print(f'[swap] node output:\n{output[:500]}')
+
+        for line in output.split('\n'):
+            if line.startswith('TX_HASH:'):
+                return line.replace('TX_HASH:', '').strip()
+
+        print(f'[swap] No TX_HASH found in output — swap may have failed')
+        return None
+
+    except subprocess.TimeoutExpired:
+        print('[swap] node script timed out after 60s')
+        return None
+    except Exception as e:
+        print(f'[swap] error: {e}')
+        return None
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
 
 # ── MAIN EXECUTION LOOP ───────────────────────────────────────────────────────
 async def watch_and_copy(targets, budget_usd):
     """
     Main loop: poll target wallets every 30s, copy significant trades.
-    In a full production version this would use WebSocket subscriptions.
     """
     state = load_state()
     state['budget_usd'] = budget_usd
@@ -314,7 +586,6 @@ async def watch_and_copy(targets, budget_usd):
     print(f'[trader] Agent wallet: {SWARM_WALLET}')
     print(f'[trader] Private key: {"SET ✅" if AGENT_KEY else "MISSING ❌"}')
 
-    # Get starting block
     r = rpc_call('eth_blockNumber')
     last_block = hex(int(r['result'], 16) - 5) if r and 'result' in r else 'latest'
     check_interval = 30  # seconds
@@ -331,24 +602,26 @@ async def watch_and_copy(targets, budget_usd):
                 swaps = get_wallet_recent_swaps(addr, last_block)
 
                 for swap in swaps:
-                    usd_size = estimate_swap_usd(swap)
+                    usd_size = estimate_swap_usd(swap['data'])
                     if usd_size < MIN_COPY_BUY:
                         continue
 
-                    # Calculate proportional copy size
-                    copy_size = min(state['cash_remaining'], budget_usd * 0.25)  # max 25% per trade
+                    # Max 25% of budget per trade
+                    copy_size = min(state['cash_remaining'], budget_usd * 0.25)
                     if copy_size < 1:
                         tg_send(f'⚠️ Out of cash to copy. Total P&L: ${state["total_pnl"]:.2f}')
                         return state
 
-                    print(f'[trader] 🚨 Target {addr[:10]}... swapped ~${usd_size:.0f} — copying ${copy_size:.2f}')
+                    token_out = swap.get('token_out') or WETH_BASE
+                    print(f'[trader] 🚨 Target {addr[:10]}... swapped ~${usd_size:.0f} — copying ${copy_size:.2f} → {token_out[:10]}...')
 
-                    # Record the position
+                    # Record position
                     pos_id = swap['hash'][:12]
                     state['positions'][pos_id] = {
                         'target_wallet': addr,
                         'tx_hash': swap['hash'],
                         'pool': swap['pool'],
+                        'token_out': token_out,
                         'copy_usd': copy_size,
                         'entry_block': int(current_block, 16),
                         'entry_time': datetime.now().isoformat(),
@@ -356,130 +629,49 @@ async def watch_and_copy(targets, budget_usd):
                         'exit_usd': None,
                         'pnl': None,
                     }
-                    # Only decrement cash after confirmed swap execution
-                    # cash_remaining decremented below on success only
                     save_state(state)
 
                     tg_send(
-                        f'⚡ *Copy Trade Opened*\n\n'
+                        f'⚡ *Copy Trade Signal*\n\n'
                         f'Target: `{addr[:10]}...`\n'
                         f'Original size: ~${usd_size:.0f}\n'
                         f'Copy size: *${copy_size:.2f}*\n'
-                        f'Pool: `{swap["pool"][:10]}...`\n'
+                        f'Token out: `{token_out[:12]}...`\n'
                         f'Cash remaining: ${state["cash_remaining"]:.2f}\n\n'
-                        f'⚠️ Note: Execution requires private key. '
-                        f'Position tracked — swap pending confirmation.'
+                        f'Executing swap...'
                     )
 
-                    # --- ACTUAL SWAP EXECUTION ---
-                    # If private key is set, execute via ethers/viem call
+                    # Execute with real decoded tokenOut
                     if AGENT_KEY:
-                        exec_result = execute_swap(copy_size, swap['pool'], AGENT_KEY)
+                        exec_result = execute_swap(copy_size, token_out, AGENT_KEY)
                         if exec_result:
-                            state['cash_remaining'] -= copy_size  # only deduct on success
+                            state['cash_remaining'] -= copy_size
+                            state['positions'][pos_id]['tx_copy'] = exec_result
+                            state['positions'][pos_id]['status'] = 'filled'
                             save_state(state)
-                            tg_send(f'✅ Swap executed: {exec_result}\nCash remaining: ${state["cash_remaining"]:.2f}')
+                            tg_send(
+                                f'✅ *Swap Executed*\n\n'
+                                f'Tx: `{exec_result[:20]}...`\n'
+                                f'Token: `{token_out[:12]}...`\n'
+                                f'Cash remaining: ${state["cash_remaining"]:.2f}'
+                            )
                         else:
-                            # Remove the position since swap failed — don't waste budget
                             state['positions'].pop(pos_id, None)
                             save_state(state)
-                            tg_send(f'❌ Swap execution failed — budget preserved')
+                            tg_send(f'❌ Swap execution failed — budget preserved\nToken: `{token_out[:12]}...`')
                     else:
                         tg_send(f'⚠️ No private key — position tracked only, budget not decremented')
 
             last_block = current_block
 
-            # Status update every 10 iterations
             if iteration % 10 == 0:
-                print(f'[trader] Tick {iteration} | Cash: ${state["cash_remaining"]:.2f} | P&L: ${state["total_pnl"]:.2f} | Open: {len([p for p in state["positions"].values() if p["status"]=="open"])}')
+                open_count = len([p for p in state['positions'].values() if p.get('status') == 'open'])
+                print(f'[trader] Tick {iteration} | Cash: ${state["cash_remaining"]:.2f} | P&L: ${state["total_pnl"]:.2f} | Open: {open_count}')
 
         except Exception as e:
             print(f'[trader] Error: {e}')
 
         await asyncio.sleep(check_interval)
-
-def execute_swap(usd_amount, pool_address, private_key, token_out=None):
-    """
-    Execute actual swap via Uniswap v3: USDC → target token.
-    Approves Uniswap router for USDC first, then swaps.
-    Returns tx hash on success, None on failure.
-    """
-    token_out_addr = token_out or WETH_BASE
-    script = f"""
-const {{ createWalletClient, createPublicClient, http, parseUnits, maxUint256 }} = require('viem');
-const {{ base }} = require('viem/chains');
-const {{ privateKeyToAccount }} = require('viem/accounts');
-
-const ERC20_ABI = [
-  {{ name:'approve', type:'function', inputs:[{{name:'spender',type:'address'}},{{name:'amount',type:'uint256'}}], outputs:[{{name:'',type:'bool'}}] }},
-  {{ name:'allowance', type:'function', inputs:[{{name:'owner',type:'address'}},{{name:'spender',type:'address'}}], outputs:[{{name:'',type:'uint256'}}] }},
-];
-
-const ROUTER_ABI = [{{
-  name: 'exactInputSingle',
-  type: 'function',
-  inputs: [{{ name: 'params', type: 'tuple', components: [
-    {{name:'tokenIn',type:'address'}},
-    {{name:'tokenOut',type:'address'}},
-    {{name:'fee',type:'uint24'}},
-    {{name:'recipient',type:'address'}},
-    {{name:'amountIn',type:'uint256'}},
-    {{name:'amountOutMinimum',type:'uint256'}},
-    {{name:'sqrtPriceLimitX96',type:'uint160'}},
-  ]}}],
-  outputs: [{{name:'amountOut',type:'uint256'}}],
-}}];
-
-async function swap() {{
-  const account = privateKeyToAccount('{private_key}');
-  const walletClient = createWalletClient({{ account, chain: base, transport: http('{BASE_RPC}') }});
-  const publicClient = createPublicClient({{ chain: base, transport: http('{BASE_RPC}') }});
-
-  const USDC = '{USDC_BASE}';
-  const ROUTER = '{UNISWAP_V3_ROUTER}';
-  const amountIn = parseUnits('{usd_amount:.2f}', 6);
-
-  // Approval is pre-done via /api/copy-trader/approve — swap immediately
-  // Step 1: Execute swap USDC → token
-  const params = {{
-    tokenIn: USDC,
-    tokenOut: '{token_out_addr}',
-    fee: 3000,
-    recipient: account.address,
-    amountIn,
-    amountOutMinimum: 0n,
-    sqrtPriceLimitX96: 0n,
-  }};
-
-  try {{
-    const hash = await walletClient.writeContract({{
-      address: ROUTER, abi: ROUTER_ABI,
-      functionName: 'exactInputSingle',
-      args: [params],
-    }});
-    await publicClient.waitForTransactionReceipt({{ hash }});
-    console.log('TX_HASH:' + hash);
-  }} catch(e) {{
-    console.error('SWAP_ERROR:' + e.message);
-  }}
-}}
-swap().catch(e => console.error('FATAL:' + e.message));
-"""
-    try:
-        import subprocess
-        result = subprocess.run(
-            ['node', '-e', script],
-            capture_output=True, text=True, timeout=30,
-            cwd='/app'
-        )
-        output = result.stdout + result.stderr
-        for line in output.split('\n'):
-            if line.startswith('TX_HASH:'):
-                return line.replace('TX_HASH:', '').strip()
-        print(f'[swap] output: {output[:300]}')
-    except Exception as e:
-        print(f'[swap] error: {e}')
-    return None
 
 # ── STATUS REPORT ─────────────────────────────────────────────────────────────
 def show_status():
@@ -491,14 +683,14 @@ def show_status():
     print(f'Positions: {len(state.get("positions", {}))}')
     print(f'Targets: {len(state.get("targets", []))}')
     for t in state.get('targets', []):
-        print(f'  → {t["address"][:12]}... WR={t.get("win_rate",0):.0%}')
+        print(f'  → {t["address"][:12]}... WR={t.get("win_rate",0):.0%} src={t.get("source","?")}')
     print(f'Trades: {len(state.get("trades", []))}')
     for trade in state.get('trades', [])[-5:]:
         pnl = trade.get('pnl', 0) or 0
         print(f'  {trade.get("entry_time","")[:16]} ${trade.get("copy_usd",0):.2f} → P&L ${pnl:.2f}')
     return state
 
-# ── CLI ───────────────────────────────────────────────────────────────────────
+# ── CLI ────────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='GSB Copy Trader')
     parser.add_argument('--budget', type=float, default=10.0, help='Budget in USD (default: $10)')
@@ -516,7 +708,6 @@ if __name__ == '__main__':
     elif args.wallet:
         targets = [{'address': args.wallet, 'source': 'manual', 'win_rate': 0, 'trades': 0}]
     else:
-        # Load saved targets or hunt fresh
         state = load_state()
         targets = state.get('targets', [])
         if not targets:
