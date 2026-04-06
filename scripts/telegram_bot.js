@@ -33,12 +33,26 @@ function saveAlerts() { try { fs.writeFileSync(ALERTS_FILE, JSON.stringify(alert
 // ── Telegram API ──────────────────────────────────────────────────────────────
 async function tgRequest(method, body) {
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/${method}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return res.json();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    const json = await res.json();
+    if (!json.ok && json.error_code) {
+      console.error(`[bot] TG API error ${json.error_code}: ${json.description}`);
+    }
+    return json;
+  } catch(e) {
+    clearTimeout(timer);
+    if (e.name !== 'AbortError') console.error('[bot] fetch error:', e.message);
+    return { ok: false, result: [] };
+  }
 }
 
 async function sendMessage(chatId, text, extra = {}) {
@@ -250,11 +264,11 @@ async function poll() {
       const userId = msg.from.id;
       const text   = msg.text.trim();
       const parts  = text.split(/\s+/);
-      const cmd    = parts[0].toLowerCase().replace('@gsbswapbot', '');
+      const cmd    = parts[0].toLowerCase().replace('@gsb_swap_bot', '').replace('@gsbswapbot', '').split('@')[0];
       const arg1   = parts[1] || '';
       const arg2   = parts[2] || '';
 
-      console.log(`[bot] ${userId}: ${text}`);
+      console.log(`[bot] MSG from ${userId} in ${chatId}: ${text} | cmd=${cmd}`);
 
       try {
         if (cmd === '/start' || cmd === '/help') await handleStart(chatId, userId);
