@@ -3495,3 +3495,16 @@ server.listen(PORT, '0.0.0.0', async () => {
     console.error('[acp] initAcp crashed — dashboard still running, fire-job disabled:', err.message);
   }
 });
+
+// ── Telegram swap bot token test ──────────────────────────────────────────────
+app.get('/api/tg-test', requireOperator, async (req, res) => {
+  const token = process.env.TELEGRAM_SWAP_BOT_TOKEN;
+  if (!token) return res.json({ ok: false, error: 'TELEGRAM_SWAP_BOT_TOKEN not set', envKeys: Object.keys(process.env).filter(k => k.includes('TELEGRAM')) });
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    const data = await r.json();
+    res.json({ ok: data.ok, tokenLength: token.length, tokenPrefix: token.slice(0,8)+'...', bot: data.result });
+  } catch(e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
