@@ -292,10 +292,12 @@ async function handlePrice(chatId, input) {
   await sendMessage(chatId, msg);
 }
 
-async function handleTrending(chatId) {
-  await sendMessage(chatId, '⏳ Fetching trending Base tokens...');
-  const tokens = await getTrending();
-  const msg = `🔥 *Trending on Base*\n\n${tokens.map((t, i) => `${i+1}. ${t}`).join('\n')}\n\n_Updated every 5 minutes_`;
+async function handleTrending(chatId, chainInput = '') {
+  const chainArg = chainInput ? (CHAIN_IDS[chainInput.toLowerCase()] || 'base') : 'base';
+  const chainLabel2 = CHAIN_NAMES[chainArg] || 'Base';
+  await sendMessage(chatId, `⏳ Fetching trending ${chainLabel2} tokens...`);
+  const tokens = await getTrending(chainArg);
+  const msg = `🔥 *Trending on ${chainLabel2}*\n\n${tokens.map((t, i) => `${i+1}. ${t}`).join('\n')}\n\n_Updated every 5 minutes_`;
   await sendMessage(chatId, msg);
 }
 
@@ -385,7 +387,7 @@ async function poll() {
         if (cmd === '/start' || cmd === '/help') await handleStart(chatId, userId);
         else if (cmd === '/analyze') await handleAnalyze(chatId, arg1);
         else if (cmd === '/price')   await handlePrice(chatId, arg1);
-        else if (cmd === '/trending') await handleTrending(chatId);
+        else if (cmd === '/trending') await handleTrending(chatId, arg1);
         else if (cmd === '/buy')     await handleBuy(chatId, arg1, arg2);
         else if (cmd === '/alert')   await handleAlert(chatId, userId, arg1, arg2);
         else if (text.startsWith('/')) await sendMessage(chatId, '❓ Unknown command. Use /help to see all commands.');
