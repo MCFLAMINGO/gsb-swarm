@@ -19,7 +19,7 @@ const path   = require('path');
 const fs     = require('fs');
 const { execSync } = require('child_process');
 
-const BOT_TOKEN    = process.env.TELEGRAM_SWAP_BOT_TOKEN;
+const BOT_TOKEN    = process.env.TELEGRAM_SWAP_BOT;
 const GSB_TREASURY = '0x8E223841aA396d36a6727EfcEAFC61d691692a37';
 const ALERTS_FILE  = '/tmp/gsb-bot-alerts.json';
 
