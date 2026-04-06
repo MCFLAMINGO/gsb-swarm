@@ -345,10 +345,10 @@
       <div class="card-title">You Receive</div>
       <div class="input-row">
         <div class="input-wrap" style="flex:2">
-          <input type="text" id="amount-out" placeholder="0.00" readonly style="color:var(--muted)">
+          <input type="text" id="amount-out" placeholder="0.00" readonly style="color:var(--accent);font-weight:700;font-size:17px">
         </div>
         <div style="flex:1; position:relative">
-          <input id="token-out" placeholder="FETCHR" oninput="searchToken(this.value)" autocomplete="off">
+          <input id="token-out" value="FETCHR" oninput="searchToken(this.value)" autocomplete="off">
           <div id="token-search-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;z-index:10;max-height:200px;overflow-y:auto"></div>
         </div>
       </div>
@@ -566,6 +566,7 @@ function onWalletConnected() {
 
 async function saveWallet() {
   try {
+    localStorage.setItem(`gsb_wallet_${userId}`, walletAddress);
     await fetch(`${API_BASE}/api/swap/wallet`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -665,7 +666,7 @@ async function updateQuote() {
         const outAmount = netAmount / d.price;
         const minOut = outAmount * (1 - parseFloat(document.getElementById('slippage-select').value) / 100);
 
-        document.getElementById('amount-out').value = outAmount.toFixed(6);
+        document.getElementById('amount-out').value = outAmount.toFixed(2) + ' ' + tokenOut;
         document.getElementById('q-price').textContent = `$${d.price.toFixed(8)}`;
         const chg = d.change24h || 0;
         document.getElementById('q-change').innerHTML = `<span class="${chg>=0?'change-pos':'change-neg'}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>`;
@@ -673,8 +674,8 @@ async function updateQuote() {
         document.getElementById('q-min').textContent = `${minOut.toFixed(6)} ${tokenOut}`;
         document.getElementById('quote-card').style.display = 'block';
 
-        swapBtn.disabled = !walletAddress;
-        swapBtn.textContent = walletAddress ? `Swap ${tokenIn} → ${tokenOut}` : 'Connect Wallet to Swap';
+        swapBtn.disabled = false;
+        swapBtn.textContent = walletAddress ? `Swap ${tokenIn} → ${tokenOut}` : `Get Swap Link`;
       } else {
         swapBtn.textContent = 'Token not found';
         document.getElementById('quote-card').style.display = 'none';
@@ -864,6 +865,8 @@ window.addEventListener('load', () => {
     walletAddress = saved;
     onWalletConnected();
   }
+  // Auto-load FETCHR price on open
+  setTimeout(() => updateQuote(), 500);
   // Check for ethereum provider
   if (window.ethereum) {
     window.ethereum.on('accountsChanged', (accounts) => {
