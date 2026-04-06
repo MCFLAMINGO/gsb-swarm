@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>GSB Swap</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: #0d0d0d;
+      --surface: #1a1a1a;
+      --border: #2a2a2a;
+      --accent: #00ff88;
+      --accent2: #7c3aed;
+      --text: #f0f0f0;
+      --muted: #666;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 15px;
+      min-height: 100vh;
+      padding-bottom: 80px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .logo { font-weight: 700; font-size: 18px; color: var(--accent); }
+    .wallet-badge {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 6px 12px;
+      font-size: 12px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .wallet-badge.connected { color: var(--accent); border-color: var(--accent); }
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+    }
+    .tab {
+      flex: 1;
+      padding: 12px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .panel { display: none; padding: 16px; }
+    .panel.active { display: block; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .card-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+    }
+    .input-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .input-wrap { flex: 1; position: relative; }
+    input, select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      color: var(--text);
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus, select:focus { border-color: var(--accent); }
+    select option { background: var(--bg); }
+    .input-label {
+      position: absolute;
+      top: -8px;
+      left: 10px;
+      background: var(--surface);
+      padding: 0 4px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .chain-badge {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 13px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .price-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .price-val { color: var(--text); font-weight: 600; }
+    .change-pos { color: var(--accent); }
+    .change-neg { color: var(--red); }
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border-radius: 10px;
+      border: none;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #000; }
+    .btn-secondary { background: var(--accent2); color: #fff; }
+    .btn-danger { background: var(--red); color: #fff; }
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .fee-note {
+      text-align: center;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+    .dca-item {
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .dca-info { flex: 1; }
+    .dca-token { font-weight: 700; font-size: 15px; }
+    .dca-detail { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .dca-status {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 20px;
+      margin-right: 8px;
+    }
+    .dca-status.active { background: rgba(0,255,136,0.1); color: var(--accent); }
+    .dca-status.paused { background: rgba(245,158,11,0.1); color: var(--yellow); }
+    .dca-stop { background: none; border: none; color: var(--red); cursor: pointer; font-size: 18px; padding: 4px; }
+    .approve-banner {
+      background: rgba(124,58,237,0.15);
+      border: 1px solid var(--accent2);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .approve-banner p { font-size: 13px; color: #c4b5fd; margin-bottom: 10px; }
+    .connect-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+      text-align: center;
+    }
+    .connect-icon { font-size: 48px; margin-bottom: 16px; }
+    .connect-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+    .connect-sub { font-size: 14px; color: var(--muted); margin-bottom: 24px; line-height: 1.5; }
+    .wallets-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      width: 100%;
+      max-width: 320px;
+    }
+    .wallet-option {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 10px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    .wallet-option:hover { border-color: var(--accent); }
+    .wallet-option .w-icon { font-size: 28px; margin-bottom: 6px; }
+    .wallet-option .w-name { font-size: 12px; font-weight: 600; }
+    .toast {
+      position: fixed;
+      bottom: 90px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 13px;
+      z-index: 100;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .toast.show { opacity: 1; }
+    .toast.success { border-color: var(--accent); color: var(--accent); }
+    .toast.error { border-color: var(--red); color: var(--red); }
+    .bottom-nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      z-index: 50;
+    }
+    .nav-btn {
+      flex: 1;
+      padding: 12px 8px;
+      text-align: center;
+      cursor: pointer;
+      font-size: 11px;
+      color: var(--muted);
+      transition: color 0.2s;
+    }
+    .nav-btn.active { color: var(--accent); }
+    .nav-btn svg { display: block; margin: 0 auto 3px; }
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid rgba(0,0,0,0.3);
+      border-top-color: #000;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .stat-card {
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+    .stat-val { font-size: 18px; font-weight: 700; }
+    .stat-label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">⚡ GSB Swap</div>
+  <div class="wallet-badge" id="wallet-badge" onclick="connectWallet()">Connect Wallet</div>
+</div>
+
+<div id="connect-screen" class="connect-screen" style="display:none">
+  <div class="connect-icon">🔗</div>
+  <div class="connect-title">Connect Your Wallet</div>
+  <div class="connect-sub">Connect once. Swap forever.<br>Non-custodial. Your keys, your tokens.</div>
+  <div class="wallets-grid">
+    <div class="wallet-option" onclick="connectWith('metamask')">
+      <div class="w-icon">🦊</div>
+      <div class="w-name">MetaMask</div>
+    </div>
+    <div class="wallet-option" onclick="connectWith('coinbase')">
+      <div class="w-icon">🔵</div>
+      <div class="w-name">Coinbase</div>
+    </div>
+    <div class="wallet-option" onclick="connectWith('walletconnect')">
+      <div class="w-icon">🔷</div>
+      <div class="w-name">WalletConnect</div>
+    </div>
+    <div class="wallet-option" onclick="connectWith('rainbow')">
+      <div class="w-icon">🌈</div>
+      <div class="w-name">Rainbow</div>
+    </div>
+  </div>
+</div>
+
+<div id="app-screen">
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('swap')">Swap</div>
+    <div class="tab" onclick="switchTab('dca')">DCA</div>
+    <div class="tab" onclick="switchTab('portfolio')">Portfolio</div>
+  </div>
+
+  <!-- SWAP PANEL -->
+  <div class="panel active" id="panel-swap">
+    <div id="approve-banner" class="approve-banner" style="display:none">
+      <p>Approve USDC once to enable instant swaps and DCA</p>
+      <button class="btn btn-secondary" onclick="approveUSDC()">Approve USDC Spending</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">You Pay</div>
+      <div class="input-row">
+        <div class="input-wrap" style="flex:2">
+          <input type="number" id="amount-in" placeholder="0.00" step="0.01" oninput="updateQuote()">
+        </div>
+        <select id="token-in" onchange="updateQuote()" style="flex:1">
+          <option value="USDC">USDC</option>
+          <option value="ETH">ETH</option>
+          <option value="VIRTUAL">VIRTUAL</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="text-align:center; margin: -4px 0; position:relative; z-index:1">
+      <button onclick="flipTokens()" style="background:var(--surface);border:1px solid var(--border);border-radius:50%;width:36px;height:36px;cursor:pointer;font-size:18px">⇅</button>
+    </div>
+
+    <div class="card" style="margin-top:-4px">
+      <div class="card-title">You Receive</div>
+      <div class="input-row">
+        <div class="input-wrap" style="flex:2">
+          <input type="text" id="amount-out" placeholder="0.00" readonly style="color:var(--muted)">
+        </div>
+        <div style="flex:1; position:relative">
+          <input id="token-out" placeholder="FETCHR" oninput="searchToken(this.value)" autocomplete="off">
+          <div id="token-search-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;z-index:10;max-height:200px;overflow-y:auto"></div>
+        </div>
+      </div>
+      <div id="chain-selector-row" class="input-row">
+        <div class="input-wrap">
+          <span class="input-label">Chain</span>
+          <select id="chain-select" onchange="updateQuote()">
+            <option value="base">Base</option>
+            <option value="ethereum">Ethereum</option>
+            <option value="solana">Solana</option>
+            <option value="bsc">BSC</option>
+            <option value="arbitrum">Arbitrum</option>
+            <option value="polygon">Polygon</option>
+          </select>
+        </div>
+        <div class="input-wrap">
+          <span class="input-label">Slippage</span>
+          <select id="slippage-select">
+            <option value="0.5">0.5%</option>
+            <option value="1" selected>1%</option>
+            <option value="2">2%</option>
+            <option value="5">5%</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="quote-card" style="display:none">
+      <div class="price-row"><span>Price</span><span class="price-val" id="q-price">—</span></div>
+      <div class="price-row"><span>24h Change</span><span class="price-val" id="q-change">—</span></div>
+      <div class="price-row"><span>Price Impact</span><span class="price-val" id="q-impact">~0.1%</span></div>
+      <div class="price-row"><span>Fee (0.5%)</span><span class="price-val" id="q-fee">—</span></div>
+      <div class="price-row"><span>Min Received</span><span class="price-val" id="q-min">—</span></div>
+    </div>
+
+    <button class="btn btn-primary" id="swap-btn" onclick="executeSwap()" disabled>Enter amount</button>
+    <p class="fee-note">0.5% fee • 50% buys $GSB • Powered by GSB Swarm</p>
+  </div>
+
+  <!-- DCA PANEL -->
+  <div class="panel" id="panel-dca">
+    <div class="card">
+      <div class="card-title">New DCA Order</div>
+      <div class="input-row">
+        <div class="input-wrap">
+          <span class="input-label">Token</span>
+          <input type="text" id="dca-token" placeholder="FETCHR" autocomplete="off">
+        </div>
+        <div class="input-wrap">
+          <span class="input-label">Chain</span>
+          <select id="dca-chain">
+            <option value="base">Base</option>
+            <option value="ethereum">Ethereum</option>
+            <option value="solana">Solana</option>
+            <option value="bsc">BSC</option>
+            <option value="arbitrum">Arbitrum</option>
+          </select>
+        </div>
+      </div>
+      <div class="input-row">
+        <div class="input-wrap">
+          <span class="input-label">Amount (USDC)</span>
+          <input type="number" id="dca-amount" placeholder="10" min="1">
+        </div>
+        <div class="input-wrap">
+          <span class="input-label">Frequency</span>
+          <select id="dca-frequency">
+            <option value="hourly">Hourly</option>
+            <option value="daily" selected>Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </div>
+      </div>
+      <div class="input-row">
+        <div class="input-wrap">
+          <span class="input-label">Max Price (optional)</span>
+          <input type="number" id="dca-max-price" placeholder="Skip if above price" step="any">
+        </div>
+        <div class="input-wrap">
+          <span class="input-label">Total Orders</span>
+          <input type="number" id="dca-orders" placeholder="∞ (unlimited)" min="1">
+        </div>
+      </div>
+      <button class="btn btn-secondary" onclick="createDCA()">Start DCA</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Active Orders</div>
+      <div id="dca-list">
+        <div style="text-align:center;color:var(--muted);padding:20px;font-size:13px">No active DCA orders</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">DCA Stats</div>
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-val" id="dca-total-invested">$0</div>
+          <div class="stat-label">Total Invested</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="dca-orders-count">0</div>
+          <div class="stat-label">Orders Executed</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="dca-avg-price">—</div>
+          <div class="stat-label">Avg Buy Price</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="dca-pnl" style="color:var(--accent)">+0%</div>
+          <div class="stat-label">DCA P&L</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PORTFOLIO PANEL -->
+  <div class="panel" id="panel-portfolio">
+    <div class="card">
+      <div class="card-title">Your Holdings</div>
+      <div id="portfolio-list">
+        <div style="text-align:center;color:var(--muted);padding:20px;font-size:13px">Connect wallet to view portfolio</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Recent Swaps</div>
+      <div id="swap-history">
+        <div style="text-align:center;color:var(--muted);padding:20px;font-size:13px">No swaps yet</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="bottom-nav">
+  <div class="nav-btn active" onclick="switchTab('swap')">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+    Swap
+  </div>
+  <div class="nav-btn" onclick="switchTab('dca')">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    DCA
+  </div>
+  <div class="nav-btn" onclick="switchTab('portfolio')">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+    Portfolio
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+const API_BASE = 'https://gsb-swarm-production.up.railway.app';
+const userId = tg?.initDataUnsafe?.user?.id || 'dev_user';
+const userName = tg?.initDataUnsafe?.user?.username || 'user';
+
+let walletAddress = null;
+let isApproved = false;
+let quoteTimer = null;
+let dcaOrders = [];
+
+// ── Wallet Connection ─────────────────────────────────────────────────────────
+function connectWallet() {
+  document.getElementById('connect-screen').style.display = 'flex';
+  document.getElementById('app-screen').style.display = 'none';
+}
+
+async function connectWith(provider) {
+  if (provider === 'metamask' && window.ethereum) {
+    try {
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      walletAddress = accounts[0];
+      onWalletConnected();
+    } catch(e) {
+      showToast('Connection cancelled', 'error');
+    }
+  } else if (provider === 'coinbase' && window.ethereum?.isCoinbaseWallet) {
+    try {
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      walletAddress = accounts[0];
+      onWalletConnected();
+    } catch(e) {
+      showToast('Connection cancelled', 'error');
+    }
+  } else {
+    // Fallback: deep link to wallet
+    const links = {
+      metamask: 'https://metamask.app.link/dapp/gsb-swarm-production.up.railway.app/miniapp/',
+      coinbase: 'https://go.cb-w.com/dapp?cb_url=' + encodeURIComponent(location.href),
+      walletconnect: 'https://walletconnect.com/',
+      rainbow: 'https://rnbwapp.com/wc?uri=' + encodeURIComponent(location.href),
+    };
+    window.open(links[provider] || links.metamask, '_blank');
+  }
+}
+
+function onWalletConnected() {
+  document.getElementById('connect-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'block';
+  const short = walletAddress.slice(0,6) + '...' + walletAddress.slice(-4);
+  const badge = document.getElementById('wallet-badge');
+  badge.textContent = short;
+  badge.classList.add('connected');
+  // Save wallet server-side
+  saveWallet();
+  // Check USDC approval
+  checkApproval();
+  // Load DCA orders and portfolio
+  loadDCAOrders();
+  loadPortfolio();
+}
+
+async function saveWallet() {
+  try {
+    await fetch(`${API_BASE}/api/swap/wallet`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, userName, walletAddress }),
+    });
+  } catch {}
+}
+
+async function checkApproval() {
+  try {
+    const r = await fetch(`${API_BASE}/api/swap/approval-status?wallet=${walletAddress}`);
+    const d = await r.json();
+    isApproved = d.approved;
+    document.getElementById('approve-banner').style.display = isApproved ? 'none' : 'block';
+  } catch {
+    document.getElementById('approve-banner').style.display = 'block';
+  }
+}
+
+async function approveUSDC() {
+  if (!walletAddress) return showToast('Connect wallet first', 'error');
+  try {
+    const r = await fetch(`${API_BASE}/api/swap/approve-link?wallet=${walletAddress}`);
+    const d = await r.json();
+    window.open(d.url, '_blank');
+    showToast('Complete approval in your wallet', 'success');
+  } catch(e) {
+    showToast('Error generating approval link', 'error');
+  }
+}
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.tab, .panel, .nav-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('panel-' + tab).classList.add('active');
+  document.querySelectorAll('.tab')[['swap','dca','portfolio'].indexOf(tab)].classList.add('active');
+  document.querySelectorAll('.nav-btn')[['swap','dca','portfolio'].indexOf(tab)].classList.add('active');
+}
+
+// ── Token search ──────────────────────────────────────────────────────────────
+let searchTimer = null;
+function searchToken(q) {
+  clearTimeout(searchTimer);
+  const results = document.getElementById('token-search-results');
+  if (!q || q.length < 2) { results.style.display = 'none'; return; }
+  searchTimer = setTimeout(async () => {
+    try {
+      const chain = document.getElementById('chain-select').value;
+      const r = await fetch(`${API_BASE}/api/swap/search?q=${encodeURIComponent(q)}&chain=${chain}`);
+      const d = await r.json();
+      if (!d.tokens?.length) { results.style.display = 'none'; return; }
+      results.innerHTML = d.tokens.slice(0,5).map(t =>
+        `<div onclick="selectToken('${t.symbol}','${t.address}')" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px">
+          <span style="font-weight:700">${t.symbol}</span>
+          <span style="color:var(--muted);margin-left:6px">${t.name}</span>
+          ${t.change24h ? `<span style="float:right;color:${t.change24h>0?'var(--accent)':'var(--red)'}">${t.change24h>0?'+':''}${t.change24h.toFixed(1)}%</span>` : ''}
+        </div>`
+      ).join('');
+      results.style.display = 'block';
+    } catch {}
+  }, 300);
+}
+
+function selectToken(symbol, address) {
+  document.getElementById('token-out').value = symbol;
+  document.getElementById('token-search-results').style.display = 'none';
+  updateQuote();
+}
+
+// ── Quote ─────────────────────────────────────────────────────────────────────
+async function updateQuote() {
+  clearTimeout(quoteTimer);
+  const amount = parseFloat(document.getElementById('amount-in').value);
+  const tokenOut = document.getElementById('token-out').value;
+  const swapBtn = document.getElementById('swap-btn');
+
+  if (!amount || !tokenOut) {
+    swapBtn.disabled = true;
+    swapBtn.textContent = 'Enter amount';
+    document.getElementById('quote-card').style.display = 'none';
+    return;
+  }
+
+  swapBtn.disabled = true;
+  swapBtn.innerHTML = '<span class="spinner"></span>Getting quote...';
+
+  quoteTimer = setTimeout(async () => {
+    try {
+      const chain = document.getElementById('chain-select').value;
+      const tokenIn = document.getElementById('token-in').value;
+      const r = await fetch(`${API_BASE}/api/swap/quote?tokenIn=${tokenIn}&tokenOut=${tokenOut}&amount=${amount}&chain=${chain}`);
+      const d = await r.json();
+
+      if (d.ok && d.price) {
+        const fee = amount * 0.005;
+        const netAmount = amount - fee;
+        const outAmount = netAmount / d.price;
+        const minOut = outAmount * (1 - parseFloat(document.getElementById('slippage-select').value) / 100);
+
+        document.getElementById('amount-out').value = outAmount.toFixed(6);
+        document.getElementById('q-price').textContent = `$${d.price.toFixed(8)}`;
+        const chg = d.change24h || 0;
+        document.getElementById('q-change').innerHTML = `<span class="${chg>=0?'change-pos':'change-neg'}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>`;
+        document.getElementById('q-fee').textContent = `$${fee.toFixed(4)} USDC`;
+        document.getElementById('q-min').textContent = `${minOut.toFixed(6)} ${tokenOut}`;
+        document.getElementById('quote-card').style.display = 'block';
+
+        swapBtn.disabled = !walletAddress;
+        swapBtn.textContent = walletAddress ? `Swap ${tokenIn} → ${tokenOut}` : 'Connect Wallet to Swap';
+      } else {
+        swapBtn.textContent = 'Token not found';
+        document.getElementById('quote-card').style.display = 'none';
+      }
+    } catch {
+      swapBtn.disabled = false;
+      swapBtn.textContent = 'Swap';
+    }
+  }, 500);
+}
+
+function flipTokens() {
+  const inSel = document.getElementById('token-in');
+  const outIn = document.getElementById('token-out');
+  const tmp = inSel.value;
+  inSel.value = outIn.value;
+  outIn.value = tmp;
+  updateQuote();
+}
+
+// ── Execute Swap ──────────────────────────────────────────────────────────────
+async function executeSwap() {
+  if (!walletAddress) return connectWallet();
+  const amount = parseFloat(document.getElementById('amount-in').value);
+  const tokenIn = document.getElementById('token-in').value;
+  const tokenOut = document.getElementById('token-out').value;
+  const chain = document.getElementById('chain-select').value;
+  const slippage = document.getElementById('slippage-select').value;
+
+  const btn = document.getElementById('swap-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Preparing swap...';
+
+  try {
+    const r = await fetch(`${API_BASE}/api/swap/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, walletAddress, tokenIn, tokenOut, amount, chain, slippage }),
+    });
+    const d = await r.json();
+
+    if (d.ok && d.txUrl) {
+      showToast('✅ Swap submitted!', 'success');
+      window.open(d.txUrl, '_blank');
+      // Add to history
+      addSwapHistory(tokenIn, tokenOut, amount, d.txUrl);
+    } else if (d.uniswapUrl) {
+      // Fallback: open Uniswap with pre-filled params
+      window.open(d.uniswapUrl, '_blank');
+      showToast('Opening Uniswap...', 'success');
+    } else {
+      showToast(d.error || 'Swap failed', 'error');
+    }
+  } catch(e) {
+    showToast('Network error', 'error');
+  }
+  btn.disabled = false;
+  btn.textContent = `Swap ${tokenIn} → ${tokenOut}`;
+}
+
+function addSwapHistory(tokenIn, tokenOut, amount, txUrl) {
+  const history = document.getElementById('swap-history');
+  const time = new Date().toLocaleTimeString();
+  history.innerHTML = `<div style="padding:10px;border-bottom:1px solid var(--border);font-size:13px">
+    <span style="color:var(--accent)">✅</span> ${amount} ${tokenIn} → ${tokenOut}
+    <span style="float:right;color:var(--muted)">${time}</span>
+    ${txUrl ? `<br><a href="${txUrl}" target="_blank" style="color:var(--accent);font-size:11px">View tx ↗</a>` : ''}
+  </div>` + history.innerHTML;
+}
+
+// ── DCA ───────────────────────────────────────────────────────────────────────
+async function createDCA() {
+  if (!walletAddress) return showToast('Connect wallet first', 'error');
+  const token = document.getElementById('dca-token').value.trim().toUpperCase();
+  const amount = parseFloat(document.getElementById('dca-amount').value);
+  const frequency = document.getElementById('dca-frequency').value;
+  const chain = document.getElementById('dca-chain').value;
+  const maxPrice = parseFloat(document.getElementById('dca-max-price').value) || null;
+  const totalOrders = parseInt(document.getElementById('dca-orders').value) || null;
+
+  if (!token || !amount) return showToast('Enter token and amount', 'error');
+
+  try {
+    const r = await fetch(`${API_BASE}/api/swap/dca/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, walletAddress, token, amount, frequency, chain, maxPrice, totalOrders }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      showToast(`✅ DCA started — ${token} ${frequency}`, 'success');
+      loadDCAOrders();
+    } else {
+      showToast(d.error || 'Failed to create DCA', 'error');
+    }
+  } catch { showToast('Network error', 'error'); }
+}
+
+async function loadDCAOrders() {
+  if (!walletAddress) return;
+  try {
+    const r = await fetch(`${API_BASE}/api/swap/dca/list?userId=${userId}&wallet=${walletAddress}`);
+    const d = await r.json();
+    dcaOrders = d.orders || [];
+    renderDCAOrders();
+    updateDCAStats();
+  } catch {}
+}
+
+function renderDCAOrders() {
+  const list = document.getElementById('dca-list');
+  if (!dcaOrders.length) {
+    list.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;font-size:13px">No active DCA orders</div>';
+    return;
+  }
+  list.innerHTML = dcaOrders.map(o => `
+    <div class="dca-item">
+      <div class="dca-info">
+        <div class="dca-token">${o.token}</div>
+        <div class="dca-detail">$${o.amount} USDC · ${o.frequency} · ${o.chain}${o.executedCount ? ` · ${o.executedCount} fills` : ''}</div>
+        ${o.maxPrice ? `<div class="dca-detail">Max price: $${o.maxPrice}</div>` : ''}
+      </div>
+      <span class="dca-status ${o.status === 'active' ? 'active' : 'paused'}">${o.status}</span>
+      <button class="dca-stop" onclick="stopDCA('${o.id}')">✕</button>
+    </div>
+  `).join('');
+}
+
+function updateDCAStats() {
+  const totalInvested = dcaOrders.reduce((s, o) => s + (o.executedCount || 0) * o.amount, 0);
+  const totalOrders = dcaOrders.reduce((s, o) => s + (o.executedCount || 0), 0);
+  document.getElementById('dca-total-invested').textContent = `$${totalInvested.toFixed(0)}`;
+  document.getElementById('dca-orders-count').textContent = totalOrders;
+}
+
+async function stopDCA(orderId) {
+  try {
+    const r = await fetch(`${API_BASE}/api/swap/dca/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, orderId }),
+    });
+    const d = await r.json();
+    if (d.ok) { showToast('DCA stopped', 'success'); loadDCAOrders(); }
+  } catch {}
+}
+
+// ── Portfolio ─────────────────────────────────────────────────────────────────
+async function loadPortfolio() {
+  if (!walletAddress) return;
+  try {
+    const r = await fetch(`${API_BASE}/api/swap/portfolio?wallet=${walletAddress}`);
+    const d = await r.json();
+    const list = document.getElementById('portfolio-list');
+    if (!d.tokens?.length) {
+      list.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;font-size:13px">No tokens found</div>';
+      return;
+    }
+    list.innerHTML = d.tokens.map(t => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-weight:700">${t.symbol}</div>
+          <div style="font-size:12px;color:var(--muted)">${t.balance} tokens</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700">$${t.valueUsd?.toFixed(2) || '—'}</div>
+          <div style="font-size:12px;color:${(t.change24h||0)>=0?'var(--accent)':'var(--red)'}">${(t.change24h||0)>=0?'+':''}${(t.change24h||0).toFixed(1)}%</div>
+        </div>
+      </div>
+    `).join('');
+  } catch {}
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast show ${type}`;
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  // Check if wallet previously connected (stored in localStorage)
+  const saved = localStorage.getItem(`gsb_wallet_${userId}`);
+  if (saved) {
+    walletAddress = saved;
+    onWalletConnected();
+  }
+  // Check for ethereum provider
+  if (window.ethereum) {
+    window.ethereum.on('accountsChanged', (accounts) => {
+      if (accounts.length > 0) { walletAddress = accounts[0]; onWalletConnected(); }
+    });
+  }
+});
+</script>
+</body>
+</html>
