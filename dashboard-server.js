@@ -3466,7 +3466,7 @@ server.listen(PORT, '0.0.0.0', async () => {
   console.log(`[gsb-dashboard] Listening on port ${PORT}`);
 
   // Start Telegram bot as background process
-  if (process.env.TELEGRAM_SWAP_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN) {
+  if (process.env.TELEGRAM_SWAP_BOT || process.env.TELEGRAM_BOT_TOKEN) {
     try {
       const { spawn: spawnBot } = require('child_process');
       const botPath = path.join(__dirname, 'scripts', 'telegram_bot.js');
@@ -3498,8 +3498,8 @@ server.listen(PORT, '0.0.0.0', async () => {
 
 // ── Telegram swap bot token test ──────────────────────────────────────────────
 app.get('/api/tg-test', requireOperator, async (req, res) => {
-  const token = process.env.TELEGRAM_SWAP_BOT_TOKEN;
-  if (!token) return res.json({ ok: false, error: 'TELEGRAM_SWAP_BOT_TOKEN not set', envKeys: Object.keys(process.env).filter(k => k.includes('TELEGRAM')) });
+  const token = process.env.TELEGRAM_SWAP_BOT;
+  if (!token) return res.json({ ok: false, error: 'TELEGRAM_SWAP_BOT not set', envKeys: Object.keys(process.env).filter(k => k.includes('TELEGRAM')) });
   try {
     const r = await fetch(`https://api.telegram.org/bot${token}/getMe`);
     const data = await r.json();
