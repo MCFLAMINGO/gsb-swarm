@@ -3388,11 +3388,39 @@ app.post('/api/swap/execute', express.json(), async (req, res) => {
     const chainParams = { base: 'base', ethereum: 'mainnet', solana: 'solana', bsc: 'bnb', arbitrum: 'arbitrum', polygon: 'polygon' };
     const chainParam = chainParams[chain] || 'base';
     const usdcAddress = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-    const uniswapUrl = `https://app.uniswap.org/swap?chain=${chainParam}&inputCurrency=${usdcAddress}&outputCurrency=${priceData.contractAddress}&exactAmount=${amount}&exactField=input`;
-    res.json({ ok: true, uniswapUrl, price: priceData.price, contractAddress: priceData.contractAddress });
+    // ── GSB fee: 0.5% → Swarm wallet (Uniswap native fee-on-swap) ──────────────
+    const GSB_SWARM_WALLET = '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
+    const FEE_BPS = 50; // 0.5%
+    const uniswapUrl = `https://app.uniswap.org/swap?chain=${chainParam}&inputCurrency=${usdcAddress}&outputCurrency=${priceData.contractAddress}&exactAmount=${amount}&exactField=input&feeRecipient=${GSB_SWARM_WALLET}&feeBps=${FEE_BPS}`;
+
+    // Log fee event for tracking
+    const feeUsd = (parseFloat(amount) * FEE_BPS / 10000).toFixed(4);
+    console.log(`[fee] swap ${tokenIn}→${tokenOut} $${amount} | fee ~$${feeUsd} | wallet ${walletAddress || 'anon'} | chain ${chain}`);
+    if (!global.feeLog) global.feeLog = [];
+    global.feeLog.push({ ts: new Date().toISOString(), tokenIn, tokenOut, amount: parseFloat(amount), feeUsd: parseFloat(feeUsd), walletAddress, chain });
+    if (global.feeLog.length > 500) global.feeLog.shift();
+
+    res.json({ ok: true, uniswapUrl, price: priceData.price, contractAddress: priceData.contractAddress, feeUsd: parseFloat(feeUsd), feeRecipient: GSB_SWARM_WALLET });
   } catch(e) {
     res.status(500).json({ ok: false, error: e.message });
   }
+});
+
+// ── Fee stats ────────────────────────────────────────────────────────────────
+app.get('/api/fee-stats', requireOperator, (req, res) => {
+  const log = global.feeLog || [];
+  const totalFees = log.reduce((s, e) => s + (e.feeUsd || 0), 0);
+  const totalSwaps = log.length;
+  const totalVolume = log.reduce((s, e) => s + (e.amount || 0), 0);
+  res.json({
+    ok: true,
+    totalSwaps,
+    totalVolumeUsd: totalVolume.toFixed(2),
+    totalFeesUsd: totalFees.toFixed(4),
+    feeRecipient: '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d',
+    feeBps: 50,
+    recent: log.slice(-20).reverse(),
+  });
 });
 
 // ── Approval link ─────────────────────────────────────────────────────────────
