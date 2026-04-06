@@ -3354,9 +3354,10 @@ server.listen(PORT, '0.0.0.0', async () => {
   // Start Telegram bot as background process
   if (process.env.TELEGRAM_SWAP_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN) {
     try {
+      const { spawn: spawnBot } = require('child_process');
       const botPath = path.join(__dirname, 'scripts', 'telegram_bot.js');
       if (fs.existsSync(botPath)) {
-        const botProc = spawn('node', [botPath], {
+        const botProc = spawnBot('node', [botPath], {
           cwd: __dirname,
           env: { ...process.env },
           stdio: ['ignore', 'pipe', 'pipe'],
