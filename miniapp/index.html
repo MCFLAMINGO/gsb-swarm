@@ -999,13 +999,16 @@ async function executeSwap() {
     });
     const d = await r.json();
 
-    if (d.ok && d.txUrl) {
-      showToast('✅ Swap submitted!', 'success');
+    if (d.ok && d.solana && d.transaction) {
+      // ── Solana: sign the Jupiter transaction with Phantom / Solflare ──────────
+      await executeSolanaSwap(d, tokenIn, tokenOut, amount);
+    } else if (d.ok && d.txUrl) {
+      showToast('Swap submitted!', 'success');
       window.open(d.txUrl, '_blank');
       addSwapHistory(tokenIn, tokenOut, amount, d.txUrl);
-    } else if (d.uniswapUrl) {
-      window.open(d.uniswapUrl, '_blank');
+    } else if (d.ok && d.uniswapUrl) {
       const chainSel = document.getElementById('chain-select').value;
+      window.open(d.uniswapUrl, '_blank');
       showToast(chainSel === 'solana' ? 'Opening Jupiter...' : 'Opening Uniswap...', 'success');
     } else {
       showToast(d.error || 'Swap failed', 'error');
@@ -1015,6 +1018,64 @@ async function executeSwap() {
   }
   btn.disabled = false;
   btn.textContent = `Swap ${document.getElementById('token-in').value} → ${document.getElementById('token-out').value}`;
+}
+
+// ── Solana transaction sign + relay ─────────────────────────────────────────────────────────
+async function executeSolanaSwap(swapData, tokenIn, tokenOut, amount) {
+  // Detect Phantom or Solflare
+  const solProvider = window.phantom?.solana || window.solana || window.solflare;
+  if (!solProvider || !solProvider.isConnected) {
+    // Wallet not connected — fall back to Jupiter deep link
+    const solUsdc = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+    const lamports = Math.round(parseFloat(amount) * 1_000_000);
+    const jupUrl = `https://jup.ag/swap/${solUsdc}-${swapData.contractAddress}?inAmount=${lamports}`;
+    window.open(jupUrl, '_blank');
+    showToast('Opening Jupiter (connect Phantom in browser for fee-tracked swaps)', 'success');
+    return;
+  }
+
+  try {
+    showToast('Approve in Phantom / Solflare...', '');
+
+    // Decode base64 transaction
+    const txBytes      = Uint8Array.from(atob(swapData.transaction), c => c.charCodeAt(0));
+    const signedBytes  = await solProvider.signTransaction({ serialize: () => txBytes, serializeMessage: () => txBytes });
+
+    // Re-encode signed tx
+    let signedB64;
+    if (signedBytes?.serialize) {
+      signedB64 = btoa(String.fromCharCode(...signedBytes.serialize()));
+    } else if (signedBytes?.signature) {
+      // Phantom returns { signature } on signAndSendTransaction
+      const sig = signedBytes.signature;
+      showToast('Swap submitted!', 'success');
+      const txUrl = `https://solscan.io/tx/${sig}`;
+      addSwapHistory(tokenIn, tokenOut, amount, txUrl);
+      window.open(txUrl, '_blank');
+      return;
+    } else {
+      throw new Error('Could not serialize signed transaction');
+    }
+
+    // POST signed tx to our server which relays to Jupiter /execute
+    const execRes  = await fetch(`${API_BASE}/api/swap/solana-execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signedTransaction: signedB64, requestId: swapData.requestId }),
+    });
+    const execData = await execRes.json();
+
+    if (execData.ok) {
+      showToast('Solana swap confirmed!', 'success');
+      addSwapHistory(tokenIn, tokenOut, amount, execData.txUrl);
+      window.open(execData.txUrl, '_blank');
+    } else {
+      showToast(execData.error || 'Swap execution failed', 'error');
+    }
+  } catch (e) {
+    console.error('[solana-swap]', e);
+    showToast('Solana sign error: ' + (e.message || 'User rejected'), 'error');
+  }
 }
 
 function addSwapHistory(tokenIn, tokenOut, amount, txUrl) {

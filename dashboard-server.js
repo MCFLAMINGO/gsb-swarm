@@ -3393,13 +3393,49 @@ app.post('/api/swap/execute', express.json(), async (req, res) => {
     const FEE_BPS = 50; // 0.5%
     let uniswapUrl;
     if (chain === 'solana') {
-      // ── Jupiter deep link for Solana ───────────────────────────────────────────
-      // USDC on Solana: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
-      const solUsdc = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-      const inputMint  = tokenIn && tokenIn.toLowerCase() !== 'usdc' ? priceData.contractAddress : solUsdc;
+      // ── Jupiter Swap API V2 /order — returns transaction for user to sign ──────
+      const SOL_USDC   = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
       const outputMint = priceData.contractAddress;
       const lamports   = Math.round(parseFloat(amount) * 1_000_000); // USDC = 6 decimals
-      uniswapUrl = `https://jup.ag/swap/${solUsdc}-${outputMint}?inAmount=${lamports}&referralAccount=${GSB_SOL_WALLET}&referralName=GSBSwarm`;
+      const referralAccount = process.env.JUPITER_REFERRAL_ACCOUNT || null;
+      const jupApiKey       = process.env.JUP_API_KEY || '';
+
+      const jupParams = new URLSearchParams({
+        inputMint:  SOL_USDC,
+        outputMint: outputMint,
+        amount:     String(lamports),
+        taker:      walletAddress || '',
+        slippageBps: String(Math.round(parseFloat(slippage) * 100)),
+      });
+      if (referralAccount) {
+        jupParams.set('referralAccount', referralAccount);
+        jupParams.set('referralFee', '50'); // 50 bps = 0.5%; Jupiter keeps 20%, you keep 80%
+      }
+
+      const jupHeaders = { 'Accept': 'application/json' };
+      if (jupApiKey) jupHeaders['x-api-key'] = jupApiKey;
+
+      const jupRes  = await fetch(`https://api.jup.ag/swap/v2/order?${jupParams}`, { headers: jupHeaders });
+      const jupData = await jupRes.json();
+
+      if (!jupData.transaction) {
+        // Fallback: deep link if API unavailable or no taker wallet
+        const fallbackUrl = `https://jup.ag/swap/${SOL_USDC}-${outputMint}?inAmount=${lamports}`;
+        return res.json({ ok: true, uniswapUrl: fallbackUrl, solanaFallback: true, price: priceData.price, feeUsd: parseFloat(feeUsd) });
+      }
+
+      // Return transaction + requestId so client can sign then POST to /api/swap/solana-execute
+      return res.json({
+        ok: true,
+        solana: true,
+        transaction:   jupData.transaction,   // base64 transaction for wallet to sign
+        requestId:     jupData.requestId,      // needed for /execute
+        price:         priceData.price,
+        contractAddress: outputMint,
+        feeUsd:        parseFloat(feeUsd),
+        feeRecipient:  referralAccount || GSB_SOL_WALLET,
+        referralActive: !!referralAccount,
+      });
     } else {
       // ── Uniswap deep link for EVM chains ──────────────────────────────────────
       const chainParams = { base: 'base', ethereum: 'mainnet', bsc: 'bnb', arbitrum: 'arbitrum', polygon: 'polygon', optimism: 'optimism', avalanche: 'avalanche' };
@@ -3421,6 +3457,41 @@ app.post('/api/swap/execute', express.json(), async (req, res) => {
     res.json({ ok: true, uniswapUrl, price: priceData.price, contractAddress: priceData.contractAddress, feeUsd: parseFloat(feeUsd), feeRecipient: GSB_SWARM_WALLET });
   } catch(e) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── Solana swap execute (user posts signed tx, we relay to Jupiter) ────────────
+app.post('/api/swap/solana-execute', express.json(), async (req, res) => {
+  const { signedTransaction, requestId } = req.body;
+  if (!signedTransaction || !requestId) {
+    return res.status(400).json({ ok: false, error: 'signedTransaction and requestId required' });
+  }
+  try {
+    const jupApiKey = process.env.JUP_API_KEY || '';
+    const jupHeaders = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+    if (jupApiKey) jupHeaders['x-api-key'] = jupApiKey;
+
+    const jupRes  = await fetch('https://api.jup.ag/swap/v2/execute', {
+      method: 'POST',
+      headers: jupHeaders,
+      body: JSON.stringify({ signedTransaction, requestId }),
+    });
+    const jupData = await jupRes.json();
+
+    if (jupData.status === 'Success') {
+      return res.json({
+        ok: true,
+        signature: jupData.signature,
+        txUrl: `https://solscan.io/tx/${jupData.signature}`,
+        inputAmount:  jupData.inputAmountResult,
+        outputAmount: jupData.outputAmountResult,
+      });
+    } else {
+      return res.json({ ok: false, error: jupData.error || 'Transaction failed', status: jupData.status });
+    }
+  } catch (e) {
+    console.error('[solana-execute]', e.message);
+    return res.status(500).json({ ok: false, error: e.message });
   }
 });
 
