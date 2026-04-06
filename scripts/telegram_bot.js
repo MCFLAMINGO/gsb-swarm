@@ -55,6 +55,14 @@ async function tgRequest(method, body) {
   }
 }
 
+const CHATS_FILE = '/tmp/gsb-bot-chats.json';
+let chatStore = {};
+try { chatStore = JSON.parse(fs.readFileSync(CHATS_FILE, 'utf8')); } catch {}
+function saveChatId(userId, chatId) {
+  chatStore[String(userId)] = chatId;
+  try { fs.writeFileSync(CHATS_FILE, JSON.stringify(chatStore)); } catch {}
+}
+
 async function sendMessage(chatId, text, extra = {}) {
   return tgRequest('sendMessage', { chat_id: chatId, text, parse_mode: 'Markdown', ...extra });
 }
@@ -222,15 +230,29 @@ async function handleStart(chatId, userId) {
     `/price [token] — Quick price check\n` +
     `/trending [chain] — Top 5 tokens (base/eth/sol/bsc/arb)\n` +
     `/buy [token] [amount] — Get swap link\n` +
+    `/dca [token] [amount] [freq] — Auto-buy on schedule\n` +
     `/alert [token] [price] — Price alert\n` +
     `/help — This menu\n\n` +
     `_Examples:_\n` +
     `/analyze FETCHR\n` +
+    `/dca FETCHR 10 daily\n` +
     `/price $VIRTUAL\n` +
-    `/buy AGNT 5\n` +
     `/alert FETCHR 0.000002\n\n` +
     `Fees support $GSB buybacks. Trade smart. 🚀`;
-  await sendMessage(chatId, msg);
+  const miniAppUrl = 'https://gsb-swarm-production.up.railway.app/miniapp/';
+  await tgRequest('sendMessage', {
+    chat_id: chatId,
+    text: msg,
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [[
+        { text: '⚡ Open GSB Swap App', web_app: { url: miniAppUrl } },
+      ], [
+        { text: '📊 Trending', callback_data: 'trending' },
+        { text: '💹 Analyze', callback_data: 'analyze_help' },
+      ]]
+    }
+  });
 }
 
 // Supported chains display
@@ -302,6 +324,66 @@ async function handleTrending(chatId, chainInput = '') {
   await sendMessage(chatId, msg);
 }
 
+async function handleDCA(chatId, userId, token, amount, frequency) {
+  if (!token || !amount) {
+    return sendMessage(chatId,
+      '📅 *DCA — Dollar Cost Averaging*\n\n' +
+      'Auto-buy any token on a schedule.\n\n' +
+      '*Usage:* `/dca TOKEN AMOUNT FREQUENCY`\n\n' +
+      '*Examples:*\n' +
+      '`/dca FETCHR 10 daily` — buy $10 FETCHR every day\n' +
+      '`/dca AGNT 25 weekly` — buy $25 AGNT every week\n' +
+      '`/dca VIRTUAL 5 hourly` — buy $5 VIRTUAL every hour\n\n' +
+      '`/dca stop` — view and stop active orders\n\n' +
+      '_Open the swap app for full DCA management:_',
+      { reply_markup: { inline_keyboard: [[{ text: '⚡ Open Swap App', web_app: { url: 'https://gsb-swarm-production.up.railway.app/miniapp/' } }]] } }
+    );
+  }
+
+  if (token.toLowerCase() === 'stop') {
+    // List active orders
+    try {
+      const r = await fetch(`https://gsb-swarm-production.up.railway.app/api/swap/dca/list?userId=${userId}`);
+      const d = await r.json();
+      const orders = d.orders || [];
+      if (!orders.length) return sendMessage(chatId, '📅 No active DCA orders.');
+      const msg = '📅 *Active DCA Orders*\n\n' + orders.map((o, i) =>
+        `${i+1}. *${o.token}* — $${o.amount} ${o.frequency} (${o.executedCount} fills)`
+      ).join('\n') + '\n\n_Use the swap app to stop orders_';
+      return sendMessage(chatId, msg, {
+        reply_markup: { inline_keyboard: [[{ text: '⚡ Manage in App', web_app: { url: 'https://gsb-swarm-production.up.railway.app/miniapp/' } }]] }
+      });
+    } catch { return sendMessage(chatId, '❌ Could not fetch orders'); }
+  }
+
+  const validFreqs = ['hourly', 'daily', 'weekly', 'monthly'];
+  const freq = validFreqs.includes((frequency || 'daily').toLowerCase()) ? (frequency || 'daily').toLowerCase() : 'daily';
+  const amt = parseFloat(amount);
+  if (isNaN(amt) || amt < 1) return sendMessage(chatId, '❌ Amount must be at least $1 USDC');
+
+  try {
+    const r = await fetch('https://gsb-swarm-production.up.railway.app/api/swap/dca/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: String(userId), token: token.toUpperCase(), amount: amt, frequency: freq, chain: 'base' }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      return sendMessage(chatId,
+        `✅ *DCA Created*\n\n` +
+        `Token: *${token.toUpperCase()}*\n` +
+        `Amount: $${amt} USDC\n` +
+        `Frequency: ${freq}\n` +
+        `First buy: in ~1 minute\n\n` +
+        `_You'll get a notification on each buy._`,
+        { reply_markup: { inline_keyboard: [[{ text: '⚡ Manage in App', web_app: { url: 'https://gsb-swarm-production.up.railway.app/miniapp/' } }]] } }
+      );
+    } else {
+      return sendMessage(chatId, `❌ ${d.error || 'Failed to create DCA'}`);
+    }
+  } catch { return sendMessage(chatId, '❌ Network error'); }
+}
+
 async function handleBuy(chatId, token, amount) {
   if (!token) return sendMessage(chatId, '❌ Usage: `/buy FETCHR 5`');
   const amt = parseFloat(amount) || 5;
@@ -371,6 +453,14 @@ async function poll() {
     const updates = res.result || [];
     for (const update of updates) {
       offset = update.update_id + 1;
+      // Handle callback queries from inline buttons
+      if (update.callback_query) {
+        const cb = update.callback_query;
+        const cbChatId = cb.message?.chat?.id;
+        await tgRequest('answerCallbackQuery', { callback_query_id: cb.id });
+        if (cb.data === 'trending') await handleTrending(cbChatId, 'base');
+        if (cb.data === 'analyze_help') await sendMessage(cbChatId, '💹 Usage: `/analyze TOKEN [chain]`\nExample: `/analyze FETCHR` or `/analyze BTC eth`');
+      }
       const msg = update.message;
       if (!msg?.text) continue;
 
@@ -389,6 +479,7 @@ async function poll() {
         else if (cmd === '/analyze') await handleAnalyze(chatId, arg1);
         else if (cmd === '/price')   await handlePrice(chatId, arg1);
         else if (cmd === '/trending') await handleTrending(chatId, arg1);
+        else if (cmd === '/dca')      await handleDCA(chatId, userId, arg1, arg2, parts[3] || '');
         else if (cmd === '/buy')     await handleBuy(chatId, arg1, arg2);
         else if (cmd === '/alert')   await handleAlert(chatId, userId, arg1, arg2);
         else if (text.startsWith('/')) await sendMessage(chatId, '❓ Unknown command. Use /help to see all commands.');
