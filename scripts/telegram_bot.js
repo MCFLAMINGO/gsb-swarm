@@ -297,7 +297,8 @@ async function handleTrending(chatId, chainInput = '') {
   const chainLabel2 = CHAIN_NAMES[chainArg] || 'Base';
   await sendMessage(chatId, `⏳ Fetching trending ${chainLabel2} tokens...`);
   const tokens = await getTrending(chainArg);
-  const msg = `🔥 *Trending on ${chainLabel2}*\n\n${tokens.map((t, i) => `${i+1}. ${t}`).join('\n')}\n\n_Updated every 5 minutes_`;
+  const chainSuffix = chainArg !== 'base' ? ` ${chainInput.toLowerCase()}` : '';
+  const msg = `🔥 *Trending on ${chainLabel2}*\n\n${tokens.map((t, i) => `${i+1}. ${t}`).join('\n')}\n\n_To analyze: /analyze TOKEN${chainSuffix}_\n_Updated every 5 minutes_`;
   await sendMessage(chatId, msg);
 }
 
