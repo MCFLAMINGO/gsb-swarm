@@ -31,23 +31,14 @@ try { alerts = JSON.parse(fs.readFileSync(ALERTS_FILE, 'utf8')); } catch {}
 function saveAlerts() { try { fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts)); } catch {} }
 
 // ── Telegram API ──────────────────────────────────────────────────────────────
-function tgRequest(method, body) {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify(body);
-    const req = https.request({
-      hostname: 'api.telegram.org',
-      path: `/bot${BOT_TOKEN}/${method}`,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': data.length },
-    }, res => {
-      let chunks = '';
-      res.on('data', d => chunks += d);
-      res.on('end', () => resolve(JSON.parse(chunks)));
-    });
-    req.on('error', reject);
-    req.write(data);
-    req.end();
+async function tgRequest(method, body) {
+  const url = `https://api.telegram.org/bot${BOT_TOKEN}/${method}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   });
+  return res.json();
 }
 
 async function sendMessage(chatId, text, extra = {}) {
