@@ -356,7 +356,8 @@ async def watch_and_copy(targets, budget_usd):
                         'exit_usd': None,
                         'pnl': None,
                     }
-                    state['cash_remaining'] -= copy_size
+                    # Only decrement cash after confirmed swap execution
+                    # cash_remaining decremented below on success only
                     save_state(state)
 
                     tg_send(
@@ -375,9 +376,16 @@ async def watch_and_copy(targets, budget_usd):
                     if AGENT_KEY:
                         exec_result = execute_swap(copy_size, swap['pool'], AGENT_KEY)
                         if exec_result:
-                            tg_send(f'✅ Swap executed: {exec_result}')
+                            state['cash_remaining'] -= copy_size  # only deduct on success
+                            save_state(state)
+                            tg_send(f'✅ Swap executed: {exec_result}\nCash remaining: ${state["cash_remaining"]:.2f}')
                         else:
-                            tg_send(f'❌ Swap execution failed — position tracked only')
+                            # Remove the position since swap failed — don't waste budget
+                            state['positions'].pop(pos_id, None)
+                            save_state(state)
+                            tg_send(f'❌ Swap execution failed — budget preserved')
+                    else:
+                        tg_send(f'⚠️ No private key — position tracked only, budget not decremented')
 
             last_block = current_block
 
