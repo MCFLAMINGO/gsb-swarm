@@ -48,17 +48,22 @@
     .tabs {
       display: flex;
       border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+      scrollbar-width: none;
     }
+    .tabs::-webkit-scrollbar { display: none; }
     .tab {
       flex: 1;
-      padding: 12px;
+      min-width: 60px;
+      padding: 12px 8px;
       text-align: center;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
       color: var(--muted);
       cursor: pointer;
       border-bottom: 2px solid transparent;
       transition: all 0.2s;
+      white-space: nowrap;
     }
     .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
     .panel { display: none; padding: 16px; }
@@ -105,15 +110,6 @@
       padding: 0 4px;
       font-size: 11px;
       color: var(--muted);
-    }
-    .chain-badge {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px;
-      font-size: 13px;
-      color: var(--muted);
-      white-space: nowrap;
     }
     .price-row {
       display: flex;
@@ -243,10 +239,10 @@
     }
     .nav-btn {
       flex: 1;
-      padding: 12px 8px;
+      padding: 10px 4px;
       text-align: center;
       cursor: pointer;
-      font-size: 11px;
+      font-size: 10px;
       color: var(--muted);
       transition: color 0.2s;
     }
@@ -257,6 +253,16 @@
       width: 16px; height: 16px;
       border: 2px solid rgba(0,0,0,0.3);
       border-top-color: #000;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    .spinner-white {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
       border-radius: 50%;
       animation: spin 0.7s linear infinite;
       vertical-align: middle;
@@ -276,6 +282,150 @@
     }
     .stat-val { font-size: 18px; font-weight: 700; }
     .stat-label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    /* ── Analyze styles ─────────────────────────────────────────── */
+    .analyze-search-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .analyze-search-row input {
+      flex: 1;
+      text-transform: uppercase;
+    }
+    .analyze-search-row button {
+      padding: 12px 18px;
+      border-radius: 8px;
+      border: none;
+      background: var(--accent);
+      color: #000;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .analyze-search-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .rec-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .rec-buy    { background: rgba(0,255,136,0.15); color: var(--accent); }
+    .rec-hold   { background: rgba(245,158,11,0.15); color: var(--yellow); }
+    .rec-avoid  { background: rgba(239,68,68,0.15); color: var(--red); }
+    .confidence-bar-wrap {
+      background: var(--bg);
+      border-radius: 4px;
+      height: 6px;
+      margin-top: 6px;
+      overflow: hidden;
+    }
+    .confidence-bar {
+      height: 100%;
+      border-radius: 4px;
+      background: var(--accent);
+      transition: width 0.4s ease;
+    }
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .tag {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 3px 10px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .price-target-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .price-target {
+      flex: 1;
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+    }
+    .price-target .pt-label { font-size: 10px; color: var(--muted); }
+    .price-target .pt-val { font-size: 14px; font-weight: 700; color: var(--accent); margin-top: 2px; }
+    .analyze-empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .analyze-empty .big { font-size: 36px; margin-bottom: 12px; }
+
+    /* ── Trending styles ────────────────────────────────────────── */
+    .chain-pills {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      padding-bottom: 2px;
+    }
+    .chain-pills::-webkit-scrollbar { display: none; }
+    .chain-pill {
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      color: var(--muted);
+      transition: all 0.2s;
+    }
+    .chain-pill.active { background: var(--accent); color: #000; border-color: var(--accent); }
+    .trending-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .trending-item:last-child { border-bottom: none; }
+    .trending-rank {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--muted);
+      width: 24px;
+      flex-shrink: 0;
+    }
+    .trending-info { flex: 1; padding: 0 10px; }
+    .trending-name { font-weight: 700; font-size: 14px; }
+    .trending-vol { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .trending-change {
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .trending-analyze-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 8px;
+      cursor: pointer;
+      margin-left: 8px;
+      white-space: nowrap;
+    }
+    .trending-loading {
+      text-align: center;
+      padding: 30px;
+      color: var(--muted);
+      font-size: 13px;
+    }
   </style>
 </head>
 <body>
@@ -311,12 +461,14 @@
 
 <div id="app-screen">
   <div class="tabs">
-    <div class="tab active" onclick="switchTab('swap')">Swap</div>
-    <div class="tab" onclick="switchTab('dca')">DCA</div>
-    <div class="tab" onclick="switchTab('portfolio')">Portfolio</div>
+    <div class="tab active"    onclick="switchTab('swap')">Swap</div>
+    <div class="tab"           onclick="switchTab('dca')">DCA</div>
+    <div class="tab"           onclick="switchTab('analyze')">Analyze</div>
+    <div class="tab"           onclick="switchTab('trending')">Trending</div>
+    <div class="tab"           onclick="switchTab('portfolio')">Portfolio</div>
   </div>
 
-  <!-- SWAP PANEL -->
+  <!-- ── SWAP PANEL ───────────────────────────────────────────────── -->
   <div class="panel active" id="panel-swap">
     <div id="approve-banner" class="approve-banner" style="display:none">
       <p>Approve USDC once to enable instant swaps and DCA</p>
@@ -388,7 +540,7 @@
     <p class="fee-note">0.5% fee • 50% buys $GSB • Powered by GSB Swarm</p>
   </div>
 
-  <!-- DCA PANEL -->
+  <!-- ── DCA PANEL ────────────────────────────────────────────────── -->
   <div class="panel" id="panel-dca">
     <div class="card">
       <div class="card-title">New DCA Order</div>
@@ -466,7 +618,55 @@
     </div>
   </div>
 
-  <!-- PORTFOLIO PANEL -->
+  <!-- ── ANALYZE PANEL ─────────────────────────────────────────────── -->
+  <div class="panel" id="panel-analyze">
+    <div class="card">
+      <div class="card-title">AI Token Analysis</div>
+      <div class="analyze-search-row">
+        <input type="text" id="analyze-input" placeholder="FETCHR, VIRTUAL, ETH..." oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')runAnalyze()">
+        <select id="analyze-chain" style="flex:0;width:90px;font-size:13px;padding:12px 8px">
+          <option value="">Auto</option>
+          <option value="base">Base</option>
+          <option value="ethereum">ETH</option>
+          <option value="solana">SOL</option>
+          <option value="bsc">BSC</option>
+          <option value="arbitrum">ARB</option>
+        </select>
+        <button id="analyze-btn" onclick="runAnalyze()">⚡ Go</button>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">Powered by GSB Intelligence Swarm · Claude AI</div>
+    </div>
+
+    <div id="analyze-result">
+      <div class="analyze-empty">
+        <div class="big">🔮</div>
+        Enter a token symbol above to get a full AI trade analysis — recommendation, price targets, entry zone, and risk summary.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TRENDING PANEL ────────────────────────────────────────────── -->
+  <div class="panel" id="panel-trending">
+    <div class="card">
+      <div class="card-title">Trending Now</div>
+      <div class="chain-pills">
+        <div class="chain-pill active" onclick="loadTrending('base', this)">Base</div>
+        <div class="chain-pill" onclick="loadTrending('eth', this)">Ethereum</div>
+        <div class="chain-pill" onclick="loadTrending('solana', this)">Solana</div>
+        <div class="chain-pill" onclick="loadTrending('bsc', this)">BSC</div>
+        <div class="chain-pill" onclick="loadTrending('arbitrum', this)">Arbitrum</div>
+        <div class="chain-pill" onclick="loadTrending('polygon', this)">Polygon</div>
+      </div>
+      <div id="trending-list">
+        <div class="trending-loading"><span class="spinner-white"></span> Loading...</div>
+      </div>
+      <div style="margin-top:10px">
+        <button class="btn btn-outline" onclick="refreshTrending()" style="font-size:13px;padding:10px">↻ Refresh</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── PORTFOLIO PANEL ───────────────────────────────────────────── -->
   <div class="panel" id="panel-portfolio">
     <div class="card">
       <div class="card-title">Your Holdings</div>
@@ -485,15 +685,23 @@
 
 <div class="bottom-nav">
   <div class="nav-btn active" onclick="switchTab('swap')">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
     Swap
   </div>
   <div class="nav-btn" onclick="switchTab('dca')">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
     DCA
   </div>
+  <div class="nav-btn" onclick="switchTab('analyze')">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    Analyze
+  </div>
+  <div class="nav-btn" onclick="switchTab('trending')">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+    Trending
+  </div>
   <div class="nav-btn" onclick="switchTab('portfolio')">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
     Portfolio
   </div>
 </div>
@@ -505,15 +713,28 @@ const tg = window.Telegram?.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
 
 const API_BASE = 'https://gsb-swarm-production.up.railway.app';
-const userId = tg?.initDataUnsafe?.user?.id || 'dev_user';
+const userId   = tg?.initDataUnsafe?.user?.id || 'dev_user';
 const userName = tg?.initDataUnsafe?.user?.username || 'user';
 
-let walletAddress = null;
-let isApproved = false;
-let quoteTimer = null;
-let dcaOrders = [];
+const TABS = ['swap','dca','analyze','trending','portfolio'];
 
-// ── Wallet Connection ─────────────────────────────────────────────────────────
+let walletAddress  = null;
+let isApproved     = false;
+let quoteTimer     = null;
+let dcaOrders      = [];
+let trendingChain  = 'base';
+
+// ── Tab switching ──────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach((el,i) => el.classList.toggle('active', TABS[i] === tab));
+  document.querySelectorAll('.panel').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach((el,i) => el.classList.toggle('active', TABS[i] === tab));
+  document.getElementById('panel-' + tab).classList.add('active');
+
+  if (tab === 'trending') loadTrending(trendingChain);
+}
+
+// ── Wallet Connection ──────────────────────────────────────────────────────────
 function connectWallet() {
   document.getElementById('connect-screen').style.display = 'flex';
   document.getElementById('app-screen').style.display = 'none';
@@ -525,24 +746,19 @@ async function connectWith(provider) {
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
       walletAddress = accounts[0];
       onWalletConnected();
-    } catch(e) {
-      showToast('Connection cancelled', 'error');
-    }
+    } catch(e) { showToast('Connection cancelled', 'error'); }
   } else if (provider === 'coinbase' && window.ethereum?.isCoinbaseWallet) {
     try {
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
       walletAddress = accounts[0];
       onWalletConnected();
-    } catch(e) {
-      showToast('Connection cancelled', 'error');
-    }
+    } catch(e) { showToast('Connection cancelled', 'error'); }
   } else {
-    // Fallback: deep link to wallet
     const links = {
-      metamask: 'https://metamask.app.link/dapp/gsb-swarm-production.up.railway.app/miniapp/',
-      coinbase: 'https://go.cb-w.com/dapp?cb_url=' + encodeURIComponent(location.href),
+      metamask:      'https://metamask.app.link/dapp/gsb-swarm-production.up.railway.app/miniapp/',
+      coinbase:      'https://go.cb-w.com/dapp?cb_url=' + encodeURIComponent(location.href),
       walletconnect: 'https://walletconnect.com/',
-      rainbow: 'https://rnbwapp.com/wc?uri=' + encodeURIComponent(location.href),
+      rainbow:       'https://rnbwapp.com/wc?uri=' + encodeURIComponent(location.href),
     };
     window.open(links[provider] || links.metamask, '_blank');
   }
@@ -555,11 +771,8 @@ function onWalletConnected() {
   const badge = document.getElementById('wallet-badge');
   badge.textContent = short;
   badge.classList.add('connected');
-  // Save wallet server-side
   saveWallet();
-  // Check USDC approval
   checkApproval();
-  // Load DCA orders and portfolio
   loadDCAOrders();
   loadPortfolio();
 }
@@ -598,15 +811,7 @@ async function approveUSDC() {
   }
 }
 
-// ── Tab switching ─────────────────────────────────────────────────────────────
-function switchTab(tab) {
-  document.querySelectorAll('.tab, .panel, .nav-btn').forEach(el => el.classList.remove('active'));
-  document.getElementById('panel-' + tab).classList.add('active');
-  document.querySelectorAll('.tab')[['swap','dca','portfolio'].indexOf(tab)].classList.add('active');
-  document.querySelectorAll('.nav-btn')[['swap','dca','portfolio'].indexOf(tab)].classList.add('active');
-}
-
-// ── Token search ──────────────────────────────────────────────────────────────
+// ── Token search ───────────────────────────────────────────────────────────────
 let searchTimer = null;
 function searchToken(q) {
   clearTimeout(searchTimer);
@@ -636,12 +841,12 @@ function selectToken(symbol, address) {
   updateQuote();
 }
 
-// ── Quote ─────────────────────────────────────────────────────────────────────
+// ── Quote ──────────────────────────────────────────────────────────────────────
 async function updateQuote() {
   clearTimeout(quoteTimer);
-  const amount = parseFloat(document.getElementById('amount-in').value);
+  const amount   = parseFloat(document.getElementById('amount-in').value);
   const tokenOut = document.getElementById('token-out').value;
-  const swapBtn = document.getElementById('swap-btn');
+  const swapBtn  = document.getElementById('swap-btn');
 
   if (!amount || !tokenOut) {
     swapBtn.disabled = true;
@@ -655,23 +860,24 @@ async function updateQuote() {
 
   quoteTimer = setTimeout(async () => {
     try {
-      const chain = document.getElementById('chain-select').value;
+      const chain   = document.getElementById('chain-select').value;
       const tokenIn = document.getElementById('token-in').value;
       const r = await fetch(`${API_BASE}/api/swap/quote?tokenIn=${tokenIn}&tokenOut=${tokenOut}&amount=${amount}&chain=${chain}`);
       const d = await r.json();
 
       if (d.ok && d.price) {
-        const fee = amount * 0.005;
+        const fee       = amount * 0.005;
         const netAmount = amount - fee;
         const outAmount = netAmount / d.price;
-        const minOut = outAmount * (1 - parseFloat(document.getElementById('slippage-select').value) / 100);
+        const slippage  = parseFloat(document.getElementById('slippage-select').value);
+        const minOut    = outAmount * (1 - slippage / 100);
 
         document.getElementById('amount-out').value = outAmount.toFixed(2) + ' ' + tokenOut;
         document.getElementById('q-price').textContent = `$${d.price.toFixed(8)}`;
         const chg = d.change24h || 0;
         document.getElementById('q-change').innerHTML = `<span class="${chg>=0?'change-pos':'change-neg'}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>`;
-        document.getElementById('q-fee').textContent = `$${fee.toFixed(4)} USDC`;
-        document.getElementById('q-min').textContent = `${minOut.toFixed(6)} ${tokenOut}`;
+        document.getElementById('q-fee').textContent  = `$${fee.toFixed(4)} USDC`;
+        document.getElementById('q-min').textContent  = `${minOut.toFixed(6)} ${tokenOut}`;
         document.getElementById('quote-card').style.display = 'block';
 
         swapBtn.disabled = false;
@@ -696,13 +902,13 @@ function flipTokens() {
   updateQuote();
 }
 
-// ── Execute Swap ──────────────────────────────────────────────────────────────
+// ── Execute Swap ───────────────────────────────────────────────────────────────
 async function executeSwap() {
   if (!walletAddress) return connectWallet();
-  const amount = parseFloat(document.getElementById('amount-in').value);
-  const tokenIn = document.getElementById('token-in').value;
+  const amount   = parseFloat(document.getElementById('amount-in').value);
+  const tokenIn  = document.getElementById('token-in').value;
   const tokenOut = document.getElementById('token-out').value;
-  const chain = document.getElementById('chain-select').value;
+  const chain    = document.getElementById('chain-select').value;
   const slippage = document.getElementById('slippage-select').value;
 
   const btn = document.getElementById('swap-btn');
@@ -720,10 +926,8 @@ async function executeSwap() {
     if (d.ok && d.txUrl) {
       showToast('✅ Swap submitted!', 'success');
       window.open(d.txUrl, '_blank');
-      // Add to history
       addSwapHistory(tokenIn, tokenOut, amount, d.txUrl);
     } else if (d.uniswapUrl) {
-      // Fallback: open Uniswap with pre-filled params
       window.open(d.uniswapUrl, '_blank');
       showToast('Opening Uniswap...', 'success');
     } else {
@@ -733,7 +937,7 @@ async function executeSwap() {
     showToast('Network error', 'error');
   }
   btn.disabled = false;
-  btn.textContent = `Swap ${tokenIn} → ${tokenOut}`;
+  btn.textContent = `Swap ${document.getElementById('token-in').value} → ${document.getElementById('token-out').value}`;
 }
 
 function addSwapHistory(tokenIn, tokenOut, amount, txUrl) {
@@ -746,14 +950,221 @@ function addSwapHistory(tokenIn, tokenOut, amount, txUrl) {
   </div>` + history.innerHTML;
 }
 
-// ── DCA ───────────────────────────────────────────────────────────────────────
+// ── ANALYZE ────────────────────────────────────────────────────────────────────
+let analyzeInFlight = false;
+
+async function runAnalyze(tokenOverride) {
+  const symbol = (tokenOverride || document.getElementById('analyze-input').value || '').trim().toUpperCase();
+  if (!symbol) { showToast('Enter a token symbol', 'error'); return; }
+  if (analyzeInFlight) return;
+
+  // If called from Trending, set the input field
+  if (tokenOverride) {
+    document.getElementById('analyze-input').value = symbol;
+    switchTab('analyze');
+  }
+
+  const chain  = document.getElementById('analyze-chain').value;
+  const btn    = document.getElementById('analyze-btn');
+  const result = document.getElementById('analyze-result');
+
+  analyzeInFlight = true;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+  result.innerHTML = `<div class="card" style="text-align:center;padding:30px;color:var(--muted)"><span class="spinner-white"></span> Analyzing ${symbol}...</div>`;
+
+  try {
+    const chainParam = chain ? `&chain=${chain}` : '';
+    const r = await fetch(`${API_BASE}/api/analyze?token=${encodeURIComponent(symbol)}${chainParam}`);
+    const d = await r.json();
+
+    if (d.error) {
+      result.innerHTML = `<div class="card" style="color:var(--red);text-align:center;padding:20px">${d.error}</div>`;
+      return;
+    }
+
+    const rec   = (d.analysis?.recommendation || 'HOLD').toUpperCase();
+    const conf  = d.analysis?.confidence || 0;
+    const price = d.currentPrice || d.price || 0;
+    const chg   = d.marketData?.priceChange24h || d.analysis?.priceChange24h || 0;
+    const liq   = d.marketData?.liquidity || 0;
+    const vol   = d.marketData?.volume24h || 0;
+    const targets = d.analysis?.targets || [];
+    const entry   = d.analysis?.entryZone || {};
+    const summary = d.analysis?.summary || d.analysis?.summaryShort || '';
+    const trend   = d.analysis?.trend || '';
+
+    const recClass = rec === 'BUY' ? 'rec-buy' : rec === 'AVOID' ? 'rec-avoid' : 'rec-hold';
+    const chgColor = chg >= 0 ? 'var(--accent)' : 'var(--red)';
+    const chgSign  = chg >= 0 ? '+' : '';
+
+    const formatUsd = (n) => {
+      if (!n || isNaN(n)) return '—';
+      if (n >= 1e9) return '$' + (n/1e9).toFixed(2) + 'B';
+      if (n >= 1e6) return '$' + (n/1e6).toFixed(2) + 'M';
+      if (n >= 1e3) return '$' + (n/1e3).toFixed(1) + 'K';
+      return '$' + n.toFixed(2);
+    };
+
+    const formatPrice = (p) => {
+      if (!p) return '—';
+      if (p < 0.000001) return '$' + p.toExponential(2);
+      if (p < 0.01)     return '$' + p.toFixed(8);
+      if (p < 1)        return '$' + p.toFixed(6);
+      return '$' + p.toFixed(4);
+    };
+
+    result.innerHTML = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+          <div>
+            <div style="font-size:22px;font-weight:800">${d.symbol || symbol}</div>
+            <div style="font-size:13px;color:var(--muted)">${d.name || ''}</div>
+          </div>
+          <span class="rec-badge ${recClass}">${rec}</span>
+        </div>
+
+        <div style="font-size:28px;font-weight:800;margin-bottom:4px">${formatPrice(price)}</div>
+        <div style="font-size:14px;font-weight:600;color:${chgColor};margin-bottom:12px">${chgSign}${chg.toFixed(2)}% (24h)</div>
+
+        <div style="margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+            <span style="color:var(--muted)">AI Confidence</span>
+            <span style="font-weight:700;color:var(--accent)">${conf}%</span>
+          </div>
+          <div class="confidence-bar-wrap"><div class="confidence-bar" style="width:${conf}%"></div></div>
+        </div>
+
+        <div class="price-row"><span>Liquidity</span><span class="price-val">${formatUsd(liq)}</span></div>
+        <div class="price-row"><span>Volume 24h</span><span class="price-val">${formatUsd(vol)}</span></div>
+        ${trend ? `<div class="price-row"><span>Trend</span><span class="price-val" style="text-transform:capitalize">${trend}</span></div>` : ''}
+      </div>
+
+      ${targets.length ? `
+      <div class="card">
+        <div class="card-title">Price Targets</div>
+        <div class="price-target-row">
+          ${targets.map((t,i) => `
+            <div class="price-target">
+              <div class="pt-label">Target ${i+1}</div>
+              <div class="pt-val">${formatPrice(t)}</div>
+            </div>
+          `).join('')}
+          ${entry.min ? `
+            <div class="price-target">
+              <div class="pt-label" style="color:var(--yellow)">Entry Zone</div>
+              <div class="pt-val" style="color:var(--yellow)">${formatPrice(entry.min)}–${formatPrice(entry.max)}</div>
+            </div>
+          ` : ''}
+        </div>
+      </div>` : ''}
+
+      ${summary ? `
+      <div class="card">
+        <div class="card-title">AI Summary</div>
+        <div style="font-size:13px;line-height:1.6;color:var(--text)">${summary}</div>
+      </div>` : ''}
+
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn btn-primary" onclick="document.getElementById('token-out').value='${d.symbol||symbol}';switchTab('swap');updateQuote();" style="flex:1">
+          Buy ${d.symbol || symbol}
+        </button>
+        <button class="btn btn-secondary" onclick="document.getElementById('dca-token').value='${d.symbol||symbol}';switchTab('dca');" style="flex:1">
+          DCA It
+        </button>
+      </div>
+    `;
+  } catch(e) {
+    result.innerHTML = `<div class="card" style="color:var(--red);text-align:center;padding:20px">Analysis failed. Try again.</div>`;
+    console.error('[analyze]', e);
+  } finally {
+    analyzeInFlight = false;
+    btn.disabled = false;
+    btn.textContent = '⚡ Go';
+  }
+}
+
+// ── TRENDING ───────────────────────────────────────────────────────────────────
+const GECKO_NETWORKS = {
+  base: 'base', eth: 'eth', ethereum: 'eth',
+  solana: 'solana', sol: 'solana',
+  bsc: 'bsc', bnb: 'bsc',
+  arbitrum: 'arbitrum', arb: 'arbitrum',
+  polygon: 'polygon_pos', matic: 'polygon_pos',
+};
+
+async function loadTrending(chain, pillEl) {
+  trendingChain = chain || trendingChain;
+
+  // Update pill UI if called from a pill click
+  if (pillEl) {
+    document.querySelectorAll('.chain-pill').forEach(p => p.classList.remove('active'));
+    pillEl.classList.add('active');
+  }
+
+  const list = document.getElementById('trending-list');
+  list.innerHTML = '<div class="trending-loading"><span class="spinner-white"></span> Loading...</div>';
+
+  try {
+    const network = GECKO_NETWORKS[trendingChain] || 'base';
+    const r = await fetch(`https://api.geckoterminal.com/api/v2/networks/${network}/trending_pools?page=1`);
+    const data = await r.json();
+    const pools = (data?.data || []).slice(0, 10);
+
+    if (!pools.length) {
+      list.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;font-size:13px">No trending data available</div>';
+      return;
+    }
+
+    list.innerHTML = pools.map((p, i) => {
+      const a   = p.attributes || {};
+      const vol = Number(a.volume_usd?.h24 || 0);
+      const chg = Number(a.price_change_percentage?.h24 || 0);
+      const name = a.name || 'Unknown';
+      // Extract base token symbol from pair name (e.g. "FETCHR / WETH" → "FETCHR")
+      const sym = name.split('/')[0].trim();
+      const chgColor = chg >= 0 ? 'var(--accent)' : 'var(--red)';
+      const chgSign  = chg >= 0 ? '+' : '';
+
+      const fmtVol = vol >= 1e6 ? '$' + (vol/1e6).toFixed(1) + 'M vol'
+                   : vol >= 1e3 ? '$' + (vol/1e3).toFixed(0) + 'K vol'
+                   : '$' + vol.toFixed(0) + ' vol';
+
+      return `
+        <div class="trending-item">
+          <div class="trending-rank">#${i+1}</div>
+          <div class="trending-info">
+            <div class="trending-name">${sym}</div>
+            <div class="trending-vol">${fmtVol}</div>
+          </div>
+          <span class="trending-change" style="color:${chgColor}">${chgSign}${chg.toFixed(1)}%</span>
+          <button class="trending-analyze-btn" onclick="analyzeFromTrending('${sym}')">Analyze ↗</button>
+        </div>
+      `;
+    }).join('');
+  } catch(e) {
+    list.innerHTML = '<div style="text-align:center;color:var(--red);padding:20px;font-size:13px">Failed to load trending data</div>';
+  }
+}
+
+function analyzeFromTrending(symbol) {
+  document.getElementById('analyze-input').value = symbol;
+  switchTab('analyze');
+  runAnalyze(symbol);
+}
+
+function refreshTrending() {
+  loadTrending(trendingChain);
+}
+
+// ── DCA ────────────────────────────────────────────────────────────────────────
 async function createDCA() {
   if (!walletAddress) return showToast('Connect wallet first', 'error');
-  const token = document.getElementById('dca-token').value.trim().toUpperCase();
-  const amount = parseFloat(document.getElementById('dca-amount').value);
-  const frequency = document.getElementById('dca-frequency').value;
-  const chain = document.getElementById('dca-chain').value;
-  const maxPrice = parseFloat(document.getElementById('dca-max-price').value) || null;
+  const token       = document.getElementById('dca-token').value.trim().toUpperCase();
+  const amount      = parseFloat(document.getElementById('dca-amount').value);
+  const frequency   = document.getElementById('dca-frequency').value;
+  const chain       = document.getElementById('dca-chain').value;
+  const maxPrice    = parseFloat(document.getElementById('dca-max-price').value) || null;
   const totalOrders = parseInt(document.getElementById('dca-orders').value) || null;
 
   if (!token || !amount) return showToast('Enter token and amount', 'error');
@@ -806,9 +1217,9 @@ function renderDCAOrders() {
 
 function updateDCAStats() {
   const totalInvested = dcaOrders.reduce((s, o) => s + (o.executedCount || 0) * o.amount, 0);
-  const totalOrders = dcaOrders.reduce((s, o) => s + (o.executedCount || 0), 0);
+  const totalOrders   = dcaOrders.reduce((s, o) => s + (o.executedCount || 0), 0);
   document.getElementById('dca-total-invested').textContent = `$${totalInvested.toFixed(0)}`;
-  document.getElementById('dca-orders-count').textContent = totalOrders;
+  document.getElementById('dca-orders-count').textContent   = totalOrders;
 }
 
 async function stopDCA(orderId) {
@@ -823,7 +1234,7 @@ async function stopDCA(orderId) {
   } catch {}
 }
 
-// ── Portfolio ─────────────────────────────────────────────────────────────────
+// ── Portfolio ──────────────────────────────────────────────────────────────────
 async function loadPortfolio() {
   if (!walletAddress) return;
   try {
@@ -849,7 +1260,7 @@ async function loadPortfolio() {
   } catch {}
 }
 
-// ── Toast ─────────────────────────────────────────────────────────────────────
+// ── Toast ──────────────────────────────────────────────────────────────────────
 function showToast(msg, type = '') {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -857,17 +1268,16 @@ function showToast(msg, type = '') {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
+// ── Init ───────────────────────────────────────────────────────────────────────
 window.addEventListener('load', () => {
-  // Check if wallet previously connected (stored in localStorage)
   const saved = localStorage.getItem(`gsb_wallet_${userId}`);
   if (saved) {
     walletAddress = saved;
     onWalletConnected();
   }
-  // Auto-load FETCHR price on open
   setTimeout(() => updateQuote(), 500);
-  // Check for ethereum provider
+  // Load trending in background so it's ready when user clicks
+  loadTrending('base');
   if (window.ethereum) {
     window.ethereum.on('accountsChanged', (accounts) => {
       if (accounts.length > 0) { walletAddress = accounts[0]; onWalletConnected(); }
