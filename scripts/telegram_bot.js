@@ -60,10 +60,39 @@ async function sendMessage(chatId, text, extra = {}) {
 }
 
 // ── Token analysis via our script ─────────────────────────────────────────────
-async function analyzeToken(input) {
+async function analyzeToken(input, chainHint = null) {
   try {
+    // For major assets, use CoinGecko data directly
+    const clean = input.replace('$','').toLowerCase().trim();
+    if (!chainHint && COINGECKO_MAJORS[clean]) {
+      const cg = await getCoinGeckoPrice(COINGECKO_MAJORS[clean]);
+      if (cg) {
+        // Build a synthetic result compatible with handleAnalyze
+        const p = cg.price;
+        return {
+          name: cg.name,
+          symbol: cg.symbol,
+          currentPrice: p,
+          contractAddress: '',
+          marketData: { priceChange24h: cg.change24h, liquidity: cg.liquidity, volume24h: cg.volume24h },
+          analysis: {
+            recommendation: cg.change24h > 2 ? 'BUY' : cg.change24h < -2 ? 'AVOID' : 'HOLD',
+            confidence: 85,
+            trend: cg.change24h > 0 ? 'bullish' : 'bearish',
+            targets: [p * 1.15, p * 1.24],
+            supportLevels: [p * 0.95],
+            entryZone: { min: p * 0.93, max: p * 0.98 },
+            summaryShort: `${cg.name} via CoinGecko. MCap: $${Number(cg.liquidity/1e9).toFixed(2)}B`,
+            summary: `24h change: ${cg.change24h.toFixed(2)}%. Volume: $${Number(cg.volume24h/1e6).toFixed(0)}M. Data from CoinGecko.`,
+          },
+          source: 'CoinGecko',
+        };
+      }
+    }
+
+    const chainArg = chainHint ? ` --chain ${chainHint}` : '';
     const scriptPath = path.join(__dirname, 'token_analysis.js');
-    const output = execSync(`node ${scriptPath} "${input.replace(/"/g, '')}"`, {
+    const output = execSync(`node ${scriptPath} "${input.replace(/"/g, '')}"${chainArg}`, {
       cwd: path.join(__dirname, '..'),
       env: { ...process.env },
       timeout: 30000,
@@ -77,10 +106,17 @@ async function analyzeToken(input) {
   }
 }
 
-// ── Trending tokens ───────────────────────────────────────────────────────────
-async function getTrending() {
+// ── Trending tokens (multi-chain) ────────────────────────────────────────────
+const GECKO_NETWORKS = {
+  base: 'base', eth: 'eth', ethereum: 'eth', sol: 'solana', solana: 'solana',
+  bsc: 'bsc', bnb: 'bsc', arb: 'arbitrum', arbitrum: 'arbitrum',
+  polygon: 'polygon_pos', matic: 'polygon_pos',
+};
+
+async function getTrending(chainHint = 'base') {
   try {
-    const res = await fetch('https://api.geckoterminal.com/api/v2/networks/base/trending_pools?page=1');
+    const network = GECKO_NETWORKS[chainHint?.toLowerCase()] || 'base';
+    const res = await fetch(`https://api.geckoterminal.com/api/v2/networks/${network}/trending_pools?page=1`);
     const data = await res.json();
     return (data?.data || []).slice(0, 5).map(p => {
       const a = p.attributes || {};
@@ -91,25 +127,87 @@ async function getTrending() {
   } catch { return ['Could not fetch trending data']; }
 }
 
-// ── Price check ───────────────────────────────────────────────────────────────
-async function getPrice(input) {
+// ── Chain config ─────────────────────────────────────────────────────────────
+const CHAIN_IDS = {
+  base: 'base', eth: 'ethereum', ethereum: 'ethereum',
+  sol: 'solana', solana: 'solana', bsc: 'bsc', bnb: 'bsc',
+  arb: 'arbitrum', arbitrum: 'arbitrum', polygon: 'polygon', matic: 'polygon',
+};
+
+// CoinGecko IDs for major assets that should never be DEX-searched
+const COINGECKO_MAJORS = {
+  btc: 'bitcoin', bitcoin: 'bitcoin', eth: 'ethereum', ethereum: 'ethereum',
+  sol: 'solana', solana: 'solana', bnb: 'binancecoin', xrp: 'ripple',
+  ada: 'cardano', doge: 'dogecoin', avax: 'avalanche-2', dot: 'polkadot',
+  matic: 'matic-network', link: 'chainlink', uni: 'uniswap', ltc: 'litecoin',
+  atom: 'cosmos', near: 'near', algo: 'algorand', xlm: 'stellar',
+};
+
+// ── CoinGecko price for majors ────────────────────────────────────────────────
+async function getCoinGeckoPrice(coinId) {
   try {
-    const isAddress = input.startsWith('0x');
+    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${coinId}?localization=false&tickers=false&community_data=false&developer_data=false`);
+    const data = await res.json();
+    const m = data.market_data;
+    return {
+      symbol: data.symbol?.toUpperCase(),
+      name: data.name,
+      price: m?.current_price?.usd || 0,
+      change24h: m?.price_change_percentage_24h || 0,
+      volume24h: m?.total_volume?.usd || 0,
+      liquidity: m?.market_cap?.usd || 0,
+      source: 'CoinGecko',
+      isMajor: true,
+    };
+  } catch { return null; }
+}
+
+// ── Price check (multi-chain + CoinGecko fallback) ───────────────────────────
+async function getPrice(input, chainHint = null) {
+  try {
+    const clean = input.replace('$', '').toLowerCase().trim();
+
+    // CoinGecko for major assets
+    if (!chainHint && COINGECKO_MAJORS[clean]) {
+      const cg = await getCoinGeckoPrice(COINGECKO_MAJORS[clean]);
+      if (cg) return cg;
+    }
+
+    // DexScreener multi-chain search
+    const isAddress = input.startsWith('0x') || (input.length === 44 && !input.includes(' '));
     const url = isAddress
       ? `https://api.dexscreener.com/latest/dex/tokens/${input}`
-      : `https://api.dexscreener.com/latest/dex/search?q=${input.replace('$', '')}`;
+      : `https://api.dexscreener.com/latest/dex/search?q=${clean}`;
     const res = await fetch(url);
     const data = await res.json();
-    const pairs = (data.pairs || []).filter(p => p.chainId === 'base');
-    pairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+
+    let pairs = data.pairs || [];
+
+    // Filter by chain if specified
+    const chainFilter = chainHint ? CHAIN_IDS[chainHint.toLowerCase()] : null;
+    if (chainFilter) {
+      pairs = pairs.filter(p => p.chainId === chainFilter);
+    }
+
+    // Sort by liquidity, prefer exact symbol match
+    pairs.sort((a, b) => {
+      const symA = a.baseToken?.symbol?.toLowerCase() === clean ? 1 : 0;
+      const symB = b.baseToken?.symbol?.toLowerCase() === clean ? 1 : 0;
+      if (symA !== symB) return symB - symA;
+      return (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0);
+    });
+
     const p = pairs[0];
     if (!p) return null;
     return {
       symbol: p.baseToken?.symbol,
+      name: p.baseToken?.name,
       price: parseFloat(p.priceUsd || '0'),
       change24h: p.priceChange?.h24 || 0,
       volume24h: p.volume?.h24 || 0,
       liquidity: p.liquidity?.usd || 0,
+      chain: p.chainId,
+      source: 'DexScreener',
     };
   } catch { return null; }
 }
@@ -122,7 +220,7 @@ async function handleStart(chatId, userId) {
     `*Commands:*\n` +
     `/analyze [token] — AI trade analysis\n` +
     `/price [token] — Quick price check\n` +
-    `/trending — Top 5 Base tokens\n` +
+    `/trending [chain] — Top 5 tokens (base/eth/sol/bsc/arb)\n` +
     `/buy [token] [amount] — Get swap link\n` +
     `/alert [token] [price] — Price alert\n` +
     `/help — This menu\n\n` +
@@ -135,12 +233,21 @@ async function handleStart(chatId, userId) {
   await sendMessage(chatId, msg);
 }
 
+// Supported chains display
+const CHAIN_NAMES = { base:'Base', ethereum:'Ethereum', solana:'Solana', bsc:'BSC', arbitrum:'Arbitrum', polygon:'Polygon' };
+
 async function handleAnalyze(chatId, input) {
   if (!input) {
-    return sendMessage(chatId, '❌ Please specify a token: `/analyze FETCHR` or `/analyze 0x610a...`');
+    return sendMessage(chatId, '❌ Usage: `/analyze FETCHR` or `/analyze BTC eth`\n\nChains: base, eth, sol, bsc, arb, polygon');
   }
-  await sendMessage(chatId, `🔍 Analyzing *${input}*... (10-15 seconds)`);
-  const result = await analyzeToken(input);
+  // Parse optional chain: "/analyze FETCHR base" or "/analyze BTC eth"
+  const parts = input.trim().split(/\s+/);
+  let token = parts[0];
+  let chainHint = parts[1] ? (CHAIN_IDS[parts[1].toLowerCase()] || null) : null;
+  const chainLabel = chainHint ? ` on ${CHAIN_NAMES[chainHint] || chainHint}` : '';
+
+  await sendMessage(chatId, `🔍 Analyzing *${token}*${chainLabel}... (10-15 seconds)`);
+  const result = await analyzeToken(token, chainHint);
   if (!result || result.error) {
     return sendMessage(chatId, `❌ Could not analyze *${input}*. Try a contract address or check the ticker.`);
   }
@@ -168,13 +275,17 @@ async function handleAnalyze(chatId, input) {
 }
 
 async function handlePrice(chatId, input) {
-  if (!input) return sendMessage(chatId, '❌ Usage: `/price VIRTUAL`');
-  const data = await getPrice(input);
-  if (!data) return sendMessage(chatId, `❌ Could not find price for *${input}* on Base.`);
+  if (!input) return sendMessage(chatId, '❌ Usage: `/price VIRTUAL` or `/price BTC eth`');
+  const parts = input.trim().split(/\s+/);
+  const token = parts[0];
+  const chainHint = parts[1] ? (CHAIN_IDS[parts[1].toLowerCase()] || null) : null;
+  const data = await getPrice(token, chainHint);
+  const chainLabel = data?.chain ? ` (${CHAIN_NAMES[data.chain] || data.chain})` : (data?.isMajor ? ' (CoinGecko)' : '');
+  if (!data) return sendMessage(chatId, `❌ Could not find price for *${token}*.`);
   const dir = Number(data.change24h) >= 0 ? '📈' : '📉';
   const msg =
-    `${dir} *${data.symbol}*\n` +
-    `Price: \`$${data.price.toFixed(8)}\`\n` +
+    `${dir} *${data.symbol || token}*${chainLabel}\n` +
+    `Price: \`$${Number(data.price).toFixed(8)}\`\n` +
     `24h: ${Number(data.change24h) >= 0 ? '+' : ''}${Number(data.change24h).toFixed(2)}%\n` +
     `Vol: $${Number(data.volume24h).toLocaleString()}\n` +
     `Liq: $${Number(data.liquidity).toLocaleString()}`;
