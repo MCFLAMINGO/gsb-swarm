@@ -3352,7 +3352,7 @@ server.listen(PORT, '0.0.0.0', async () => {
   console.log(`[gsb-dashboard] Listening on port ${PORT}`);
 
   // Start Telegram bot as background process
-  if (process.env.TELEGRAM_BOT_TOKEN) {
+  if (process.env.TELEGRAM_SWAP_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN) {
     try {
       const botPath = path.join(__dirname, 'scripts', 'telegram_bot.js');
       if (fs.existsSync(botPath)) {
