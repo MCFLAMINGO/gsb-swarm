@@ -3342,6 +3342,120 @@ app.get('/api/copy-trader/status', requireOperator, (req, res) => {
   });
 });
 
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GSB CONTENT ENGINE — 12 API endpoints (Post King competitor)
+// ══════════════════════════════════════════════════════════════════════════════
+const contentEngine = require('./scripts/content_engine');
+
+// Helper: wrap async handler, return structured error
+function ceHandler(fn) {
+  return async (req, res) => {
+    try {
+      const params = { ...req.body, ...req.query };
+      const result = await fn(anthropic, params);
+      res.json({ ok: true, ...result });
+    } catch (e) {
+      console.error('[content-engine]', e.message);
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  };
+}
+
+// 1. Analyze website audience
+app.post('/api/content/analyze-audience', express.json(), ceHandler(contentEngine.analyzeWebsiteAudience));
+
+// 2. List brands
+app.get('/api/content/brands', async (req, res) => {
+  try {
+    const result = await contentEngine.listMyBrands({ walletAddress: req.query.walletAddress });
+    res.json({ ok: true, ...result });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// 3. Generate themes
+app.post('/api/content/generate-themes', express.json(), ceHandler(contentEngine.generateThemes));
+
+// 4. List themes
+app.get('/api/content/themes', async (req, res) => {
+  try {
+    const result = await contentEngine.listMyThemes({ brandId: req.query.brandId });
+    res.json({ ok: true, ...result });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// 5. Generate single social post
+app.post('/api/content/social-post', express.json(), ceHandler(contentEngine.generateSocialPost));
+
+// 6. Generate bulk posts
+app.post('/api/content/bulk-posts', express.json(), ceHandler(contentEngine.generateBulkPosts));
+
+// 7. Generate blog post
+app.post('/api/content/blog-post', express.json(), ceHandler(contentEngine.generateBlogPost));
+
+// 8. Repurpose content
+app.post('/api/content/repurpose', express.json(), ceHandler(contentEngine.repurposeContent));
+
+// 9. Humanize text
+app.post('/api/content/humanize', express.json(), ceHandler(contentEngine.humanizeText));
+
+// 10. Rewrite with voice
+app.post('/api/content/rewrite-voice', express.json(), ceHandler(contentEngine.rewriteWithVoice));
+
+// 11. Detect AI content
+app.post('/api/content/detect-ai', express.json(), ceHandler(contentEngine.detectAiContent));
+
+// 12. Get X mentions
+app.get('/api/content/x-mentions', async (req, res) => {
+  try {
+    const result = await contentEngine.getXMentions({
+      query: req.query.query,
+      username: req.query.username,
+      count: parseInt(req.query.count) || 20,
+    });
+    res.json({ ok: true, ...result });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// Resource: list voices
+app.get('/api/content/voices', (req, res) => {
+  res.json({ ok: true, voices: contentEngine.listPublicVoices() });
+});
+
+// Resource: list platforms
+app.get('/api/content/platforms', (req, res) => {
+  res.json({ ok: true, platforms: contentEngine.getSupportedPlatforms() });
+});
+
+// ACP job dispatch — single endpoint for Virtuals butler to call
+app.post('/api/content/job', express.json(), async (req, res) => {
+  const { job, params } = req.body;
+  if (!job) return res.status(400).json({ ok: false, error: 'job is required' });
+  const jobMap = {
+    'analyze_website_audience': (p) => contentEngine.analyzeWebsiteAudience(anthropic, p),
+    'list_my_brands':           (p) => contentEngine.listMyBrands(p),
+    'generate_themes':          (p) => contentEngine.generateThemes(anthropic, p),
+    'list_my_themes':           (p) => contentEngine.listMyThemes(p),
+    'generate_social_post':     (p) => contentEngine.generateSocialPost(anthropic, p),
+    'generate_bulk_posts':      (p) => contentEngine.generateBulkPosts(anthropic, p),
+    'generate_blog_post':       (p) => contentEngine.generateBlogPost(anthropic, p),
+    'repurpose_content':        (p) => contentEngine.repurposeContent(anthropic, p),
+    'humanize_text':            (p) => contentEngine.humanizeText(anthropic, p),
+    'rewrite_with_voice':       (p) => contentEngine.rewriteWithVoice(anthropic, p),
+    'detect_ai_content':        (p) => contentEngine.detectAiContent(anthropic, p),
+    'get_x_mentions':           (p) => contentEngine.getXMentions(p),
+  };
+  const handler = jobMap[job];
+  if (!handler) return res.status(404).json({ ok: false, error: `Unknown job: ${job}` });
+  try {
+    const result = await handler(params || {});
+    res.json({ ok: true, job, result });
+  } catch (e) {
+    console.error('[content-engine job]', e.message);
+    res.status(400).json({ ok: false, job, error: e.message });
+  }
+});
+
 // ── Catch-all → index.html ────────────────────────────────────────────────────
 app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dashboard-ui', 'index.html'));
