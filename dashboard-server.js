@@ -3343,6 +3343,129 @@ app.get('/api/copy-trader/status', requireOperator, (req, res) => {
 });
 
 
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GSB SWAP + DCA API
+// ══════════════════════════════════════════════════════════════════════════════
+const dcaEngine = require('./scripts/dca_engine');
+
+// Serve mini app
+app.use('/miniapp', express.static(path.join(__dirname, 'miniapp')));
+
+// ── Wallet management ─────────────────────────────────────────────────────────
+app.post('/api/swap/wallet', express.json(), (req, res) => {
+  const { userId, userName, walletAddress } = req.body;
+  if (!userId || !walletAddress) return res.status(400).json({ ok: false, error: 'userId and walletAddress required' });
+  dcaEngine.saveWallet({ userId, userName, walletAddress });
+  res.json({ ok: true });
+});
+
+// ── Token search ──────────────────────────────────────────────────────────────
+app.get('/api/swap/search', async (req, res) => {
+  const { q, chain = 'base' } = req.query;
+  if (!q) return res.status(400).json({ ok: false, error: 'q required' });
+  const tokens = await dcaEngine.searchTokens(q, chain);
+  res.json({ ok: true, tokens });
+});
+
+// ── Quote ─────────────────────────────────────────────────────────────────────
+app.get('/api/swap/quote', async (req, res) => {
+  const { tokenIn = 'USDC', tokenOut, amount, chain = 'base' } = req.query;
+  if (!tokenOut || !amount) return res.status(400).json({ ok: false, error: 'tokenOut and amount required' });
+  const quote = await dcaEngine.getQuote(tokenIn, tokenOut, parseFloat(amount), chain);
+  if (!quote) return res.json({ ok: false, error: 'Could not get quote' });
+  res.json({ ok: true, ...quote });
+});
+
+// ── Execute swap (returns Uniswap URL for user to confirm) ───────────────────
+app.post('/api/swap/execute', express.json(), async (req, res) => {
+  const { userId, walletAddress, tokenIn, tokenOut, amount, chain = 'base', slippage = 1 } = req.body;
+  if (!tokenOut || !amount) return res.status(400).json({ ok: false, error: 'tokenOut and amount required' });
+  try {
+    const priceData = await dcaEngine.getTokenPrice(tokenOut, chain);
+    if (!priceData) return res.json({ ok: false, error: 'Token not found' });
+    // Build Uniswap deep link
+    const chainParams = { base: 'base', ethereum: 'mainnet', solana: 'solana', bsc: 'bnb', arbitrum: 'arbitrum', polygon: 'polygon' };
+    const chainParam = chainParams[chain] || 'base';
+    const usdcAddress = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+    const uniswapUrl = `https://app.uniswap.org/swap?chain=${chainParam}&inputCurrency=${usdcAddress}&outputCurrency=${priceData.contractAddress}&exactAmount=${amount}&exactField=input`;
+    res.json({ ok: true, uniswapUrl, price: priceData.price, contractAddress: priceData.contractAddress });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── Approval link ─────────────────────────────────────────────────────────────
+app.get('/api/swap/approval-status', (req, res) => {
+  // For now, always return not approved (requires on-chain check in production)
+  res.json({ approved: false });
+});
+app.get('/api/swap/approve-link', (req, res) => {
+  const { wallet } = req.query;
+  // Build Uniswap approval URL for USDC
+  const url = `https://app.uniswap.org/swap?chain=base&inputCurrency=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&exactAmount=1000&exactField=input`;
+  res.json({ ok: true, url });
+});
+
+// ── Portfolio ─────────────────────────────────────────────────────────────────
+app.get('/api/swap/portfolio', async (req, res) => {
+  const { wallet } = req.query;
+  if (!wallet) return res.status(400).json({ ok: false, error: 'wallet required' });
+  const portfolio = await dcaEngine.getPortfolio(wallet);
+  res.json({ ok: true, ...portfolio });
+});
+
+// ── DCA CRUD ──────────────────────────────────────────────────────────────────
+app.post('/api/swap/dca/create', express.json(), (req, res) => {
+  const { userId, walletAddress, token, amount, frequency, chain, maxPrice, totalOrders } = req.body;
+  if (!userId || !token || !amount || !frequency) {
+    return res.status(400).json({ ok: false, error: 'userId, token, amount, frequency required' });
+  }
+  const order = dcaEngine.createOrder({ userId, walletAddress, token, amount, frequency, chain, maxPrice, totalOrders });
+  res.json({ ok: true, order });
+});
+
+app.get('/api/swap/dca/list', (req, res) => {
+  const { userId, wallet } = req.query;
+  if (!userId) return res.status(400).json({ ok: false, error: 'userId required' });
+  const orders = dcaEngine.listOrders(userId, wallet);
+  res.json({ ok: true, orders });
+});
+
+app.post('/api/swap/dca/stop', express.json(), (req, res) => {
+  const { userId, orderId } = req.body;
+  if (!userId || !orderId) return res.status(400).json({ ok: false, error: 'userId and orderId required' });
+  const stopped = dcaEngine.stopOrder(userId, orderId);
+  res.json({ ok: stopped, error: stopped ? null : 'Order not found' });
+});
+
+// ── DCA cron — runs every minute, executes due orders ─────────────────────────
+setInterval(async () => {
+  try {
+    const tgNotify = async (userId, msg) => {
+      const walletData = dcaEngine.getWallet(userId);
+      if (!walletData) return;
+      // Send via Telegram bot token
+      const botToken = process.env.TELEGRAM_SWAP_BOT;
+      if (!botToken) return;
+      // Find chat ID — stored when user sent /start
+      const chatsFile = '/tmp/gsb-bot-chats.json';
+      let chats = {};
+      try { chats = JSON.parse(require('fs').readFileSync(chatsFile, 'utf8')); } catch {}
+      const chatId = chats[userId];
+      if (!chatId) return;
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: 'Markdown', disable_web_page_preview: false }),
+      });
+    };
+    await dcaEngine.executeDueDCAs(tgNotify);
+  } catch(e) {
+    console.error('[dca-cron]', e.message);
+  }
+}, 60000);
+
 // ══════════════════════════════════════════════════════════════════════════════
 // GSB CONTENT ENGINE — 12 API endpoints (Post King competitor)
 // ══════════════════════════════════════════════════════════════════════════════
