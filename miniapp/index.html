@@ -683,6 +683,68 @@
   </div>
 </div>
 
+<!-- Limit Orders Panel -->
+<div class="panel" id="panel-limits">
+  <div style="padding:16px">
+    <div class="card">
+      <div class="card-title">Set Limit Order</div>
+      <div style="display:grid;gap:10px;margin-top:10px">
+        <input id="limit-token" class="input" placeholder="Token address or symbol" />
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <input id="limit-amount" class="input" placeholder="Amount (USDC)" type="number" min="0" />
+          <input id="limit-price" class="input" placeholder="Trigger price ($)" type="number" min="0" step="any" />
+        </div>
+        <select id="limit-direction" class="input" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:12px">
+          <option value="below">Buy if price drops below</option>
+          <option value="above">Sell if price rises above</option>
+        </select>
+        <select id="limit-chain" class="input" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:12px">
+          <option value="base">Base</option>
+          <option value="ethereum">Ethereum</option>
+          <option value="arbitrum">Arbitrum</option>
+          <option value="optimism">Optimism</option>
+          <option value="polygon">Polygon</option>
+        </select>
+        <input id="limit-expire" class="input" placeholder="Expires in hours (default 72)" type="number" min="1" />
+        <button class="btn-primary" onclick="createLimitOrder()" style="padding:14px;border-radius:12px;font-weight:700">Set Limit Order</button>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="card-title">Active Orders</div>
+      <div id="limit-orders-list" style="margin-top:8px">
+        <div style="text-align:center;color:var(--muted);padding:20px;font-size:13px">No active limit orders</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Referral Panel -->
+<div class="panel" id="panel-referral">
+  <div style="padding:16px">
+    <div class="card">
+      <div class="card-title">Your Referral Link</div>
+      <div id="referral-code-section" style="margin-top:10px;text-align:center">
+        <div style="color:var(--muted);font-size:13px;padding:16px">Loading...</div>
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn-primary" onclick="registerReferral()" style="width:100%;padding:12px;border-radius:12px;font-weight:700">Get My Referral Link</button>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="card-title">Your Stats</div>
+      <div id="referral-stats" style="margin-top:8px">
+        <div style="text-align:center;color:var(--muted);padding:20px;font-size:13px">Register to see stats</div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="card-title">Leaderboard</div>
+      <div id="referral-leaderboard" style="margin-top:8px">
+        <div style="text-align:center;color:var(--muted);padding:20px;font-size:13px">Loading...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="bottom-nav">
   <div class="nav-btn active" onclick="switchTab('swap')">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
@@ -704,6 +766,14 @@
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
     Portfolio
   </div>
+  <div class="nav-btn" onclick="switchTab('limits')">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+    Limits
+  </div>
+  <div class="nav-btn" onclick="switchTab('referral')">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    Refer
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -716,7 +786,7 @@ const API_BASE = 'https://gsb-swarm-production.up.railway.app';
 const userId   = tg?.initDataUnsafe?.user?.id || 'dev_user';
 const userName = tg?.initDataUnsafe?.user?.username || 'user';
 
-const TABS = ['swap','dca','analyze','trending','portfolio'];
+const TABS = ['swap','dca','analyze','trending','portfolio','limits','referral'];
 
 let walletAddress  = null;
 let isApproved     = false;
@@ -732,6 +802,8 @@ function switchTab(tab) {
   document.getElementById('panel-' + tab).classList.add('active');
 
   if (tab === 'trending') loadTrending(trendingChain);
+  if (tab === 'limits')   loadLimitOrders();
+  if (tab === 'referral') loadReferralStats();
 }
 
 // ── Wallet Connection ──────────────────────────────────────────────────────────
@@ -775,6 +847,9 @@ function onWalletConnected() {
   checkApproval();
   loadDCAOrders();
   loadPortfolio();
+  // Auto-register referral (also picks up ?ref= code from URL)
+  const _urlRef = new URLSearchParams(window.location.search).get('ref') || '';
+  fetch(`${API_BASE}/api/referral/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: String(userId), userName, refCode: _urlRef }) }).catch(() => {});
 }
 
 async function saveWallet() {
@@ -1261,6 +1336,151 @@ async function loadPortfolio() {
 }
 
 // ── Toast ──────────────────────────────────────────────────────────────────────
+// ── Limit Orders ──────────────────────────────────────────────────────────────
+async function createLimitOrder() {
+  if (!walletAddress) { showToast('Connect wallet first', 'error'); return; }
+  const token       = document.getElementById('limit-token').value.trim();
+  const amount      = parseFloat(document.getElementById('limit-amount').value);
+  const triggerPrice = parseFloat(document.getElementById('limit-price').value);
+  const direction   = document.getElementById('limit-direction').value;
+  const chain       = document.getElementById('limit-chain').value;
+  const expireHours = parseInt(document.getElementById('limit-expire').value) || 72;
+  if (!token || isNaN(amount) || isNaN(triggerPrice)) { showToast('Fill all fields', 'error'); return; }
+  try {
+    const r = await fetch(`${API_BASE}/api/swap/limit/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: String(userId), walletAddress, token, amount, chain, triggerPrice, direction, expireHours }),
+    });
+    const data = await r.json();
+    if (data.success) {
+      showToast('Limit order set! You will be notified via Telegram when triggered.', 'success');
+      document.getElementById('limit-token').value = '';
+      document.getElementById('limit-amount').value = '';
+      document.getElementById('limit-price').value = '';
+      loadLimitOrders();
+    } else { showToast(data.error || 'Failed to set order', 'error'); }
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function loadLimitOrders() {
+  const el = document.getElementById('limit-orders-list');
+  if (!walletAddress) { el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;font-size:13px">Connect wallet to see orders</div>'; return; }
+  try {
+    const r = await fetch(`${API_BASE}/api/swap/limit/list?userId=${encodeURIComponent(String(userId))}&wallet=${walletAddress}`);
+    const data = await r.json();
+    const orders = data.orders || [];
+    if (!orders.length) { el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;font-size:13px">No active limit orders</div>'; return; }
+    el.innerHTML = orders.map(o => {
+      const exp = new Date(o.expiresAt).toLocaleDateString();
+      const dir = o.direction === 'below' ? '🟢 Buy at' : '🔴 Sell at';
+      return `<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:8px;border:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:700">${o.token.slice(0,8)}... ${dir} $${o.triggerPrice}</span>
+          <button onclick="cancelLimitOrder('${o.id}')" style="background:#ff4455;color:#fff;border:none;border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer">Cancel</button>
+        </div>
+        <div style="color:var(--muted);font-size:12px;margin-top:4px">$${o.amount} USDC · ${o.chain} · Expires ${exp}</div>
+      </div>`;
+    }).join('');
+  } catch(e) { el.innerHTML = '<div style="color:var(--muted);padding:16px;font-size:13px">Error loading orders</div>'; }
+}
+
+async function cancelLimitOrder(orderId) {
+  try {
+    const r = await fetch(`${API_BASE}/api/swap/limit/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: String(userId), orderId }),
+    });
+    const data = await r.json();
+    if (data.success) { showToast('Order cancelled', 'success'); loadLimitOrders(); }
+    else { showToast(data.error || 'Cancel failed', 'error'); }
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ── Referral ───────────────────────────────────────────────────────────────────
+async function registerReferral() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const incomingRef = urlParams.get('ref') || '';
+  try {
+    const r = await fetch(`${API_BASE}/api/referral/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: String(userId), userName: userName, refCode: incomingRef }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      const el = document.getElementById('referral-code-section');
+      el.innerHTML = `
+        <div style="background:var(--surface2);border-radius:12px;padding:16px;border:1px solid var(--border)">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em">Your Referral Code</div>
+          <div style="font-size:22px;font-weight:900;letter-spacing:.12em;color:var(--accent)">${data.refCode}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:8px;word-break:break-all">${data.refLink}</div>
+          <button onclick="navigator.clipboard.writeText('${data.refLink}').then(()=>showToast('Link copied!','success'))" style="margin-top:10px;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-weight:700;cursor:pointer">Copy Link</button>
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:var(--muted)">Earn 25% of every swap fee from users you refer.</div>
+      `;
+      loadReferralStats();
+    } else { showToast(data.error || 'Registration failed', 'error'); }
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function loadReferralStats() {
+  try {
+    // Load stats
+    const r = await fetch(`${API_BASE}/api/referral/stats?userId=${encodeURIComponent(String(userId))}`);
+    if (r.ok) {
+      const data = await r.json();
+      if (data.ok) {
+        const el = document.getElementById('referral-code-section');
+        el.innerHTML = `
+          <div style="background:var(--surface2);border-radius:12px;padding:16px;border:1px solid var(--border)">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em">Your Referral Code</div>
+            <div style="font-size:22px;font-weight:900;letter-spacing:.12em;color:var(--accent)">${data.refCode}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:8px;word-break:break-all">${data.refLink}</div>
+            <button onclick="navigator.clipboard.writeText('${data.refLink}').then(()=>showToast('Link copied!','success'))" style="margin-top:10px;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-weight:700;cursor:pointer">Copy Link</button>
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:var(--muted)">Earn 25% of every swap fee from users you refer.</div>
+        `;
+        document.getElementById('referral-stats').innerHTML = `
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+            <div style="background:var(--surface2);border-radius:10px;padding:12px;text-align:center;border:1px solid var(--border)">
+              <div style="font-size:11px;color:var(--muted);margin-bottom:4px">REFERRALS</div>
+              <div style="font-size:20px;font-weight:900">${data.referralCount}</div>
+            </div>
+            <div style="background:var(--surface2);border-radius:10px;padding:12px;text-align:center;border:1px solid var(--border)">
+              <div style="font-size:11px;color:var(--muted);margin-bottom:4px">EARNED</div>
+              <div style="font-size:20px;font-weight:900;color:var(--accent)">$${parseFloat(data.totalEarned || 0).toFixed(4)}</div>
+            </div>
+            <div style="background:var(--surface2);border-radius:10px;padding:12px;text-align:center;border:1px solid var(--border)">
+              <div style="font-size:11px;color:var(--muted);margin-bottom:4px">SWAPS</div>
+              <div style="font-size:20px;font-weight:900">${(data.referrals || []).reduce((s,r)=>s+(r.swapCount||0),0)}</div>
+            </div>
+          </div>
+        `;
+      }
+    }
+    // Load leaderboard
+    const lb = await fetch(`${API_BASE}/api/referral/leaderboard`);
+    const lbData = await lb.json();
+    if (lbData.ok && lbData.leaderboard.length) {
+      document.getElementById('referral-leaderboard').innerHTML =
+        '<div style="font-size:12px">' +
+        lbData.leaderboard.map((u,i) =>
+          `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
+            <span>${i+1}. ${u.userName}</span>
+            <span style="color:var(--accent)">$${parseFloat(u.totalEarned||0).toFixed(4)} · ${u.referralCount} refs</span>
+          </div>`
+        ).join('') + '</div>';
+    } else {
+      document.getElementById('referral-leaderboard').innerHTML = '<div style="text-align:center;color:var(--muted);padding:16px;font-size:13px">No referrals yet — be first!</div>';
+    }
+  } catch(e) {
+    // User not registered yet — show register prompt
+    document.getElementById('referral-stats').innerHTML = '<div style="text-align:center;color:var(--muted);padding:16px;font-size:13px">Register above to see your stats</div>';
+  }
+}
+
 function showToast(msg, type = '') {
   const t = document.getElementById('toast');
   t.textContent = msg;

@@ -30,6 +30,8 @@ const { execSync } = require('child_process');
 const crypto   = require('crypto');
 const axios    = require('axios');
 const { CHAIN_CONFIG, CHAIN_ALIASES, resolveChain, SUPPORTED_CHAINS } = require('./chains');
+const limitEngine   = require('./scripts/limit_engine');
+const pnlCardRoute  = require('./scripts/pnl_card_route');
 
 // ── ACP SDK (V2) ─────────────────────────────────────────────────────────────
 let AcpContractClientV2, baseAcpConfigV2, AcpClient;
@@ -3399,11 +3401,127 @@ app.post('/api/swap/execute', express.json(), async (req, res) => {
     if (!global.feeLog) global.feeLog = [];
     global.feeLog.push({ ts: new Date().toISOString(), tokenIn, tokenOut, amount: parseFloat(amount), feeUsd: parseFloat(feeUsd), walletAddress, chain });
     if (global.feeLog.length > 500) global.feeLog.shift();
+    // Referral: attribute swap fee asynchronously
+    const _swapUserId = (req.body && req.body.userId) ? String(req.body.userId) : null;
+    fetch(`http://localhost:${PORT}/api/referral/record-swap`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ walletAddress, feeUsd: parseFloat(feeUsd), userId: _swapUserId }) }).catch(() => {});
 
     res.json({ ok: true, uniswapUrl, price: priceData.price, contractAddress: priceData.contractAddress, feeUsd: parseFloat(feeUsd), feeRecipient: GSB_SWARM_WALLET });
   } catch(e) {
     res.status(500).json({ ok: false, error: e.message });
   }
+});
+
+// ── PnL share card ──────────────────────────────────────────────────────────
+app.get('/api/pnl-card', pnlCardRoute);
+
+// ── Referral system ──────────────────────────────────────────────────────────
+const REFERRAL_FILE = '/tmp/gsb-referrals.json';
+function loadReferrals() { try { return JSON.parse(fs.readFileSync(REFERRAL_FILE, 'utf8')); } catch { return {}; } }
+function saveReferrals(d) { try { fs.writeFileSync(REFERRAL_FILE, JSON.stringify(d, null, 2)); } catch {} }
+function generateRefCode(existing) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code;
+  do {
+    code = 'GSB_' + Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  } while (Object.values(existing).some(u => u.refCode === code));
+  return code;
+}
+function userIdForWallet(walletAddress) {
+  if (!global.feeLog || !walletAddress) return null;
+  const entry = [...global.feeLog].reverse().find(e => e.walletAddress && e.walletAddress.toLowerCase() === walletAddress.toLowerCase());
+  return entry ? entry.userId || null : null;
+}
+
+app.post('/api/referral/register', (req, res) => {
+  const { userId, userName, refCode: incomingRefCode } = req.body || {};
+  if (!userId) return res.status(400).json({ ok: false, error: 'userId required' });
+  const db = loadReferrals();
+  if (db[userId]) {
+    const existing = db[userId];
+    return res.json({ ok: true, refCode: existing.refCode, refLink: `https://gsb-swarm-production.up.railway.app/miniapp/?ref=${existing.refCode}`, alreadyRegistered: true });
+  }
+  let referredBy = null, referrerUserId = null;
+  if (incomingRefCode) {
+    const referrerEntry = Object.values(db).find(u => u.refCode === incomingRefCode);
+    if (referrerEntry) { referredBy = incomingRefCode; referrerUserId = referrerEntry.userId; }
+  }
+  const newRefCode = generateRefCode(db);
+  db[userId] = { userId, userName: userName || '', refCode: newRefCode, referredBy: referredBy || null, joinedAt: new Date().toISOString(), totalEarned: 0, swapCount: 0, referrals: [] };
+  if (referrerUserId && db[referrerUserId]) { if (!db[referrerUserId].referrals.includes(userId)) db[referrerUserId].referrals.push(userId); }
+  saveReferrals(db);
+  return res.json({ ok: true, refCode: newRefCode, refLink: `https://gsb-swarm-production.up.railway.app/miniapp/?ref=${newRefCode}` });
+});
+
+app.get('/api/referral/stats', (req, res) => {
+  const { userId } = req.query;
+  if (!userId) return res.status(400).json({ ok: false, error: 'userId required' });
+  const db = loadReferrals();
+  const user = db[userId];
+  if (!user) return res.status(404).json({ ok: false, error: 'User not registered in referral program' });
+  const referralDetails = (user.referrals || []).map(refUserId => {
+    const ref = db[refUserId];
+    if (!ref) return { userId: refUserId, userName: '', swapCount: 0 };
+    return { userId: ref.userId, userName: ref.userName || '', swapCount: ref.swapCount || 0, joinedAt: ref.joinedAt };
+  });
+  return res.json({ ok: true, refCode: user.refCode, refLink: `https://gsb-swarm-production.up.railway.app/miniapp/?ref=${user.refCode}`, referralCount: (user.referrals || []).length, totalEarned: user.totalEarned || 0, pendingPayout: user.totalEarned || 0, referrals: referralDetails });
+});
+
+app.post('/api/referral/record-swap', express.json(), (req, res) => {
+  const { walletAddress, feeUsd, userId: directUserId } = req.body || {};
+  if (!feeUsd || isNaN(parseFloat(feeUsd))) return res.status(400).json({ ok: false, error: 'feeUsd required' });
+  const fee = parseFloat(feeUsd);
+  const credited = parseFloat((fee * 0.25).toFixed(6));
+  const db = loadReferrals();
+  const userId = directUserId || userIdForWallet(walletAddress);
+  if (!userId || !db[userId]) {
+    if (userId && db[userId]) { db[userId].swapCount = (db[userId].swapCount || 0) + 1; saveReferrals(db); }
+    return res.json({ ok: true, credited: 0, reason: 'user not in referral program or no referrer' });
+  }
+  db[userId].swapCount = (db[userId].swapCount || 0) + 1;
+  const referredByCode = db[userId].referredBy;
+  if (!referredByCode) { saveReferrals(db); return res.json({ ok: true, credited: 0, reason: 'no referrer on record' }); }
+  const referrer = Object.values(db).find(u => u.refCode === referredByCode);
+  if (!referrer || !db[referrer.userId]) { saveReferrals(db); return res.json({ ok: true, credited: 0, reason: 'referrer not found' }); }
+  db[referrer.userId].totalEarned = parseFloat(((db[referrer.userId].totalEarned || 0) + credited).toFixed(6));
+  saveReferrals(db);
+  return res.json({ ok: true, credited, referrerUserId: referrer.userId });
+});
+
+app.get('/api/referral/leaderboard', (req, res) => {
+  const db = loadReferrals();
+  const leaderboard = Object.values(db).map(u => ({ userName: u.userName || 'Anonymous', refCode: u.refCode, referralCount: (u.referrals || []).length, totalEarned: u.totalEarned || 0 })).sort((a, b) => b.totalEarned - a.totalEarned).slice(0, 10);
+  return res.json({ ok: true, leaderboard });
+});
+
+// ── Limit orders ─────────────────────────────────────────────────────────────
+app.post('/api/swap/limit/create', express.json(), async (req, res) => {
+  try {
+    const { userId, walletAddress, token, amount, chain, triggerPrice, direction, expireHours } = req.body;
+    if (!userId || !walletAddress || !token || !amount || !chain || !triggerPrice || !direction)
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    if (direction !== 'above' && direction !== 'below')
+      return res.status(400).json({ success: false, error: 'direction must be "above" or "below"' });
+    const order = limitEngine.createLimitOrder({ userId, walletAddress, token, amount: Number(amount), chain, triggerPrice: Number(triggerPrice), direction, expireHours: expireHours ? Number(expireHours) : 72 });
+    return res.json({ success: true, order });
+  } catch (err) { return res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.get('/api/swap/limit/list', (req, res) => {
+  try {
+    const { userId, wallet } = req.query;
+    if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+    const orders = limitEngine.listLimitOrders(userId, wallet || null);
+    return res.json({ success: true, orders });
+  } catch (err) { return res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.post('/api/swap/limit/cancel', express.json(), (req, res) => {
+  try {
+    const { userId, orderId } = req.body;
+    if (!userId || !orderId) return res.status(400).json({ success: false, error: 'userId and orderId are required' });
+    const order = limitEngine.cancelLimitOrder(userId, orderId);
+    return res.json({ success: true, order });
+  } catch (err) { return res.status(500).json({ success: false, error: err.message }); }
 });
 
 // ── Fee stats ────────────────────────────────────────────────────────────────
@@ -3489,6 +3607,7 @@ setInterval(async () => {
       });
     };
     await dcaEngine.executeDueDCAs(tgNotify);
+    await limitEngine.checkAndExecute(tgNotify);
   } catch(e) {
     console.error('[dca-cron]', e.message);
   }

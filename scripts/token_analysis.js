@@ -8,6 +8,36 @@
 const axios = require('axios');
 
 const TOKEN_INPUT = process.argv[2] || '$VIRTUAL';
+
+// ── Honeypot safety check ─────────────────────────────────────────────────────
+const EVM_CHAINS  = ['base', 'ethereum', 'eth', 'polygon', 'avalanche', 'arbitrum', 'optimism', 'bsc'];
+const NON_EVM_CHAINS = ['solana', 'sol', 'sui', 'aptos', 'ton'];
+async function checkHoneypot(contractAddress, chain = 'base') {
+  if (NON_EVM_CHAINS.includes((chain || '').toLowerCase()))
+    return { isHoneypot: false, buyTax: null, sellTax: null, isBlacklisted: false, flags: ['non-evm'] };
+  if (!contractAddress || typeof contractAddress !== 'string' || !contractAddress.trim().startsWith('0x') || contractAddress.trim().length < 10)
+    return { isHoneypot: false, buyTax: null, sellTax: null, isBlacklisted: false, flags: ['no contract'] };
+  const address = contractAddress.trim();
+  const chainIdMap = { ethereum: 1, eth: 1, bsc: 56, polygon: 137, arbitrum: 42161, optimism: 10, base: 8453, avalanche: 43114 };
+  const chainId = chainIdMap[(chain || '').toLowerCase()] || 8453;
+  const url = `https://api.honeypot.is/v2/IsHoneypot?address=${encodeURIComponent(address)}&chainID=${chainId}`;
+  try {
+    const response = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json', 'User-Agent': 'GSB-SwarmBot/1.0' }, signal: AbortSignal.timeout(8000) });
+    if (!response.ok) return { isHoneypot: false, buyTax: null, sellTax: null, isBlacklisted: false, flags: ['check failed'] };
+    const data = await response.json();
+    const isHoneypot    = !!(data.honeypotResult?.isHoneypot ?? data.isHoneypot ?? false);
+    const buyTax        = data.simulationResult?.buyTax  ?? null;
+    const sellTax       = data.simulationResult?.sellTax ?? null;
+    const isBlacklisted = !!(data.flags?.includes?.('blacklist') || false);
+    const derivedFlags  = Array.isArray(data.flags) ? [...data.flags] : [];
+    if (!isHoneypot && sellTax !== null && sellTax > 10) derivedFlags.push(`high-sell-tax:${sellTax}%`);
+    if (!isHoneypot && buyTax  !== null && buyTax  > 10) derivedFlags.push(`high-buy-tax:${buyTax}%`);
+    return { isHoneypot, buyTax, sellTax, isBlacklisted, flags: derivedFlags };
+  } catch (err) {
+    console.warn(`[checkHoneypot] Error for ${address}:`, err.message);
+    return { isHoneypot: false, buyTax: null, sellTax: null, isBlacklisted: false, flags: ['check failed'] };
+  }
+}
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
 async function getTokenData(input) {
@@ -133,6 +163,7 @@ function calculateTechnicals(price, priceChange24h, priceChange1h, priceChange6h
   if (priceChange24h > 20 && liquidity > 100000) { recommendation = 'BUY'; confidence = 72; }
   if (isBearish) { recommendation = 'AVOID'; confidence = 60; }
   if (liquidity < 10000) { recommendation = 'AVOID'; confidence = 70; } // Too illiquid
+  // NOTE: honeypot override applied after safetyCheck resolves in analyzeToken()
 
   const summaryShort = isBullish
     ? `Bullish momentum. Pullback buy $${entryMin}–$${entryMax}`
@@ -199,12 +230,25 @@ async function analyzeToken(input) {
     return { error: `Token ${input} not found on Base DEX`, input };
   }
 
+  // ── Safety check (honeypot.is) ───────────────────────────────────────────────
+  const safetyCheck = await checkHoneypot(dex.contractAddress, 'base');
+
   const tech = calculateTechnicals(
     dex.currentPrice, dex.priceChange24h, dex.priceChange1h,
     dex.priceChange6h, dex.high24h, dex.low24h, dex.volume24h, dex.liquidity
   );
 
   const aiSummary = await generateAISummary({ ...dex, priceChange1h: dex.priceChange1h }, tech);
+
+  // ── Honeypot override ────────────────────────────────────────────────────────
+  let finalRecommendation = tech.recommendation;
+  let finalConfidence     = tech.confidence;
+  let finalPatterns       = [...tech.patterns];
+  if (safetyCheck.isHoneypot) {
+    finalRecommendation = 'AVOID';
+    finalConfidence     = 99;
+    finalPatterns       = ['HONEYPOT DETECTED', ...finalPatterns];
+  }
 
   // Ethy-compatible output format
   const result = {
@@ -217,14 +261,21 @@ async function analyzeToken(input) {
       trend:            tech.trend,
       supportLevels:    tech.supportLevels,
       resistanceLevels: tech.resistanceLevels,
-      patterns:         tech.patterns,
+      patterns:         finalPatterns,
       summaryShort:     tech.summaryShort,
       entryZone:        tech.entryZone,
       targets:          tech.targets,
       summary:          aiSummary.summary,
       summary_advanced: aiSummary.summary_advanced,
-      confidence:       tech.confidence,
-      recommendation:   tech.recommendation,
+      confidence:       finalConfidence,
+      recommendation:   finalRecommendation,
+    },
+    safetyCheck: {
+      isHoneypot:    safetyCheck.isHoneypot,
+      buyTax:        safetyCheck.buyTax,
+      sellTax:       safetyCheck.sellTax,
+      isBlacklisted: safetyCheck.isBlacklisted,
+      flags:         safetyCheck.flags,
     },
     marketData: {
       volume24h:     String(dex.volume24h),
@@ -233,7 +284,7 @@ async function analyzeToken(input) {
       liquidity:     dex.liquidity,
       txns24h:       dex.txns24h,
     },
-    gsb_verdict:   tech.recommendation,
+    gsb_verdict:   finalRecommendation,
     gsb_signal:    `${tech.trend.toUpperCase()} — ${tech.summaryShort}`,
     analyzedAt:    new Date().toISOString(),
     source:        'GSB Token Analyst | bleeding.cash',
