@@ -700,6 +700,7 @@
         </select>
         <select id="limit-chain" class="input" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:12px">
           <option value="base">Base</option>
+          <option value="solana">Solana</option>
           <option value="ethereum">Ethereum</option>
           <option value="arbitrum">Arbitrum</option>
           <option value="optimism">Optimism</option>
@@ -1004,7 +1005,8 @@ async function executeSwap() {
       addSwapHistory(tokenIn, tokenOut, amount, d.txUrl);
     } else if (d.uniswapUrl) {
       window.open(d.uniswapUrl, '_blank');
-      showToast('Opening Uniswap...', 'success');
+      const chainSel = document.getElementById('chain-select').value;
+      showToast(chainSel === 'solana' ? 'Opening Jupiter...' : 'Opening Uniswap...', 'success');
     } else {
       showToast(d.error || 'Swap failed', 'error');
     }

@@ -7,7 +7,8 @@
 
 const axios = require('axios');
 
-const TOKEN_INPUT = process.argv[2] || '$VIRTUAL';
+const TOKEN_INPUT  = process.argv[2] || '$VIRTUAL';
+const CHAIN_INPUT  = (process.argv[3] || 'base').toLowerCase();
 
 // ── Honeypot safety check ─────────────────────────────────────────────────────
 const EVM_CHAINS  = ['base', 'ethereum', 'eth', 'polygon', 'avalanche', 'arbitrum', 'optimism', 'bsc'];
@@ -51,7 +52,9 @@ async function getTokenData(input) {
     const res = await axios.get(url, { timeout: 8000 });
     const pairs = res.data?.pairs || [];
     // Filter to Base, sort by liquidity
-    const basePairs = pairs.filter(p => p.chainId === 'base');
+    // Filter to requested chain; fall back to all chains sorted by liquidity
+    let basePairs = pairs.filter(p => p.chainId === CHAIN_INPUT);
+    if (!basePairs.length) basePairs = pairs; // fallback: any chain
     basePairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
     if (basePairs.length > 0) {
       const p = basePairs[0];
@@ -231,7 +234,7 @@ async function analyzeToken(input) {
   }
 
   // ── Safety check (honeypot.is) ───────────────────────────────────────────────
-  const safetyCheck = await checkHoneypot(dex.contractAddress, 'base');
+  const safetyCheck = await checkHoneypot(dex.contractAddress, CHAIN_INPUT);
 
   const tech = calculateTechnicals(
     dex.currentPrice, dex.priceChange24h, dex.priceChange1h,

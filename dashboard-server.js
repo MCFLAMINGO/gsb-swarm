@@ -3064,11 +3064,13 @@ buyToken().catch(e => console.error('BUY_ERROR:' + e.message));
 
 // ── /api/analyze — public token analysis (Ethy-compatible output) ─────────────────
 app.get('/api/analyze', async (req, res) => {
-  const { token } = req.query;
+  const { token, chain = 'base' } = req.query;
   if (!token) return res.status(400).json({ error: 'token query param required. e.g. /api/analyze?token=FETCHR' });
   try {
     const scriptPath = path.join(__dirname, 'scripts', 'token_analysis.js');
-    const output = execSync(`node ${scriptPath} "${token.replace(/"/g, '')}"`, {
+    const safeToken = token.replace(/"/g, '').replace(/'/g, '');
+    const safeChain = chain.replace(/[^a-z]/gi, '');
+    const output = execSync(`node ${scriptPath} "${safeToken}" "${safeChain}"`, {
       cwd: __dirname,
       env: { ...process.env },
       timeout: 30000,
@@ -3386,14 +3388,25 @@ app.post('/api/swap/execute', express.json(), async (req, res) => {
   try {
     const priceData = await dcaEngine.getTokenPrice(tokenOut, chain);
     if (!priceData) return res.json({ ok: false, error: 'Token not found' });
-    // Build Uniswap deep link
-    const chainParams = { base: 'base', ethereum: 'mainnet', solana: 'solana', bsc: 'bnb', arbitrum: 'arbitrum', polygon: 'polygon' };
-    const chainParam = chainParams[chain] || 'base';
-    const usdcAddress = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-    // ── GSB fee: 0.5% → Swarm wallet (Uniswap native fee-on-swap) ──────────────
     const GSB_SWARM_WALLET = '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
+    const GSB_SOL_WALLET   = '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d'; // update to SOL address when ready
     const FEE_BPS = 50; // 0.5%
-    const uniswapUrl = `https://app.uniswap.org/swap?chain=${chainParam}&inputCurrency=${usdcAddress}&outputCurrency=${priceData.contractAddress}&exactAmount=${amount}&exactField=input&feeRecipient=${GSB_SWARM_WALLET}&feeBps=${FEE_BPS}`;
+    let uniswapUrl;
+    if (chain === 'solana') {
+      // ── Jupiter deep link for Solana ───────────────────────────────────────────
+      // USDC on Solana: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+      const solUsdc = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+      const inputMint  = tokenIn && tokenIn.toLowerCase() !== 'usdc' ? priceData.contractAddress : solUsdc;
+      const outputMint = priceData.contractAddress;
+      const lamports   = Math.round(parseFloat(amount) * 1_000_000); // USDC = 6 decimals
+      uniswapUrl = `https://jup.ag/swap/${solUsdc}-${outputMint}?inAmount=${lamports}&referralAccount=${GSB_SOL_WALLET}&referralName=GSBSwarm`;
+    } else {
+      // ── Uniswap deep link for EVM chains ──────────────────────────────────────
+      const chainParams = { base: 'base', ethereum: 'mainnet', bsc: 'bnb', arbitrum: 'arbitrum', polygon: 'polygon', optimism: 'optimism', avalanche: 'avalanche' };
+      const chainParam  = chainParams[chain] || 'base';
+      const usdcAddress = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'; // USDC on Base
+      uniswapUrl = `https://app.uniswap.org/swap?chain=${chainParam}&inputCurrency=${usdcAddress}&outputCurrency=${priceData.contractAddress}&exactAmount=${amount}&exactField=input&feeRecipient=${GSB_SWARM_WALLET}&feeBps=${FEE_BPS}`;
+    }
 
     // Log fee event for tracking
     const feeUsd = (parseFloat(amount) * FEE_BPS / 10000).toFixed(4);

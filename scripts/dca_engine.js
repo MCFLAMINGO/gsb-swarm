@@ -99,13 +99,18 @@ async function getTokenPrice(token, chain = 'base') {
   } catch { return null; }
 }
 
-// Build Uniswap swap URL for a given order execution
+// Build swap URL — Jupiter for Solana, Uniswap for EVM
 function buildSwapUrl(order, contractAddress) {
+  if ((order.chain || '').toLowerCase() === 'solana') {
+    const solUsdc  = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+    const lamports = Math.round(parseFloat(order.amount) * 1_000_000);
+    return `https://jup.ag/swap/${solUsdc}-${contractAddress}?inAmount=${lamports}`;
+  }
   const chainParams = {
-    base: 'base', ethereum: 'mainnet', solana: 'solana',
-    bsc: 'bnb', arbitrum: 'arbitrum', polygon: 'polygon',
+    base: 'base', ethereum: 'mainnet',
+    bsc: 'bnb', arbitrum: 'arbitrum', polygon: 'polygon', optimism: 'optimism', avalanche: 'avalanche',
   };
-  const chainParam = chainParams[order.chain] || 'base';
+  const chainParam  = chainParams[(order.chain || '').toLowerCase()] || 'base';
   const usdcAddress = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'; // USDC on Base
   return `https://app.uniswap.org/swap?chain=${chainParam}&inputCurrency=${usdcAddress}&outputCurrency=${contractAddress}&exactAmount=${order.amount}&exactField=input`;
 }

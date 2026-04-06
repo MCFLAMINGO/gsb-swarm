@@ -87,17 +87,31 @@ function cancelLimitOrder(userId, orderId) {
 }
 
 function buildLimitSwapUrl(order) {
-  // Use the same Uniswap deep link pattern as DCA
   const chain = (order.chain || 'base').toLowerCase();
-  const token = encodeURIComponent(order.token);
+
+  if (chain === 'solana') {
+    // ── Jupiter deep link ──────────────────────────────────────────────────────
+    const solUsdc  = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+    const lamports = Math.round(parseFloat(order.amount) * 1_000_000);
+    if (order.direction === 'below') {
+      // Buy: USDC → token
+      return `https://jup.ag/swap/${solUsdc}-${order.token}?inAmount=${lamports}`;
+    } else {
+      // Sell: token → USDC
+      return `https://jup.ag/swap/${order.token}-${solUsdc}`;
+    }
+  }
+
+  // ── Uniswap deep link for EVM ──────────────────────────────────────────────────
+  const chainParams = { base: 'base', ethereum: 'mainnet', bsc: 'bnb', arbitrum: 'arbitrum', polygon: 'polygon', optimism: 'optimism', avalanche: 'avalanche' };
+  const chainParam  = chainParams[chain] || 'base';
+  const token  = encodeURIComponent(order.token);
   const amount = encodeURIComponent(order.amount);
 
   if (order.direction === 'below') {
-    // Buy the dip: spend USDC to get TOKEN
-    return `https://app.uniswap.org/swap?chain=${chain}&inputCurrency=USDC&outputCurrency=${token}&exactAmount=${amount}&exactField=input`;
+    return `https://app.uniswap.org/swap?chain=${chainParam}&inputCurrency=USDC&outputCurrency=${token}&exactAmount=${amount}&exactField=input`;
   } else {
-    // Take profit: sell TOKEN for USDC
-    return `https://app.uniswap.org/swap?chain=${chain}&inputCurrency=${token}&outputCurrency=USDC&exactAmount=${amount}&exactField=input`;
+    return `https://app.uniswap.org/swap?chain=${chainParam}&inputCurrency=${token}&outputCurrency=USDC&exactAmount=${amount}&exactField=input`;
   }
 }
 
