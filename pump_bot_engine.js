@@ -253,8 +253,8 @@ async function executeOneBuy(session) {
 async function checkDepositReceived(session) {
   const chain = session.chain || 'base';
 
-  // ── pump.fun sessions: check for SOL deposit via Solana RPC ─────────────────
-  if (session.isPumpFun) {
+  // ── Solana sessions (pump.fun or Jupiter): check for SOL deposit via Solana RPC ──
+  if (session.chain === 'solana') {
     try {
       const { Connection, PublicKey } = require('@solana/web3.js');
       const bs58 = require('bs58');
@@ -382,9 +382,12 @@ const MAX_SESSION_SOL     = 5; // max 5 SOL per pump.fun session
 
 function createSession({ userId, tokenAddress, chain, totalAmount, intervalAmount, rateName, receivingWallet,
                          isPumpFun, totalSol, solPerBuy }) {
-  // pump.fun sessions use SOL amounts; EVM sessions use USD amounts
-  if (isPumpFun) {
-    if (!totalSol || totalSol > MAX_SESSION_SOL) throw new Error(`pump.fun sessions max ${MAX_SESSION_SOL} SOL`);
+  // Solana sessions (any token) are SOL-denominated; EVM sessions use USD
+  const isSolana = chain === 'solana' || isPumpFun;
+  // isPumpFun = use PumpPortal (bonding curve); plain Solana = Jupiter
+  // Both are SOL-denominated for budget/deposit purposes
+  if (isSolana) {
+    if (!totalSol || totalSol > MAX_SESSION_SOL) throw new Error(`Solana sessions max ${MAX_SESSION_SOL} SOL`);
     if (!VALID_SOL_INTERVALS.includes(Number(solPerBuy))) throw new Error(`Invalid SOL per buy. Use: ${VALID_SOL_INTERVALS.join(', ')}`);
   } else {
     if (totalAmount > MAX_SESSION_USD)   throw new Error(`Max session is $${MAX_SESSION_USD}`);
@@ -394,8 +397,8 @@ function createSession({ userId, tokenAddress, chain, totalAmount, intervalAmoun
   if (!tokenAddress || tokenAddress.length < 10) throw new Error('Invalid token address');
   if (!receivingWallet || receivingWallet.length < 10) throw new Error('Receiving wallet required');
 
-  // Auto-detect pump.fun if not explicitly set
-  const detectedPumpFun = isPumpFun || (chain === 'solana' && tokenAddress.endsWith('pump'));
+  // pump.fun = PumpPortal (bonding curve tokens ending in 'pump'), everything else on Solana uses Jupiter
+  const detectedPumpFun = isPumpFun || (isSolana && tokenAddress.endsWith('pump'));
 
   const sessions = loadSessions();
   // Cancel any existing active session for this user
@@ -410,12 +413,12 @@ function createSession({ userId, tokenAddress, chain, totalAmount, intervalAmoun
     sessionId,
     userId: String(userId),
     tokenAddress,
-    chain: detectedPumpFun ? 'solana' : (chain || 'base'),
-    isPumpFun: detectedPumpFun || false,
-    totalAmount:    detectedPumpFun ? null : totalAmount,
-    totalSol:       detectedPumpFun ? Number(totalSol) : null,
-    intervalAmount: detectedPumpFun ? null : intervalAmount,
-    solPerBuy:      detectedPumpFun ? Number(solPerBuy) : null,
+    chain: isSolana ? 'solana' : (chain || 'base'),
+    isPumpFun: detectedPumpFun,
+    totalAmount:    isSolana ? null : totalAmount,
+    totalSol:       isSolana ? Number(totalSol) : null,
+    intervalAmount: isSolana ? null : intervalAmount,
+    solPerBuy:      isSolana ? Number(solPerBuy) : null,
     rateName,
     rateMs: VALID_RATES_MS[rateName],
     receivingWallet,
@@ -472,8 +475,9 @@ async function tick(notify) {
         session.startedAt = Date.now();
         dirty = true;
         console.log(`[pump] Session ${session.sessionId} deposit confirmed — starting`);
-        const startMsg = session.isPumpFun
-          ? `✅ *Pump Bot Started*\n\nDeposit received. Buying ${session.tokenAddress.slice(0,10)}... every ${session.rateName} at ${session.solPerBuy} SOL/buy\nTotal: ${session.totalSol} SOL\n🔥 pump.fun bonding curve`
+        const _solSess = session.chain === 'solana';
+        const startMsg = _solSess
+          ? `✅ *Pump Bot Started*\n\nDeposit received. Buying ${session.tokenAddress.slice(0,10)}... every ${session.rateName} at ${session.solPerBuy} SOL/buy\nTotal: ${session.totalSol} SOL${session.isPumpFun ? '\n🔥 pump.fun bonding curve' : '\n⚡ Jupiter'}`
           : `✅ *Pump Bot Started*\n\nDeposit received. Buying ${session.tokenAddress.slice(0,10)}... every ${session.rateName} at $${session.intervalAmount}/buy\nTotal: $${session.totalAmount}`;
         if (notify) notify(session.userId, startMsg);
       }
@@ -487,7 +491,7 @@ async function tick(notify) {
       if (now < nextBuyAt) continue;
 
       // Check if we've spent all the budget (SOL or USD depending on session type)
-      const budgetExhausted = session.isPumpFun
+      const budgetExhausted = session.chain === 'solana'
         ? session.totalSpent >= session.totalSol
         : session.totalSpent >= session.totalAmount;
 
@@ -496,8 +500,8 @@ async function tick(notify) {
         session.payoutAfter = now + PAYOUT_DELAY_MS;
         dirty = true;
         console.log(`[pump] Session ${session.sessionId} budget exhausted — payout in 20min`);
-        const doneMsg = session.isPumpFun
-          ? `🏁 *Pump Bot Complete*\n\nAll ${session.totalSol} SOL deployed on pump.fun.\nToken payout in 20 minutes to ${session.receivingWallet.slice(0,10)}...`
+        const doneMsg = session.chain === 'solana'
+          ? `🏁 *Pump Bot Complete*\n\nAll ${session.totalSol} SOL deployed.\nToken payout in 20 minutes to ${session.receivingWallet.slice(0,10)}...`
           : `🏁 *Pump Bot Complete*\n\nAll $${session.totalAmount} deployed.\nToken payout in 20 minutes to ${session.receivingWallet.slice(0,10)}...`;
         if (notify) notify(session.userId, doneMsg);
         continue;
@@ -505,7 +509,7 @@ async function tick(notify) {
 
       // Calculate this buy amount (don't overspend)
       let buyAmount;
-      if (session.isPumpFun) {
+      if (session.chain === 'solana') {
         const remainingSol = session.totalSol - session.totalSpent;
         buyAmount = Math.min(session.solPerBuy, remainingSol);
       } else {
@@ -515,10 +519,10 @@ async function tick(notify) {
 
       _running[session.sessionId] = true;
       try {
-        if (session.isPumpFun) {
-          console.log(`[pump] PumpFun buying ${buyAmount} SOL of ${session.tokenAddress.slice(0,10)} for session ${session.sessionId}`);
+        if (session.chain === 'solana') {
+          console.log(`[pump] Solana buying ${buyAmount} SOL of ${session.tokenAddress.slice(0,10)} (${session.isPumpFun ? 'PumpPortal' : 'Jupiter'}) for session ${session.sessionId}`);
         } else {
-          console.log(`[pump] Buying $${buyAmount} of ${session.tokenAddress.slice(0,10)} for session ${session.sessionId}`);
+          console.log(`[pump] Buying $${buyAmount} of ${session.tokenAddress.slice(0,10)} on ${session.chain} for session ${session.sessionId}`);
         }
         const result = await executeOneBuy({ ...session, intervalAmount: buyAmount, solPerBuy: buyAmount });
         session.totalSpent = Math.round((session.totalSpent + buyAmount) * 1e9) / 1e9;
@@ -531,10 +535,10 @@ async function tick(notify) {
         // Accumulate tokens received
         session.totalTokensReceived = (BigInt(session.totalTokensReceived || '0') + (result.amountOut || 0n)).toString();
         dirty = true;
-        console.log(`[pump] Buy OK: ${session.isPumpFun ? buyAmount + ' SOL' : '$' + buyAmount} → ${result.hash}`);
+        console.log(`[pump] Buy OK: ${session.chain === 'solana' ? buyAmount + ' SOL' : '$' + buyAmount} → ${result.hash}`);
         if (notify && session.buys.length % 5 === 0) {
           // Progress update every 5 buys
-          const progressMsg = session.isPumpFun
+          const progressMsg = session.chain === 'solana'
             ? `⚡ *Pump Bot Update*\n\nBuys: ${session.buys.length}\nSpent: ${session.totalSpent.toFixed(4)} / ${session.totalSol} SOL`
             : `⚡ *Pump Bot Update*\n\nBuys: ${session.buys.length}\nSpent: $${session.totalSpent.toFixed(2)} / $${session.totalAmount}\nRemaining: $${(session.totalAmount - session.totalSpent).toFixed(2)}`;
           notify(session.userId, progressMsg);
@@ -547,7 +551,7 @@ async function tick(notify) {
         dirty = true;
       } finally {
         delete _running[session.sessionId];
-        if (!session.isPumpFun) {
+        if (session.chain !== 'solana') {
           session.intervalAmount = parseFloat((sessions[session.sessionId]?.intervalAmount || buyAmount).toFixed(6));
         }
       }
@@ -558,16 +562,15 @@ async function tick(notify) {
       _running[session.sessionId] = true;
       try {
         console.log(`[pump] Paying out session ${session.sessionId} to ${session.receivingWallet}`);
-        const payout = session.isPumpFun
+        const payout = session.chain === 'solana'
           ? await sendSplTokensToUser(session)
           : await sendTokensToUser(session);
         session.status       = 'complete';
         session.payoutTxHash = payout.hash;
         dirty = true;
         console.log(`[pump] Payout OK: ${payout.hash}`);
-        const payoutMsg = session.isPumpFun
-          ? `💸 *Tokens Sent*\n\n90% of tokens sent to ${session.receivingWallet.slice(0,10)}...\n[View tx](https://solscan.io/tx/${payout.hash})\n\nThank you for using GSB Pump Bot 🤖`
-          : `💸 *Tokens Sent*\n\n90% of tokens sent to ${session.receivingWallet.slice(0,10)}...\n[View tx](https://basescan.org/tx/${payout.hash})\n\nThank you for using GSB Pump Bot 🤖`;
+        const _explorerBase = session.chain === 'ethereum' ? 'https://etherscan.io/tx/' : session.chain === 'arbitrum' ? 'https://arbiscan.io/tx/' : session.chain === 'solana' ? 'https://solscan.io/tx/' : 'https://basescan.org/tx/';
+        const payoutMsg = `💸 *Tokens Sent*\n\n90% of tokens sent to ${session.receivingWallet.slice(0,10)}...\n[View tx](${_explorerBase}${payout.hash})\n\nThank you for using GSB Pump Bot 🤖`;
         if (notify) notify(session.userId, payoutMsg);
       } catch (err) {
         console.error(`[pump] Payout failed for ${session.sessionId}:`, err.message);

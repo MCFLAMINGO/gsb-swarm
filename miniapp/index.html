@@ -1377,42 +1377,40 @@ function refreshTrending() {
 let pumpSession = null;
 let pumpPoller  = null;
 
+function isSolanaSession() {
+  return document.getElementById('pump-chain').value === 'solana';
+}
 function isPumpFunToken() {
-  const chain = document.getElementById('pump-chain').value;
-  const addr  = (document.getElementById('pump-token').value || '').trim();
-  return chain === 'solana' && addr.endsWith('pump');
+  const addr = (document.getElementById('pump-token').value || '').trim();
+  return isSolanaSession() && addr.endsWith('pump');
 }
 
 function updatePumpChainNote() {
   const chain  = document.getElementById('pump-chain').value;
+  const isSol  = isSolanaSession();
   const isPf   = isPumpFunToken();
   const note   = document.getElementById('pump-chain-note');
   const evmRow = document.getElementById('pump-evm-row');
   const solRow = document.getElementById('pump-sol-row');
 
-  if (isPf) {
-    note.style.display      = 'block';
-    note.style.color        = 'var(--yellow)';
-    note.style.background   = 'rgba(245,158,11,0.08)';
-    note.innerHTML          = '🔥 <strong>pump.fun bonding curve detected.</strong> Budget and per-buy are in SOL. Bot uses PumpPortal API — buys directly on the bonding curve.';
-    evmRow.style.display    = 'none';
-    solRow.style.display    = 'grid';
-  } else if (chain === 'solana') {
-    note.style.display      = 'block';
-    note.style.color        = 'var(--yellow)';
-    note.style.background   = 'rgba(245,158,11,0.08)';
-    note.innerHTML          = '⚡ Solana (Jupiter): paste full mint address. Deposit Solana USDC. Budget and per-buy in USDC.';
-    evmRow.style.display    = 'grid';
-    solRow.style.display    = 'none';
+  if (isSol) {
+    note.style.display    = 'block';
+    note.style.color      = 'var(--yellow)';
+    note.style.background = 'rgba(245,158,11,0.08)';
+    note.innerHTML        = isPf
+      ? '🔥 <strong>pump.fun bonding curve detected.</strong> Budget and per-buy in SOL. Bot uses PumpPortal API directly on the bonding curve.'
+      : '⚡ <strong>Solana token.</strong> Budget and per-buy in SOL. Bot buys via Jupiter. Paste the full mint address.';
+    evmRow.style.display  = 'none';
+    solRow.style.display  = 'grid';
   } else {
-    note.style.display      = 'none';
-    evmRow.style.display    = 'grid';
-    solRow.style.display    = 'none';
+    note.style.display    = 'none';
+    evmRow.style.display  = 'grid';
+    solRow.style.display  = 'none';
   }
 
   // Update wallet placeholder
   const walletInput = document.getElementById('pump-wallet');
-  if (walletInput) walletInput.placeholder = chain === 'solana' ? 'Solana wallet address (base58)' : '0x... EVM wallet address';
+  if (walletInput) walletInput.placeholder = isSol ? 'Solana wallet address (base58)' : '0x... EVM wallet address';
 
   updatePumpPreview();
 }
@@ -1421,9 +1419,10 @@ function updatePumpPreview() {
   const rateMap  = { '30s':'30 sec', '1m':'1 min', '2m':'2 min', '5m':'5 min' };
   const preview  = document.getElementById('pump-preview');
   const text     = document.getElementById('pump-preview-text');
+  const isSol   = isSolanaSession();
   const isPf     = isPumpFunToken();
 
-  if (isPf) {
+  if (isSol) {
     const total    = parseFloat(document.getElementById('pump-total-sol').value) || 0;
     const interval = parseFloat(document.getElementById('pump-sol-interval').value) || 0.01;
     const rate     = document.getElementById('pump-rate-sol').value;
@@ -1435,7 +1434,7 @@ function updatePumpPreview() {
     const secs     = totalSec % 60;
     const duration = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
     preview.style.display = 'block';
-    text.textContent = `🔥 pump.fun: ${numBuys} buys × ${interval} SOL every ${rateMap[rate]} = ~${duration} total. Deposit ${total} SOL. 90% of tokens returned. 10% platform fee.`;
+    text.textContent = `${isPf ? '🔥 pump.fun' : '⚡ Jupiter'}: ${numBuys} buys × ${interval} SOL every ${rateMap[rate]} = ~${duration} total. Deposit ${total} SOL to GSB Solana wallet. 90% of tokens returned. 10% fee.`;
   } else {
     const total    = parseFloat(document.getElementById('pump-total').value) || 0;
     const interval = parseFloat(document.getElementById('pump-interval').value) || 0.02;
@@ -1448,7 +1447,7 @@ function updatePumpPreview() {
     const secs     = totalSec % 60;
     const duration = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
     preview.style.display = 'block';
-    text.textContent = `${numBuys} buys × $${interval} every ${rateMap[rate]} = ~${duration} total runtime. You receive 90% of tokens after. 10% platform fee.`;
+    text.textContent = `${numBuys} buys × $${interval} every ${rateMap[rate]} = ~${duration} total runtime. Deposit $${total} USDC. 90% of tokens returned. 10% platform fee.`;
   }
 }
 
@@ -1457,23 +1456,24 @@ async function startPumpBot() {
   const tokenAddress    = document.getElementById('pump-token').value.trim();
   const chain           = document.getElementById('pump-chain').value;
   const receivingWallet = document.getElementById('pump-wallet').value.trim();
+  const isSol          = isSolanaSession();
   const isPf            = isPumpFunToken();
 
   if (!tokenAddress)    return showToast('Enter token address', 'error');
   if (!receivingWallet) return showToast('Enter receiving wallet', 'error');
 
-  // Solana address validation
-  if (chain === 'solana' && tokenAddress.startsWith('0x')) return showToast('Solana needs a base58 mint address, not 0x', 'error');
-  if (chain !== 'solana' && !tokenAddress.startsWith('0x')) return showToast('EVM chains need a 0x contract address', 'error');
+  // Address validation
+  if (isSol && tokenAddress.startsWith('0x')) return showToast('Solana needs a base58 mint address, not 0x', 'error');
+  if (!isSol && !tokenAddress.startsWith('0x')) return showToast('EVM chains need a 0x contract address', 'error');
 
   let body;
-  if (isPf) {
-    const totalSol = parseFloat(document.getElementById('pump-total-sol').value);
-    const solPerBuy = parseFloat(document.getElementById('pump-sol-interval').value);
-    const rateName  = document.getElementById('pump-rate-sol').value;
+  if (isSol) {
+    const totalSol   = parseFloat(document.getElementById('pump-total-sol').value);
+    const solPerBuy  = parseFloat(document.getElementById('pump-sol-interval').value);
+    const rateName   = document.getElementById('pump-rate-sol').value;
     if (!totalSol || totalSol <= 0) return showToast('Enter total SOL budget', 'error');
     if (totalSol > 5) return showToast('Max 5 SOL per session', 'error');
-    body = { userId, tokenAddress, chain: 'solana', rateName, receivingWallet, isPumpFun: true, totalSol, solPerBuy };
+    body = { userId, tokenAddress, chain: 'solana', rateName, receivingWallet, isPumpFun: isPf, totalSol, solPerBuy };
   } else {
     const totalAmount    = parseFloat(document.getElementById('pump-total').value);
     const intervalAmount = parseFloat(document.getElementById('pump-interval').value);
@@ -1493,7 +1493,7 @@ async function startPumpBot() {
     if (!d.ok) return showToast(d.error || 'Failed to create session', 'error');
 
     pumpSession = d.session;
-    showToast(isPf ? 'Session created — send SOL to start' : 'Session created — send USDC to start', 'success');
+    showToast(isSol ? 'Session created — send SOL to start' : 'Session created — send USDC to start', 'success');
     showDepositInstructions(d);
     startPumpPoller();
   } catch(e) {
@@ -1569,7 +1569,7 @@ function renderPumpSession(s) {
     error:           '⚠️ Error',
   }[s.status] || s.status;
 
-  const _isSolSess  = s.isPumpFun || s.chain === 'solana';
+  const _isSolSess  = s.isPumpFun;  // only pump.fun sessions are SOL-denominated; plain Solana USDC sessions use USD
   const _budgetVal   = _isSolSess ? (s.totalSol || s.maxSol || 0) : (s.totalAmount || 0);
   const _spentVal    = s.totalSpent || 0;
   const _budgetLabel = _isSolSess ? `${_budgetVal} SOL` : `$${_budgetVal}`;
@@ -1636,7 +1636,7 @@ async function loadPumpSession() {
       document.getElementById('pump-deposit-card').style.display = d.session.status === 'pending_deposit' ? 'block' : 'none';
       const _isPf  = d.session.isPumpFun;
       const _isSol = d.session.chain === 'solana';
-      const _addr  = d.session.solDepositAddress || d.session.depositAddress || (_isPf ? 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs' : '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d');
+      const _addr  = d.session.solDepositAddress || d.session.depositAddress || ((_isPf || _isSol) ? 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs' : '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d');
       const _amt   = _isPf ? (d.session.totalSol || d.session.maxSol || '') : (d.session.totalAmount || '');
       const _unit  = _isPf ? 'SOL' : (_isSol ? '(Solana USDC)' : '(Base USDC)');
       document.getElementById('pump-deposit-chain-label').textContent = (_isSol || _isPf) ? 'GSB Solana Wallet:' : 'Swarm Wallet (Base):';

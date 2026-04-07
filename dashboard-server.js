@@ -4022,34 +4022,34 @@ app.post('/api/swap/dca/stop', express.json(), (req, res) => {
 app.post('/api/pump/create', express.json(), (req, res) => {
   const { userId, tokenAddress, chain, totalAmount, intervalAmount, rateName, receivingWallet,
           isPumpFun, totalSol, solPerBuy } = req.body;
-  // For pump.fun sessions: need totalSol + solPerBuy. For EVM: need totalAmount + intervalAmount.
-  const detectedPumpFun = isPumpFun || (chain === 'solana' && tokenAddress && tokenAddress.endsWith('pump'));
+  // Solana sessions (any token) = SOL-denominated; EVM = USDC-denominated
+  const isSolana = chain === 'solana' || isPumpFun;
   if (!userId || !tokenAddress || !rateName || !receivingWallet) {
     return res.status(400).json({ ok: false, error: 'Missing required fields: userId, tokenAddress, rateName, receivingWallet' });
   }
-  if (detectedPumpFun && (!totalSol || !solPerBuy)) {
-    return res.status(400).json({ ok: false, error: 'pump.fun sessions require totalSol and solPerBuy' });
+  if (isSolana && (!totalSol || !solPerBuy)) {
+    return res.status(400).json({ ok: false, error: 'Solana sessions require totalSol and solPerBuy' });
   }
-  if (!detectedPumpFun && (!totalAmount || !intervalAmount)) {
+  if (!isSolana && (!totalAmount || !intervalAmount)) {
     return res.status(400).json({ ok: false, error: 'EVM sessions require totalAmount and intervalAmount' });
   }
   try {
     const session = pumpBot.createSession({
       userId: String(userId), tokenAddress,
       chain: chain || 'base',
-      totalAmount:    detectedPumpFun ? null : parseFloat(totalAmount),
-      intervalAmount: detectedPumpFun ? null : parseFloat(intervalAmount),
+      totalAmount:    isSolana ? null : parseFloat(totalAmount),
+      intervalAmount: isSolana ? null : parseFloat(intervalAmount),
       rateName, receivingWallet,
-      isPumpFun: detectedPumpFun || false,
-      totalSol:  detectedPumpFun ? parseFloat(totalSol)  : null,
-      solPerBuy: detectedPumpFun ? parseFloat(solPerBuy) : null,
+      isPumpFun: isPumpFun || false,
+      totalSol:  isSolana ? parseFloat(totalSol)  : null,
+      solPerBuy: isSolana ? parseFloat(solPerBuy) : null,
     });
     const GSB_SOL_WALLET = process.env.GSB_SOL_WALLET || 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs';
     res.json({
       ok: true, session,
-      depositAddress: detectedPumpFun ? GSB_SOL_WALLET : pumpBot.SWARM_WALLET,
-      depositAmount:  detectedPumpFun ? session.totalSol : session.totalAmount,
-      depositToken:   detectedPumpFun ? 'SOL' : 'USDC',
+      depositAddress: isSolana ? GSB_SOL_WALLET : pumpBot.SWARM_WALLET,
+      depositAmount:  isSolana ? session.totalSol : session.totalAmount,
+      depositToken:   isSolana ? 'SOL' : 'USDC',
     });
   } catch(e) {
     res.status(400).json({ ok: false, error: e.message });
