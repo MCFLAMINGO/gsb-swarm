@@ -239,10 +239,87 @@ async function getQuote(tokenIn, tokenOut, amount, chain = 'base') {
 // Get wallet portfolio via DexScreener
 async function getPortfolio(walletAddress) {
   try {
-    const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${walletAddress}`);
-    const d = await r.json();
-    return { tokens: [] }; // DexScreener doesn't support wallet lookup, return empty
-  } catch { return { tokens: [] }; }
+    // 1. Get token list from Blockscout (Base)
+    const blockRes = await fetch(`https://base.blockscout.com/api?module=account&action=tokenlist&address=${walletAddress}`, { headers: { Accept: 'application/json' } });
+    const blockData = await blockRes.json();
+    const rawTokens = Array.isArray(blockData.result) ? blockData.result : [];
+
+    if (rawTokens.length === 0) return { tokens: [] };
+
+    // Filter dust — only tokens with balance > 0
+    const meaningful = rawTokens.filter(t => {
+      const bal = parseFloat(t.balance || '0') / Math.pow(10, parseInt(t.decimals || '18'));
+      return bal > 0.000001;
+    }).slice(0, 20); // max 20 tokens
+
+    // 2. Fetch prices from DexScreener in one batch call
+    const addresses = meaningful.map(t => t.contractAddress).join(',');
+    let priceMap = {};
+    try {
+      const dexRes = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${addresses}`);
+      const dexData = await dexRes.json();
+      const pairs = dexData.pairs || [];
+      for (const pair of pairs) {
+        const addr = pair.baseToken?.address?.toLowerCase();
+        if (addr && !priceMap[addr]) {
+          priceMap[addr] = {
+            priceUsd: parseFloat(pair.priceUsd || '0'),
+            change24h: parseFloat(pair.priceChange?.h24 || '0'),
+          };
+        }
+      }
+    } catch {}
+
+    // 3. Build token list with USD values
+    const tokens = meaningful.map(t => {
+      const decimals = parseInt(t.decimals || '18');
+      const balance = parseFloat(t.balance || '0') / Math.pow(10, decimals);
+      const price = priceMap[t.contractAddress?.toLowerCase()] || { priceUsd: 0, change24h: 0 };
+      const valueUsd = balance * price.priceUsd;
+      return {
+        symbol: t.symbol || '???',
+        name: t.name || t.symbol || 'Unknown',
+        address: t.contractAddress,
+        balance: balance.toFixed(6),
+        priceUsd: price.priceUsd,
+        valueUsd,
+        change24h: price.change24h,
+      };
+    }).filter(t => t.valueUsd > 0.01 || parseFloat(t.balance) > 0.001) // filter true dust
+      .sort((a, b) => b.valueUsd - a.valueUsd);
+
+    // 4. Get native ETH balance
+    let ethBalance = 0;
+    try {
+      const ethRes = await fetch(`https://base.blockscout.com/api?module=account&action=balance&address=${walletAddress}`);
+      const ethData = await ethRes.json();
+      ethBalance = parseFloat(ethData.result || '0') / 1e18;
+    } catch {}
+
+    if (ethBalance > 0.0001) {
+      // Get ETH price
+      let ethPrice = 0;
+      try {
+        const ethPriceRes = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
+        const ep = await ethPriceRes.json();
+        ethPrice = ep?.ethereum?.usd || 0;
+      } catch {}
+      tokens.unshift({
+        symbol: 'ETH',
+        name: 'Ethereum',
+        address: '0x0000000000000000000000000000000000000000',
+        balance: ethBalance.toFixed(6),
+        priceUsd: ethPrice,
+        valueUsd: ethBalance * ethPrice,
+        change24h: 0,
+      });
+    }
+
+    return { tokens };
+  } catch (e) {
+    console.error('[portfolio] Error:', e.message);
+    return { tokens: [] };
+  }
 }
 
 module.exports = {
