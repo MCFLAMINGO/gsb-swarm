@@ -3979,7 +3979,7 @@ app.get('/api/swap/approval-status', async (req, res) => {
 });
 app.get('/api/swap/approve-link', (req, res) => {
   // Deep-link to Uniswap token approval page for USDC on Base
-  const url = 'https://app.uniswap.org/explore/tokens/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+  const url = 'https://app.uniswap.org/#/swap?chain=base&inputCurrency=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
   res.json({ ok: true, url });
 });
 
