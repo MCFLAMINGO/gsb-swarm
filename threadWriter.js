@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { buildAcpClient } = require('./acp');
+const swarmMemory = require('./swarmMemory');
 
 const AGENT_NAME = 'GSB Thread Writer';
 
@@ -669,12 +670,20 @@ async function start() {
           const solAddrMatch  = content.match(/\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/);
           const evmAddrMatch  = content.match(/\b(0x[a-fA-F0-9]{40})\b/);
           const chainMatch    = content.match(/\b(solana|sol|base|ethereum|eth|arbitrum|polygon)\b/i);
+          const symbol        = cashtagMatch ? cashtagMatch[1] : null;
+          const contractAddress = evmAddrMatch ? evmAddrMatch[1] : (solAddrMatch ? solAddrMatch[1] : null);
+          const chain         = chainMatch ? chainMatch[1].toLowerCase() : null;
 
-          result = await buildTokenIntelReport({
-            symbol:          cashtagMatch  ? cashtagMatch[1]  : null,
-            contractAddress: evmAddrMatch  ? evmAddrMatch[1]  : (solAddrMatch ? solAddrMatch[1] : null),
-            chain:           chainMatch    ? chainMatch[1].toLowerCase() : null,
-          });
+          // ── Check swarm memory first — skip full re-research if fresh narrative exists ──
+          const existingNarrative = symbol ? swarmMemory.readNarrative(symbol) : null;
+          if (existingNarrative && existingNarrative.threadPosted && Date.now() - existingNarrative.updatedAt < 30 * 60 * 1000) {
+            // Narrative already exists and thread was posted in last 30 min — expand on it instead
+            console.log(`[${AGENT_NAME}] Found fresh swarm memory for $${symbol} — expanding narrative`);
+            const memCtx = swarmMemory.buildContextString(symbol);
+            result = await buildTokenIntelReport({ symbol, contractAddress: contractAddress || existingNarrative.contractAddress, chain: chain || existingNarrative.chain, memoryContext: memCtx });
+          } else {
+            result = await buildTokenIntelReport({ symbol, contractAddress, chain });
+          }
 
           // Post the thread to X
           if (process.env.X_API_KEY && process.env.X_ACCESS_TOKEN && result.thread_tweets?.length > 0) {
@@ -685,8 +694,29 @@ async function start() {
               console.error(`[${AGENT_NAME}] X posting failed:`, err.message);
             }
           }
+
+          // ── Write narrative to swarm memory ──────────────────────────────────
+          if (symbol) {
+            swarmMemory.writeNarrative(symbol, {
+              contractAddress:  result.contract_address || contractAddress,
+              chain:            result.token_data?.chain || chain,
+              summary:          result.thread_tweets?.[0] || '',
+              priceUsd:         result.token_data?.priceUsd,
+              liquidity:        result.token_data?.liquidity,
+              volume24h:        result.token_data?.volume24h,
+              xTweetsFound:     result.x_tweets_found,
+              threadPosted:     !!threadUrl,
+              threadUrl,
+              thread_tweets:    result.thread_tweets,
+            });
+            console.log(`[${AGENT_NAME}] Wrote $${symbol} narrative to swarm memory`);
+          }
         } else {
-          result = await writeThread(content);
+          // ── For write_thread / write_alpha_report — inject swarm memory context if token is mentioned ──
+          const symbolMatch = content.match(/\$([A-Z]{2,10})\b/i);
+          const memCtx = symbolMatch ? swarmMemory.buildContextString(symbolMatch[1]) : swarmMemory.buildContextString(null);
+          const enrichedContent = memCtx ? `${content}\n\n--- Swarm Memory Context ---\n${memCtx}` : content;
+          result = await writeThread(enrichedContent);
 
           // If X credentials are configured, post to X
           if (process.env.X_API_KEY && process.env.X_ACCESS_TOKEN) {

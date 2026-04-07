@@ -3,6 +3,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { buildAcpClient } = require('./acp');
+const swarmMemory = require('./swarmMemory');
 const { CHAIN_CONFIG, resolveChain, SUPPORTED_CHAINS } = require('./chains');
 
 const AGENT_NAME = 'GSB Alpha Scanner';
@@ -430,6 +431,23 @@ async function start() {
           : await scanAlpha(jobChain);
         await freshJob.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
+
+        // ── Write findings to swarm memory ────────────────────────────────────
+        try {
+          const sym = result.symbol || result.baseToken?.symbol;
+          const addr = result.contractAddress || check.tokenAddress;
+          if (sym) {
+            swarmMemory.writeNarrative(sym, {
+              contractAddress: addr || result.contractAddress,
+              chain:           result.chain || jobChain,
+              priceUsd:        result.priceUsd,
+              liquidity:       result.liquidity,
+              volume24h:       result.volume24h,
+              alphaVerdict:    result.gsb_signal || result.verdict,
+            });
+          }
+          if (addr) swarmMemory.writeFinding(`alpha:${addr}`, AGENT_NAME, result);
+        } catch (_) {}
       } catch (err) {
         console.error(`[${AGENT_NAME}] Job ${job.id} error:`, err.message);
         // If we're past the REQUEST phase, use rejectPayable so the buyer is refunded

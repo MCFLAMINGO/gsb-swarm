@@ -30,6 +30,7 @@ const { execSync } = require('child_process');
 const crypto   = require('crypto');
 const axios    = require('axios');
 const { CHAIN_CONFIG, CHAIN_ALIASES, resolveChain, SUPPORTED_CHAINS } = require('./chains');
+const swarmMemory = require('./swarmMemory');
 const limitEngine   = require('./scripts/limit_engine');
 const pnlCardRoute  = require('./scripts/pnl_card_route');
 
@@ -537,6 +538,32 @@ async function initAcp() {
             latestBrief = buildBriefSnapshot();
             latestBrief.ceoSynthesis = synthesis;
             broadcast('brief', latestBrief);
+          }
+
+          // ── Write CEO brief to swarm memory so agents can reuse it ─────────────
+          try {
+            const ta = briefResults.token_analysis;
+            const symbol = ta?.symbol || ta?.name;
+            if (symbol) {
+              swarmMemory.writeNarrative(symbol, {
+                contractAddress: ta.contractAddress,
+                chain:           ta.chain,
+                priceUsd:        ta.priceUsd,
+                liquidity:       ta.liquidity,
+                volume24h:       ta.volume24h,
+                alphaVerdict:    briefResults.alpha_signals?.gsb_signal,
+                summary:         synthesis.summary || synthesis.recommendation,
+                ceoFindings:     synthesis.keyFindings,
+                ceoBrief:        synthesis,
+              });
+              console.log(`[ceo] Wrote $${symbol} to swarm memory`);
+            }
+            // Also pin the full synthesis as context for any agent
+            if (synthesis.summary) {
+              swarmMemory.pinContext('latest_ceo_brief', JSON.stringify(synthesis));
+            }
+          } catch (memErr) {
+            console.warn('[ceo] swarmMemory write failed:', memErr.message);
           }
         } catch (err) {
           console.error(`[ceo] evaluate error job ${job.id}:`, err.message);
@@ -4070,6 +4097,23 @@ app.post('/api/pump/cancel', express.json(), (req, res) => {
   if (!sessionId) return res.status(400).json({ ok: false, error: 'sessionId required' });
   const cancelled = pumpBot.cancelSession(sessionId);
   res.json({ ok: cancelled, error: cancelled ? null : 'Session not found or already complete' });
+});
+
+// GET /api/swarm-memory — return current swarm memory (narratives + pinned context)
+app.get('/api/swarm-memory', (req, res) => {
+  res.json({
+    ok: true,
+    narratives:    swarmMemory.listNarratives(),
+    pinnedContext: swarmMemory.getPinnedContext(),
+  });
+});
+
+// POST /api/swarm-memory/pin — CEO or operator can pin context manually
+app.post('/api/swarm-memory/pin', express.json(), requireOperator, (req, res) => {
+  const { label, content } = req.body;
+  if (!label || !content) return res.status(400).json({ ok: false, error: 'label and content required' });
+  swarmMemory.pinContext(label, content);
+  res.json({ ok: true });
 });
 
 // GET /api/pump/config — return valid intervals and rates
