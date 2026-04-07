@@ -35,6 +35,9 @@
       border-bottom: 1px solid var(--border);
     }
     .logo { font-weight: 700; font-size: 18px; color: var(--accent); }
+    .approve-banner { background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.3); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .approve-banner p { font-size: 12px; color: #c4b5fd; margin: 0; flex: 1; }
+    .approve-banner button { font-size: 12px; padding: 6px 14px; white-space: nowrap; }
     .wallet-badge {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -470,6 +473,10 @@
 
   <!-- ── SWAP PANEL ───────────────────────────────────────────────── -->
   <div class="panel active" id="panel-swap">
+    <div id="approve-banner" class="approve-banner" style="display:none">
+      <p>Approve USDC once to enable swaps — sign once in your wallet, never again.</p>
+      <button class="btn btn-secondary" onclick="approveUSDC()">Approve USDC →</button>
+    </div>
     <div class="card">
       <div class="card-title">You Pay</div>
       <div class="input-row">
@@ -886,7 +893,26 @@ async function saveWallet() {
   } catch {}
 }
 
-async function checkApproval() { /* approval handled server-side — no-op */ }
+async function checkApproval() {
+  if (!walletAddress) return;
+  try {
+    const r = await fetch(`${API_BASE}/api/swap/approval-status?wallet=${walletAddress}`);
+    const d = await r.json();
+    document.getElementById('approve-banner').style.display = d.approved ? 'none' : 'flex';
+  } catch {
+    document.getElementById('approve-banner').style.display = 'flex';
+  }
+}
+
+async function approveUSDC() {
+  if (!walletAddress) return showToast('Connect wallet first', 'error');
+  // Send user to Uniswap swap page — approval prompt appears before first swap
+  const url = 'https://app.uniswap.org/#/swap?chain=base&inputCurrency=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+  IS_TELEGRAM ? tg.openLink(url) : window.open(url, '_blank');
+  showToast('Approve USDC on Uniswap, then come back', 'success');
+  // Re-check after 30s to auto-hide banner if they approved
+  setTimeout(checkApproval, 30000);
+}
 
 
 // ── Token search ───────────────────────────────────────────────────────────────
