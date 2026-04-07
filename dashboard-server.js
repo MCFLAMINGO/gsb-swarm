@@ -1538,61 +1538,190 @@ app.post('/api/command', async (req, res) => {
   });
   res.json({ ok: true, workers: intents.map(i => i.worker) });
 
-  // Role prompts for each worker
-  const ROLE_PROMPTS = {
-    'GSB Thread Writer': (req) => `You are the GSB Thread Writer. Write a crypto Twitter/X thread. Format as numbered tweets (1/, 2/, ...) separated by blank lines. Each tweet max 280 chars.\n\nFacts to use:\n- Virtuals Protocol Twitter: @virtuals_io\n- GSB token page: app.virtuals.io/virtuals/68291\n- GSB ticker: $GSB, Chain: Base\n- Treasury: 0x8E223841aA396d36a6727EfcEAFC61d691692a37\n\nRequirement: ${req}`,
-    'GSB Token Analyst': (req) => `You are the GSB Token Analyst. Analyze the requested token and provide: price, 24h change, liquidity, key on-chain signals, and a clear BUY / HOLD / AVOID recommendation with reasoning. Be specific and data-driven.\n\nRequirement: ${req}`,
-    'GSB Wallet Profiler': (req) => `You are the GSB Wallet Profiler. Profile the requested wallet — classify as whale/degen/institutional/smart-money, describe recent activity patterns, top holdings, and risk assessment.\n\nRequirement: ${req}`,
-    'GSB Alpha Scanner': (req) => `You are the GSB Alpha Scanner. Scan Base chain for alpha signals. Return top 3 opportunities with: token name, key price/volume signal, and a risk/reward assessment. Be specific.\n\nRequirement: ${req}`,
-  };
+  // ── Free API worker functions (no Claude cost) ────────────────────────────
+  async function workerAnalyzeToken(requirement, chain) {
+    const addrMatch = requirement.match(/0x[0-9a-fA-F]{40}/i);
+    const address = addrMatch ? addrMatch[0] : null;
+    if (!address) return { error: 'No contract address found in requirement.' };
+    try {
+      const resolvedChain = resolveChain(chain) || 'base';
+      const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${address}`, { timeout: 8000 });
+      const allPairs = dexRes.data?.pairs;
+      if (!allPairs || allPairs.length === 0) return { error: `No trading pairs found for ${address}.` };
+      let chainPairs = allPairs.filter(p => p.chainId === resolvedChain);
+      if (chainPairs.length === 0) chainPairs = allPairs;
+      const pair = chainPairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0];
+      const liq = pair.liquidity?.usd || 0;
+      const vol24h = pair.volume?.h24 || 0;
+      const change24h = pair.priceChange?.h24 || 0;
+      let gsb_verdict = 'NEUTRAL — Average activity.';
+      if (liq > 100000 && vol24h > 50000 && change24h > 10) gsb_verdict = 'BULLISH — Strong liquidity, high volume, upward momentum.';
+      else if (liq > 50000 && vol24h > 10000) gsb_verdict = 'WATCH — Decent setup. Monitor for breakout.';
+      else if (liq < 5000) gsb_verdict = 'RISKY — Low liquidity. High rug potential.';
+      return {
+        token: { name: pair.baseToken?.name, symbol: pair.baseToken?.symbol, address, chain: pair.chainId },
+        price: { usd: pair.priceUsd, change_24h: change24h },
+        liquidity_usd: liq, volume_24h: vol24h, market_cap: pair.marketCap || pair.fdv || 0,
+        dexscreener_url: `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`,
+        gsb_verdict, analyzed_at: new Date().toISOString(), powered_by: 'GSB Intelligence Swarm',
+      };
+    } catch (err) { return { error: `Token analysis failed: ${err.message}` }; }
+  }
 
-  // Run each worker sequentially, broadcast results as they complete
+  async function workerProfileWallet(requirement) {
+    const match = requirement.match(/0x[a-fA-F0-9]{40}/);
+    if (!match) return { error: 'No EVM wallet address found.' };
+    const address = match[0];
+    try {
+      const blockscoutV1 = 'https://base.blockscout.com/api';
+      const [txRes, tokenRes, ethRes] = await Promise.allSettled([
+        axios.get(`${blockscoutV1}?module=account&action=txlist&address=${address}&sort=desc`, { timeout: 10000 }),
+        axios.get(`${blockscoutV1}?module=account&action=tokenlist&address=${address}`, { timeout: 10000 }),
+        axios.get(`${blockscoutV1}?module=account&action=balance&address=${address}`, { timeout: 10000 }),
+      ]);
+      const txs = txRes.status === 'fulfilled' ? (txRes.value.data?.result || []) : [];
+      const tokens = tokenRes.status === 'fulfilled' ? (tokenRes.value.data?.result || []) : [];
+      const ethBalRaw = ethRes.status === 'fulfilled' ? (ethRes.value.data?.result || '0') : '0';
+      const txCount = Array.isArray(txs) ? txs.length : 0;
+      const ethBal = (parseInt(ethBalRaw) / 1e18).toFixed(6);
+      let classification = 'RETAIL — Standard wallet activity.';
+      if (txCount > 1000) classification = 'WHALE — Very high transaction volume.';
+      else if (txCount > 200) classification = 'ACTIVE TRADER — Frequent on-chain activity.';
+      else if (txCount > 20) classification = 'REGULAR USER — Moderate on-chain history.';
+      else if (txCount < 5) classification = 'NEW WALLET — Limited history.';
+      const tokenHoldings = Array.isArray(tokens) ? tokens.slice(0, 5).map(t => ({
+        symbol: t.symbol, balance: (parseInt(t.balance || '0') / Math.pow(10, parseInt(t.decimals || '18'))).toFixed(4),
+      })) : [];
+      return { wallet: address, chain: 'base', native_balance: `${ethBal} ETH`, transaction_count: txCount,
+        classification, token_holdings: tokenHoldings, blockscout_url: `https://base.blockscout.com/address/${address}`,
+        profiled_at: new Date().toISOString(), powered_by: 'GSB Intelligence Swarm' };
+    } catch (err) { return { error: `Wallet profile failed: ${err.message}` }; }
+  }
+
+  async function workerScanAlpha(chain) {
+    try {
+      const resolvedChain = resolveChain(chain) || 'base';
+      const geckoId = CHAIN_CONFIG[resolvedChain]?.geckoTerminalId || 'base';
+      const res = await axios.get(`https://api.geckoterminal.com/api/v2/networks/${geckoId}/trending_pools`, {
+        headers: { Accept: 'application/json' }, timeout: 10000,
+      });
+      const pools = res.data?.data?.slice(0, 5) || [];
+      if (pools.length === 0) return { error: 'No trending pools found.' };
+      const signals = pools.map(p => {
+        const a = p.attributes || {};
+        const vol = parseFloat(a.volume_usd?.h24 || 0);
+        const chg = parseFloat(a.price_change_percentage?.h24 || 0);
+        const liq = parseFloat(a.reserve_in_usd || 0);
+        let signal = 'NEUTRAL';
+        if (chg > 20 && vol > 50000) signal = 'BULLISH';
+        else if (chg < -20) signal = 'BEARISH';
+        else if (vol > 100000) signal = 'HIGH_VOL';
+        return { name: a.name || p.id, price_usd: a.base_token_price_usd, change_24h: chg,
+          volume_24h: vol, liquidity_usd: liq, signal,
+          url: `https://www.geckoterminal.com/${geckoId}/pools/${p.id}` };
+      });
+      return { chain: resolvedChain, signals, scanned_at: new Date().toISOString(), powered_by: 'GSB Intelligence Swarm' };
+    } catch (err) { return { error: `Alpha scan failed: ${err.message}` }; }
+  }
+
+  // ── Run workers using free APIs — Claude only for Thread Writer ────────────
+  // Flag: use Claude only when operator explicitly requests deep/premium synthesis
+  const isPremium = /\b(deep|full analysis|premium|explain|why|breakdown)\b/.test(cmd);
+
   for (const intent of intents) {
     const jobId = 'direct_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
     try {
       broadcast('cmd-status', { type: 'firing', message: `Running ${intent.worker}...`, jobId });
       setWorkerStatus(intent.worker, 'working', jobId);
-      logJob(jobId, intent.worker, 'fired', 'direct');
+      logJob(jobId, intent.worker, 'fired', 'free-api');
 
-      const promptFn = ROLE_PROMPTS[intent.worker] || ((r) => `You are ${intent.worker}. Complete this task: ${r}`);
-      const msg = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1500,
-        messages: [{ role: 'user', content: promptFn(intent.requirement) }],
-      });
-      const result = msg.content[0]?.text || '';
+      let result = '';
 
-      // Store in briefResults so CEO synthesis has real data
-      const role = WORKER_CATALOG[intent.worker]?.role;
-      if (role) {
-        briefResults[role] = { raw: result };
-        const up = result.toUpperCase();
-        if (up.includes('BUY'))     briefResults[role].gsb_verdict = 'BUY';
-        if (up.includes('AVOID'))   briefResults[role].gsb_verdict = 'AVOID';
-        if (up.includes('HOLD'))    briefResults[role].gsb_verdict = 'HOLD';
-        if (up.includes('BULLISH')) briefResults[role].gsb_signal  = 'BULLISH';
-        if (up.includes('BEARISH')) briefResults[role].gsb_signal  = 'BEARISH';
-        if (role === 'thread')        briefResults[role].thread = result;
-        if (role === 'wallet_profile') briefResults[role].classification = result.split('\n')[0];
+      if (intent.worker === 'GSB Token Analyst') {
+        const data = await workerAnalyzeToken(intent.requirement, requestedChain);
+        if (data.error) {
+          result = `Token analysis failed: ${data.error}`;
+        } else {
+          result = [
+            `${data.token.name} (${data.token.symbol}) — ${data.token.chain.toUpperCase()}`,
+            `Price: $${data.price.usd} · 24h: ${data.price.change_24h >= 0 ? '+' : ''}${data.price.change_24h}%`,
+            `Liquidity: $${Number(data.liquidity_usd).toLocaleString()} · Vol 24h: $${Number(data.volume_24h).toLocaleString()}`,
+            `MCap: $${Number(data.market_cap).toLocaleString()}`,
+            `Verdict: ${data.gsb_verdict}`,
+            `DexScreener: ${data.dexscreener_url}`,
+          ].join('\n');
+          const role = WORKER_CATALOG[intent.worker]?.role;
+          if (role) {
+            briefResults[role] = { ...data, raw: result };
+            if (data.gsb_verdict.includes('BULLISH')) briefResults[role].gsb_signal = 'BULLISH';
+            if (data.gsb_verdict.includes('RISKY'))   briefResults[role].gsb_verdict = 'AVOID';
+            if (data.gsb_verdict.includes('WATCH'))   briefResults[role].gsb_verdict = 'HOLD';
+          }
+        }
+
+      } else if (intent.worker === 'GSB Wallet Profiler') {
+        const data = await workerProfileWallet(intent.requirement);
+        if (data.error) {
+          result = `Wallet profile failed: ${data.error}`;
+        } else {
+          result = [
+            `Wallet: ${data.wallet}`,
+            `Balance: ${data.native_balance} · Txs: ${data.transaction_count}`,
+            `Classification: ${data.classification}`,
+            `Top tokens: ${data.token_holdings.map(t => `${t.symbol} (${t.balance})`).join(', ') || 'None'}`,
+            `Explorer: ${data.blockscout_url}`,
+          ].join('\n');
+          const role = WORKER_CATALOG[intent.worker]?.role;
+          if (role) { briefResults[role] = { ...data, raw: result, classification: data.classification }; }
+        }
+
+      } else if (intent.worker === 'GSB Alpha Scanner') {
+        const data = await workerScanAlpha(requestedChain);
+        if (data.error) {
+          result = `Alpha scan failed: ${data.error}`;
+        } else {
+          const lines = [`Alpha signals on ${data.chain.toUpperCase()} (${data.signals.length} pools):`];
+          data.signals.forEach((s, i) => {
+            lines.push(`${i + 1}. ${s.name} — $${s.price_usd || '?'} · ${s.change_24h >= 0 ? '+' : ''}${s.change_24h?.toFixed(1)}% · Vol $${Number(s.volume_24h).toLocaleString()} [${s.signal}]`);
+          });
+          result = lines.join('\n');
+          const role = WORKER_CATALOG[intent.worker]?.role;
+          if (role) { briefResults[role] = { signals: data.signals, raw: result }; }
+        }
+
+      } else if (intent.worker === 'GSB Thread Writer') {
+        // Thread Writer always needs Claude — generative content, no free API equivalent
+        if (!anthropic) {
+          result = 'Thread Writer requires Claude API key (ANTHROPIC_API_KEY not set).';
+        } else {
+          try {
+            const prompt = `You are the GSB Thread Writer. Write a crypto Twitter/X thread. Format as numbered tweets (1/, 2/, ...) separated by blank lines. Each tweet max 280 chars.\n\nFacts:\n- Virtuals Protocol Twitter: @virtuals_io\n- GSB token page: app.virtuals.io/virtuals/68291\n- GSB ticker: $GSB, Chain: Base\n- Treasury: 0x8E223841aA396d36a6727EfcEAFC61d691692a37\n\nRequirement: ${intent.requirement}`;
+            const msg = await anthropic.messages.create({ model: 'claude-haiku-4-5-20251001', max_tokens: 1200, messages: [{ role: 'user', content: prompt }] });
+            result = msg.content[0]?.text || '';
+            const role = WORKER_CATALOG[intent.worker]?.role;
+            if (role) { briefResults[role] = { thread: result, raw: result }; }
+          } catch (err) {
+            result = `Thread Writer failed: ${err.message}`;
+          }
+        }
+
+      } else {
+        // Unknown worker — fall back to rule-based message
+        result = `${intent.worker} completed (free mode): ${intent.requirement}`;
       }
 
       setWorkerStatus(intent.worker, 'idle', jobId);
-      logJob(jobId, intent.worker, 'completed', 'direct');
+      logJob(jobId, intent.worker, 'completed', 'free-api');
       ceoDashCache.totalJobsServed++;
 
-      // Broadcast result immediately so dashboard updates
       broadcast('job-result', { jobId, worker: intent.worker, result });
-      broadcast('cmd-status', {
-        type: 'result',
-        worker: intent.worker,
-        jobId,
-        message: `${intent.worker} complete`,
-        result: result.slice(0, 400),
-      });
+      broadcast('cmd-status', { type: 'result', worker: intent.worker, jobId, message: `${intent.worker} complete`, result: result.slice(0, 400) });
 
-      // CEO synthesis after each worker — dashboard sees progressive updates
+      // CEO synthesis — rule-based by default (free), Claude only if premium flag
       try {
-        const synthesis = await ceoSynthesize(briefResults);
+        const synthesis = isPremium
+          ? await ceoSynthesize(briefResults, command)
+          : ceoSynthesizeRuleBased(briefResults, command);
         latestBrief = buildBriefSnapshot();
         latestBrief.ceoSynthesis = synthesis;
         broadcast('brief', latestBrief);
@@ -1613,6 +1742,7 @@ app.post('/api/command', async (req, res) => {
     message: `${intents.length} worker${intents.length > 1 ? 's' : ''} complete. Brief updated.`,
   });
 });
+
 
 // ── BasaltSurge Payment Integration ──────────────────────────────────────────
 const BASALT_BASE    = 'https://surge.basalthq.com';
