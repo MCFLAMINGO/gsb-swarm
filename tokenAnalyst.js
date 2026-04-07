@@ -191,7 +191,7 @@ async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
   const client = await buildAcpClient({
     privateKey:         process.env.TOKEN_ANALYST_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY,
-    entityId:           parseInt(process.env.TOKEN_ANALYST_ENTITY_ID),
+    entityId:           parseInt(process.env.TOKEN_ANALYST_ENTITY_ID) || 1,
     agentWalletAddress: process.env.TOKEN_ANALYST_WALLET_ADDRESS,
 
     onNewTask: async (job) => {

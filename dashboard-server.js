@@ -72,7 +72,7 @@ let anthropic = null;
 
 // ── Config ───────────────────────────────────────────────────────────────────
 const PRIVATE_KEY        = process.env.AGENT_WALLET_PRIVATE_KEY;
-const CEO_ENTITY_ID      = parseInt(process.env.CEO_ENTITY_ID) || 1332;
+const CEO_ENTITY_ID      = parseInt(process.env.CEO_ENTITY_ID) || 2;
 const CEO_WALLET_ADDRESS = process.env.CEO_WALLET_ADDRESS || '0xf0d4832A4c2D33Faa1F655cd4dE5e7c551a0fE45';
 const PORT               = 8080; // Fixed — Railway domain set to 8080
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || null;
