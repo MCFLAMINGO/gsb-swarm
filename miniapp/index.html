@@ -169,16 +169,7 @@
     .dca-status.active { background: rgba(0,255,136,0.1); color: var(--accent); }
     .dca-status.paused { background: rgba(245,158,11,0.1); color: var(--yellow); }
     .dca-stop { background: none; border: none; color: var(--red); cursor: pointer; font-size: 18px; padding: 4px; }
-    .approve-banner {
-      background: rgba(124,58,237,0.15);
-      border: 1px solid var(--accent2);
-      border-radius: var(--radius);
-      padding: 14px;
-      margin-bottom: 12px;
-      text-align: center;
-    }
-    .approve-banner p { font-size: 13px; color: #c4b5fd; margin-bottom: 10px; }
-    .connect-screen {
+  .connect-screen {
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -479,11 +470,6 @@
 
   <!-- ── SWAP PANEL ───────────────────────────────────────────────── -->
   <div class="panel active" id="panel-swap">
-    <div id="approve-banner" class="approve-banner" style="display:none">
-      <p>Approve USDC once to enable instant swaps and DCA. Opens Uniswap → connect wallet → approve before your first swap.</p>
-      <button class="btn btn-secondary" onclick="approveUSDC()">Approve on Uniswap →</button>
-    </div>
-
     <div class="card">
       <div class="card-title">You Pay</div>
       <div class="input-row">
@@ -900,28 +886,8 @@ async function saveWallet() {
   } catch {}
 }
 
-async function checkApproval() {
-  try {
-    const r = await fetch(`${API_BASE}/api/swap/approval-status?wallet=${walletAddress}`);
-    const d = await r.json();
-    isApproved = d.approved;
-    document.getElementById('approve-banner').style.display = isApproved ? 'none' : 'block';
-  } catch {
-    document.getElementById('approve-banner').style.display = 'block';
-  }
-}
+async function checkApproval() { /* approval handled server-side — no-op */ }
 
-async function approveUSDC() {
-  if (!walletAddress) return showToast('Connect wallet first', 'error');
-  try {
-    const r = await fetch(`${API_BASE}/api/swap/approve-link?wallet=${walletAddress}`);
-    const d = await r.json();
-    window.open(d.url, '_blank');
-    showToast('Complete approval in your wallet', 'success');
-  } catch(e) {
-    showToast('Error generating approval link', 'error');
-  }
-}
 
 // ── Token search ───────────────────────────────────────────────────────────────
 let searchTimer = null;
