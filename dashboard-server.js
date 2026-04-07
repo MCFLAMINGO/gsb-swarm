@@ -138,7 +138,7 @@ const WORKER_CATALOG = {
     role: 'token_analysis',
     defaultReq: 'Analyze token 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 on Base',
   },
-  'GSB Wallet Profiler': {
+  'GSB Wallet Profiler & DCA Engine': {
     address: '0x730e371ff3E2277c36060748dd5207CEAF50701d',
     price: 0.50,
     role: 'wallet_profile',
@@ -608,7 +608,7 @@ app.post('/api/fire-job', requireOperator, async (req, res) => {
       const rolePrompt = {
         'GSB Thread Writer': `You are the GSB Thread Writer. Write a crypto Twitter/X thread. Format as numbered tweets separated by blank lines. Each tweet max 280 chars.\n\nIMPORTANT FACTS — use these exactly, never invent handles or URLs:\n- Virtuals Protocol Twitter: @virtuals_io\n- GSB token page: app.virtuals.io/virtuals/68291\n- GSB ticker: $GSB\n- Chain: Base\n- Treasury wallet: 0x8E223841aA396d36a6727EfcEAFC61d691692a37\n\nRequirement: ${requirement}`,
         'GSB Token Analyst': `You are the GSB Token Analyst. Analyze the requested token and provide a detailed report with BUY/HOLD/AVOID recommendation.\n\nRequirement: ${requirement}`,
-        'GSB Wallet Profiler': `You are the GSB Wallet Profiler. Profile the requested wallet — classify as whale/degen/institutional, describe activity patterns.\n\nRequirement: ${requirement}`,
+        'GSB Wallet Profiler & DCA Engine': `You are the GSB Wallet Profiler. Profile the requested wallet — classify as whale/degen/institutional, describe activity patterns.\n\nRequirement: ${requirement}`,
         'GSB Alpha Scanner': `You are the GSB Alpha Scanner. Scan for alpha signals on Base chain. Return top opportunities with risk/reward assessment.\n\nRequirement: ${requirement}`,
       }[workerName] || `You are ${workerName}. Complete this task:\n\nRequirement: ${requirement}`;
 
@@ -1488,8 +1488,8 @@ app.post('/api/command', async (req, res) => {
   if (/wallet|profile|who is|address|holder|tx|transaction/.test(cmd)) {
     const requirement = customAddr
       ? `Profile wallet ${customAddr} on ${chainName}`
-      : WORKER_CATALOG['GSB Wallet Profiler'].defaultReq;
-    intents.push({ worker: 'GSB Wallet Profiler', requirement });
+      : WORKER_CATALOG['GSB Wallet Profiler & DCA Engine'].defaultReq;
+    intents.push({ worker: 'GSB Wallet Profiler & DCA Engine', requirement });
   }
 
   // Alpha scanning — catches "what's hot", "what should I watch", "any plays"
@@ -1659,7 +1659,7 @@ app.post('/api/command', async (req, res) => {
           }
         }
 
-      } else if (intent.worker === 'GSB Wallet Profiler') {
+      } else if (intent.worker === 'GSB Wallet Profiler & DCA Engine') {
         const data = await workerProfileWallet(intent.requirement);
         if (data.error) {
           result = `Wallet profile failed: ${data.error}`;

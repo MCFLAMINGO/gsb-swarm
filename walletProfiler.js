@@ -5,7 +5,7 @@ const path = require('path');
 const { buildAcpClient } = require('./acp');
 const { CHAIN_CONFIG, resolveChain, SUPPORTED_CHAINS } = require('./chains');
 
-const AGENT_NAME = 'GSB Wallet Profiler';
+const AGENT_NAME = 'GSB Wallet Profiler & DCA Engine';
 
 // ── Skill Registry ───────────────────────────────────────────────────────────
 function loadSkills(workerName) {
@@ -48,8 +48,8 @@ const JOB_PRICE = 0.50;
 const EVM_CHAINS = SUPPORTED_CHAINS.filter(c => CHAIN_CONFIG[c].isEVM);
 
 const REQUIREMENTS_SCHEMA = {
-  name: 'GSB Wallet Profiler',
-  description: `Profiles an EVM wallet address: token holdings, recent transactions, DeFi activity, risk flags. Supports: ${EVM_CHAINS.join(', ')}.`,
+  name: 'GSB Wallet Profiler & DCA Engine',
+  description: `Profiles EVM wallets AND executes DCA buys on Base via Uniswap v3. Skills: wallet profiling (holdings, tx history, classification) + DCA buy execution (token address, USDC amount). Supports: ${EVM_CHAINS.join(', ')}.`,
   parameters: {
     type: 'object',
     properties: {
@@ -60,6 +60,18 @@ const REQUIREMENTS_SCHEMA = {
       chain: {
         type: 'string',
         description: `Blockchain network (${EVM_CHAINS.join(', ')}). Defaults to base. Solana not yet supported.`,
+      },
+      action: {
+        type: 'string',
+        description: "'profile' (default) to analyze a wallet, or 'dca_buy' to execute a DCA buy",
+      },
+      token_address: {
+        type: 'string',
+        description: 'Token contract address to buy (required for dca_buy action)',
+      },
+      usdc_amount: {
+        type: 'number',
+        description: 'USDC amount to spend (required for dca_buy action, e.g. 5.00)',
       },
     },
     required: ['wallet_address'],
