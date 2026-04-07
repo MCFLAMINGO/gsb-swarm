@@ -404,13 +404,25 @@ async function searchXForToken(query, count = 20) {
 
 // ── Token intel report: X search + DexScreener + thread ──────────────────────
 
-async function buildTokenIntelReport({ symbol, contractAddress, chain }) {
+const THREAD_ANGLES = [
+  { label: 'intel',     opener: 'Intel Report',      cta: 'The Swarm has eyes on this. DYOR. Not financial advice.' },
+  { label: 'alpha',     opener: 'Alpha Signal',       cta: 'Early signal. Not financial advice. Powered by GSB Swarm.' },
+  { label: 'breakdown', opener: 'On-Chain Breakdown', cta: 'Data-driven, not hype-driven. GSB Swarm. DYOR.' },
+  { label: 'watch',     opener: 'Swarm Watch Report', cta: 'GSB has this token flagged. Watch closely. Not financial advice.' },
+  { label: 'narrative', opener: 'Narrative Update',   cta: 'Narrative is building. GSB Swarm tracking. DYOR.' },
+];
+
+async function buildTokenIntelReport({ symbol, contractAddress, chain, memoryContext, freshAngle }) {
   const ticker = symbol ? (symbol.startsWith('$') ? symbol : `$${symbol}`) : null;
+  const skipXSearch = !!freshAngle;
+
+  // Pick a rotating angle for this delivery
+  const angle = THREAD_ANGLES[Math.floor(Date.now() / 1000) % THREAD_ANGLES.length];
 
   // Run X search + token data fetch in parallel
   const searchQueries = [];
-  if (ticker) searchQueries.push(searchXForToken(ticker, 30));
-  if (contractAddress) searchQueries.push(searchXForToken(contractAddress, 15));
+  if (!skipXSearch && ticker) searchQueries.push(searchXForToken(ticker, 30));
+  if (!skipXSearch && contractAddress) searchQueries.push(searchXForToken(contractAddress, 15));
   const tokenDataPromise = contractAddress
     ? fetchTokenData(contractAddress)
     : (ticker ? axios.get(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(ticker.replace('$', ''))}`, { timeout: 8000 }) : Promise.resolve(null));
@@ -489,14 +501,17 @@ async function buildTokenIntelReport({ symbol, contractAddress, chain }) {
   const chainStr      = tokenData?.chain || chain || 'unknown chain';
   const pairUrl       = tokenData?.pairUrl || (detectedContract ? `https://dexscreener.com/${chainStr}/${detectedContract}` : null);
 
+  // If freshAngle mode — note we're using cached research
+  const cachedNote = skipXSearch && memoryContext ? `\n\n[Cached research — updated within last hour. Fresh price pulled now.]` : '';
+
   const threadTweets = [
-    `1/ ${displayName} (${displayTicker}) — Intel Report from GSB Swarm 🤖`,
+    `1/ ${displayName} (${displayTicker}) — ${angle.opener} from GSB Swarm 🤖${cachedNote}`,
     `2/ On-chain snapshot:\n${priceStr} ${changeStr}\n${liqStr} | ${volStr}\nChain: ${chainStr}${detectedContract ? `\nCA: ${detectedContract}` : ''}`,
     `3/ X sentiment scan (${tweets.length} tweets):\n${tweetSummary}`,
     ...(tweets.slice(1, 4).map((t, i) =>
-      `${i + 4}/ @${t.author}: “${t.text.slice(0, 220)}” \u2764 ${t.likes} 🔁 ${t.retweets}`
+      `${i + 4}/ @${t.author}: "${t.text.slice(0, 220)}" \u2764 ${t.likes} 🔁 ${t.retweets}`
     )),
-    `${tweets.slice(1, 4).length + 4}/ GSB Alpha Signal:\nWhile others report noise, the Swarm digs for signal. ${displayTicker} is being watched. DYOR. Not financial advice.\n\nPowered by GSB CEO Agent — one orchestrator, five agents.`,
+    `${tweets.slice(1, 4).length + 4}/ ${angle.cta}\n\nPowered by GSB CEO Agent — one orchestrator, five agents.`,
   ];
 
   return {
@@ -674,14 +689,16 @@ async function start() {
           const contractAddress = evmAddrMatch ? evmAddrMatch[1] : (solAddrMatch ? solAddrMatch[1] : null);
           const chain         = chainMatch ? chainMatch[1].toLowerCase() : null;
 
-          // ── Check swarm memory first — skip full re-research if fresh narrative exists ──
+          // ── Check swarm memory first — skip full re-research if researched within 1 hour (per-job skip, global narrative) ──
           const existingNarrative = symbol ? swarmMemory.readNarrative(symbol) : null;
-          if (existingNarrative && existingNarrative.threadPosted && Date.now() - existingNarrative.updatedAt < swarmMemory.SKIP_RESEARCH_MS) {
-            // Narrative exists + thread posted within 1 hour — expand on it instead of re-researching
-            console.log(`[${AGENT_NAME}] Found fresh swarm memory for $${symbol} — expanding narrative`);
+          const researchAge = existingNarrative?.lastResearchedAt ? Date.now() - existingNarrative.lastResearchedAt : Infinity;
+          if (existingNarrative && researchAge < swarmMemory.SKIP_RESEARCH_MS) {
+            // Researched within 1 hour — serve from cache with a fresh angle (skip X search, only refresh price)
+            console.log(`[${AGENT_NAME}] Swarm memory for $${symbol} is ${Math.round(researchAge/60000)}m old — using cached research, rotating angle`);
             const memCtx = swarmMemory.buildContextString(symbol);
-            result = await buildTokenIntelReport({ symbol, contractAddress: contractAddress || existingNarrative.contractAddress, chain: chain || existingNarrative.chain, memoryContext: memCtx });
+            result = await buildTokenIntelReport({ symbol, contractAddress: contractAddress || existingNarrative.contractAddress, chain: chain || existingNarrative.chain, memoryContext: memCtx, freshAngle: true });
           } else {
+            // Full research pass
             result = await buildTokenIntelReport({ symbol, contractAddress, chain });
           }
 

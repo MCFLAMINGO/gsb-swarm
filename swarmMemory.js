@@ -40,7 +40,7 @@ function writeNarrative(symbol, data) {
   const existing = mem.narratives[key] || {};
 
   // Fields that should ALWAYS be overwritten with latest values (price, volume, etc.)
-  const OVERWRITE_FIELDS = ['priceUsd', 'liquidity', 'volume24h', 'priceChange24h', 'marketCap', 'updatedAt', 'threadPosted', 'threadUrl', 'xTweetsFound'];
+  const OVERWRITE_FIELDS = ['priceUsd', 'liquidity', 'volume24h', 'priceChange24h', 'marketCap', 'updatedAt', 'threadUrl', 'xTweetsFound'];
   // Fields that should ACCUMULATE (thread history, findings history)
   const merged = { ...existing };
 
@@ -62,6 +62,10 @@ function writeNarrative(symbol, data) {
 
   merged.symbol    = `$${key}`;
   merged.updatedAt = Date.now();
+  // Track when a full research pass happened (has X tweets or thread — not just a price patch)
+  if (data.xTweetsFound !== undefined || data.thread_tweets !== undefined || data.summary !== undefined) {
+    merged.lastResearchedAt = Date.now();
+  }
   mem.narratives[key] = merged;
 
   // Prune oldest if over limit
