@@ -465,6 +465,8 @@
         <select id="token-in" onchange="updateQuote()" style="flex:1">
           <option value="USDC">USDC</option>
           <option value="ETH">ETH</option>
+          <option value="SOL">SOL</option>
+          <option value="WBTC">WBTC</option>
           <option value="VIRTUAL">VIRTUAL</option>
         </select>
       </div>
@@ -488,7 +490,7 @@
       <div id="chain-selector-row" class="input-row">
         <div class="input-wrap">
           <span class="input-label">Chain</span>
-          <select id="chain-select" onchange="updateQuote()">
+          <select id="chain-select" onchange="onChainChange()">
             <option value="base">Base</option>
             <option value="ethereum">Ethereum</option>
             <option value="solana">Solana</option>
@@ -522,10 +524,10 @@
   </div>
 
   <!-- ── PUMP BOT PANEL ──────────────────────────────────────────────── -->
-  <div class="panel" id="panel-dca">
+  <div class="panel" id="panel-dca" style="gap:12px">
 
     <!-- Config form -->
-    <div class="card" id="pump-config-card" style="padding:14px">
+    <div class="card" id="pump-config-card" style="padding:16px">
       <div class="card-title">⚡ Pump Bot</div>
       <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Deploy rapid buys on any token. Deposit funds, bot buys at your chosen speed. Tokens sent back to you after (minus 10% fee + gas).</p>
 
@@ -968,6 +970,18 @@ function selectToken(symbol, address) {
 }
 
 // ── Quote ──────────────────────────────────────────────────────────────────────
+function onChainChange() {
+  const chain   = document.getElementById('chain-select').value;
+  const tokenIn = document.getElementById('token-in');
+  // Auto-switch input token to match chain
+  if (chain === 'solana' && !['SOL', 'USDC'].includes(tokenIn.value)) {
+    tokenIn.value = 'SOL';
+  } else if (chain !== 'solana' && tokenIn.value === 'SOL') {
+    tokenIn.value = 'USDC';
+  }
+  updateQuote();
+}
+
 async function updateQuote() {
   clearTimeout(quoteTimer);
   const amount   = parseFloat(document.getElementById('amount-in').value);
@@ -1258,7 +1272,14 @@ async function runAnalyze(tokenOverride) {
         <button class="btn btn-primary" onclick="document.getElementById('token-out').value='${d.symbol||symbol}';switchTab('swap');updateQuote();" style="flex:1">
           Buy ${d.symbol || symbol}
         </button>
-        <button class="btn btn-secondary" onclick="document.getElementById('pump-token').value=d.contractAddress||'';document.getElementById('pump-chain').value=d.chain||'base';switchTab('dca');" style="flex:1">
+        <button class="btn btn-secondary" onclick="(function(){
+          const addr = d.contractAddress||'';
+          const ch   = d.chain||'base';
+          document.getElementById('pump-token').value = addr;
+          document.getElementById('pump-chain').value = ch;
+          switchTab('dca');
+          updatePumpChainNote();
+        })()" style="flex:1">
           Pump It
         </button>
       </div>
