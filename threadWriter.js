@@ -640,10 +640,11 @@ async function start() {
         let freshJob = job;
 
         // ── Detect token intel report request (before respond, so we can set right message) ──
+        // Only fire if skillId is explicitly token_intel_report, OR no skillId set and content has token signal + intel keyword
         const isIntelReport = (
           (parsed.skillId === 'token_intel_report') ||
-          (/\$(\w+)/.test(content) && /intel|report|research|alpha|investigate|find|look.?up/i.test(content)) ||
-          (/\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/.test(content) && /report|intel|alpha/i.test(content))
+          (!parsed.skillId && /\$(\w+)/.test(content) && /intel|report|research|alpha|investigate|find|look.?up/i.test(content)) ||
+          (!parsed.skillId && /\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/.test(content) && /report|intel|alpha/i.test(content))
         );
 
         if (job.phase === 2) {
