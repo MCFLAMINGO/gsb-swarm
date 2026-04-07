@@ -878,6 +878,37 @@ app.get('/api/public', (req, res) => {
   });
 });
 
+// ── GET /api/agent-status — Public live agent status for Vercel dashboard ────
+// Returns per-worker job counts + copy trader state (no auth required)
+app.get('/api/agent-status', (req, res) => {
+  const workers = Object.entries(WORKER_CATALOG).map(([wName, w]) => ({
+    id: w.role,       // e.g. 'token_analysis'
+    name: wName,      // e.g. 'GSB Token Analyst'
+    status: workerStatus[wName]?.status || 'idle',
+    jobsCompleted: workerStatus[wName]?.jobsCompleted || 0,
+    lastJobAt: workerStatus[wName]?.lastJobAt || null,
+    pricePerJob: w.price,
+  }));
+
+  // Copy trader state
+  const ct = global.copyTraderState || copyTraderState;
+  const copyTrader = {
+    running: ct?.running || false,
+    budget: ct?.budget || 0,
+    startedAt: ct?.startedAt || null,
+    recentLog: (ct?.log || []).slice(-10),
+  };
+
+  res.json({
+    ok: true,
+    updatedAt: new Date().toISOString(),
+    acpReady,
+    workers,
+    copyTrader,
+    totalJobsServed: ceoDashCache.totalJobsServed || 0,
+  });
+});
+
 // ── GET /api/resource/:name — Public resource endpoint for ACP/Butler reads ──
 app.get('/api/resource/:name', (req, res) => {
   const { name } = req.params;
