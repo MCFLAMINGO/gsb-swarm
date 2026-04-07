@@ -73,6 +73,7 @@
     .panel.active { display: block; }
     #panel-dca { padding: 16px; }
     #pump-config-card { flex-grow: 1; }
+    .pump-label { display:block; font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:5px; }
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -529,21 +530,19 @@
   <div class="panel" id="panel-dca">
 
     <!-- Config form -->
-    <div class="card" id="pump-config-card" style="padding:20px 18px 24px;display:flex;flex-direction:column;gap:20px">
-      <div>
-        <div class="card-title" style="margin-bottom:6px">⚡ Pump Bot</div>
-        <p style="font-size:12px;color:var(--muted);margin:0;line-height:1.6">Deploy rapid buys on any token. Deposit funds, bot buys at your chosen speed. Tokens sent back after (minus 10% fee).</p>
-      </div>
+    <div class="card" id="pump-config-card" style="padding:20px 18px 24px">
+      <div class="card-title" style="margin-bottom:4px">⚡ Pump Bot</div>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 20px;line-height:1.6">Deploy rapid buys on any token. Deposit funds, bot buys at your chosen speed. Tokens sent back after (minus 10% fee).</p>
 
       <!-- Token address + chain -->
-      <div style="display:grid;grid-template-columns:1fr 90px;gap:10px;padding-top:10px">
-        <div class="input-wrap" style="margin:0">
-          <span class="input-label">Token Address</span>
-          <input type="text" id="pump-token" placeholder="0x... or Solana mint address" autocomplete="off" style="font-size:12px" oninput="updatePumpChainNote()">
+      <div style="display:grid;grid-template-columns:1fr 90px;gap:10px;margin-bottom:20px">
+        <div>
+          <div class="pump-label">Token Address</div>
+          <input type="text" id="pump-token" placeholder="0x... or Solana mint address" autocomplete="off" style="width:100%;font-size:12px" oninput="updatePumpChainNote()">
         </div>
-        <div class="input-wrap" style="margin:0">
-          <span class="input-label">Chain</span>
-          <select id="pump-chain" onchange="updatePumpChainNote()" style="padding:10px 6px;font-size:12px">
+        <div>
+          <div class="pump-label">Chain</div>
+          <select id="pump-chain" onchange="updatePumpChainNote()" style="width:100%;padding:10px 6px;font-size:12px">
             <option value="base" selected>Base</option>
             <option value="solana">Solana</option>
             <option value="ethereum">ETH</option>
@@ -554,17 +553,17 @@
       </div>
 
       <!-- pump.fun bonding curve detected note -->
-      <div id="pump-chain-note" style="display:none;font-size:11px;border-radius:6px;padding:10px 12px;line-height:1.5;margin-top:-10px"></div>
+      <div id="pump-chain-note" style="display:none;font-size:11px;border-radius:6px;padding:10px 12px;line-height:1.5;margin-bottom:20px"></div>
 
       <!-- EVM budget row -->
-      <div id="pump-evm-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding-top:10px">
-        <div class="input-wrap" style="margin:0">
-          <span class="input-label">Budget (USDC)</span>
-          <input type="number" id="pump-total" placeholder="50" min="1" max="1000" step="1" oninput="updatePumpPreview()" style="font-size:13px">
+      <div id="pump-evm-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:20px">
+        <div>
+          <div class="pump-label">Budget (USDC)</div>
+          <input type="number" id="pump-total" placeholder="50" min="1" max="1000" step="1" oninput="updatePumpPreview()" style="width:100%;font-size:13px">
         </div>
-        <div class="input-wrap" style="margin:0">
-          <span class="input-label">Per-Buy</span>
-          <select id="pump-interval" onchange="updatePumpPreview()" style="font-size:12px">
+        <div>
+          <div class="pump-label">Per-Buy</div>
+          <select id="pump-interval" onchange="updatePumpPreview()" style="width:100%;font-size:12px">
             <option value="0.01">$0.01</option>
             <option value="0.02" selected>$0.02</option>
             <option value="0.05">$0.05</option>
@@ -574,9 +573,9 @@
             <option value="1.00">$1.00</option>
           </select>
         </div>
-        <div class="input-wrap" style="margin:0">
-          <span class="input-label">Rate</span>
-          <select id="pump-rate" onchange="updatePumpPreview()" style="font-size:12px">
+        <div>
+          <div class="pump-label">Rate</div>
+          <select id="pump-rate" onchange="updatePumpPreview()" style="width:100%;font-size:12px">
             <option value="30s">30 sec</option>
             <option value="1m" selected>1 min</option>
             <option value="2m">2 min</option>
@@ -586,14 +585,14 @@
       </div>
 
       <!-- pump.fun SOL budget row -->
-      <div id="pump-sol-row" style="display:none;grid-template-columns:1fr 1fr 1fr;gap:10px;padding-top:10px">
-        <div class="input-wrap" style="margin:0">
-          <span class="input-label">Budget (SOL)</span>
-          <input type="number" id="pump-total-sol" placeholder="0.5" min="0.001" max="5" step="0.01" oninput="updatePumpPreview()" style="font-size:13px">
+      <div id="pump-sol-row" style="display:none;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:20px">
+        <div>
+          <div class="pump-label">Budget (SOL)</div>
+          <input type="number" id="pump-total-sol" placeholder="0.5" min="0.001" max="5" step="0.01" oninput="updatePumpPreview()" style="width:100%;font-size:13px">
         </div>
-        <div class="input-wrap" style="margin:0">
-          <span class="input-label">Per-Buy</span>
-          <select id="pump-sol-interval" onchange="updatePumpPreview()" style="font-size:12px">
+        <div>
+          <div class="pump-label">Per-Buy</div>
+          <select id="pump-sol-interval" onchange="updatePumpPreview()" style="width:100%;font-size:12px">
             <option value="0.001">0.001 SOL</option>
             <option value="0.002">0.002 SOL</option>
             <option value="0.005">0.005 SOL</option>
@@ -603,9 +602,9 @@
             <option value="0.1">0.1 SOL</option>
           </select>
         </div>
-        <div class="input-wrap" style="margin:0">
-          <span class="input-label">Rate</span>
-          <select id="pump-rate-sol" onchange="updatePumpPreview()" style="font-size:12px">
+        <div>
+          <div class="pump-label">Rate</div>
+          <select id="pump-rate-sol" onchange="updatePumpPreview()" style="width:100%;font-size:12px">
             <option value="30s">30 sec</option>
             <option value="1m" selected>1 min</option>
             <option value="2m">2 min</option>
@@ -615,20 +614,17 @@
       </div>
 
       <!-- Receiving wallet -->
-      <div class="input-wrap" style="margin:0;padding-top:10px">
-        <span class="input-label">Your Receiving Wallet</span>
-        <input type="text" id="pump-wallet" placeholder="0x... or Solana wallet to receive tokens" autocomplete="off" style="font-size:12px">
+      <div style="margin-bottom:20px">
+        <div class="pump-label">Your Receiving Wallet</div>
+        <input type="text" id="pump-wallet" placeholder="0x... or Solana wallet to receive tokens" autocomplete="off" style="width:100%;font-size:12px">
       </div>
 
       <!-- Preview -->
-      <div id="pump-preview" style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);border-radius:8px;padding:12px;font-size:12px;color:var(--muted);line-height:1.5;display:none">
+      <div id="pump-preview" style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);border-radius:8px;padding:12px;margin-bottom:20px;font-size:12px;color:var(--muted);line-height:1.5;display:none">
         <span id="pump-preview-text"></span>
       </div>
 
-      <!-- Button pushed to bottom with extra top space -->
-      <div style="padding-top:8px">
-        <button class="btn btn-primary" style="width:100%;padding:15px;font-size:15px;font-weight:700" onclick="startPumpBot()">⚡ Start Pump Bot</button>
-      </div>
+      <button class="btn btn-primary" style="width:100%;padding:15px;font-size:15px;font-weight:700" onclick="startPumpBot()">⚡ Start Pump Bot</button>
     </div>
 
     <!-- Active session -->
