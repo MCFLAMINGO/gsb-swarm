@@ -3200,6 +3200,53 @@ app.get('/api/copy-trader/positions', requireOperator, (req, res) => {
 let copyTraderProcess = null;
 let copyTraderState = { running: false, log: [], startedAt: null, budget: 0 };
 
+// Auto-start copy trader on server boot (60s delay so healthcheck passes first)
+const COPY_TRADER_AUTO_BUDGET = parseFloat(process.env.COPY_TRADER_BUDGET || '0');
+if (COPY_TRADER_AUTO_BUDGET > 0 && process.env.AGENT_WALLET_PRIVATE_KEY) {
+  setTimeout(() => {
+    if (copyTraderProcess) return;
+    const wallet = process.env.COPY_TRADER_WALLET || null;
+    copyTraderState = { running: true, log: ['[auto-start] Copy trader launching...'], startedAt: new Date().toISOString(), budget: COPY_TRADER_AUTO_BUDGET };
+    const args = ['scripts/copy_trader.py', '--budget', String(COPY_TRADER_AUTO_BUDGET)];
+    if (wallet) args.push('--wallet', wallet);
+    else args.push('--hunt');
+    const { spawn } = require('child_process');
+    copyTraderProcess = spawn('python3', args, { cwd: __dirname, env: { ...process.env } });
+    copyTraderProcess.stdout.on('data', d => {
+      const line = d.toString().trim();
+      copyTraderState.log.push(line);
+      if (copyTraderState.log.length > 200) copyTraderState.log.shift();
+      console.log('[copy-trader]', line);
+    });
+    copyTraderProcess.stderr.on('data', d => {
+      const line = '[ERR] ' + d.toString().trim();
+      copyTraderState.log.push(line);
+      if (copyTraderState.log.length > 200) copyTraderState.log.shift();
+    });
+    copyTraderProcess.on('close', code => {
+      copyTraderState.running = false;
+      copyTraderState.log.push(`[process exited code ${code}]`);
+      copyTraderProcess = null;
+      // Auto-restart on crash after 30s
+      if (code !== 0 && COPY_TRADER_AUTO_BUDGET > 0) {
+        console.log('[copy-trader] Crashed — restarting in 30s...');
+        setTimeout(() => {
+          if (!copyTraderProcess) {
+            const args2 = ['scripts/copy_trader.py', '--budget', String(COPY_TRADER_AUTO_BUDGET)];
+            if (wallet) args2.push('--wallet', wallet); else args2.push('--hunt');
+            copyTraderProcess = spawn('python3', args2, { cwd: __dirname, env: { ...process.env } });
+            copyTraderState.running = true;
+            copyTraderState.log.push('[auto-restart] Restarted after crash');
+          }
+        }, 30000);
+      }
+    });
+    console.log('[copy-trader] Auto-started with budget $' + COPY_TRADER_AUTO_BUDGET);
+  }, 60000);
+} else {
+  console.log('[copy-trader] Auto-start disabled — set COPY_TRADER_BUDGET env var to enable');
+}
+
 app.post('/api/copy-trader/start', requireOperator, express.json(), async (req, res) => {
   if (copyTraderProcess) {
     return res.json({ ok: false, error: 'Already running' });
