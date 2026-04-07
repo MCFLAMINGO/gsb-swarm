@@ -335,7 +335,7 @@ async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
   let client;
   client = await buildAcpClient({
-    privateKey: process.env.AGENT_WALLET_PRIVATE_KEY,
+    privateKey: process.env.THREAD_WRITER_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY,
     entityId: parseInt(process.env.THREAD_WRITER_ENTITY_ID),
     agentWalletAddress: process.env.THREAD_WRITER_WALLET_ADDRESS,
     onNewTask: async (job) => {

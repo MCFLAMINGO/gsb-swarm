@@ -190,7 +190,7 @@ async function analyzeToken(contractAddress, chain = 'base') {
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
   const client = await buildAcpClient({
-    privateKey:         process.env.AGENT_WALLET_PRIVATE_KEY,
+    privateKey:         process.env.TOKEN_ANALYST_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY,
     entityId:           parseInt(process.env.TOKEN_ANALYST_ENTITY_ID),
     agentWalletAddress: process.env.TOKEN_ANALYST_WALLET_ADDRESS,
 
