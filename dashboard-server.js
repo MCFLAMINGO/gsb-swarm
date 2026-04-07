@@ -3877,14 +3877,26 @@ app.get('/api/fee-stats', requireOperator, (req, res) => {
 });
 
 // ── Approval link ─────────────────────────────────────────────────────────────
-app.get('/api/swap/approval-status', (req, res) => {
-  // For now, always return not approved (requires on-chain check in production)
-  res.json({ approved: false });
+app.get('/api/swap/approval-status', async (req, res) => {
+  const { wallet } = req.query;
+  if (!wallet) return res.json({ approved: false });
+  try {
+    const { createPublicClient, http } = require('viem');
+    const { base } = require('viem/chains');
+    const USDC   = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+    const ROUTER = '0x2626664c2603336E57B271c5C0b26F421741e481';
+    const ERC20_ALLOW_ABI = [{ name:'allowance', type:'function', inputs:[{name:'owner',type:'address'},{name:'spender',type:'address'}], outputs:[{name:'',type:'uint256'}], stateMutability:'view' }];
+    const pc = createPublicClient({ chain: base, transport: http(process.env.BASE_RPC_URL || 'https://base.drpc.org') });
+    const allowance = await pc.readContract({ address: USDC, abi: ERC20_ALLOW_ABI, functionName: 'allowance', args: [wallet, ROUTER] });
+    res.json({ approved: allowance >= BigInt('1000000000000') }); // >= 1M USDC (max approve)
+  } catch(e) {
+    console.error('approval-status error:', e.message);
+    res.json({ approved: false });
+  }
 });
 app.get('/api/swap/approve-link', (req, res) => {
-  const { wallet } = req.query;
-  // Build Uniswap approval URL for USDC
-  const url = `https://app.uniswap.org/swap?chain=base&inputCurrency=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&exactAmount=1000&exactField=input`;
+  // Deep-link to Uniswap token approval page for USDC on Base
+  const url = 'https://app.uniswap.org/explore/tokens/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
   res.json({ ok: true, url });
 });
 
