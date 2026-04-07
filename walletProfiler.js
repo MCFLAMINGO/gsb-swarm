@@ -240,10 +240,109 @@ async function profileWallet(address, chain = 'base') {
   }
 }
 
+const { execSync } = require('child_process');
+const fsSync = require('fs');
+
+async function executeDcaBuy(tokenAddress, usdcAmount) {
+  const PRIVATE_KEY = process.env.AGENT_WALLET_PRIVATE_KEY;
+  if (!PRIVATE_KEY) return { ok: false, error: 'No AGENT_WALLET_PRIVATE_KEY configured' };
+
+  const WETH   = '0x4200000000000000000000000000000000000006';
+  const USDC   = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+  const ROUTER = '0x2626664c2603336E57B271c5C0b26F421741e481';
+  const RPC    = process.env.BASE_RPC_URL || 'https://base.drpc.org';
+  const amount = parseFloat(usdcAmount);
+  if (!amount || amount <= 0) return { ok: false, error: 'Invalid usdc_amount' };
+  if (!tokenAddress || !tokenAddress.match(/^0x[a-fA-F0-9]{40}$/)) return { ok: false, error: 'Invalid token_address' };
+
+  const script = `
+const { createWalletClient, createPublicClient, http, parseUnits, maxUint256 } = require('viem');
+const { base } = require('viem/chains');
+const { privateKeyToAccount } = require('viem/accounts');
+
+const ERC20_ABI = [
+  { name:'approve', type:'function', inputs:[{name:'spender',type:'address'},{name:'amount',type:'uint256'}], outputs:[{name:'',type:'bool'}] },
+  { name:'allowance', type:'function', inputs:[{name:'owner',type:'address'},{name:'spender',type:'address'}], outputs:[{name:'',type:'uint256'}] },
+];
+const MULTIHOP_ABI = [{
+  name: 'exactInput', type: 'function',
+  inputs: [{ name: 'params', type: 'tuple', components: [
+    {name:'path',type:'bytes'},{name:'recipient',type:'address'},
+    {name:'amountIn',type:'uint256'},{name:'amountOutMinimum',type:'uint256'},
+  ]}],
+  outputs: [{name:'amountOut',type:'uint256'}],
+}];
+
+async function run() {
+  const account = privateKeyToAccount('${PRIVATE_KEY}');
+  const walletClient = createWalletClient({ account, chain: base, transport: http('${RPC}') });
+  const publicClient = createPublicClient({ chain: base, transport: http('${RPC}') });
+  const amountIn = parseUnits('${amount.toFixed(6)}', 6);
+
+  const allowance = await publicClient.readContract({ address: '${USDC}', abi: ERC20_ABI, functionName: 'allowance', args: [account.address, '${ROUTER}'] });
+  if (allowance < amountIn) {
+    const approveTx = await walletClient.writeContract({ address: '${USDC}', abi: ERC20_ABI, functionName: 'approve', args: ['${ROUTER}', maxUint256] });
+    await publicClient.waitForTransactionReceipt({ hash: approveTx });
+  }
+  const encodePath = (tokens, fees) => {
+    let enc = tokens[0].slice(2).toLowerCase();
+    for (let i = 0; i < fees.length; i++) { enc += fees[i].toString(16).padStart(6,'0'); enc += tokens[i+1].slice(2).toLowerCase(); }
+    return '0x' + enc;
+  };
+  const path = encodePath(['${USDC}', '${WETH}', '${tokenAddress}'], [500, 3000]);
+  const hash = await walletClient.writeContract({
+    address: '${ROUTER}', abi: MULTIHOP_ABI, functionName: 'exactInput',
+    args: [{ path, recipient: account.address, amountIn, amountOutMinimum: 0n }],
+  });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+  console.log('TX_HASH:' + hash);
+  console.log('AMOUNT_OUT:' + receipt.logs?.[receipt.logs.length-1]?.data || '0');
+}
+run().catch(e => console.error('DCA_ERROR:' + e.message));
+`;
+
+  const tmpFile = path.join(__dirname, `dca_${Date.now()}.js`);
+  try {
+    fsSync.writeFileSync(tmpFile, script);
+    const output = execSync(`node ${tmpFile}`, { timeout: 90000, env: process.env, cwd: __dirname }).toString();
+    fsSync.unlinkSync(tmpFile);
+
+    const txLine = output.split('\n').find(l => l.startsWith('TX_HASH:'));
+    const errLine = output.split('\n').find(l => l.startsWith('DCA_ERROR:'));
+    if (errLine) return { ok: false, error: errLine.replace('DCA_ERROR:', '').trim() };
+    if (!txLine) return { ok: false, error: 'No tx hash returned' };
+
+    const txHash = txLine.replace('TX_HASH:', '').trim();
+    return {
+      ok: true, txHash, amountIn: amount,
+      explorerUrl: `https://basescan.org/tx/${txHash}`,
+      status: 'confirmed',
+    };
+  } catch (err) {
+    try { fsSync.unlinkSync(tmpFile); } catch {}
+    const errMsg = err.stdout?.toString().match(/DCA_ERROR:(.*)/)?.[1]?.trim() || err.message;
+    return { ok: false, error: errMsg };
+  }
+}
+
 async function processJob(client, job, chain = 'base') {
   const rawContent = extractContent(job.requirement)
     || extractContent(job.memos?.[0]?.content)
     || '';
+
+  // ── DCA buy branch ───────────────────────────────────────────────────────
+  const parsed = parseJobRequirement(rawContent);
+  if (parsed.skillId === 'dca_buy' || parsed.params?.action === 'dca_buy') {
+    const tokenAddress = parsed.params?.token_address;
+    const usdcAmount   = parsed.params?.usdc_amount;
+    console.log(`[${AGENT_NAME}] DCA buy: ${usdcAmount} USDC → ${tokenAddress}`);
+    const result = await executeDcaBuy(tokenAddress, usdcAmount);
+    await job.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
+    console.log(`[${AGENT_NAME}] DCA job ${job.id} delivered. ok=${result.ok}`);
+    return;
+  }
+
+  // ── Wallet profile branch (default) ─────────────────────────────────────
   const match = rawContent.match(/0x[a-fA-F0-9]{40}/);
   if (!match) {
     await job.deliver({ type: 'text', value: 'No wallet address found. Please provide a valid EVM wallet address.' });
@@ -251,7 +350,7 @@ async function processJob(client, job, chain = 'base') {
   }
   const profile = await profileWallet(match[0], chain);
   await job.deliver({ type: 'text', value: JSON.stringify(profile, null, 2) });
-  console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
+  console.log(`[${AGENT_NAME}] Profile job ${job.id} delivered.`);
 }
 
 async function start() {
