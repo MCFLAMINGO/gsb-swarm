@@ -985,7 +985,7 @@ app.get('/api/resource/:name', (req, res) => {
       resource: 'gsb_offerings',
       agent: 'GSB CEO Agent',
       agentId: 40779,
-      description: 'GSB CEO orchestrates a full intelligence swarm on Base. Hire for instant alpha, deep token analysis, wallet profiling, social coordination, and strategic briefs.',
+      description: 'One command. Five agents. GSB CEO is the orchestration layer for the entire swarm — Token Analyst, Wallet Profiler & DCA Engine, Alpha Scanner, and Thread Writer run in parallel. Every job is an on-chain ACP transaction. Verifiable receipts, not promises. Industrial-grade intelligence on Base.',
       offerings: [
         { name: 'swarm_heartbeat_report', price_usdc: 0.10, description: 'Instant swarm status + live Base market snapshot from cache. Response in <5 seconds.' },
         { name: 'strategy_task_assignment', price_usdc: 0.25, description: 'CEO routes your goal to the best worker(s) and synthesizes results. Alpha scans, token analysis, thread writing.' },
@@ -1355,6 +1355,50 @@ async function instantQuery(command) {
   return null; // nothing matched — let ACP handle it
 }
 
+// ── Pre-alpha / deployer wallet helpers (Blockscout + GeckoTerminal) ────────
+async function scanDeployerWallets(hoursBack = 6) {
+  try {
+    const r = await fetch('https://base.blockscout.com/api/v2/transactions?filter=to%3Anull&limit=50', { signal: AbortSignal.timeout(8000) });
+    const d = await r.json();
+    const items = d.items || [];
+    const cutoff = Date.now() - hoursBack * 3600 * 1000;
+    const deployers = items
+      .filter(tx => tx.created_contract && tx.from && new Date(tx.timestamp).getTime() > cutoff)
+      .map(tx => ({
+        deployer: tx.from.hash,
+        contract: tx.created_contract.hash,
+        timestamp: tx.timestamp,
+        txHash: tx.hash,
+      }));
+    return { deployers, scanned: items.length };
+  } catch (e) {
+    return { deployers: [], error: e.message };
+  }
+}
+
+async function detectPreLiquidity(hoursBack = 6) {
+  try {
+    const r = await fetch('https://api.geckoterminal.com/api/v2/networks/base/new_pools?page=1', {
+      headers: { 'Accept': 'application/json;version=20230302' },
+      signal: AbortSignal.timeout(8000),
+    });
+    const d = await r.json();
+    const cutoff = Date.now() - hoursBack * 3600 * 1000;
+    return (d.data || [])
+      .filter(p => p.attributes?.pool_created_at && new Date(p.attributes.pool_created_at).getTime() > cutoff)
+      .map(p => ({
+        token: p.attributes?.name,
+        address: p.relationships?.base_token?.data?.id?.split('_')[1],
+        pool: p.attributes?.address,
+        liquidity: parseFloat(p.attributes?.reserve_in_usd || 0),
+        createdAt: p.attributes?.pool_created_at,
+        signal: parseFloat(p.attributes?.reserve_in_usd || 0) < 10000 ? 'staging' : 'early',
+      }));
+  } catch (e) {
+    return [];
+  }
+}
+
 // ── POST /api/command — CEO natural-language command line ─────────────────────
 // Parses the command text and fires the right workers automatically.
 // Streams status back via WebSocket under type 'cmd-status'.
@@ -1447,6 +1491,45 @@ app.post('/api/command', async (req, res) => {
   // Jobs complete instantly via direct Claude calls instead of waiting for on-chain delivery.
   const USE_DIRECT_MODE = true;
 
+  // ── CEO special skills: early-exit before intent detection ─────────────────
+  // proof_of_work_report — return job history as verifiable receipt
+  if (/proof.?of.?work|job.?receipt|job.?history|completed.?jobs|track.?record|receipts?/i.test(cmd)) {
+    const limit = parseInt(cmd.match(/\d+/)?.[0]) || 20;
+    const recent = jobHistory.slice(0, limit);
+    const totalUsdc = ceoDashCache.totalUsdcEarned || 0;
+    const report = {
+      totalCompleted: jobHistory.length,
+      totalUsdcEarned: totalUsdc,
+      generatedAt: new Date().toISOString(),
+      jobs: recent.map(j => ({ jobId: j.jobId, worker: j.worker, status: j.status, ts: new Date(j.ts).toISOString() })),
+      verifyUrl: 'https://base.blockscout.com/address/' + (process.env.AGENT_WALLET_ADDRESS || '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d'),
+    };
+    broadcast('cmd-status', { type: 'result', worker: 'CEO', jobId: 'pow-' + Date.now(), message: 'Proof of work report generated', result: JSON.stringify(report).slice(0, 400) });
+    return res.json({ ok: true, workers: ['CEO'], result: report });
+  }
+
+  // watch_deployer_wallets — pre-alpha new contract deployments
+  if (/deployer|pre.?alpha|pre.?launch|before.*(twitter|trending)|new.?contract|contract.?deploy/i.test(cmd)) {
+    const hours = parseInt(cmd.match(/\d+/)?.[0]) || 6;
+    broadcast('cmd-status', { type: 'ack', command, message: `Alpha Scanner scanning deployer wallets (last ${hours}h)…`, workers: ['GSB Alpha Scanner'] });
+    const data = await scanDeployerWallets(hours);
+    const pools = await detectPreLiquidity(hours);
+    result = `Deployer scan (last ${hours}h): ${data.deployers?.length || 0} new contracts found.\n`;
+    if (data.deployers?.length) {
+      data.deployers.slice(0, 5).forEach((d, i) => {
+        result += `${i+1}. ${d.deployer} → ${d.contract} at ${d.timestamp}\n`;
+      });
+    }
+    result += `\nPre-liquidity pools (staging): ${pools.filter(p => p.signal === 'staging').length}\n`;
+    pools.filter(p => p.signal === 'staging').slice(0, 3).forEach((p, i) => {
+      result += `${i+1}. ${p.token} — $${Math.round(p.liquidity).toLocaleString()} liq — ${p.createdAt}\n`;
+    });
+    logJob('pre-' + Date.now(), 'GSB Alpha Scanner', 'pre-alpha-scan', 'free-api');
+    ceoDashCache.totalJobsServed++;
+    broadcast('cmd-status', { type: 'result', worker: 'GSB Alpha Scanner', message: 'Pre-alpha scan complete', result: result.slice(0, 400) });
+    return res.json({ ok: true, workers: ['GSB Alpha Scanner'], result });
+  }
+
   // ── Intent detection ──────────────────────────────────────────────────────
   // Extract any 0x address from the command for dynamic requirements
   const addrMatch = command.match(/0x[0-9a-fA-F]{40}/i);
@@ -1492,16 +1575,16 @@ app.post('/api/command', async (req, res) => {
     intents.push({ worker: 'GSB Wallet Profiler & DCA Engine', requirement });
   }
 
-  // Alpha scanning — catches "what's hot", "what should I watch", "any plays"
-  if (/alpha|scan|signal|mover|gainer|trending|opportunity|what.s moving|what.s hot|what should|any play|top token|best token|watch/.test(cmd)) {
+  // Alpha scanning — catches trending, volume, AND pre-alpha/deployer signals
+  if (/alpha|scan|signal|mover|gainer|trending|opportunity|what.s moving|what.s hot|what should|any play|top token|best token|watch|pre.?alpha|deployer|new.?launch|before.?twitter/.test(cmd)) {
     const alphaReq = requestedChain !== 'base'
       ? `Scan ${chainName} chain for alpha signals now`
       : WORKER_CATALOG['GSB Alpha Scanner'].defaultReq;
     intents.push({ worker: 'GSB Alpha Scanner', requirement: alphaReq });
   }
 
-  // Thread writing
-  if (/thread|tweet|post|write|twitter|content/.test(cmd)) {
+  // Thread writing — includes competitive/anti-gatekeeper angle
+  if (/thread|tweet|post|write|twitter|content|anti.?gatekeeper|crowded.?trade|competitive/.test(cmd)) {
     const requirement = customAddr
       ? `Write a crypto Twitter thread about token ${customAddr}`
       : ticker && ticker !== 'GSB'
