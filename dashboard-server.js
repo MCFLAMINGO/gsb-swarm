@@ -4020,13 +4020,37 @@ app.post('/api/swap/dca/stop', express.json(), (req, res) => {
 
 // POST /api/pump/create — create a new pump session
 app.post('/api/pump/create', express.json(), (req, res) => {
-  const { userId, tokenAddress, chain, totalAmount, intervalAmount, rateName, receivingWallet } = req.body;
-  if (!userId || !tokenAddress || !totalAmount || !intervalAmount || !rateName || !receivingWallet) {
-    return res.status(400).json({ ok: false, error: 'Missing required fields: userId, tokenAddress, totalAmount, intervalAmount, rateName, receivingWallet' });
+  const { userId, tokenAddress, chain, totalAmount, intervalAmount, rateName, receivingWallet,
+          isPumpFun, totalSol, solPerBuy } = req.body;
+  // For pump.fun sessions: need totalSol + solPerBuy. For EVM: need totalAmount + intervalAmount.
+  const detectedPumpFun = isPumpFun || (chain === 'solana' && tokenAddress && tokenAddress.endsWith('pump'));
+  if (!userId || !tokenAddress || !rateName || !receivingWallet) {
+    return res.status(400).json({ ok: false, error: 'Missing required fields: userId, tokenAddress, rateName, receivingWallet' });
+  }
+  if (detectedPumpFun && (!totalSol || !solPerBuy)) {
+    return res.status(400).json({ ok: false, error: 'pump.fun sessions require totalSol and solPerBuy' });
+  }
+  if (!detectedPumpFun && (!totalAmount || !intervalAmount)) {
+    return res.status(400).json({ ok: false, error: 'EVM sessions require totalAmount and intervalAmount' });
   }
   try {
-    const session = pumpBot.createSession({ userId: String(userId), tokenAddress, chain: chain || 'base', totalAmount: parseFloat(totalAmount), intervalAmount: parseFloat(intervalAmount), rateName, receivingWallet });
-    res.json({ ok: true, session, depositAddress: pumpBot.SWARM_WALLET, depositAmount: session.totalAmount });
+    const session = pumpBot.createSession({
+      userId: String(userId), tokenAddress,
+      chain: chain || 'base',
+      totalAmount:    detectedPumpFun ? null : parseFloat(totalAmount),
+      intervalAmount: detectedPumpFun ? null : parseFloat(intervalAmount),
+      rateName, receivingWallet,
+      isPumpFun: detectedPumpFun || false,
+      totalSol:  detectedPumpFun ? parseFloat(totalSol)  : null,
+      solPerBuy: detectedPumpFun ? parseFloat(solPerBuy) : null,
+    });
+    const GSB_SOL_WALLET = process.env.GSB_SOL_WALLET || 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs';
+    res.json({
+      ok: true, session,
+      depositAddress: detectedPumpFun ? GSB_SOL_WALLET : pumpBot.SWARM_WALLET,
+      depositAmount:  detectedPumpFun ? session.totalSol : session.totalAmount,
+      depositToken:   detectedPumpFun ? 'SOL' : 'USDC',
+    });
   } catch(e) {
     res.status(400).json({ ok: false, error: e.message });
   }
@@ -4050,7 +4074,17 @@ app.post('/api/pump/cancel', express.json(), (req, res) => {
 
 // GET /api/pump/config — return valid intervals and rates
 app.get('/api/pump/config', (req, res) => {
-  res.json({ ok: true, intervals: pumpBot.VALID_INTERVALS, rates: Object.keys(pumpBot.VALID_RATES_MS), maxAmount: pumpBot.MAX_SESSION_USD, depositAddress: pumpBot.SWARM_WALLET });
+  const GSB_SOL_WALLET = process.env.GSB_SOL_WALLET || 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs';
+  res.json({
+    ok: true,
+    intervals: pumpBot.VALID_INTERVALS,
+    solIntervals: pumpBot.VALID_SOL_INTERVALS,
+    rates: Object.keys(pumpBot.VALID_RATES_MS),
+    maxAmount: pumpBot.MAX_SESSION_USD,
+    maxSol: pumpBot.MAX_SESSION_SOL,
+    depositAddress: pumpBot.SWARM_WALLET,
+    solDepositAddress: GSB_SOL_WALLET,
+  });
 });
 
 // ── DCA cron — runs every minute, executes due orders ─────────────────────────
