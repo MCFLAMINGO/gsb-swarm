@@ -120,7 +120,26 @@ function validateInput(raw) {
     limit = 50;
   }
 
-  return { valid: true, query, chain: resolvedChain, limit };
+  // Detect token address in query — Solana (base58, 32-44 chars, no 0x) or EVM (0x + 40 hex)
+  const solanaAddrMatch = raw.match(/\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/);
+  const evmAddrMatch    = raw.match(/\b(0x[a-fA-F0-9]{40})\b/);
+  let tokenAddress = null;
+  if (evmAddrMatch) {
+    tokenAddress = evmAddrMatch[1];
+  } else if (solanaAddrMatch && !raw.match(/^[0-9]+$/)) {
+    // Only treat as Solana address if it looks like base58 (not a pure number string)
+    tokenAddress = solanaAddrMatch[1];
+    // If chain not explicitly set, infer solana from base58 address
+    if (resolvedChain === 'base') {
+      // leave chain as-is if user specified it, otherwise set solana
+      if (!chain) {
+        const inferredChain = 'solana';
+        return { valid: true, query, chain: inferredChain, limit, tokenAddress };
+      }
+    }
+  }
+
+  return { valid: true, query, chain: resolvedChain, limit, tokenAddress };
 }
 
 const handledJobs = new Set();
@@ -149,7 +168,93 @@ async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
 // ── Data sources (no API keys required) ──────────────────────────────────────
 const GECKO_API    = 'https://api.geckoterminal.com/api/v2/networks';
 const DEX_BOOST    = 'https://api.dexscreener.com/token-boosts/latest/v1';
+const DEX_TOKENS   = 'https://api.dexscreener.com/latest/dex/tokens';
 const GECKO_HEADERS = { 'Accept': 'application/json', 'User-Agent': 'GSB-Alpha-Scanner/1.0' };
+
+// ── Specific token address lookup via DexScreener ─────────────────────────────
+async function lookupToken(tokenAddress, hintChain) {
+  try {
+    const res = await axios.get(`${DEX_TOKENS}/${tokenAddress}`, { timeout: 10000 });
+    const pairs = res.data?.pairs || [];
+    if (!pairs.length) {
+      return { error: `No trading pairs found for ${tokenAddress}. Token may be too new or not yet listed on any DEX.` };
+    }
+
+    // Sort by liquidity descending, prefer hintChain if provided
+    const sorted = pairs
+      .filter(p => p.liquidity?.usd > 0 || p.volume?.h24 > 0)
+      .sort((a, b) => {
+        // Prefer the hinted chain
+        if (hintChain && a.chainId === hintChain && b.chainId !== hintChain) return -1;
+        if (hintChain && b.chainId === hintChain && a.chainId !== hintChain) return 1;
+        return (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0);
+      });
+
+    if (!sorted.length) {
+      // Return raw first pair even if low liquidity
+      const p = pairs[0];
+      return {
+        token_address: tokenAddress,
+        name: p.baseToken?.name || 'Unknown',
+        symbol: p.baseToken?.symbol || '?',
+        chain: p.chainId,
+        price_usd: p.priceUsd || '0',
+        liquidity: '$0',
+        volume_24h: '$0',
+        change_1h: '0%',
+        change_24h: '0%',
+        fdv: '$0',
+        pair_url: p.url,
+        note: 'Very low liquidity — early stage token.',
+      };
+    }
+
+    const best = sorted[0];
+    const isPumpFun = best.url?.includes('pump.fun') || tokenAddress.endsWith('pump');
+
+    // Build concise multi-chain summary if pairs exist on multiple chains
+    const chains = [...new Set(sorted.map(p => p.chainId))].slice(0, 3);
+
+    const change1h  = parseFloat(best.priceChange?.h1  || 0);
+    const change24h = parseFloat(best.priceChange?.h24 || 0);
+    const liq       = best.liquidity?.usd  || 0;
+    const vol24h    = best.volume?.h24     || 0;
+    const fdv       = best.fdv             || 0;
+    const mcap      = best.marketCap       || 0;
+
+    const signal = (() => {
+      if (isPumpFun && liq < 10000) return 'pump.fun bonding curve — pre-graduation. High risk, high reward.';
+      if (liq < 5000)  return 'Very thin liquidity. Treat as speculative.';
+      if (change1h > 20) return `Pumping hard — +${change1h.toFixed(1)}% in the last hour. Watch for reversal.`;
+      if (change24h > 50) return `Up ${change24h.toFixed(1)}% in 24h. Momentum play — set stop loss.`;
+      if (change24h < -30) return `Down ${Math.abs(change24h).toFixed(1)}% in 24h. Potential oversold bounce or distribution.`;
+      return 'Stable price action. Monitor for breakout.';
+    })();
+
+    return {
+      token_address: tokenAddress,
+      name:        best.baseToken?.name   || 'Unknown',
+      symbol:      best.baseToken?.symbol || '?',
+      chain:       best.chainId,
+      chains_listed: chains,
+      price_usd:   best.priceUsd || '0',
+      price_native: best.priceNative || '0',
+      liquidity:   fmt(liq),
+      volume_24h:  fmt(vol24h),
+      change_1h:   `${change1h >= 0 ? '+' : ''}${change1h.toFixed(2)}%`,
+      change_24h:  `${change24h >= 0 ? '+' : ''}${change24h.toFixed(2)}%`,
+      fdv:         fmt(fdv),
+      market_cap:  fmt(mcap),
+      pair_url:    best.url,
+      dex:         best.dexId,
+      is_pump_fun: isPumpFun,
+      gsb_signal:  signal,
+      powered_by:  'GSB Intelligence Swarm',
+    };
+  } catch (err) {
+    return { error: `Token lookup failed: ${err.message}`, token_address: tokenAddress };
+  }
+}
 
 function fmt(n) {
   const num = parseFloat(n || 0);
@@ -319,7 +424,10 @@ async function start() {
           console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase. Scanning...`);
         }
 
-        const result = await scanAlpha(jobChain);
+        // If a specific token address was detected, look it up directly
+        const result = check.tokenAddress
+          ? await lookupToken(check.tokenAddress, jobChain)
+          : await scanAlpha(jobChain);
         await freshJob.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
         console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
       } catch (err) {
