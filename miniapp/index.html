@@ -432,7 +432,7 @@
 
 <div class="header">
   <div class="logo">⚡ GSB Swap</div>
-  <div class="wallet-badge" id="wallet-badge" onclick="connectWallet()">Connect Wallet</div>
+  <div class="wallet-badge" id="wallet-badge" onclick="walletAddress ? null : connectWallet()">Connect Wallet</div>
 </div>
 
 <div id="connect-screen" class="connect-screen" style="display:none">
@@ -1590,7 +1590,16 @@ function showToast(msg, type = '') {
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 window.addEventListener('load', () => {
-  const saved = localStorage.getItem(`gsb_wallet_${userId}`);
+  let saved = localStorage.getItem(`gsb_wallet_${userId}`);
+  if (!saved) {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('gsb_wallet_') && localStorage.getItem(k)) {
+        saved = localStorage.getItem(k);
+        break;
+      }
+    }
+  }
   if (saved) {
     walletAddress = saved;
     onWalletConnected();
