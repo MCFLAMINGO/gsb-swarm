@@ -1442,13 +1442,10 @@ app.post('/api/command', async (req, res) => {
   const jobLimitErr = checkDailyJobLimit();
   if (jobLimitErr) return res.status(429).json({ error: jobLimitErr });
 
-  if (!acpClient || !acpReady) {
-    broadcast('cmd-status', {
-      type: 'error',
-      message: 'CEO wallet not ready — cannot deploy agents. Check your .env and restart.',
-    });
-    return res.status(503).json({ error: 'ACP client not ready' });
-  }
+  // NOTE: Workers run in direct mode (Claude API) regardless of ACP status.
+  // ACP on-chain job firing is disabled until workers are fully graduated on Virtuals.
+  // Jobs complete instantly via direct Claude calls instead of waiting for on-chain delivery.
+  const USE_DIRECT_MODE = true;
 
   // ── Intent detection ──────────────────────────────────────────────────────
   // Extract any 0x address from the command for dynamic requirements
@@ -1530,44 +1527,90 @@ app.post('/api/command', async (req, res) => {
     intents.push({ worker: 'GSB Token Analyst', requirement: WORKER_CATALOG['GSB Token Analyst'].defaultReq });
   }
 
-  // ── Acknowledge immediately, then fire async ──────────────────────────────
+  // ── Execute workers directly via Claude (no ACP until workers are graduated) ──
   setWorkerStatus('CEO', 'working', null);
   const workerNamesList = intents.map(i => i.worker).join(', ');
   broadcast('cmd-status', {
     type: 'ack',
     command,
-    message: `CEO parsed intent → hiring: ${workerNamesList}`,
+    message: `CEO deploying: ${workerNamesList}`,
     workers: intents.map(i => i.worker),
   });
   res.json({ ok: true, workers: intents.map(i => i.worker) });
 
-  // Fire jobs sequentially with a small gap to avoid nonce collisions
+  // Role prompts for each worker
+  const ROLE_PROMPTS = {
+    'GSB Thread Writer': (req) => `You are the GSB Thread Writer. Write a crypto Twitter/X thread. Format as numbered tweets (1/, 2/, ...) separated by blank lines. Each tweet max 280 chars.\n\nFacts to use:\n- Virtuals Protocol Twitter: @virtuals_io\n- GSB token page: app.virtuals.io/virtuals/68291\n- GSB ticker: $GSB, Chain: Base\n- Treasury: 0x8E223841aA396d36a6727EfcEAFC61d691692a37\n\nRequirement: ${req}`,
+    'GSB Token Analyst': (req) => `You are the GSB Token Analyst. Analyze the requested token and provide: price, 24h change, liquidity, key on-chain signals, and a clear BUY / HOLD / AVOID recommendation with reasoning. Be specific and data-driven.\n\nRequirement: ${req}`,
+    'GSB Wallet Profiler': (req) => `You are the GSB Wallet Profiler. Profile the requested wallet — classify as whale/degen/institutional/smart-money, describe recent activity patterns, top holdings, and risk assessment.\n\nRequirement: ${req}`,
+    'GSB Alpha Scanner': (req) => `You are the GSB Alpha Scanner. Scan Base chain for alpha signals. Return top 3 opportunities with: token name, key price/volume signal, and a risk/reward assessment. Be specific.\n\nRequirement: ${req}`,
+  };
+
+  // Run each worker sequentially, broadcast results as they complete
   for (const intent of intents) {
+    const jobId = 'direct_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
     try {
-      broadcast('cmd-status', { type: 'firing', message: `Hiring ${intent.worker}…` });
-      const jobId = await acpClient.initiateJob(
-        WORKER_CATALOG[intent.worker].address,
-        intent.requirement,
-        makeFare(WORKER_CATALOG[intent.worker].price),
-        null,
-        new Date(Date.now() + 1000 * 60 * 30),
-      );
-      jobWorkerMap.set(jobId, intent.worker);
+      broadcast('cmd-status', { type: 'firing', message: `Running ${intent.worker}...`, jobId });
       setWorkerStatus(intent.worker, 'working', jobId);
-      logJob(jobId, intent.worker, 'fired', 'fired');
-      broadcast('cmd-status', { type: 'fired', message: `${intent.worker} hired → job ${jobId}`, jobId });
-      console.log(`[cmd] ✓ ${intent.worker} → job ${jobId}`);
+      logJob(jobId, intent.worker, 'fired', 'direct');
+
+      const promptFn = ROLE_PROMPTS[intent.worker] || ((r) => `You are ${intent.worker}. Complete this task: ${r}`);
+      const msg = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1500,
+        messages: [{ role: 'user', content: promptFn(intent.requirement) }],
+      });
+      const result = msg.content[0]?.text || '';
+
+      // Store in briefResults so CEO synthesis has real data
+      const role = WORKER_CATALOG[intent.worker]?.role;
+      if (role) {
+        briefResults[role] = { raw: result };
+        const up = result.toUpperCase();
+        if (up.includes('BUY'))     briefResults[role].gsb_verdict = 'BUY';
+        if (up.includes('AVOID'))   briefResults[role].gsb_verdict = 'AVOID';
+        if (up.includes('HOLD'))    briefResults[role].gsb_verdict = 'HOLD';
+        if (up.includes('BULLISH')) briefResults[role].gsb_signal  = 'BULLISH';
+        if (up.includes('BEARISH')) briefResults[role].gsb_signal  = 'BEARISH';
+        if (role === 'thread')        briefResults[role].thread = result;
+        if (role === 'wallet_profile') briefResults[role].classification = result.split('\n')[0];
+      }
+
+      setWorkerStatus(intent.worker, 'idle', jobId);
+      logJob(jobId, intent.worker, 'completed', 'direct');
+      ceoDashCache.totalJobsServed++;
+
+      // Broadcast result immediately so dashboard updates
+      broadcast('job-result', { jobId, worker: intent.worker, result });
+      broadcast('cmd-status', {
+        type: 'result',
+        worker: intent.worker,
+        jobId,
+        message: `${intent.worker} complete`,
+        result: result.slice(0, 400),
+      });
+
+      // CEO synthesis after each worker — dashboard sees progressive updates
+      try {
+        const synthesis = await ceoSynthesize(briefResults);
+        latestBrief = buildBriefSnapshot();
+        latestBrief.ceoSynthesis = synthesis;
+        broadcast('brief', latestBrief);
+      } catch (synthErr) {
+        console.warn('[cmd] synthesis error:', synthErr.message);
+      }
+
     } catch (err) {
-      console.error(`[cmd] Error firing ${intent.worker}:`, err.message);
-      broadcast('cmd-status', { type: 'error', message: `Failed to hire ${intent.worker}: ${err.message}` });
+      console.error(`[cmd] Error running ${intent.worker}:`, err.message);
+      setWorkerStatus(intent.worker, 'idle', null);
+      broadcast('cmd-status', { type: 'error', message: `${intent.worker} failed: ${err.message}` });
     }
-    await sleep(3000);
   }
 
   setWorkerStatus('CEO', 'idle', null);
   broadcast('cmd-status', {
     type: 'done',
-    message: `All ${intents.length} job${intents.length > 1 ? 's' : ''} fired. Watch the Jobs tab for deliveries.`,
+    message: `${intents.length} worker${intents.length > 1 ? 's' : ''} complete. Brief updated.`,
   });
 });
 
