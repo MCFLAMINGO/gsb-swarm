@@ -676,8 +676,8 @@ async function start() {
 
           // ── Check swarm memory first — skip full re-research if fresh narrative exists ──
           const existingNarrative = symbol ? swarmMemory.readNarrative(symbol) : null;
-          if (existingNarrative && existingNarrative.threadPosted && Date.now() - existingNarrative.updatedAt < 30 * 60 * 1000) {
-            // Narrative already exists and thread was posted in last 30 min — expand on it instead
+          if (existingNarrative && existingNarrative.threadPosted && Date.now() - existingNarrative.updatedAt < swarmMemory.SKIP_RESEARCH_MS) {
+            // Narrative exists + thread posted within 1 hour — expand on it instead of re-researching
             console.log(`[${AGENT_NAME}] Found fresh swarm memory for $${symbol} — expanding narrative`);
             const memCtx = swarmMemory.buildContextString(symbol);
             result = await buildTokenIntelReport({ symbol, contractAddress: contractAddress || existingNarrative.contractAddress, chain: chain || existingNarrative.chain, memoryContext: memCtx });
