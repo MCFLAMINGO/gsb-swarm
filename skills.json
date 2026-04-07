@@ -224,6 +224,27 @@
         "posted",
         "threadUrl"
       ]
+    },
+    {
+      "skillId": "token_intel_report",
+      "description": "Research a token across X (Twitter) and on-chain data, then write and post a full intel thread. Searches X for the cashtag and contract address, scrapes recent tweets, pulls DexScreener price/liquidity data, auto-detects contract from X if not provided, and posts the thread to X.",
+      "instruction": "Research {symbol} on X and on-chain. Find the contract address, pull price/liquidity from DexScreener, scan recent X posts, then write and post a full intel thread to X. Chain hint: {chain}. Contract (optional): {contractAddress}.",
+      "params": [
+        "symbol",
+        "chain",
+        "contractAddress"
+      ],
+      "price": 0.25,
+      "outputFields": [
+        "thread",
+        "thread_tweets",
+        "token_data",
+        "contract_address",
+        "x_tweets_found",
+        "x_top_tweets",
+        "threadUrl",
+        "posted"
+      ]
     }
   ],
   "GSB Financial Analyst": [

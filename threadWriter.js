@@ -355,6 +355,158 @@ async function writeThread(jobRequest) {
   };
 }
 
+// ── X/Twitter search via Bearer token ──────────────────────────────────────────
+
+async function searchXForToken(query, count = 20) {
+  const https = require('https');
+  const bearerToken = process.env.Bearer_Token || process.env.X_BEARER_TOKEN || process.env.X_API_KEY;
+  if (!bearerToken) return { tweets: [], error: 'No X bearer token configured' };
+
+  return new Promise((resolve) => {
+    const encoded = encodeURIComponent(`${query} -is:retweet lang:en`);
+    const path = `/2/tweets/search/recent?query=${encoded}&max_results=${Math.min(count, 100)}&tweet.fields=created_at,author_id,public_metrics,text&expansions=author_id&user.fields=username,name`;
+    const req = require('https').request({
+      hostname: 'api.twitter.com',
+      path,
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${bearerToken}` },
+    }, (res) => {
+      let data = '';
+      res.on('data', d => data += d);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          const users = {};
+          (json.includes?.users || []).forEach(u => { users[u.id] = u.username; });
+          const tweets = (json.data || []).map(t => ({
+            id:         t.id,
+            text:       t.text,
+            author:     users[t.author_id] || t.author_id,
+            created_at: t.created_at,
+            likes:      t.public_metrics?.like_count    || 0,
+            retweets:   t.public_metrics?.retweet_count || 0,
+            replies:    t.public_metrics?.reply_count   || 0,
+          }));
+          resolve({ tweets, count: tweets.length });
+        } catch (e) {
+          resolve({ tweets: [], error: 'Parse error: ' + e.message });
+        }
+      });
+    });
+    req.on('error', (e) => resolve({ tweets: [], error: e.message }));
+    req.end();
+  });
+}
+
+// ── Token intel report: X search + DexScreener + thread ──────────────────────
+
+async function buildTokenIntelReport({ symbol, contractAddress, chain }) {
+  const ticker = symbol ? (symbol.startsWith('$') ? symbol : `$${symbol}`) : null;
+
+  // Run X search + token data fetch in parallel
+  const searchQueries = [];
+  if (ticker) searchQueries.push(searchXForToken(ticker, 30));
+  if (contractAddress) searchQueries.push(searchXForToken(contractAddress, 15));
+  const tokenDataPromise = contractAddress
+    ? fetchTokenData(contractAddress)
+    : (ticker ? axios.get(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(ticker.replace('$', ''))}`, { timeout: 8000 }) : Promise.resolve(null));
+
+  const [xResults1, xResults2, tokenDataRaw] = await Promise.allSettled([
+    searchQueries[0] || Promise.resolve({ tweets: [] }),
+    searchQueries[1] || Promise.resolve({ tweets: [] }),
+    tokenDataPromise,
+  ]);
+
+  // Merge + deduplicate tweets by id
+  const allTweets = [
+    ...(xResults1.value?.tweets || []),
+    ...(xResults2.value?.tweets || []),
+  ];
+  const seen = new Set();
+  const tweets = allTweets.filter(t => { if (seen.has(t.id)) return false; seen.add(t.id); return true; })
+    .sort((a, b) => (b.likes + b.retweets) - (a.likes + a.retweets))
+    .slice(0, 20);
+
+  // Resolve token data
+  let tokenData = null;
+  if (tokenDataRaw.status === 'fulfilled' && tokenDataRaw.value) {
+    const raw = tokenDataRaw.value;
+    if (raw.name) {
+      tokenData = raw; // already shaped by fetchTokenData()
+    } else {
+      // DexScreener search response
+      const pairs = raw.data?.pairs || [];
+      if (pairs.length > 0) {
+        const best = pairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0];
+        tokenData = {
+          name:          best.baseToken?.name,
+          symbol:        best.baseToken?.symbol,
+          priceUsd:      best.priceUsd,
+          priceChange24h: best.priceChange?.h24,
+          liquidity:     best.liquidity?.usd,
+          volume24h:     best.volume?.h24,
+          marketCap:     best.marketCap,
+          contractAddress: best.baseToken?.address,
+          chain:         best.chainId,
+          pairUrl:       best.url,
+        };
+      }
+    }
+  }
+
+  // Auto-detect contract from X if not provided
+  let detectedContract = contractAddress || tokenData?.contractAddress || null;
+  if (!detectedContract && tweets.length > 0) {
+    // Scan tweets for Solana address (base58, 32-44 chars) or EVM address
+    for (const t of tweets) {
+      const solMatch = t.text.match(/\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/);
+      const evmMatch = t.text.match(/\b(0x[a-fA-F0-9]{40})\b/);
+      if (evmMatch) { detectedContract = evmMatch[1]; break; }
+      if (solMatch) { detectedContract = solMatch[1]; break; }
+    }
+    // If we found a contract via tweets, fetch token data for it
+    if (detectedContract && !tokenData) {
+      try { tokenData = await fetchTokenData(detectedContract); } catch {}
+    }
+  }
+
+  // Summarise sentiment from tweets
+  const tweetSummary = tweets.length === 0
+    ? 'No recent X activity found.'
+    : `${tweets.length} tweets found. Top engagement: “${tweets[0]?.text?.slice(0, 120)}” by @${tweets[0]?.author} (${tweets[0]?.likes} likes, ${tweets[0]?.retweets} RTs).`;
+
+  // Build thread text
+  const displayTicker = ticker || (tokenData?.symbol ? `$${tokenData.symbol}` : 'this token');
+  const displayName   = tokenData?.name || displayTicker;
+  const priceStr      = tokenData?.priceUsd ? `$${parseFloat(tokenData.priceUsd).toFixed(8)}` : 'price unknown';
+  const changeStr     = tokenData?.priceChange24h != null ? `${tokenData.priceChange24h > 0 ? '+' : ''}${parseFloat(tokenData.priceChange24h).toFixed(1)}% 24h` : '';
+  const liqStr        = tokenData?.liquidity ? `$${(tokenData.liquidity / 1000).toFixed(1)}K liq` : '';
+  const volStr        = tokenData?.volume24h  ? `$${(tokenData.volume24h  / 1000).toFixed(1)}K vol` : '';
+  const chainStr      = tokenData?.chain || chain || 'unknown chain';
+  const pairUrl       = tokenData?.pairUrl || (detectedContract ? `https://dexscreener.com/${chainStr}/${detectedContract}` : null);
+
+  const threadTweets = [
+    `1/ ${displayName} (${displayTicker}) — Intel Report from GSB Swarm 🤖`,
+    `2/ On-chain snapshot:\n${priceStr} ${changeStr}\n${liqStr} | ${volStr}\nChain: ${chainStr}${detectedContract ? `\nCA: ${detectedContract}` : ''}`,
+    `3/ X sentiment scan (${tweets.length} tweets):\n${tweetSummary}`,
+    ...(tweets.slice(1, 4).map((t, i) =>
+      `${i + 4}/ @${t.author}: “${t.text.slice(0, 220)}” \u2764 ${t.likes} 🔁 ${t.retweets}`
+    )),
+    `${tweets.slice(1, 4).length + 4}/ GSB Alpha Signal:\nWhile others report noise, the Swarm digs for signal. ${displayTicker} is being watched. DYOR. Not financial advice.\n\nPowered by GSB CEO Agent — one orchestrator, five agents.`,
+  ];
+
+  return {
+    thread: threadTweets.join('\n\n---\n\n'),
+    thread_tweets: threadTweets,
+    token_data:       tokenData,
+    contract_address: detectedContract,
+    x_tweets_found:   tweets.length,
+    x_top_tweets:     tweets.slice(0, 5),
+    generated_at:     new Date().toISOString(),
+    powered_by:       'GSB Intelligence Swarm',
+  };
+}
+
 // ── OAuth 1.0a for Twitter API v2 ────────────────────────────────────────────
 
 function percentEncode(str) {
@@ -494,19 +646,57 @@ async function start() {
           console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase. Writing thread...`);
         }
 
-        const result = await writeThread(content);
+        // ── Detect token intel report request ───────────────────────────────
+        // Triggers: skillId=token_intel_report, OR content has cashtag/address + intel/report/research keyword
+        const isIntelReport = (
+          (parsed.skillId === 'token_intel_report') ||
+          (/\$(\w+)/.test(content) && /intel|report|research|alpha|investigate|find|look.?up/i.test(content)) ||
+          (/\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/.test(content) && /report|intel|alpha/i.test(content))
+        );
+
+        let result;
         let threadUrl = null;
 
-        // If X credentials are configured, post to X
-        if (process.env.X_API_KEY && process.env.X_ACCESS_TOKEN) {
-          try {
-            const tweets = parseThreadToTweets(result);
-            if (tweets.length > 0) {
-              threadUrl = await postThread(tweets);
-              console.log(`[${AGENT_NAME}] Thread posted to X: ${threadUrl}`);
+        if (isIntelReport) {
+          console.log(`[${AGENT_NAME}] Job ${job.id} — token intel report mode`);
+          await job.respond(true, 'Searching X and on-chain data for token intel...');
+          freshJob = await waitForTransaction(client, job.id);
+
+          // Extract symbol and/or contract from content
+          const cashtagMatch  = content.match(/\$(\w+)/);
+          const solAddrMatch  = content.match(/\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/);
+          const evmAddrMatch  = content.match(/\b(0x[a-fA-F0-9]{40})\b/);
+          const chainMatch    = content.match(/\b(solana|sol|base|ethereum|eth|arbitrum|polygon)\b/i);
+
+          result = await buildTokenIntelReport({
+            symbol:          cashtagMatch  ? cashtagMatch[1]  : null,
+            contractAddress: evmAddrMatch  ? evmAddrMatch[1]  : (solAddrMatch ? solAddrMatch[1] : null),
+            chain:           chainMatch    ? chainMatch[1].toLowerCase() : null,
+          });
+
+          // Post the thread to X
+          if (process.env.X_API_KEY && process.env.X_ACCESS_TOKEN && result.thread_tweets?.length > 0) {
+            try {
+              threadUrl = await postThread(result.thread_tweets);
+              console.log(`[${AGENT_NAME}] Intel thread posted to X: ${threadUrl}`);
+            } catch (err) {
+              console.error(`[${AGENT_NAME}] X posting failed:`, err.message);
             }
-          } catch (err) {
-            console.error(`[${AGENT_NAME}] X posting failed (delivering text only):`, err.message);
+          }
+        } else {
+          result = await writeThread(content);
+
+          // If X credentials are configured, post to X
+          if (process.env.X_API_KEY && process.env.X_ACCESS_TOKEN) {
+            try {
+              const tweets = parseThreadToTweets(result);
+              if (tweets.length > 0) {
+                threadUrl = await postThread(tweets);
+                console.log(`[${AGENT_NAME}] Thread posted to X: ${threadUrl}`);
+              }
+            } catch (err) {
+              console.error(`[${AGENT_NAME}] X posting failed (delivering text only):`, err.message);
+            }
           }
         }
 
