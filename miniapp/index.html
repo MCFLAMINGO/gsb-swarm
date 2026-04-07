@@ -1569,7 +1569,12 @@ function renderPumpSession(s) {
     error:           '⚠️ Error',
   }[s.status] || s.status;
 
-  const progress = s.totalAmount > 0 ? Math.min(100, (s.totalSpent / s.totalAmount) * 100) : 0;
+  const _isSolSess  = s.isPumpFun || s.chain === 'solana';
+  const _budgetVal   = _isSolSess ? (s.totalSol || s.maxSol || 0) : (s.totalAmount || 0);
+  const _spentVal    = s.totalSpent || 0;
+  const _budgetLabel = _isSolSess ? `${_budgetVal} SOL` : `$${_budgetVal}`;
+  const _spentLabel  = _isSolSess ? `${_spentVal.toFixed(4)} SOL` : `$${_spentVal.toFixed(2)}`;
+  const progress = _budgetVal > 0 ? Math.min(100, (_spentVal / _budgetVal) * 100) : 0;
 
   statusEl.innerHTML = `
     <div style="display:flex;justify-content:space-between;margin-bottom:8px">
@@ -1581,10 +1586,10 @@ function renderPumpSession(s) {
       <div style="height:6px;border-radius:4px;background:var(--accent);width:${progress}%"></div>
     </div>
     <div style="display:flex;justify-content:space-between;font-size:12px">
-      <span>Spent: <b>$${(s.totalSpent||0).toFixed(2)}</b></span>
-      <span>Budget: <b>$${s.totalAmount}</b></span>
+      <span>Spent: <b>${_spentLabel}</b></span>
+      <span>Budget: <b>${_budgetLabel}</b></span>
     </div>
-    ${s.payoutTxHash ? `<div style="margin-top:8px;font-size:11px"><a href="https://basescan.org/tx/${s.payoutTxHash}" target="_blank" style="color:var(--accent)">View payout tx →</a></div>` : ''}
+    ${s.payoutTxHash ? `<div style="margin-top:8px;font-size:11px"><a href="${s.isPumpFun ? 'https://solscan.io/tx/' : 'https://basescan.org/tx/'}${s.payoutTxHash}" target="_blank" style="color:var(--accent)">View payout tx →</a></div>` : ''}
     ${s.error ? `<div style="margin-top:6px;font-size:11px;color:var(--red)">${s.error}</div>` : ''}
   `;
 
@@ -1629,8 +1634,14 @@ async function loadPumpSession() {
       pumpSession = d.session;
       document.getElementById('pump-config-card').style.display = 'none';
       document.getElementById('pump-deposit-card').style.display = d.session.status === 'pending_deposit' ? 'block' : 'none';
-      document.getElementById('pump-deposit-addr').textContent = '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
-      document.getElementById('pump-deposit-amount').textContent = `Send exactly $${d.session.totalAmount} USDC`;
+      const _isPf  = d.session.isPumpFun;
+      const _isSol = d.session.chain === 'solana';
+      const _addr  = d.session.solDepositAddress || d.session.depositAddress || (_isPf ? 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs' : '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d');
+      const _amt   = _isPf ? (d.session.totalSol || d.session.maxSol || '') : (d.session.totalAmount || '');
+      const _unit  = _isPf ? 'SOL' : (_isSol ? '(Solana USDC)' : '(Base USDC)');
+      document.getElementById('pump-deposit-chain-label').textContent = (_isSol || _isPf) ? 'GSB Solana Wallet:' : 'Swarm Wallet (Base):';
+      document.getElementById('pump-deposit-addr').textContent = _addr;
+      document.getElementById('pump-deposit-amount').textContent = _isPf ? `Send exactly ${_amt} SOL` : `Send exactly $${_amt} USDC ${_unit}`;
       renderPumpSession(d.session);
       startPumpPoller();
     }
