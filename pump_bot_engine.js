@@ -3,7 +3,7 @@ async function executeOneBuySolPumpFun(session) {
   const { Connection, Keypair, VersionedTransaction } = require('@solana/web3.js');
   const bs58 = require('bs58');
 
-  const solPrivKey = process.env.SOLANA_PUMP_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY;
+  const solPrivKey = process.env.SOLANA_PUMP_PRIVATE_KEY || process.env.SOL_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY;
   if (!solPrivKey) throw new Error('SOLANA_PUMP_PRIVATE_KEY not set');
 
   let keypair;
@@ -55,7 +55,7 @@ async function executeOneBuySolana(session) {
   const { Connection, Keypair, VersionedTransaction } = require('@solana/web3.js');
   const bs58 = require('bs58');
 
-  const solPrivKey = process.env.SOLANA_PUMP_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY;
+  const solPrivKey = process.env.SOLANA_PUMP_PRIVATE_KEY || process.env.SOL_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY;
   if (!solPrivKey) throw new Error('SOLANA_PUMP_PRIVATE_KEY not set');
 
   const SOL_USDC   = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -308,7 +308,7 @@ async function sendSplTokensToUser(session) {
   const splToken = require('@solana/spl-token');
   const bs58 = require('bs58');
 
-  const solPrivKey = process.env.SOLANA_PUMP_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY;
+  const solPrivKey = process.env.SOLANA_PUMP_PRIVATE_KEY || process.env.SOL_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY;
   if (!solPrivKey) throw new Error('SOLANA_PUMP_PRIVATE_KEY not set');
   const keypair = Keypair.fromSecretKey(bs58.decode(solPrivKey));
 
