@@ -194,53 +194,161 @@ const OUTROS = [
   'Agent-to-agent economy is here. $GSB is already in it.',
 ];
 
+// ── Narrative-aware thread engine ────────────────────────────────────────────
+// Detects tone/narrative from topic text and writes accordingly.
+// Falls back to rule-based templates if Claude is unavailable.
+
+const NARRATIVE_SIGNALS = {
+  anti_gatekeeper: /anti.?gatekeeper|underdog|crowded.?trade|top.?5|meme.?heavy|industrial|alternative|unlike.*(agents?|top)|vs.*(sentient|luna|aixbt|bernie)/i,
+  orchestration:   /orchestrat|ceo.?agent|swarm|multi.?agent|general.?agent|one.?command|coordinate|5.?agents?|four.?agents?/i,
+  proof_of_work:   /proof.?of.?work|verif|on.?chain.?proof|job.?history|completed.?jobs?|track.?record|receipts/i,
+  pre_alpha:       /pre.?alpha|predict|before.?(twitter|trending)|liquidity.?deploy|developer.?wallet|next.?big|early.?signal/i,
+  token_analysis:  /0x[a-fA-F0-9]{40}|token.?analys|price.?of|mcap|market.?cap/i,
+  dca:             /dca|dollar.?cost|buy.?the.?dip|accumulate/i,
+  gsb_general:     /\$gsb|gas.?bible|gsb.?swarm|gsb.?token/i,
+};
+
+function detectNarrative(topic) {
+  for (const [name, pattern] of Object.entries(NARRATIVE_SIGNALS)) {
+    if (pattern.test(topic)) return name;
+  }
+  return 'custom'; // fully custom topic — use Claude or generic template
+}
+
+const NARRATIVE_TEMPLATES = {
+  anti_gatekeeper: (outro) => [
+    `1/ The same 5 agents keep getting pushed. Same wallets. Same narratives. Same exit liquidity.`,
+    `2/ There's a reason the "top" agent lists never change: the game is rigged toward whoever got there first.`,
+    `3/ $GSB was built for people who noticed.`,
+    `4/ No influencer deals. No paid placement. Just: deployed agents, completed ACP jobs, USDC earned on-chain.`,
+    `5/ Token Analyst. Wallet Profiler. Alpha Scanner. Thread Writer. All running. All earning. All verifiable.`,
+    `6/ The "meme-heavy" agents sell you a vibe. $GSB sells you a receipt.`,
+    `7/ Industrial-grade swarm vs. hype machine. Choose your side.`,
+    `8/ The anti-gatekeeper play is already live on @virtuals_io. $GSB`,
+    `9/ ${outro}`,
+  ],
+  orchestration: (outro) => [
+    `1/ You don't need 5 agents. You need one that commands 5.`,
+    `2/ GSB CEO Agent fires jobs to Token Analyst, Wallet Profiler, Alpha Scanner, and Thread Writer — in parallel.`,
+    `3/ One prompt: "daily brief" → all 4 workers run → CEO synthesizes → one actionable report. That's it.`,
+    `4/ Most users are paying 5 separate agents for 5 separate outputs. Then doing the synthesis themselves.`,
+    `5/ GSB CEO handles the orchestration layer. You just ask.`,
+    `6/ Cross-agent coordination via ACP. Every subtask is an on-chain job. Every result is a verifiable deliverable.`,
+    `7/ This is what "agent swarm" actually means. Not vibes. Architecture.`,
+    `8/ One entry point. Five agents. Zero overhead. $GSB on @virtuals_io`,
+    `9/ ${outro}`,
+  ],
+  proof_of_work: (outro) => [
+    `1/ Any agent can claim wins. Few can prove them.`,
+    `2/ Every $GSB job is an ACP transaction on Base. Hired → delivered → paid. All on-chain.`,
+    `3/ Job ID. Worker name. Timestamp. Deliverable hash. That's your receipt.`,
+    `4/ Most AI tokens: promises + roadmap. $GSB: completed jobs + USDC earned + verifiable history.`,
+    `5/ You can query the ACP contract. The work is there. The payments are there. The track record is there.`,
+    `6/ "Proof of work" isn't a buzzword for $GSB. It's the architecture.`,
+    `7/ Tokenized intelligence that walks the talk — or the job isn't paid.`,
+    `8/ Check the contract. Check the jobs. $GSB doesn't need you to trust it.`,
+    `9/ ${outro}`,
+  ],
+  pre_alpha: (outro) => [
+    `1/ By the time it's trending on CT, the trade is over.`,
+    `2/ $GSB Alpha Scanner doesn't watch Twitter. It watches Base.`,
+    `3/ New contract deployed → liquidity added → volume spike detected. That's the signal. Before the tweet.`,
+    `4/ Developer wallets moving funds before a token launch leave footprints. On-chain. Readable. Actionable.`,
+    `5/ Most agents give you reactive data: what already pumped. $GSB is hunting what's about to.`,
+    `6/ Liquidity deployment prediction > sentiment analysis. Always.`,
+    `7/ The edge is on-chain, not on Twitter. $GSB scans Base 24/7.`,
+    `8/ Pre-alpha or post-hype. Pick one. $GSB on @virtuals_io`,
+    `9/ ${outro}`,
+  ],
+  dca: (outro) => [
+    `1/ The best trades aren't timed. They're disciplined.`,
+    `2/ $GSB Wallet Profiler & DCA Engine executes automated buys on Base via Uniswap v3.`,
+    `3/ Set a token. Set an amount. Set a frequency. The agent handles the rest.`,
+    `4/ USDC → WETH → token. Multi-hop. Slippage-controlled. No manual txs.`,
+    `5/ DCA removes emotion. The engine removes friction. You just accumulate.`,
+    `6/ Every buy is an on-chain transaction. Verifiable. Auditable. Yours.`,
+    `7/ Tokenized DCA engine live on @virtuals_io ACP. $GSB`,
+    `8/ Most agents analyze. $GSB executes.`,
+    `9/ ${outro}`,
+  ],
+  gsb_general: (outro) => [
+    `1/ What does $GSB actually do? Thread.`,
+    `2/ $GSB is a tokenized AI agent swarm on @virtuals_io. It gets hired via ACP, delivers work, gets paid USDC.`,
+    `3/ 5 agents: CEO (orchestrator), Token Analyst, Wallet Profiler & DCA Engine, Alpha Scanner, Thread Writer.`,
+    `4/ CEO coordinates all 4 workers. One prompt triggers a full parallel intelligence run.`,
+    `5/ Every job is an on-chain transaction. Every deliverable is verifiable. Every payment is in USDC.`,
+    `6/ Token = ownership of the swarm's earning power. Not a meme. A machine.`,
+    `7/ Deployed. Earning. Verifiable. Built on Base. Powered by Virtuals Protocol.`,
+    `8/ Most AI tokens: vibes + promises. $GSB: completed jobs + USDC earned.`,
+    `9/ ${outro}`,
+  ],
+};
+
 let threadCounter = 0;
 
-function buildThread(jobRequest, liveData) {
+function buildThread(topic, liveData, narrative) {
   const idx = threadCounter++;
-  const intro = INTROS[idx % INTROS.length];
   const outro = OUTROS[idx % OUTROS.length];
-  const ts = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 
-  const lines = [];
-  lines.push(`1/ ${intro}`);
-
+  // Token-specific data thread
   if (liveData) {
     const { name, symbol, priceUsd, priceChange24h, liquidity, volume24h, marketCap } = liveData;
-    const trend = priceChange24h > 5 ? '🟢 ripping' : priceChange24h < -5 ? '🔴 bleeding' : '🟡 consolidating';
+    const trend = priceChange24h > 5 ? 'ripping' : priceChange24h < -5 ? 'bleeding' : 'consolidating';
     const liqStr = liquidity > 1e6 ? '$' + (liquidity/1e6).toFixed(1) + 'M' : '$' + Math.round(liquidity/1e3) + 'K';
     const volStr = volume24h > 1e6 ? '$' + (volume24h/1e6).toFixed(1) + 'M' : '$' + Math.round(volume24h/1e3) + 'K';
     const mcStr  = marketCap > 1e6 ? '$' + (marketCap/1e6).toFixed(1) + 'M' : '$' + Math.round(marketCap/1e3) + 'K';
-
-    lines.push(`2/ ${name} (${symbol}) is ${trend} right now.`);
-    lines.push(`3/ Price: $${parseFloat(priceUsd).toFixed(6)} | 24h: ${priceChange24h > 0 ? '+' : ''}${priceChange24h}%`);
-    lines.push(`4/ Liquidity: ${liqStr} | 24h Volume: ${volStr} | MCap: ${mcStr}`);
-    lines.push(`5/ These are the numbers that matter. Everything else is noise.`);
-    lines.push(`6/ $GSB Token Analyst ran this scan at ${ts}. On-chain. Autonomous. Always on.`);
-    lines.push(`7/ This is what tokenized intelligence looks like. Agent runs the numbers so you don't have to.`);
-    lines.push(`8/ ACP network: agent hired → agent delivered → agent paid. USDC. On-chain. No middleman.`);
-    lines.push(`9/ ${outro}`);
-  } else {
-    // generic $GSB thread
-    lines.push(`2/ $GSB is a tokenized AI agent on @virtuals_io. It gets hired, delivers work, gets paid. On-chain.`);
-    lines.push(`3/ 4 specialized agents: Token Analyst, Wallet Profiler, Alpha Scanner, Thread Writer.`);
-    lines.push(`4/ Every job completed is a transaction on Base. Transparent. Verifiable. Unstoppable.`);
-    lines.push(`5/ The Agent Commerce Protocol (ACP) is the rails. $GSB rides them.`);
-    lines.push(`6/ Token = ownership of the swarm's earning power. Not a meme. A machine.`);
-    lines.push(`7/ Most AI tokens: vibes + promises. $GSB: deployed agents + completed jobs + USDC earned.`);
-    lines.push(`8/ The Gas Bible teaches one law: thou shalt always have gas for your agents.`);
-    lines.push(`9/ ${outro}`);
+    const ts = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    return [
+      `1/ ${name} ($${symbol}) data drop. Thread.`,
+      `2/ ${name} is ${trend} right now. Here are the numbers.`,
+      `3/ Price: $${parseFloat(priceUsd).toFixed(6)} | 24h: ${priceChange24h > 0 ? '+' : ''}${priceChange24h}%`,
+      `4/ Liquidity: ${liqStr} | 24h Volume: ${volStr} | MCap: ${mcStr}`,
+      `5/ These are the numbers that matter. Everything else is noise.`,
+      `6/ $GSB Token Analyst ran this scan at ${ts}. On-chain. Autonomous. Always on.`,
+      `7/ Agent runs the numbers so you don't have to. ACP: hired → delivered → paid.`,
+      `8/ This is tokenized intelligence. Verifiable. Unstoppable.`,
+      `9/ ${outro}`,
+    ].join('\n\n');
   }
 
-  return lines.join('\n\n');
+  // Narrative-matched template
+  if (NARRATIVE_TEMPLATES[narrative]) {
+    return NARRATIVE_TEMPLATES[narrative](outro).join('\n\n');
+  }
+
+  // Custom topic — build a generic but topic-aware thread
+  const intro = INTROS[idx % INTROS.length];
+  return [
+    `1/ ${intro}`,
+    `2/ Topic: ${topic}`,
+    `3/ Here's what the $GSB swarm found scanning Base right now.`,
+    `4/ Agents running: Token Analyst, Alpha Scanner, Wallet Profiler. All on-chain. All live.`,
+    `5/ ACP jobs completed = verifiable on Base. No promises. Just receipts.`,
+    `6/ The infrastructure is deployed. The work is happening. The USDC is flowing.`,
+    `7/ Tokenized AI agents on @virtuals_io — not a thesis, a running system.`,
+    `8/ One swarm. Five agents. Zero fluff. $GSB`,
+    `9/ ${outro}`,
+  ].join('\n\n');
 }
 
 async function writeThread(jobRequest) {
-  const match = jobRequest.match(/0x[a-fA-F0-9]{40}/);
+  // Extract topic text (strip skill instruction wrapper if present)
+  let topic = jobRequest;
+  try {
+    const parsed = JSON.parse(jobRequest);
+    topic = parsed.topic || parsed.content || jobRequest;
+  } catch {}
+
+  const match = topic.match(/0x[a-fA-F0-9]{40}/);
   const liveData = match ? await fetchTokenData(match[0]) : null;
-  const thread = buildThread(jobRequest, liveData);
+  const narrative = liveData ? 'token_analysis' : detectNarrative(topic);
+
+  console.log(`[Thread Writer] narrative detected: ${narrative} | topic: ${topic.slice(0, 80)}`);
+
+  const thread = buildThread(topic, liveData, narrative);
   return {
     thread,
+    narrative,
     token_data: liveData,
     generated_at: new Date().toISOString(),
     powered_by: 'GSB Intelligence Swarm',
