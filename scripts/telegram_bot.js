@@ -450,6 +450,11 @@ let offset = 0;
 async function poll() {
   try {
     const res = await tgRequest('getUpdates', { offset, timeout: 20, allowed_updates: ['message'] });
+    if (!res.ok && res.error_code === 409) {
+      console.warn('[bot] 409 conflict — backing off 15s...');
+      setTimeout(poll, 15000);
+      return;
+    }
     const updates = res.result || [];
     for (const update of updates) {
       offset = update.update_id + 1;
@@ -497,5 +502,9 @@ async function poll() {
 // Start alert checker
 setInterval(checkAlerts, 60_000);
 
-console.log('[bot] GSB Swap Bot starting...');
-poll();
+async function startBot() {
+  try { await tgRequest('deleteWebhook', { drop_pending_updates: false }); } catch {}
+  console.log('[bot] GSB Swap Bot starting...');
+  poll();
+}
+startBot();
