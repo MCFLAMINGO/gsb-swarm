@@ -151,27 +151,6 @@
       color: var(--muted);
       margin-top: 8px;
     }
-    .dca-item {
-      background: var(--bg);
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .dca-info { flex: 1; }
-    .dca-token { font-weight: 700; font-size: 15px; }
-    .dca-detail { font-size: 12px; color: var(--muted); margin-top: 2px; }
-    .dca-status {
-      font-size: 11px;
-      padding: 3px 8px;
-      border-radius: 20px;
-      margin-right: 8px;
-    }
-    .dca-status.active { background: rgba(0,255,136,0.1); color: var(--accent); }
-    .dca-status.paused { background: rgba(245,158,11,0.1); color: var(--yellow); }
-    .dca-stop { background: none; border: none; color: var(--red); cursor: pointer; font-size: 18px; padding: 4px; }
   .connect-screen {
       display: flex;
       flex-direction: column;
@@ -465,7 +444,7 @@
 <div id="app-screen">
   <div class="tabs">
     <div class="tab active"    onclick="switchTab('swap')">Swap</div>
-    <div class="tab"           onclick="switchTab('dca')">DCA</div>
+    <div class="tab"           onclick="switchTab('dca')">Pump</div>
     <div class="tab"           onclick="switchTab('analyze')">Analyze</div>
     <div class="tab"           onclick="switchTab('trending')">Trending</div>
     <div class="tab"           onclick="switchTab('portfolio')">Portfolio</div>
@@ -542,82 +521,95 @@
     <p class="fee-note">0.5% fee • 50% buys $GSB • Powered by GSB Swarm</p>
   </div>
 
-  <!-- ── DCA PANEL ────────────────────────────────────────────────── -->
+  <!-- ── PUMP BOT PANEL ──────────────────────────────────────────────── -->
   <div class="panel" id="panel-dca">
-    <div class="card">
-      <div class="card-title">New DCA Order</div>
+
+    <!-- Config form -->
+    <div class="card" id="pump-config-card">
+      <div class="card-title">⚡ Pump Bot</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Deploy rapid buys on any token. Your USDC goes to the swarm wallet, bot buys at your chosen speed. Tokens sent back to you after (minus 10% fee + gas).</p>
+
       <div class="input-row">
-        <div class="input-wrap">
-          <span class="input-label">Token</span>
-          <input type="text" id="dca-token" placeholder="FETCHR" autocomplete="off">
+        <div class="input-wrap" style="flex:2">
+          <span class="input-label">Token Address</span>
+          <input type="text" id="pump-token" placeholder="0x... contract address" autocomplete="off">
         </div>
-        <div class="input-wrap">
+        <div class="input-wrap" style="flex:1">
           <span class="input-label">Chain</span>
-          <select id="dca-chain">
-            <option value="base">Base</option>
+          <select id="pump-chain">
+            <option value="base" selected>Base</option>
             <option value="ethereum">Ethereum</option>
-            <option value="solana">Solana</option>
-            <option value="bsc">BSC</option>
             <option value="arbitrum">Arbitrum</option>
+            <option value="polygon">Polygon</option>
           </select>
         </div>
       </div>
+
       <div class="input-row">
         <div class="input-wrap">
-          <span class="input-label">Amount (USDC)</span>
-          <input type="number" id="dca-amount" placeholder="10" min="1">
+          <span class="input-label">Total Budget (USDC)</span>
+          <input type="number" id="pump-total" placeholder="50" min="1" max="1000" step="1" oninput="updatePumpPreview()">
+          <span style="font-size:10px;color:var(--muted)">Max $1,000</span>
         </div>
         <div class="input-wrap">
-          <span class="input-label">Frequency</span>
-          <select id="dca-frequency">
-            <option value="hourly">Hourly</option>
-            <option value="daily" selected>Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
+          <span class="input-label">Per-Buy Amount</span>
+          <select id="pump-interval" onchange="updatePumpPreview()">
+            <option value="0.01">$0.01</option>
+            <option value="0.02" selected>$0.02</option>
+            <option value="0.05">$0.05</option>
+            <option value="0.10">$0.10</option>
+            <option value="0.25">$0.25</option>
+            <option value="0.50">$0.50</option>
+            <option value="1.00">$1.00</option>
           </select>
         </div>
       </div>
+
       <div class="input-row">
         <div class="input-wrap">
-          <span class="input-label">Max Price (optional)</span>
-          <input type="number" id="dca-max-price" placeholder="Skip if above price" step="any">
+          <span class="input-label">Buy Rate</span>
+          <select id="pump-rate" onchange="updatePumpPreview()">
+            <option value="30s">Every 30 seconds</option>
+            <option value="1m" selected>Every 1 minute</option>
+            <option value="2m">Every 2 minutes</option>
+            <option value="5m">Every 5 minutes</option>
+          </select>
         </div>
         <div class="input-wrap">
-          <span class="input-label">Total Orders</span>
-          <input type="number" id="dca-orders" placeholder="∞ (unlimited)" min="1">
+          <span class="input-label">Receive Wallet</span>
+          <input type="text" id="pump-wallet" placeholder="0x... your wallet" autocomplete="off">
         </div>
       </div>
-      <button class="btn btn-secondary" onclick="createDCA()">Start DCA</button>
+
+      <div id="pump-preview" style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--muted);display:none">
+        <span id="pump-preview-text"></span>
+      </div>
+
+      <button class="btn btn-primary" style="width:100%" onclick="startPumpBot()">Start Pump Bot</button>
+      <p style="font-size:10px;color:var(--muted);margin-top:8px;text-align:center">Send USDC to swarm wallet after confirming. Bot starts on deposit detection.</p>
     </div>
 
-    <div class="card">
-      <div class="card-title">Active Orders</div>
-      <div id="dca-list">
-        <div style="text-align:center;color:var(--muted);padding:20px;font-size:13px">No active DCA orders</div>
+    <!-- Active session -->
+    <div class="card" id="pump-session-card" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="card-title" style="margin:0">Active Session</div>
+        <button onclick="cancelPumpSession()" style="background:none;border:1px solid var(--red);color:var(--red);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Cancel</button>
       </div>
+      <div id="pump-session-status"></div>
     </div>
 
-    <div class="card">
-      <div class="card-title">DCA Stats</div>
-      <div class="stat-grid">
-        <div class="stat-card">
-          <div class="stat-val" id="dca-total-invested">$0</div>
-          <div class="stat-label">Total Invested</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-val" id="dca-orders-count">0</div>
-          <div class="stat-label">Orders Executed</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-val" id="dca-avg-price">—</div>
-          <div class="stat-label">Avg Buy Price</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-val" id="dca-pnl" style="color:var(--accent)">+0%</div>
-          <div class="stat-label">DCA P&L</div>
-        </div>
+    <!-- Deposit instructions -->
+    <div class="card" id="pump-deposit-card" style="display:none">
+      <div class="card-title">Send USDC to Start</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Send exactly the amount below to the swarm wallet. Bot starts automatically on detection.</div>
+      <div style="background:var(--surface);border-radius:8px;padding:10px;font-size:11px;word-break:break-all;margin-bottom:8px">
+        <div style="color:var(--muted);margin-bottom:4px">Swarm Wallet (Base):</div>
+        <div style="font-family:monospace;color:var(--text)" id="pump-deposit-addr"></div>
       </div>
+      <div style="background:var(--surface);border-radius:8px;padding:10px;font-size:13px;font-weight:700;text-align:center;color:var(--accent)" id="pump-deposit-amount"></div>
+      <button class="btn btn-outline" style="width:100%;margin-top:10px" onclick="copyDepositAddr()">Copy Address</button>
     </div>
+
   </div>
 
   <!-- ── ANALYZE PANEL ─────────────────────────────────────────────── -->
@@ -875,7 +867,7 @@ function onWalletConnected() {
   badge.classList.add('connected');
   saveWallet();
   checkApproval();
-  loadDCAOrders();
+  loadPumpSession();
   loadPortfolio();
   // Auto-register referral (also picks up ?ref= code from URL)
   const _urlRef = new URLSearchParams(window.location.search).get('ref') || '';
@@ -1324,80 +1316,178 @@ function refreshTrending() {
   loadTrending(trendingChain);
 }
 
-// ── DCA ────────────────────────────────────────────────────────────────────────
-async function createDCA() {
-  if (!walletAddress) return showToast('Connect wallet first', 'error');
-  const token       = document.getElementById('dca-token').value.trim().toUpperCase();
-  const amount      = parseFloat(document.getElementById('dca-amount').value);
-  const frequency   = document.getElementById('dca-frequency').value;
-  const chain       = document.getElementById('dca-chain').value;
-  const maxPrice    = parseFloat(document.getElementById('dca-max-price').value) || null;
-  const totalOrders = parseInt(document.getElementById('dca-orders').value) || null;
+// ── Pump Bot ──────────────────────────────────────────────────────────────────
+let pumpSession = null;
+let pumpPoller  = null;
 
-  if (!token || !amount) return showToast('Enter token and amount', 'error');
+function updatePumpPreview() {
+  const total    = parseFloat(document.getElementById('pump-total').value) || 0;
+  const interval = parseFloat(document.getElementById('pump-interval').value) || 0.02;
+  const rate     = document.getElementById('pump-rate').value;
+  const rateMap  = { '30s':'30 sec', '1m':'1 min', '2m':'2 min', '5m':'5 min' };
+  const preview  = document.getElementById('pump-preview');
+  const text     = document.getElementById('pump-preview-text');
+  if (!total || total <= 0) { preview.style.display = 'none'; return; }
+  const numBuys  = Math.ceil(total / interval);
+  const rateMs   = { '30s':30, '1m':60, '2m':120, '5m':300 }[rate] || 60;
+  const totalSec = numBuys * rateMs;
+  const mins     = Math.floor(totalSec / 60);
+  const secs     = totalSec % 60;
+  const duration = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  preview.style.display = 'block';
+  text.textContent = `${numBuys} buys × $${interval} every ${rateMap[rate]} = ~${duration} total runtime. You receive 90% of tokens after. 10% platform fee.`;
+}
+
+async function startPumpBot() {
+  if (!walletAddress) return showToast('Connect wallet first', 'error');
+  const tokenAddress   = document.getElementById('pump-token').value.trim();
+  const chain          = document.getElementById('pump-chain').value;
+  const totalAmount    = parseFloat(document.getElementById('pump-total').value);
+  const intervalAmount = parseFloat(document.getElementById('pump-interval').value);
+  const rateName       = document.getElementById('pump-rate').value;
+  const receivingWallet = document.getElementById('pump-wallet').value.trim();
+
+  if (!tokenAddress)    return showToast('Enter token address', 'error');
+  if (!totalAmount || totalAmount <= 0) return showToast('Enter total budget', 'error');
+  if (!receivingWallet) return showToast('Enter receiving wallet', 'error');
+  if (totalAmount > 1000) return showToast('Max $1,000 per session', 'error');
 
   try {
-    const r = await fetch(`${API_BASE}/api/swap/dca/create`, {
+    const r = await fetch(`${API_BASE}/api/pump/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, walletAddress, token, amount, frequency, chain, maxPrice, totalOrders }),
+      body: JSON.stringify({ userId, tokenAddress, chain, totalAmount, intervalAmount, rateName, receivingWallet }),
+    });
+    const d = await r.json();
+    if (!d.ok) return showToast(d.error || 'Failed to create session', 'error');
+
+    pumpSession = d.session;
+    showToast('Session created — send USDC to start', 'success');
+    showDepositInstructions(d);
+    startPumpPoller();
+  } catch(e) {
+    showToast('Network error', 'error');
+  }
+}
+
+function showDepositInstructions(d) {
+  document.getElementById('pump-config-card').style.display = 'none';
+  document.getElementById('pump-deposit-card').style.display = 'block';
+  document.getElementById('pump-deposit-addr').textContent   = d.depositAddress;
+  document.getElementById('pump-deposit-amount').textContent = `Send exactly $${d.depositAmount} USDC`;
+}
+
+function copyDepositAddr() {
+  const addr = document.getElementById('pump-deposit-addr').textContent;
+  navigator.clipboard?.writeText(addr);
+  showToast('Address copied', 'success');
+}
+
+function startPumpPoller() {
+  if (pumpPoller) clearInterval(pumpPoller);
+  pumpPoller = setInterval(pollPumpSession, 10000);
+  pollPumpSession();
+}
+
+async function pollPumpSession() {
+  if (!pumpSession) return;
+  try {
+    const r = await fetch(`${API_BASE}/api/pump/status?sessionId=${pumpSession.sessionId}`);
+    const d = await r.json();
+    if (!d.session) return;
+    pumpSession = d.session;
+    renderPumpSession(d.session);
+  } catch {}
+}
+
+function renderPumpSession(s) {
+  const card = document.getElementById('pump-session-card');
+  const statusEl = document.getElementById('pump-session-status');
+  card.style.display = 'block';
+
+  const statusColor = {
+    pending_deposit: 'var(--yellow)',
+    running:         'var(--accent)',
+    pending_payout:  '#a78bfa',
+    complete:        'var(--accent)',
+    cancelled:       'var(--muted)',
+    error:           'var(--red)',
+  }[s.status] || 'var(--muted)';
+
+  const statusLabel = {
+    pending_deposit: '⏳ Waiting for deposit...',
+    running:         '⚡ Buying...',
+    pending_payout:  '🕐 Preparing payout...',
+    complete:        '✅ Complete',
+    cancelled:       '🚫 Cancelled',
+    error:           '⚠️ Error',
+  }[s.status] || s.status;
+
+  const progress = s.totalAmount > 0 ? Math.min(100, (s.totalSpent / s.totalAmount) * 100) : 0;
+
+  statusEl.innerHTML = `
+    <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+      <span style="color:${statusColor};font-weight:700;font-size:13px">${statusLabel}</span>
+      <span style="font-size:11px;color:var(--muted)">${s.buys?.length || 0} buys</span>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px;font-family:monospace;word-break:break-all">${s.tokenAddress?.slice(0,20)}...</div>
+    <div style="width:100%;background:var(--surface);border-radius:4px;height:6px;margin-bottom:8px">
+      <div style="height:6px;border-radius:4px;background:var(--accent);width:${progress}%"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:12px">
+      <span>Spent: <b>$${(s.totalSpent||0).toFixed(2)}</b></span>
+      <span>Budget: <b>$${s.totalAmount}</b></span>
+    </div>
+    ${s.payoutTxHash ? `<div style="margin-top:8px;font-size:11px"><a href="https://basescan.org/tx/${s.payoutTxHash}" target="_blank" style="color:var(--accent)">View payout tx →</a></div>` : ''}
+    ${s.error ? `<div style="margin-top:6px;font-size:11px;color:var(--red)">${s.error}</div>` : ''}
+  `;
+
+  // Stop polling when terminal state
+  if (['complete', 'cancelled', 'error'].includes(s.status)) {
+    if (pumpPoller) { clearInterval(pumpPoller); pumpPoller = null; }
+    if (s.status === 'complete') {
+      document.getElementById('pump-deposit-card').style.display = 'none';
+    }
+  }
+}
+
+async function cancelPumpSession() {
+  if (!pumpSession) return;
+  try {
+    const r = await fetch(`${API_BASE}/api/pump/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: pumpSession.sessionId }),
     });
     const d = await r.json();
     if (d.ok) {
-      showToast(`✅ DCA started — ${token} ${frequency}`, 'success');
-      loadDCAOrders();
+      showToast('Session cancelled', 'success');
+      if (pumpPoller) { clearInterval(pumpPoller); pumpPoller = null; }
+      // Reset UI
+      document.getElementById('pump-config-card').style.display = 'block';
+      document.getElementById('pump-deposit-card').style.display = 'none';
+      pumpSession = null;
     } else {
-      showToast(d.error || 'Failed to create DCA', 'error');
+      showToast(d.error || 'Could not cancel', 'error');
     }
   } catch { showToast('Network error', 'error'); }
 }
 
-async function loadDCAOrders() {
-  if (!walletAddress) return;
+// On wallet connect, check for existing session
+async function loadPumpSession() {
+  if (!userId) return;
   try {
-    const r = await fetch(`${API_BASE}/api/swap/dca/list?userId=${userId}&wallet=${walletAddress}`);
+    const r = await fetch(`${API_BASE}/api/pump/status?userId=${userId}`);
     const d = await r.json();
-    dcaOrders = d.orders || [];
-    renderDCAOrders();
-    updateDCAStats();
-  } catch {}
-}
-
-function renderDCAOrders() {
-  const list = document.getElementById('dca-list');
-  if (!dcaOrders.length) {
-    list.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;font-size:13px">No active DCA orders</div>';
-    return;
-  }
-  list.innerHTML = dcaOrders.map(o => `
-    <div class="dca-item">
-      <div class="dca-info">
-        <div class="dca-token">${o.token}</div>
-        <div class="dca-detail">$${o.amount} USDC · ${o.frequency} · ${o.chain}${o.executedCount ? ` · ${o.executedCount} fills` : ''}</div>
-        ${o.maxPrice ? `<div class="dca-detail">Max price: $${o.maxPrice}</div>` : ''}
-      </div>
-      <span class="dca-status ${o.status === 'active' ? 'active' : 'paused'}">${o.status}</span>
-      <button class="dca-stop" onclick="stopDCA('${o.id}')">✕</button>
-    </div>
-  `).join('');
-}
-
-function updateDCAStats() {
-  const totalInvested = dcaOrders.reduce((s, o) => s + (o.executedCount || 0) * o.amount, 0);
-  const totalOrders   = dcaOrders.reduce((s, o) => s + (o.executedCount || 0), 0);
-  document.getElementById('dca-total-invested').textContent = `$${totalInvested.toFixed(0)}`;
-  document.getElementById('dca-orders-count').textContent   = totalOrders;
-}
-
-async function stopDCA(orderId) {
-  try {
-    const r = await fetch(`${API_BASE}/api/swap/dca/stop`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, orderId }),
-    });
-    const d = await r.json();
-    if (d.ok) { showToast('DCA stopped', 'success'); loadDCAOrders(); }
+    if (d.session && !['complete','cancelled','error'].includes(d.session.status)) {
+      pumpSession = d.session;
+      document.getElementById('pump-config-card').style.display = 'none';
+      document.getElementById('pump-deposit-card').style.display = d.session.status === 'pending_deposit' ? 'block' : 'none';
+      document.getElementById('pump-deposit-addr').textContent = '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
+      document.getElementById('pump-deposit-amount').textContent = `Send exactly $${d.session.totalAmount} USDC`;
+      renderPumpSession(d.session);
+      startPumpPoller();
+    }
   } catch {}
 }
 

@@ -3685,7 +3685,8 @@ app.get('/api/copy-trader/status', requireOperator, (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 // GSB SWAP + DCA API
 // ══════════════════════════════════════════════════════════════════════════════
-const dcaEngine = require('./scripts/dca_engine');
+const dcaEngine  = require('./scripts/dca_engine');
+const pumpBot    = require('./pump_bot_engine');
 
 // Serve mini app
 app.use('/miniapp', express.static(path.join(__dirname, 'miniapp')));
@@ -4015,6 +4016,43 @@ app.post('/api/swap/dca/stop', express.json(), (req, res) => {
   res.json({ ok: stopped, error: stopped ? null : 'Order not found' });
 });
 
+// ── Pump Bot routes ───────────────────────────────────────────────────────────
+
+// POST /api/pump/create — create a new pump session
+app.post('/api/pump/create', express.json(), (req, res) => {
+  const { userId, tokenAddress, chain, totalAmount, intervalAmount, rateName, receivingWallet } = req.body;
+  if (!userId || !tokenAddress || !totalAmount || !intervalAmount || !rateName || !receivingWallet) {
+    return res.status(400).json({ ok: false, error: 'Missing required fields: userId, tokenAddress, totalAmount, intervalAmount, rateName, receivingWallet' });
+  }
+  try {
+    const session = pumpBot.createSession({ userId: String(userId), tokenAddress, chain: chain || 'base', totalAmount: parseFloat(totalAmount), intervalAmount: parseFloat(intervalAmount), rateName, receivingWallet });
+    res.json({ ok: true, session, depositAddress: pumpBot.SWARM_WALLET, depositAmount: session.totalAmount });
+  } catch(e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+// GET /api/pump/status — get current session for userId
+app.get('/api/pump/status', (req, res) => {
+  const { userId, sessionId } = req.query;
+  const session = sessionId ? pumpBot.getSession(sessionId) : pumpBot.getUserSession(userId);
+  if (!session) return res.json({ ok: true, session: null });
+  res.json({ ok: true, session });
+});
+
+// POST /api/pump/cancel — cancel a running session
+app.post('/api/pump/cancel', express.json(), (req, res) => {
+  const { sessionId } = req.body;
+  if (!sessionId) return res.status(400).json({ ok: false, error: 'sessionId required' });
+  const cancelled = pumpBot.cancelSession(sessionId);
+  res.json({ ok: cancelled, error: cancelled ? null : 'Session not found or already complete' });
+});
+
+// GET /api/pump/config — return valid intervals and rates
+app.get('/api/pump/config', (req, res) => {
+  res.json({ ok: true, intervals: pumpBot.VALID_INTERVALS, rates: Object.keys(pumpBot.VALID_RATES_MS), maxAmount: pumpBot.MAX_SESSION_USD, depositAddress: pumpBot.SWARM_WALLET });
+});
+
 // ── DCA cron — runs every minute, executes due orders ─────────────────────────
 setInterval(async () => {
   try {
@@ -4042,6 +4080,29 @@ setInterval(async () => {
     console.error('[dca-cron]', e.message);
   }
 }, 60000);
+
+// ── Pump Bot ticker — runs every 15 seconds ────────────────────────────────
+setInterval(async () => {
+  try {
+    const tgNotify = async (userId, msg) => {
+      const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_SWAP_BOT;
+      if (!botToken) return;
+      const chatsFile = '/tmp/gsb-bot-chats.json';
+      let chats = {};
+      try { chats = JSON.parse(require('fs').readFileSync(chatsFile, 'utf8')); } catch {}
+      const chatId = chats[String(userId)];
+      if (!chatId) return;
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: 'Markdown', disable_web_page_preview: true }),
+      });
+    };
+    await pumpBot.tick(tgNotify);
+  } catch(e) {
+    console.error('[pump-cron]', e.message);
+  }
+}, 15000);
 
 // ══════════════════════════════════════════════════════════════════════════════
 // GSB CONTENT ENGINE — 12 API endpoints (Post King competitor)
