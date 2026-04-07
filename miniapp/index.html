@@ -525,35 +525,39 @@
   <div class="panel" id="panel-dca">
 
     <!-- Config form -->
-    <div class="card" id="pump-config-card">
+    <div class="card" id="pump-config-card" style="padding:14px">
       <div class="card-title">⚡ Pump Bot</div>
       <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Deploy rapid buys on any token. Your USDC goes to the swarm wallet, bot buys at your chosen speed. Tokens sent back to you after (minus 10% fee + gas).</p>
 
-      <div class="input-row">
-        <div class="input-wrap" style="flex:2">
+      <div style="display:grid;grid-template-columns:1fr 90px;gap:8px;margin-bottom:8px">
+        <div class="input-wrap" style="margin:0">
           <span class="input-label">Token Address</span>
-          <input type="text" id="pump-token" placeholder="0x... contract address" autocomplete="off">
+          <input type="text" id="pump-token" placeholder="0x... or Solana address" autocomplete="off" style="font-size:12px">
         </div>
-        <div class="input-wrap" style="flex:1">
+        <div class="input-wrap" style="margin:0">
           <span class="input-label">Chain</span>
-          <select id="pump-chain">
+          <select id="pump-chain" onchange="updatePumpChainNote()" style="padding:10px 6px;font-size:12px">
             <option value="base" selected>Base</option>
-            <option value="ethereum">Ethereum</option>
-            <option value="arbitrum">Arbitrum</option>
-            <option value="polygon">Polygon</option>
+            <option value="solana">Solana</option>
+            <option value="ethereum">ETH</option>
+            <option value="arbitrum">ARB</option>
+            <option value="polygon">MATIC</option>
           </select>
         </div>
       </div>
 
-      <div class="input-row">
-        <div class="input-wrap">
-          <span class="input-label">Total Budget (USDC)</span>
-          <input type="number" id="pump-total" placeholder="50" min="1" max="1000" step="1" oninput="updatePumpPreview()">
-          <span style="font-size:10px;color:var(--muted)">Max $1,000</span>
+      <div id="pump-chain-note" style="display:none;font-size:11px;color:var(--yellow);background:rgba(245,158,11,0.08);border-radius:6px;padding:6px 8px;margin-bottom:8px">
+        ⚡ Solana: paste the full mint address (e.g. ...pump). Bot uses Jupiter for Solana swaps.
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+        <div class="input-wrap" style="margin:0">
+          <span class="input-label">Budget (USDC)</span>
+          <input type="number" id="pump-total" placeholder="50" min="1" max="1000" step="1" oninput="updatePumpPreview()" style="font-size:13px">
         </div>
-        <div class="input-wrap">
-          <span class="input-label">Per-Buy Amount</span>
-          <select id="pump-interval" onchange="updatePumpPreview()">
+        <div class="input-wrap" style="margin:0">
+          <span class="input-label">Per-Buy</span>
+          <select id="pump-interval" onchange="updatePumpPreview()" style="font-size:12px">
             <option value="0.01">$0.01</option>
             <option value="0.02" selected>$0.02</option>
             <option value="0.05">$0.05</option>
@@ -563,30 +567,27 @@
             <option value="1.00">$1.00</option>
           </select>
         </div>
-      </div>
-
-      <div class="input-row">
-        <div class="input-wrap">
-          <span class="input-label">Buy Rate</span>
-          <select id="pump-rate" onchange="updatePumpPreview()">
-            <option value="30s">Every 30 seconds</option>
-            <option value="1m" selected>Every 1 minute</option>
-            <option value="2m">Every 2 minutes</option>
-            <option value="5m">Every 5 minutes</option>
+        <div class="input-wrap" style="margin:0">
+          <span class="input-label">Rate</span>
+          <select id="pump-rate" onchange="updatePumpPreview()" style="font-size:12px">
+            <option value="30s">30 sec</option>
+            <option value="1m" selected>1 min</option>
+            <option value="2m">2 min</option>
+            <option value="5m">5 min</option>
           </select>
         </div>
-        <div class="input-wrap">
-          <span class="input-label">Receive Wallet</span>
-          <input type="text" id="pump-wallet" placeholder="0x... your wallet" autocomplete="off">
-        </div>
+      </div>
+
+      <div class="input-wrap" style="margin-bottom:8px">
+        <span class="input-label">Your Receiving Wallet</span>
+        <input type="text" id="pump-wallet" placeholder="0x... or Solana wallet to receive tokens" autocomplete="off" style="font-size:12px">
       </div>
 
       <div id="pump-preview" style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--muted);display:none">
         <span id="pump-preview-text"></span>
       </div>
 
-      <button class="btn btn-primary" style="width:100%" onclick="startPumpBot()">Start Pump Bot</button>
-      <p style="font-size:10px;color:var(--muted);margin-top:8px;text-align:center">Send USDC to swarm wallet after confirming. Bot starts on deposit detection.</p>
+      <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="startPumpBot()">⚡ Start Pump Bot</button>
     </div>
 
     <!-- Active session -->
@@ -746,8 +747,8 @@
     Swap
   </div>
   <div class="nav-btn" onclick="switchTab('dca')">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-    DCA
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+    Pump
   </div>
   <div class="nav-btn" onclick="switchTab('analyze')">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -1228,8 +1229,8 @@ async function runAnalyze(tokenOverride) {
         <button class="btn btn-primary" onclick="document.getElementById('token-out').value='${d.symbol||symbol}';switchTab('swap');updateQuote();" style="flex:1">
           Buy ${d.symbol || symbol}
         </button>
-        <button class="btn btn-secondary" onclick="document.getElementById('dca-token').value='${d.symbol||symbol}';switchTab('dca');" style="flex:1">
-          DCA It
+        <button class="btn btn-secondary" onclick="document.getElementById('pump-token').value=d.contractAddress||'';document.getElementById('pump-chain').value=d.chain||'base';switchTab('dca');" style="flex:1">
+          Pump It
         </button>
       </div>
     `;
@@ -1320,6 +1321,15 @@ function refreshTrending() {
 let pumpSession = null;
 let pumpPoller  = null;
 
+function updatePumpChainNote() {
+  const chain = document.getElementById('pump-chain').value;
+  const note  = document.getElementById('pump-chain-note');
+  if (note) note.style.display = chain === 'solana' ? 'block' : 'none';
+  // Update wallet placeholder
+  const walletInput = document.getElementById('pump-wallet');
+  if (walletInput) walletInput.placeholder = chain === 'solana' ? 'Solana wallet address (base58)' : '0x... EVM wallet address';
+}
+
 function updatePumpPreview() {
   const total    = parseFloat(document.getElementById('pump-total').value) || 0;
   const interval = parseFloat(document.getElementById('pump-interval').value) || 0.02;
@@ -1340,17 +1350,21 @@ function updatePumpPreview() {
 
 async function startPumpBot() {
   if (!walletAddress) return showToast('Connect wallet first', 'error');
-  const tokenAddress   = document.getElementById('pump-token').value.trim();
-  const chain          = document.getElementById('pump-chain').value;
-  const totalAmount    = parseFloat(document.getElementById('pump-total').value);
-  const intervalAmount = parseFloat(document.getElementById('pump-interval').value);
-  const rateName       = document.getElementById('pump-rate').value;
+  const tokenAddress    = document.getElementById('pump-token').value.trim();
+  const chain           = document.getElementById('pump-chain').value;
+  const totalAmount     = parseFloat(document.getElementById('pump-total').value);
+  const intervalAmount  = parseFloat(document.getElementById('pump-interval').value);
+  const rateName        = document.getElementById('pump-rate').value;
   const receivingWallet = document.getElementById('pump-wallet').value.trim();
 
   if (!tokenAddress)    return showToast('Enter token address', 'error');
   if (!totalAmount || totalAmount <= 0) return showToast('Enter total budget', 'error');
   if (!receivingWallet) return showToast('Enter receiving wallet', 'error');
   if (totalAmount > 1000) return showToast('Max $1,000 per session', 'error');
+
+  // Solana address validation
+  if (chain === 'solana' && tokenAddress.startsWith('0x')) return showToast('Solana needs a base58 mint address, not 0x', 'error');
+  if (chain !== 'solana' && !tokenAddress.startsWith('0x')) return showToast('EVM chains need a 0x contract address', 'error');
 
   try {
     const r = await fetch(`${API_BASE}/api/pump/create`, {
@@ -1370,11 +1384,18 @@ async function startPumpBot() {
   }
 }
 
+const SOL_FEE_WALLET = 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs';
+
 function showDepositInstructions(d) {
+  const chain = document.getElementById('pump-chain').value;
+  const isSol = chain === 'solana';
   document.getElementById('pump-config-card').style.display = 'none';
   document.getElementById('pump-deposit-card').style.display = 'block';
-  document.getElementById('pump-deposit-addr').textContent   = d.depositAddress;
-  document.getElementById('pump-deposit-amount').textContent = `Send exactly $${d.depositAmount} USDC`;
+  document.getElementById('pump-deposit-addr').textContent   = isSol ? SOL_FEE_WALLET : d.depositAddress;
+  document.getElementById('pump-deposit-amount').textContent = `Send exactly $${d.depositAmount} USDC${isSol ? ' (Solana USDC)' : ' (Base USDC)'}`;
+  // Update chain label
+  const addrLabel = document.querySelector('#pump-deposit-card .card-title');
+  if (addrLabel) addrLabel.textContent = isSol ? 'Send Solana USDC to Start' : 'Send Base USDC to Start';
 }
 
 function copyDepositAddr() {

@@ -1,3 +1,60 @@
+// ── Solana buy via Jupiter API ────────────────────────────────────────────────
+async function executeOneBuySolana(session) {
+  const { Connection, Keypair, VersionedTransaction } = require('@solana/web3.js');
+  const bs58 = require('bs58');
+
+  const solPrivKey = process.env.SOLANA_PUMP_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY;
+  if (!solPrivKey) throw new Error('SOLANA_PUMP_PRIVATE_KEY not set');
+
+  const SOL_USDC   = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  const outputMint = session.tokenAddress;
+  const lamports   = Math.round(session.intervalAmount * 1_000_000); // USDC 6 decimals
+  const slippageBps = 300; // 3% slippage for pump bot
+
+  // Get Jupiter quote
+  const quoteRes = await fetch(
+    `https://quote-api.jup.ag/v6/quote?inputMint=${SOL_USDC}&outputMint=${outputMint}&amount=${lamports}&slippageBps=${slippageBps}`,
+    { signal: AbortSignal.timeout(8000) }
+  );
+  const quote = await quoteRes.json();
+  if (!quote.outAmount) throw new Error('Jupiter quote failed: ' + JSON.stringify(quote).slice(0, 200));
+
+  // Get swap transaction
+  let keypair;
+  try {
+    const decoded = bs58.decode(solPrivKey);
+    keypair = Keypair.fromSecretKey(decoded);
+  } catch {
+    throw new Error('Invalid Solana private key — set SOLANA_PUMP_PRIVATE_KEY');
+  }
+
+  const swapRes = await fetch('https://quote-api.jup.ag/v6/swap', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      quoteResponse: quote,
+      userPublicKey: keypair.publicKey.toBase58(),
+      wrapAndUnwrapSol: true,
+      dynamicComputeUnitLimit: true,
+      prioritizationFeeLamports: 'auto',
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+  const swapData = await swapRes.json();
+  if (!swapData.swapTransaction) throw new Error('Jupiter swap tx failed');
+
+  // Sign and send
+  const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+  const txBuf = Buffer.from(swapData.swapTransaction, 'base64');
+  const tx    = VersionedTransaction.deserialize(txBuf);
+  tx.sign([keypair]);
+
+  const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
+  await connection.confirmTransaction(sig, 'confirmed');
+
+  return { hash: sig, amountOut: BigInt(quote.outAmount || 0), gasUsed: 0n };
+}
+
 'use strict';
 require('dotenv').config();
 const fs   = require('fs');
@@ -111,9 +168,9 @@ async function executeOneBuy(session) {
   // Try direct USDC→token first (500 fee tier), fall back to USDC→WETH→token
   let path;
   let tokenOutAddress = session.tokenAddress;
-  // Normalise Solana pump.fun addresses — skip, those are Solana only
-  if (tokenOutAddress.endsWith('pump') || tokenOutAddress.length > 42) {
-    throw new Error('Solana tokens not supported for automated pump bot — Base/EVM only');
+  // ── Solana path via Jupiter ────────────────────────────────────────────────
+  if (session.chain === 'solana') {
+    return await executeOneBuySolana(session);
   }
   path = encodePath([usdc, weth, tokenOutAddress], [500, 3000]);
 
