@@ -123,7 +123,10 @@ function validateInput(raw) {
   }
 
   // Reject pure nonsense / gibberish
-  if (!hasRealWords(trimmed)) {
+  // Skip this check for skill calls, cashtags, contract addresses, or token intel requests
+  const isStructuredSkill = (() => { try { const p = JSON.parse(raw); return !!(p && p.skillId); } catch { return false; } })();
+  const hasTokenSignal = /\$[A-Z]{2,10}\b/.test(trimmed) || /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/.test(trimmed) || /\b0x[a-fA-F0-9]{40}\b/.test(trimmed);
+  if (!isStructuredSkill && !hasTokenSignal && !hasRealWords(trimmed)) {
     return { valid: false, reason: 'Topic does not appear to be a valid subject. Please provide a clear crypto or finance topic.' };
   }
 
@@ -636,31 +639,29 @@ async function start() {
 
         let freshJob = job;
 
-        if (job.phase === 2) {
-          // Already in TRANSACTION — skip respond(), deliver directly
-          console.log(`[${AGENT_NAME}] Job ${job.id} already in TRANSACTION phase.`);
-        } else {
-          await job.respond(true, 'Writing your thread now...');
-          console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
-          freshJob = await waitForTransaction(client, job.id);
-          console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase. Writing thread...`);
-        }
-
-        // ── Detect token intel report request ───────────────────────────────
-        // Triggers: skillId=token_intel_report, OR content has cashtag/address + intel/report/research keyword
+        // ── Detect token intel report request (before respond, so we can set right message) ──
         const isIntelReport = (
           (parsed.skillId === 'token_intel_report') ||
           (/\$(\w+)/.test(content) && /intel|report|research|alpha|investigate|find|look.?up/i.test(content)) ||
           (/\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/.test(content) && /report|intel|alpha/i.test(content))
         );
 
+        if (job.phase === 2) {
+          // Already in TRANSACTION — skip respond(), deliver directly
+          console.log(`[${AGENT_NAME}] Job ${job.id} already in TRANSACTION phase.`);
+        } else {
+          const acceptMsg = isIntelReport ? 'Searching X and on-chain data for token intel...' : 'Writing your thread now...';
+          await job.respond(true, acceptMsg);
+          console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
+          freshJob = await waitForTransaction(client, job.id);
+          console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase.`);
+        }
+
         let result;
         let threadUrl = null;
 
         if (isIntelReport) {
           console.log(`[${AGENT_NAME}] Job ${job.id} — token intel report mode`);
-          await job.respond(true, 'Searching X and on-chain data for token intel...');
-          freshJob = await waitForTransaction(client, job.id);
 
           // Extract symbol and/or contract from content
           const cashtagMatch  = content.match(/\$(\w+)/);
