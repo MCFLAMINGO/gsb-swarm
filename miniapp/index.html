@@ -1627,9 +1627,10 @@ function showDepositInstructions(d) {
     fundBtn.disabled = false;
     const _isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     const _hasPhantom = !!(window.phantom?.solana?.isPhantom || window.solana?.isPhantom);
+    const _hasEvm = !!window.ethereum;
     fundBtn.innerHTML = isSolSess
       ? (_isMobile ? '👻 Open in Phantom' : (_hasPhantom ? '👻 Send with Phantom' : '📋 Copy Address'))
-      : '📋 Copy Address';
+      : (_hasEvm ? '🦊 Send with Wallet' : '📋 Copy Address');
     fundBtn.onclick = isSolSess ? fundAgentWithWallet : copyDepositAddr;
   }
 }
@@ -1701,13 +1702,56 @@ function fundAgentWithWallet() {
     }
 
   } else {
-    // EVM: open MetaMask deep link
-    const amtMatch  = amountText.match(/([\d.]+)/);
-    const usdcAmt   = amtMatch ? parseFloat(amtMatch[1]) : null;
-    if (!usdcAmt) return showToast('Could not read amount', 'error');
-    // ethereum:<address>?value=<USDC units> — not universally supported, just copy instead
-    copyDepositAddr();
-    showToast('Address copied — paste into MetaMask to send USDC', '');
+    // EVM: use injected wallet (MetaMask, Coinbase Wallet, Rabby, etc.)
+    const provider = window.ethereum;
+    if (provider) {
+      (async () => {
+        try {
+          const amtMatch = amountText.match(/([\d.]+)/);
+          const usdcAmt  = amtMatch ? parseFloat(amtMatch[1]) : null;
+          if (!usdcAmt) return showToast('Could not read amount', 'error');
+
+          // Request account access
+          const accounts = await provider.request({ method: 'eth_requestAccounts' });
+          const from = accounts[0];
+
+          // USDC contract addresses per chain
+          const USDC = {
+            base:     '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+            eth:      '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+            arbitrum: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+            polygon:  '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+          };
+          const chain   = pumpSession?.chain || 'base';
+          const usdcAddr = USDC[chain] || USDC.base;
+
+          // ERC-20 transfer calldata: transfer(address,uint256)
+          const amt256 = Math.round(usdcAmt * 1e6); // USDC has 6 decimals
+          const padAddr = destAddr.replace('0x','').padStart(64,'0');
+          const padAmt  = amt256.toString(16).padStart(64,'0');
+          const data    = '0xa9059cbb' + padAddr + padAmt;
+
+          await provider.request({
+            method: 'eth_sendTransaction',
+            params: [{ from, to: usdcAddr, data, gas: '0x11170' }],
+          });
+          showToast('USDC sent! Bot starting...', 'success');
+        } catch(e) {
+          if (e.code === 4001) return showToast('Transaction cancelled', 'error');
+          navigator.clipboard.writeText(destAddr).catch(() => {});
+          showToast('Address copied — send USDC manually from your wallet', '');
+        }
+      })();
+    } else {
+      // No injected wallet — copy address
+      navigator.clipboard.writeText(destAddr).catch(() => {
+        const el = document.createElement('textarea');
+        el.value = destAddr; document.body.appendChild(el);
+        el.select(); document.execCommand('copy');
+        document.body.removeChild(el);
+      });
+      showToast('Address copied — send USDC from MetaMask or any EVM wallet', '');
+    }
   }
 }
 
