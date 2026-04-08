@@ -655,7 +655,7 @@
     <div class="card">
       <div class="card-title">AI Token Analysis</div>
       <div class="analyze-search-row">
-        <input type="text" id="analyze-input" placeholder="FETCHR, VIRTUAL, ETH..." oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')runAnalyze()">
+        <input type="text" id="analyze-input" placeholder="FETCHR, VIRTUAL, ETH... or contract address" oninput="const v=this.value; if(!/^[1-9A-HJ-NP-Za-km-z]{20,}$/.test(v.trim()) && !v.trim().startsWith('0x')) this.value=v.toUpperCase()" onkeydown="if(event.key==='Enter')runAnalyze()">
         <select id="analyze-chain" style="flex:0;width:90px;font-size:13px;padding:12px 8px">
           <option value="">Auto</option>
           <option value="base">Base</option>
@@ -1163,7 +1163,11 @@ function addSwapHistory(tokenIn, tokenOut, amount, txUrl) {
 let analyzeInFlight = false;
 
 async function runAnalyze(tokenOverride) {
-  const symbol = (tokenOverride || document.getElementById('analyze-input').value || '').trim().toUpperCase();
+  const rawInput = (tokenOverride || document.getElementById('analyze-input').value || '').trim();
+  // Preserve case for contract addresses (Solana base58 or EVM 0x); uppercase symbols only
+  const isSolAddr = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(rawInput);
+  const isEvmAddr = rawInput.startsWith('0x') && rawInput.length >= 40;
+  const symbol = (isSolAddr || isEvmAddr) ? rawInput : rawInput.toUpperCase();
   if (!symbol) { showToast('Enter a token symbol', 'error'); return; }
   if (analyzeInFlight) return;
 
