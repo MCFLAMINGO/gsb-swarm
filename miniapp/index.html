@@ -938,13 +938,29 @@ async function connectWith(provider) {
     } catch(e) { showToast('Connection cancelled', 'error'); }
     return;
   }
-  if ((provider === 'metamask' || provider === 'coinbase') && window.ethereum) {
-    try {
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      walletAddress = accounts[0];
-      onWalletConnected();
-    } catch(e) { showToast('Connection cancelled', 'error'); }
-    return;
+  if (provider === 'metamask' || provider === 'coinbase') {
+    // Pick the right provider object
+    let evmProvider = null;
+    if (provider === 'coinbase') {
+      evmProvider = window.coinbaseWalletExtension
+        || (window.ethereum?.isCoinbaseWallet ? window.ethereum : null)
+        || (window.ethereum?.providers?.find(p => p.isCoinbaseWallet))
+        || null;
+    } else {
+      evmProvider = (window.ethereum?.providers?.find(p => p.isMetaMask))
+        || (window.ethereum?.isMetaMask ? window.ethereum : null)
+        || window.ethereum
+        || null;
+    }
+    if (evmProvider) {
+      try {
+        const accounts = await evmProvider.request({ method: 'eth_requestAccounts' });
+        walletAddress = accounts[0];
+        onWalletConnected();
+      } catch(e) { showToast('Connection cancelled', 'error'); }
+      return;
+    }
+    // Provider not found — fall through to paste
   }
   // Fallback: wallet extension not detected — show paste with helpful message
   document.getElementById('paste-wallet-section').style.display = 'block';
