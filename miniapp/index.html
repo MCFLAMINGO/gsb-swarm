@@ -408,13 +408,17 @@
 
 <div class="header">
   <div class="logo">⚡ GSB Swap</div>
-  <div class="wallet-badge" id="wallet-badge" onclick="walletAddress ? null : connectWallet()">Connect Wallet</div>
+  <div class="wallet-badge" id="wallet-badge" onclick="walletAddress ? switchWallet() : connectWallet()">Connect Wallet</div>
 </div>
 
 <div id="connect-screen" class="connect-screen" style="display:none">
-  <div class="connect-icon">🔗</div>
-  <div class="connect-title">Connect Your Wallet</div>
-  <div class="connect-sub">Connect once. Swap forever.<br>Non-custodial. Your keys, your tokens.</div>
+  <div class="connect-icon" id="connect-icon">🔗</div>
+  <div class="connect-title" id="connect-title">Connect Your Wallet</div>
+  <div class="connect-sub" id="connect-sub">Connect once. Swap forever.<br>Non-custodial. Your keys, your tokens.</div>
+  <div id="disconnect-row" style="display:none;width:100%;margin-bottom:8px">
+    <button onclick="disconnectWallet()" style="width:100%;padding:12px;background:rgba(239,68,68,0.12);border:1px solid var(--red);color:var(--red);border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">🔓 Disconnect current wallet</button>
+    <div style="text-align:center;color:var(--muted);font-size:11px;margin:10px 0">or connect a different one</div>
+  </div>
 
   <!-- Paste address (shown in Telegram where no wallet extension exists) -->
   <div id="paste-wallet-section" style="display:none;width:100%;margin-top:16px">
@@ -441,6 +445,10 @@
       <div class="w-icon">📋</div>
       <div class="w-name">Paste Address</div>
     </div>
+  </div>
+  <!-- Cancel/close — only shown when already connected (switching) -->
+  <div id="cancel-connect-row" style="display:none;width:100%;margin-top:8px">
+    <button onclick="closeConnectScreen()" style="width:100%;padding:12px;background:none;border:1px solid var(--border);color:var(--muted);border-radius:10px;font-size:13px;cursor:pointer">✕ Cancel</button>
   </div>
 </div>
 
@@ -850,6 +858,11 @@ function switchTab(tab) {
 const IS_TELEGRAM = !!(window.Telegram?.WebApp?.initData);
 
 function connectWallet() {
+  // Fresh connect — hide switch-specific UI
+  document.getElementById('disconnect-row').style.display    = 'none';
+  document.getElementById('cancel-connect-row').style.display = 'none';
+  document.getElementById('connect-title').textContent = 'Connect Your Wallet';
+  document.getElementById('connect-sub').textContent   = 'Connect once. Swap forever. Non-custodial.';
   document.getElementById('connect-screen').style.display = 'flex';
   document.getElementById('app-screen').style.display = 'none';
   // In Telegram: skip wallet picker, go straight to paste input
@@ -861,6 +874,36 @@ function connectWallet() {
     document.getElementById('paste-wallet-section').style.display = 'none';
     document.getElementById('wallet-picker-section').style.display = 'grid';
   }
+}
+
+function switchWallet() {
+  // Show connect screen in switch mode — keep app-screen visible behind, show cancel
+  document.getElementById('connect-title').textContent = 'Switch Wallet';
+  document.getElementById('connect-sub').textContent   = 'Connect a different wallet or disconnect.';
+  document.getElementById('disconnect-row').style.display    = 'block';
+  document.getElementById('cancel-connect-row').style.display = 'block';
+  document.getElementById('paste-wallet-section').style.display = 'none';
+  document.getElementById('wallet-picker-section').style.display = 'grid';
+  document.getElementById('connect-screen').style.display = 'flex';
+  document.getElementById('app-screen').style.display = 'none';
+}
+
+function disconnectWallet() {
+  walletAddress = null;
+  localStorage.removeItem('gsb_wallet');
+  localStorage.removeItem('gsb_userId');
+  const badge = document.getElementById('wallet-badge');
+  badge.textContent = 'Connect Wallet';
+  badge.classList.remove('connected');
+  document.getElementById('connect-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'none';
+  // Re-show fresh connect screen
+  connectWallet();
+}
+
+function closeConnectScreen() {
+  document.getElementById('connect-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'block';
 }
 
 function connectWithPaste() {
