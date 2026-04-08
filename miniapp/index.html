@@ -648,7 +648,7 @@
     <!-- Deposit instructions -->
     <div class="card" id="pump-deposit-card" style="display:none">
       <div class="card-title" id="pump-deposit-title">⚡ Fund Agent to Start</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Send SOL to the agent wallet below. Whatever you send becomes your budget. Bot starts automatically.</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Tap the button below to open your wallet. Whatever you send becomes your budget. Bot starts automatically.</div>
 
       <!-- Amount badge -->
       <div style="background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);border-radius:10px;padding:14px;text-align:center;margin-bottom:12px">
@@ -656,18 +656,14 @@
         <div style="font-size:16px;font-weight:700;color:var(--accent)" id="pump-deposit-amount"></div>
       </div>
 
-      <!-- Address display + copy -->
-      <div style="background:var(--surface);border-radius:8px;padding:12px;margin-bottom:10px">
-        <div style="font-size:10px;color:var(--muted);margin-bottom:6px;letter-spacing:.5px;text-transform:uppercase">Agent Wallet Address</div>
-        <div style="font-family:monospace;font-size:12px;color:var(--text);word-break:break-all;line-height:1.6" id="pump-deposit-addr"></div>
-      </div>
+      <!-- Address hidden from UI — only used internally for deep link / copy -->
+      <div id="pump-deposit-addr" style="display:none"></div>
 
-      <!-- Action buttons -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-        <button id="pump-fund-btn" class="btn btn-primary" style="padding:13px;font-size:13px;font-weight:700" onclick="fundAgentWithWallet()">👻 Open in Phantom</button>
-        <button class="btn btn-outline" style="padding:13px;font-size:13px" onclick="copyDepositAddr()">Copy Address</button>
+      <!-- Action button -->
+      <div style="margin-bottom:8px">
+        <button id="pump-fund-btn" class="btn btn-primary" style="width:100%;padding:15px;font-size:14px;font-weight:700" onclick="fundAgentWithWallet()">👻 Open in Phantom</button>
       </div>
-      <div style="font-size:11px;color:var(--muted);text-align:center">Send from Phantom, Coinbase, exchange — any wallet works. Bot detects automatically.</div>
+      <div style="font-size:11px;color:var(--muted);text-align:center">Opens your wallet to send SOL. Bot detects deposit and starts automatically.</div>
     </div>
 
   </div>
@@ -1653,7 +1649,7 @@ function fundAgentWithWallet() {
         el.select(); document.execCommand('copy');
         document.body.removeChild(el);
       });
-      showToast('Address copied — open Phantom or any wallet and send SOL to this address', '');
+      showToast('Wallet ready — open Phantom or any Solana wallet and send SOL', '');
     }
 
   } else {
