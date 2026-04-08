@@ -513,6 +513,13 @@ async function tick(notify) {
 
     // ── Check deposit for pending sessions ──────────────────────────────────
     if (session.status === 'pending_deposit') {
+      // Auto-expire sessions waiting more than 30 minutes
+      if (Date.now() - session.createdAt > 30 * 60 * 1000) {
+        session.status = 'cancelled';
+        dirty = true;
+        console.log(`[pump] Session ${session.sessionId} expired (30min no deposit)`);
+        continue;
+      }
       const _prevBalSnap = session.solBalanceAtStart;
       const received = await checkDepositReceived(session);
       if (session.solBalanceAtStart !== _prevBalSnap) dirty = true; // persist balance baseline

@@ -1772,7 +1772,7 @@ async function loadPumpSession() {
       const _addr  = d.session.solDepositAddress || d.session.depositAddress
         || (_isSol ? 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs' : '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d');
       const _amt   = _isSol ? (d.session.totalSol || '') : (d.session.totalAmount || '');
-      document.getElementById('pump-deposit-chain-label').textContent = _isSol ? 'Agent SOL Wallet:' : 'Agent USDC Wallet:';
+      document.getElementById('pump-deposit-chain-label').textContent = _isSol ? 'Send any amount of SOL' : 'Send USDC to fund the bot';
       document.getElementById('pump-deposit-addr').textContent = _addr;
       document.getElementById('pump-deposit-amount').textContent = _isSol ? `${_amt} SOL` : `$${_amt} USDC`;
       // Update Fund Agent button
