@@ -1230,24 +1230,17 @@ function disconnectWallet() {
 
 function updateBadge() {
   const badge = document.getElementById('wallet-badge');
-  const hasReceiving = getVisibleChains().some(c => !!getReceivingWallet(c.id));
-  if (hasReceiving) {
-    badge.textContent = 'My Receiving Wallets';
-  } else if (walletAddress) {
+  if (walletAddress) {
     badge.textContent = walletAddress.slice(0,6) + '...' + walletAddress.slice(-4);
   } else {
     badge.textContent = 'Connect Wallet';
   }
-  badge.classList.toggle('connected', !!(walletAddress || hasReceiving));
+  badge.classList.toggle('connected', !!walletAddress);
 }
 
 function handleBadgeClick() {
-  const hasReceiving = getVisibleChains().some(c => !!getReceivingWallet(c.id));
-  if (hasReceiving || walletAddress) {
-    openWalletScreen(); // already connected — go straight to receiving wallets
-  } else {
-    connectWallet(); // not connected yet — sign first
-  }
+  // Badge always controls the SIGNING wallet — connect or change
+  openSignScreen(!!walletAddress);
 }
 
 function onWalletConnected() {
@@ -2448,58 +2441,39 @@ function showToast(msg, type = '') {
 // ── Onboarding: show every 48 hours ───────────────────────────────────────
 
 const ONBOARD_KEY    = 'gsb_onboard_seen';
-const ONBOARD_TTL_MS = 48 * 60 * 60 * 1000; // 48 hours
 
+// Show onboarding every fresh session (page load) until the user has connected a wallet
 function shouldShowOnboarding() {
-  const last = parseInt(localStorage.getItem(ONBOARD_KEY) || '0', 10);
-  return Date.now() - last > ONBOARD_TTL_MS;
+  return !walletAddress; // no wallet = always show welcome first
 }
 
 function completeOnboarding() {
-  localStorage.setItem(ONBOARD_KEY, String(Date.now()));
   document.getElementById('onboard-screen').style.display = 'none';
-  // After onboarding: restore signing wallet if known, else prompt to connect
-  const primary = getActiveWalletAddress() || localStorage.getItem(`gsb_wallet_${userId}`);
-  if (primary) {
-    walletAddress = primary;
-    onWalletConnected();
-  } else {
-    openSignScreen(); // first-time: prompt to connect signing wallet
-  }
+  openSignScreen(); // always go to sign screen after welcome
 }
 
 window.addEventListener('load', () => {
-  // Never auto-restore in dev/browser context — always start fresh so testing
-  // begins with a clean sign screen (no stale dev_user localStorage leaking in)
+  // Restore wallet only for real Telegram users — dev/browser always starts clean
   const isRealUser = tg?.initDataUnsafe?.user?.id;
   const primary = isRealUser
     ? (getActiveWalletAddress() || localStorage.getItem(`gsb_wallet_${userId}`))
     : null;
 
-  // ── Onboarding gate ───────────────────────────────────────
-  if (shouldShowOnboarding()) {
-    document.getElementById('onboard-screen').style.display = 'flex';
-    if (primary) walletAddress = primary; // restore silently while user reads
-    updateBadge();
-    loadTrending('base');
-    setTimeout(() => updateQuote(), 500);
-    if (window.ethereum) {
-      window.ethereum.on('accountsChanged', (a) => { if (a.length) { walletAddress = a[0]; onWalletConnected(); } });
-    }
-    return;
-  }
-
-  // ── Normal init ─────────────────────────────────────────────────
-  if (primary) {
-    walletAddress = primary;
-    onWalletConnected(); // real Telegram user — auto-restore
-  } else {
-    openSignScreen(); // no wallet / dev context — prompt to connect
-  }
-  setTimeout(() => updateQuote(), 500);
-  loadTrending('base');
   if (window.ethereum) {
     window.ethereum.on('accountsChanged', (a) => { if (a.length) { walletAddress = a[0]; onWalletConnected(); } });
+  }
+
+  loadTrending('base');
+  setTimeout(() => updateQuote(), 500);
+
+  if (primary) {
+    // Known Telegram user — skip welcome, go straight to app
+    walletAddress = primary;
+    onWalletConnected();
+  } else {
+    // No wallet saved — show welcome screen, then sign screen
+    document.getElementById('onboard-screen').style.display = 'flex';
+    updateBadge();
   }
 });
 </script>
