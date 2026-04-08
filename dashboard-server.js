@@ -4031,6 +4031,42 @@ app.get('/api/pump/approval-status', async (req, res) => {
   }
 });
 
+// GET /open-wallet — intermediate redirect page
+// Telegram WebView can't forward custom schemes or universal links directly.
+// We serve a plain HTTPS page that immediately does window.location.href = deeplink.
+// tg.openLink() opens this in system browser → system browser fires the universal link → wallet app.
+app.get('/open-wallet', (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.redirect('https://gsb-swarm-production.up.railway.app/miniapp/');
+  const decoded = decodeURIComponent(url);
+  // Basic allowlist — only forward to known wallet domains
+  const allowed = [
+    'metamask.app.link', 'phantom.app', 'go.cb-w.com',
+    'ethereum:', 'https://link.trustwallet.com', 'rainbow.me'
+  ];
+  const ok = allowed.some(a => decoded.startsWith('https://') || decoded.startsWith('ethereum:'));
+  if (!ok) return res.status(400).send('Invalid redirect target');
+  res.send(`<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Opening wallet...</title>
+<style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0a0a0f;color:#fff;font-family:system-ui;font-size:15px}</style>
+</head><body>
+<div style="text-align:center">
+  <div style="font-size:40px;margin-bottom:16px">🔐</div>
+  <div>Opening your wallet…</div>
+  <div style="font-size:12px;color:#888;margin-top:8px">You can close this tab after approving</div>
+</div>
+<script>
+  // Fire immediately — system browser handles the universal link / custom scheme
+  window.location.href = ${JSON.stringify(decoded)};
+  // Fallback: if still here after 2s, show copy prompt
+  setTimeout(function() {
+    document.body.innerHTML = '<div style="text-align:center;padding:32px"><div style="font-size:40px;margin-bottom:16px">🔗</div><div style="margin-bottom:16px">Could not open wallet automatically.</div><input id="l" value=' + JSON.stringify(decoded) + ' style="width:90%;padding:10px;background:#1a1a2e;border:1px solid #333;color:#fff;border-radius:8px;font-size:11px" readonly onclick="this.select()"><br><button onclick="navigator.clipboard.writeText(document.getElementById(\'l\').value)" style="margin-top:12px;padding:10px 20px;background:#6366f1;border:none;border-radius:8px;color:#fff;cursor:pointer">Copy Link</button><div style="margin-top:12px;font-size:11px;color:#888">Paste this in MetaMask or Phantom browser</div></div>';
+  }, 2000);
+</script>
+</body></html>`);
+});
+
 // GET /api/pump/approve-deeplink
 // Returns a deep link for the user to sign a one-time USDC approve in their wallet
 // EVM: EIP-681 link → MetaMask / Phantom EVM

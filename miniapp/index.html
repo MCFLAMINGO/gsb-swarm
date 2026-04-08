@@ -1385,12 +1385,19 @@ async function approveUSDC() {
 function _openWalletLink(url) {
   try {
     if (IS_TELEGRAM && tg?.openLink) {
-      tg.openLink(url);        // hands off to system browser → wallet app
+      // Wrap in our /open-wallet redirect page — system browser opens the
+      // redirect page, which immediately fires window.location.href = deeplink.
+      // This bypasses Telegram WebView's universal-link blocking.
+      const redirect = API_BASE + '/open-wallet?url=' + encodeURIComponent(url);
+      tg.openLink(redirect, { try_instant_view: false });
+      // Clipboard fallback after 800ms in case system browser still doesn't forward
+      setTimeout(() => {
+        navigator.clipboard?.writeText(url).catch(() => {});
+      }, 800);
     } else {
       window.open(url, '_blank');
     }
   } catch(e) {
-    // Last resort: copy to clipboard + toast
     navigator.clipboard?.writeText(url).catch(() => {});
     showToast('Link copied — paste in your browser to open wallet', '');
   }
