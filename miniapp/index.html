@@ -932,10 +932,12 @@ async function connectWith(provider) {
         onWalletConnected(); return;
       } catch(e) { showToast('Connection cancelled', 'error'); return; }
     }
-    // No extension — deep link to Phantom app
-    const returnUrl = encodeURIComponent(window.location.href);
-    const deepLink  = `https://phantom.app/ul/v1/connect?app_url=${returnUrl}&redirect_link=${returnUrl}`;
-    window.location.href = deepLink;
+    // No extension — show paste with Phantom-specific hint
+    document.getElementById('paste-wallet-input').placeholder = 'Paste your Solana address from Phantom';
+    document.getElementById('paste-wallet-section').style.display = 'block';
+    document.getElementById('wallet-picker-section').style.display = 'none';
+    showToast('Open Phantom → copy your address → paste here', '');
+    setTimeout(() => document.getElementById('paste-wallet-input').focus(), 100);
     return;
   }
 
@@ -949,9 +951,11 @@ async function connectWith(provider) {
         walletAddress = accounts[0]; onWalletConnected(); return;
       } catch(e) { showToast('Connection cancelled', 'error'); return; }
     }
-    // No extension — deep link to MetaMask app
-    const mmLink = `https://metamask.app.link/dapp/${window.location.host}${window.location.pathname}`;
-    window.location.href = mmLink;
+    document.getElementById('paste-wallet-input').placeholder = 'Paste your 0x address from MetaMask';
+    document.getElementById('paste-wallet-section').style.display = 'block';
+    document.getElementById('wallet-picker-section').style.display = 'none';
+    showToast('Open MetaMask → copy your address → paste here', '');
+    setTimeout(() => document.getElementById('paste-wallet-input').focus(), 100);
     return;
   }
 
@@ -965,15 +969,19 @@ async function connectWith(provider) {
         walletAddress = accounts[0]; onWalletConnected(); return;
       } catch(e) { showToast('Connection cancelled', 'error'); return; }
     }
-    // No extension — deep link to Coinbase Wallet app
-    const cbLink = `https://go.cb-w.com/dapp?cb_url=${encodeURIComponent(window.location.href)}`;
-    window.location.href = cbLink;
+    document.getElementById('paste-wallet-input').placeholder = 'Paste your 0x address from Coinbase Wallet';
+    document.getElementById('paste-wallet-section').style.display = 'block';
+    document.getElementById('wallet-picker-section').style.display = 'none';
+    showToast('Open Coinbase Wallet → copy your address → paste here', '');
+    setTimeout(() => document.getElementById('paste-wallet-input').focus(), 100);
     return;
   }
 
-  // Paste Address fallback
+  // Paste Address button
+  document.getElementById('paste-wallet-input').placeholder = '0x... (EVM) or base58 (Solana)';
   document.getElementById('paste-wallet-section').style.display = 'block';
   document.getElementById('wallet-picker-section').style.display = 'none';
+  setTimeout(() => document.getElementById('paste-wallet-input').focus(), 100);
 }
 
 function onWalletConnected() {
