@@ -8,7 +8,10 @@
 const axios = require('axios');
 
 const TOKEN_INPUT  = process.argv[2] || '$VIRTUAL';
-const CHAIN_INPUT  = (process.argv[3] || 'base').toLowerCase();
+const CHAIN_INPUT_RAW = (process.argv[3] || 'base').toLowerCase();
+// Normalize to DexScreener chainId values
+const CHAIN_MAP = { sol: 'solana', solana: 'solana', eth: 'ethereum', ethereum: 'ethereum', arb: 'arbitrum', arbitrum: 'arbitrum', matic: 'polygon', polygon: 'polygon', bsc: 'bsc', base: 'base' };
+const CHAIN_INPUT = CHAIN_MAP[CHAIN_INPUT_RAW] || CHAIN_INPUT_RAW;
 
 // ── Honeypot safety check ─────────────────────────────────────────────────────
 const EVM_CHAINS  = ['base', 'ethereum', 'eth', 'polygon', 'avalanche', 'arbitrum', 'optimism', 'bsc'];
