@@ -1149,6 +1149,7 @@ function closeSignScreen() {
 
 async function connectSigner(provider) {
   if (provider === 'phantom') {
+    // Try Phantom Solana first
     if (window.phantom?.solana) {
       try {
         const resp = await window.phantom.solana.connect();
@@ -1156,9 +1157,17 @@ async function connectSigner(provider) {
         onWalletConnected(); return;
       } catch(e) { showToast('Cancelled', 'error'); return; }
     }
+    // Try Phantom EVM (injected when inside Phantom in-app browser)
+    if (window.phantom?.ethereum) {
+      try {
+        const accounts = await window.phantom.ethereum.request({ method: 'eth_requestAccounts' });
+        walletAddress = accounts[0];
+        onWalletConnected(); return;
+      } catch(e) { showToast('Cancelled', 'error'); return; }
+    }
     // No extension — fall to paste
     const inp = document.getElementById('sign-paste-input');
-    inp.placeholder = 'Paste your Solana address from Phantom';
+    inp.placeholder = 'Paste your Solana or EVM address from Phantom';
     document.getElementById('sign-paste-row').style.display = 'block';
     showToast('Open Phantom → copy address → paste here', '');
     return;
@@ -1321,8 +1330,11 @@ async function approveUSDC() {
   // Detect chain from current UI selection (swap panel)
   const chain = document.getElementById('chain-select')?.value || 'base';
 
-  // If window.ethereum is available (browser with extension) — sign directly
-  if (window.ethereum && !IS_TELEGRAM) {
+  // Detect available EVM provider — Phantom injects window.phantom.ethereum inside its browser
+  const evmProvider = window.phantom?.ethereum || (window.ethereum?.isMetaMask && window.ethereum) || window.ethereum;
+
+  // If a real EVM provider is available and we're not in Telegram (deeplink territory) — sign directly
+  if (evmProvider && !IS_TELEGRAM) {
     try {
       const AGENT_WALLET = '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
       const USDC_ADDRS   = {
@@ -1335,9 +1347,9 @@ async function approveUSDC() {
       const MAX      = 'f'.repeat(64);
       const pad      = AGENT_WALLET.replace('0x','').toLowerCase().padStart(64,'0');
       const data     = '0x095ea7b3' + pad + MAX;
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      const accounts = await evmProvider.request({ method: 'eth_requestAccounts' });
       showToast('Approve in your wallet…', '');
-      await window.ethereum.request({
+      await evmProvider.request({
         method: 'eth_sendTransaction',
         params: [{ from: accounts[0], to: usdcAddr, data, gas: '0xf424' }],
       });
