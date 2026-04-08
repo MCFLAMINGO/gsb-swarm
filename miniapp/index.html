@@ -1124,11 +1124,13 @@ function openWalletScreen() {
 // ── Signing wallet connect (Phantom / MetaMask / Coinbase / paste) ──────────
 
 function openSignScreen(canCancel = false) {
-  document.getElementById('sign-screen').style.display = 'flex';
-  document.getElementById('connect-screen').style.display = 'none';
-  document.getElementById('app-screen').style.display = 'none';
+  document.getElementById('onboard-screen').style.display  = 'none';
+  document.getElementById('connect-screen').style.display  = 'none';
+  document.getElementById('app-screen').style.display      = 'none';
+  document.getElementById('sign-screen').style.display     = 'flex';
   document.getElementById('sign-cancel-row').style.display = canCancel ? 'block' : 'none';
-  document.getElementById('sign-paste-row').style.display = 'none';
+  document.getElementById('sign-paste-row').style.display  = 'none';
+  document.getElementById('sign-paste-input').value        = '';
 }
 
 function closeSignScreen() {
