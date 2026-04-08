@@ -1145,18 +1145,21 @@ function closeSignScreen() {
 }
 
 async function connectSigner(provider) {
-  // In Telegram: WebView blocks wallet deeplinks — open /wc page in system browser
-  // The /wc page handles WalletConnect natively, saves wallet server-side, then redirects back.
+  // In Telegram: if AppKit already has a live session, use it — no redirect needed
   if (IS_TELEGRAM) {
-    const _wcUserId   = tg?.initDataUnsafe?.user?.id || userId || 'unknown';
-    const _returnUrl  = encodeURIComponent('https://t.me/gsb_swap_bot');
-    const wcUrl       = `${API_BASE}/wc?userId=${_wcUserId}&returnUrl=${_returnUrl}`;
-    // Use tg.openLink directly — no /open-wallet wrapper needed for our own HTTPS pages
+    const _appkitState = window.gsbModal?.getState ? window.gsbModal.getState() : null;
+    if (_appkitState?.address) {
+      walletAddress = _appkitState.address;
+      onWalletConnected();
+      return;
+    }
+    // No live session — open /wc page so user can connect via Reown AppKit
+    const _wcUserId  = tg?.initDataUnsafe?.user?.id || userId || 'unknown';
+    const _returnUrl = encodeURIComponent('https://t.me/gsb_swap_bot');
+    const wcUrl      = `${API_BASE}/wc?userId=${_wcUserId}&returnUrl=${_returnUrl}`;
     if (tg?.openLink) tg.openLink(wcUrl, { try_instant_view: false });
     else window.open(wcUrl, '_blank');
-    // Update hint — tell user to come back after connecting
     document.getElementById('sign-paste-hint').textContent = 'Connect your wallet in the browser window that just opened, then return here.';
-    // Start polling for wallet address saved server-side (up to 3 min)
     startWalletPoll(_wcUserId);
     return;
   }
@@ -1342,11 +1345,12 @@ async function approveUSDC() {
   // Detect chain from current UI selection (swap panel)
   const chain = document.getElementById('chain-select')?.value || 'base';
 
-  // Detect available EVM provider — Phantom injects window.phantom.ethereum inside its browser
-  const evmProvider = window.phantom?.ethereum || (window.ethereum?.isMetaMask && window.ethereum) || window.ethereum;
+  // Detect available EVM provider — AppKit session first, then injected
+  const _appkitEvmProvider = window.gsbModal?.getWalletProvider ? window.gsbModal.getWalletProvider() : null;
+  const evmProvider = _appkitEvmProvider || window.phantom?.ethereum || (window.ethereum?.isMetaMask && window.ethereum) || window.ethereum;
 
-  // If a real EVM provider is available and we're not in Telegram (deeplink territory) — sign directly
-  if (evmProvider && !IS_TELEGRAM) {
+  // If a real EVM provider is available (AppKit session counts even in Telegram) — sign directly
+  if (evmProvider && (!IS_TELEGRAM || _appkitEvmProvider)) {
     try {
       const AGENT_WALLET = '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
       const USDC_ADDRS   = {
@@ -2368,11 +2372,20 @@ async function executeSwap() {
     });
     const d = await r.json();
 
-    if (d.ok && d.solana && d.transaction && !IS_TELEGRAM) {
-      // Desktop only — sign the Jupiter tx directly in Phantom extension
+    // Determine if AppKit has a live signing session
+    const _appkitState   = window.gsbModal?.getState ? window.gsbModal.getState() : null;
+    const _appkitHasEvm  = !!(window.gsbModal?.getWalletProvider?.()) && chain !== 'solana';
+    const _appkitHasSol  = !!(window.gsbModal?.getSolanaClient?.()) && chain === 'solana';
+    const _hasAppkitSess = _appkitHasEvm || _appkitHasSol;
+
+    if (d.ok && d.solana && d.transaction && (_appkitHasSol || !IS_TELEGRAM)) {
+      // AppKit Solana session or desktop Phantom — sign directly
       await executeSolanaSwap(d, tokenIn, tokenOut, amount);
+    } else if (d.ok && !d.solana && _appkitHasEvm) {
+      // AppKit EVM session — sign via provider directly (works in Telegram)
+      await executeEvmSwap(d, tokenIn, tokenOut, amount, chain);
     } else if (d.ok && (d.uniswapUrl || d.solana)) {
-      // Telegram (and EVM) — open deeplink in system browser, user signs there
+      // Fallback — open deeplink in system browser
       const link = d.uniswapUrl;
       const label = chain === 'solana' ? 'Opening Jupiter…' : 'Opening Uniswap…';
       if (IS_TELEGRAM) {
@@ -2396,9 +2409,41 @@ async function executeSwap() {
   btn.textContent = `Swap ${document.getElementById('token-in').value} → ${document.getElementById('token-out').value}`;
 }
 
+// ── EVM swap via AppKit provider (works in Telegram WebView) ────────────────
+async function executeEvmSwap(swapData, tokenIn, tokenOut, amount, chain) {
+  const evmProvider = window.gsbModal?.getWalletProvider?.();
+  if (!evmProvider) {
+    showToast('Wallet not connected — tap Connect first', 'error');
+    return;
+  }
+  try {
+    showToast('Approve swap in your wallet…', '');
+    // swapData.transaction is a hex-encoded calldata or the server returns tx params
+    // Build the tx from swapData fields the server provides
+    const tx = {
+      from:  walletAddress,
+      to:    swapData.to    || swapData.contractAddress,
+      data:  swapData.data  || swapData.calldata || '0x',
+      value: swapData.value || '0x0',
+    };
+    const txHash = await evmProvider.request({
+      method: 'eth_sendTransaction',
+      params: [tx],
+    });
+    const txUrl = `https://basescan.org/tx/${txHash}`;
+    showToast('Swap submitted!', 'success');
+    addSwapHistory(tokenIn, tokenOut, amount, txUrl);
+  } catch (e) {
+    if (e.code === 4001) showToast('Swap cancelled', 'error');
+    else showToast('Swap error: ' + (e.message || e), 'error');
+  }
+}
+
 async function executeSolanaSwap(swapData, tokenIn, tokenOut, amount) {
-  const solProvider = window.phantom?.solana || window.solana || window.solflare;
-  if (!solProvider || !solProvider.isConnected) {
+  // Prefer AppKit Solana client (works in Telegram), fall back to injected Phantom
+  const appkitSol = window.gsbModal?.getSolanaClient?.();
+  const solProvider = appkitSol || window.phantom?.solana || window.solana || window.solflare;
+  if (!solProvider || (!appkitSol && !solProvider.isConnected)) {
     const solUsdc = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
     const lamports = Math.round(parseFloat(amount) * 1_000_000);
     const jupUrl = `https://jup.ag/swap/${solUsdc}-${swapData.contractAddress}?inAmount=${lamports}`;
@@ -2510,6 +2555,59 @@ window.addEventListener('load', async () => {
     // No wallet saved — show welcome screen, then sign screen
     document.getElementById('onboard-screen').style.display = 'flex';
     updateBadge();
+  }
+});
+</script>
+
+<!-- Reown AppKit — persistent signing session for Telegram (EVM + Solana) -->
+<script type="module">
+import { createAppKit } from 'https://esm.sh/@reown/appkit@1.8.19'
+import { WagmiAdapter }  from 'https://esm.sh/@reown/appkit-adapter-wagmi@1.8.19'
+import { SolanaAdapter } from 'https://esm.sh/@reown/appkit-adapter-solana@1.8.19'
+import {
+  mainnet, base, arbitrum, polygon, solana
+} from 'https://esm.sh/@reown/appkit@1.8.19/networks'
+import {
+  PhantomWalletAdapter,
+  SolflareWalletAdapter
+} from 'https://esm.sh/@solana/wallet-adapter-wallets@0.19.32'
+
+const PROJECT_ID = 'ff5dd5e462b92932d7b28c00b81695e8';
+
+const wagmiAdapter = new WagmiAdapter({
+  projectId: PROJECT_ID,
+  networks: [base, mainnet, arbitrum, polygon],
+});
+
+const solanaAdapter = new SolanaAdapter({
+  wallets: [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
+});
+
+const modal = createAppKit({
+  adapters: [wagmiAdapter, solanaAdapter],
+  networks:  [base, mainnet, arbitrum, polygon, solana],
+  projectId: PROJECT_ID,
+  metadata: {
+    name:        'GSB Swarm',
+    description: 'GSB Intelligence Swarm',
+    url:         'https://gsb-swarm-production.up.railway.app',
+    icons:       ['https://gsb-swarm-production.up.railway.app/favicon.ico'],
+  },
+  features: { analytics: false, email: false, socials: false },
+  themeMode: 'dark',
+});
+
+// Expose globally so the main script can use it
+window.gsbModal = modal;
+
+// When AppKit reconnects a persisted session, push the address into the app
+modal.subscribeAccount(({ address, chainId, status }) => {
+  if (status === 'connected' && address) {
+    // If the main app hasn't got a wallet yet, hydrate it now
+    if (typeof walletAddress !== 'undefined' && !walletAddress) {
+      walletAddress = address;
+      if (typeof onWalletConnected === 'function') onWalletConnected();
+    }
   }
 });
 </script>
