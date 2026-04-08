@@ -1257,8 +1257,8 @@ async function runAnalyze(tokenOverride) {
     const conf  = d.analysis?.confidence || 0;
     const price = d.currentPrice || d.price || 0;
     const chg   = d.marketData?.priceChange24h || d.analysis?.priceChange24h || 0;
-    const liq   = d.marketData?.liquidity || 0;
-    const vol   = d.marketData?.volume24h || 0;
+    const liq   = Number(d.marketData?.liquidity) || 0;
+    const vol   = Number(d.marketData?.volume24h) || 0;
     const targets = d.analysis?.targets || [];
     const entry   = d.analysis?.entryZone || {};
     const summary = d.analysis?.summary || d.analysis?.summaryShort || '';
