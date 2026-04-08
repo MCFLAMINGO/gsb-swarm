@@ -924,43 +924,56 @@ async function connectWith(provider) {
     setTimeout(() => document.getElementById('paste-wallet-input').focus(), 100);
     return;
   }
-  if (provider === 'phantom' && window.phantom?.solana) {
-    try {
-      const resp = await window.phantom.solana.connect();
-      walletAddress = resp.publicKey.toString();
-      onWalletConnected();
-    } catch(e) { showToast('Connection cancelled', 'error'); }
+  if (provider === 'phantom') {
+    if (window.phantom?.solana) {
+      try {
+        const resp = await window.phantom.solana.connect();
+        walletAddress = resp.publicKey.toString();
+        onWalletConnected(); return;
+      } catch(e) { showToast('Connection cancelled', 'error'); return; }
+    }
+    // No extension — deep link to Phantom app
+    const returnUrl = encodeURIComponent(window.location.href);
+    const deepLink  = `https://phantom.app/ul/v1/connect?app_url=${returnUrl}&redirect_link=${returnUrl}`;
+    window.location.href = deepLink;
     return;
   }
-  if (provider === 'metamask' || provider === 'coinbase') {
-    // Pick the right provider object
-    let evmProvider = null;
-    if (provider === 'coinbase') {
-      evmProvider = window.coinbaseWalletExtension
-        || (window.ethereum?.isCoinbaseWallet ? window.ethereum : null)
-        || (window.ethereum?.providers?.find(p => p.isCoinbaseWallet))
-        || null;
-    } else {
-      evmProvider = (window.ethereum?.providers?.find(p => p.isMetaMask))
-        || (window.ethereum?.isMetaMask ? window.ethereum : null)
-        || window.ethereum
-        || null;
-    }
+
+  if (provider === 'metamask') {
+    const evmProvider = (window.ethereum?.providers?.find(p => p.isMetaMask))
+      || (window.ethereum?.isMetaMask ? window.ethereum : null)
+      || window.ethereum || null;
     if (evmProvider) {
       try {
         const accounts = await evmProvider.request({ method: 'eth_requestAccounts' });
-        walletAddress = accounts[0];
-        onWalletConnected();
-      } catch(e) { showToast('Connection cancelled', 'error'); }
-      return;
+        walletAddress = accounts[0]; onWalletConnected(); return;
+      } catch(e) { showToast('Connection cancelled', 'error'); return; }
     }
-    // Provider not found — fall through to paste
+    // No extension — deep link to MetaMask app
+    const mmLink = `https://metamask.app.link/dapp/${window.location.host}${window.location.pathname}`;
+    window.location.href = mmLink;
+    return;
   }
-  // Fallback: wallet extension not detected — show paste with helpful message
+
+  if (provider === 'coinbase') {
+    const evmProvider = window.coinbaseWalletExtension
+      || (window.ethereum?.isCoinbaseWallet ? window.ethereum : null)
+      || (window.ethereum?.providers?.find(p => p.isCoinbaseWallet)) || null;
+    if (evmProvider) {
+      try {
+        const accounts = await evmProvider.request({ method: 'eth_requestAccounts' });
+        walletAddress = accounts[0]; onWalletConnected(); return;
+      } catch(e) { showToast('Connection cancelled', 'error'); return; }
+    }
+    // No extension — deep link to Coinbase Wallet app
+    const cbLink = `https://go.cb-w.com/dapp?cb_url=${encodeURIComponent(window.location.href)}`;
+    window.location.href = cbLink;
+    return;
+  }
+
+  // Paste Address fallback
   document.getElementById('paste-wallet-section').style.display = 'block';
   document.getElementById('wallet-picker-section').style.display = 'none';
-  const walletNames = { metamask: 'MetaMask', coinbase: 'Coinbase Wallet', phantom: 'Phantom' };
-  showToast(`${walletNames[provider] || 'Wallet'} not detected — paste your address instead`, '');
 }
 
 function onWalletConnected() {
