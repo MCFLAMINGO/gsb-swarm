@@ -258,8 +258,8 @@ async function checkDepositReceived(session) {
     // Try multiple RPCs in sequence — public mainnet is rate-limited from server IPs
     const SOL_RPCS = [
       process.env.SOLANA_RPC_URL,
-      'https://rpc.ankr.com/solana',
-      'https://api.mainnet-beta.solana.com',
+      'https://solana-rpc.publicnode.com',    // free, no key needed, handles getTransaction
+      'https://api.mainnet-beta.solana.com',  // last resort — rate-limits on getTransaction
     ].filter(Boolean);
 
     for (const rpcUrl of SOL_RPCS) {
@@ -288,7 +288,30 @@ async function checkDepositReceived(session) {
         console.error(`[pump] SOL deposit check failed on ${rpcUrl}: ${err.message} — trying next RPC`);
       }
     }
-    console.error('[pump] All Solana RPCs failed for deposit check — session', session.sessionId);
+    // ── Balance-delta fallback: single getBalance call, no getTransaction needed ──
+    // Works even when getTransaction is rate-limited (429)
+    console.warn('[pump] All getTransaction RPCs failed — falling back to balance-delta check');
+    for (const rpcUrl of SOL_RPCS) {
+      try {
+        const { Connection, PublicKey } = require('@solana/web3.js');
+        const GSB_SOL_WALLET = process.env.GSB_SOL_WALLET || 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs';
+        const connection = new Connection(rpcUrl, { commitment: 'confirmed' });
+        const currentBalance = await connection.getBalance(new PublicKey(GSB_SOL_WALLET));
+        const expectedLamports = Math.round(session.totalSol * 1e9);
+        // If we have a baseline, check delta; otherwise store baseline and wait
+        if (session.solBalanceAtStart === null || session.solBalanceAtStart === undefined) {
+          session.solBalanceAtStart = currentBalance;
+          console.log(`[pump] Balance baseline set: ${(currentBalance/1e9).toFixed(6)} SOL`);
+          return false;
+        }
+        const delta = currentBalance - session.solBalanceAtStart;
+        console.log(`[pump] Balance delta: ${(delta/1e9).toFixed(6)} SOL, need ${session.totalSol} SOL`);
+        if (delta >= Math.round(expectedLamports * 0.99)) return true;
+        return false;
+      } catch (err) {
+        console.error(`[pump] Balance fallback failed on ${rpcUrl}: ${err.message}`);
+      }
+    }
     return false;
   }
 
@@ -432,6 +455,7 @@ function createSession({ userId, tokenAddress, chain, totalAmount, intervalAmoun
     rateMs: VALID_RATES_MS[rateName],
     receivingWallet,
     status: 'pending_deposit',   // pending_deposit → running → paying_out → complete | cancelled | error
+    solBalanceAtStart: null,   // set async after session create for balance-delta detection
     buys: [],
     totalSpent: 0,
     totalTokensReceived: '0',
@@ -478,7 +502,9 @@ async function tick(notify) {
 
     // ── Check deposit for pending sessions ──────────────────────────────────
     if (session.status === 'pending_deposit') {
+      const _prevBalSnap = session.solBalanceAtStart;
       const received = await checkDepositReceived(session);
+      if (session.solBalanceAtStart !== _prevBalSnap) dirty = true; // persist balance baseline
       if (received) {
         session.status = 'running';
         session.startedAt = Date.now();

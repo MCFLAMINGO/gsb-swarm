@@ -538,7 +538,7 @@
       <div style="display:grid;grid-template-columns:1fr 90px;gap:10px;margin-bottom:20px">
         <div>
           <div class="pump-label">Token Address</div>
-          <input type="text" id="pump-token" placeholder="0x... or Solana mint address" autocomplete="off" style="width:100%;font-size:12px" oninput="updatePumpChainNote()">
+          <input type="text" id="pump-token" placeholder="Token mint address (NOT your wallet)" autocomplete="off" style="width:100%;font-size:12px" oninput="updatePumpChainNote()">
         </div>
         <div>
           <div class="pump-label">Chain</div>
@@ -616,7 +616,7 @@
       <!-- Receiving wallet -->
       <div style="margin-bottom:20px">
         <div class="pump-label">Your Receiving Wallet</div>
-        <input type="text" id="pump-wallet" placeholder="0x... or Solana wallet to receive tokens" autocomplete="off" style="width:100%;font-size:12px">
+        <input type="text" id="pump-wallet" placeholder="Your wallet address to receive purchased tokens" autocomplete="off" style="width:100%;font-size:12px">
       </div>
 
       <!-- Preview -->
@@ -907,6 +907,7 @@ function onWalletConnected() {
   checkApproval();
   loadPumpSession();
   loadPortfolio();
+  updatePumpChainNote(); // auto-fill receiving wallet now that we have a connected address
   // Auto-register referral (also picks up ?ref= code from URL)
   const _urlRef = new URLSearchParams(window.location.search).get('ref') || '';
   fetch(`${API_BASE}/api/referral/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: String(userId), userName, refCode: _urlRef }) }).catch(() => {});
@@ -1412,9 +1413,17 @@ function updatePumpChainNote() {
     solRow.style.display  = 'none';
   }
 
-  // Update wallet placeholder
+  // Update wallet placeholder + auto-fill from connected wallet if field is empty
   const walletInput = document.getElementById('pump-wallet');
-  if (walletInput) walletInput.placeholder = isSol ? 'Solana wallet address (base58)' : '0x... EVM wallet address';
+  if (walletInput) {
+    walletInput.placeholder = isSol ? 'Solana wallet address (base58)' : '0x... EVM wallet address';
+    // Auto-fill receiving wallet from connected wallet if it matches the chain and field is empty
+    if (walletAddress && !walletInput.value.trim()) {
+      const isSolWallet = !walletAddress.startsWith('0x');
+      if (isSol && isSolWallet)   walletInput.value = walletAddress;  // Phantom → Solana session
+      if (!isSol && !isSolWallet) walletInput.value = walletAddress;  // MetaMask → EVM session
+    }
+  }
 
   updatePumpPreview();
 }
@@ -1463,12 +1472,27 @@ async function startPumpBot() {
   const isSol          = isSolanaSession();
   const isPf            = isPumpFunToken();
 
-  if (!tokenAddress)    return showToast('Enter token address', 'error');
-  if (!receivingWallet) return showToast('Enter receiving wallet', 'error');
+  if (!tokenAddress)    return showToast('Enter token mint address', 'error');
+  if (!receivingWallet) return showToast('Enter your receiving wallet', 'error');
 
-  // Address validation
-  if (isSol && tokenAddress.startsWith('0x')) return showToast('Solana needs a base58 mint address, not 0x', 'error');
+  // Catch swapped fields — token address should not equal receiving wallet
+  if (tokenAddress.toLowerCase() === receivingWallet.toLowerCase())
+    return showToast('Token address and receiving wallet are the same — did you paste your wallet into the wrong field?', 'error');
+
+  // Catch GSB deposit wallet being entered as token
+  const GSB_WALLETS = ['F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs', '0x592b6eebd4c99b49cf23f722e4f62faef4cd044d'];
+  if (GSB_WALLETS.some(w => tokenAddress.toLowerCase() === w.toLowerCase()))
+    return showToast('That\'s the GSB deposit wallet, not a token address. Paste the token\'s mint/contract address.', 'error');
+
+  // Token address format validation
+  if (isSol && tokenAddress.startsWith('0x')) return showToast('Solana needs a base58 mint address, not a 0x address', 'error');
   if (!isSol && !tokenAddress.startsWith('0x')) return showToast('EVM chains need a 0x contract address', 'error');
+
+  // Receiving wallet must match the selected chain
+  if (isSol && receivingWallet.startsWith('0x'))
+    return showToast('You selected Solana — receiving wallet must be a Solana address, not 0x', 'error');
+  if (!isSol && !receivingWallet.startsWith('0x'))
+    return showToast('You selected ' + chain.toUpperCase() + ' — receiving wallet must be a 0x EVM address, not a Solana address', 'error');
 
   let body;
   if (isSol) {
