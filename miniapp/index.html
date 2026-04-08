@@ -1392,6 +1392,31 @@ async function approveUSDC() {
 // ── WC wallet polling — auto-restore after user connects via /wc page ────────
 let _wcPollTimer = null;
 
+// When user returns to miniapp (e.g. from /wc page), check server for newly saved wallet
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible') return;
+  if (walletAddress) return; // already connected
+  if (!userId || userId === 'dev_user') return;
+  try {
+    const r = await fetch(`${API_BASE}/api/user/wallet?userId=${encodeURIComponent(String(userId))}`);
+    const data = await r.json();
+    if (data.ok && data.walletAddress) {
+      walletAddress = data.walletAddress;
+      localStorage.setItem(`gsb_wallet_${userId}`, walletAddress);
+      if (/^0x[0-9a-fA-F]{40}$/.test(walletAddress)) {
+        localStorage.setItem(`gsb_evm_wallet_${userId}`, walletAddress);
+      } else {
+        localStorage.setItem(`gsb_sol_wallet_${userId}`, walletAddress);
+      }
+      // Hide sign/onboard screen, go to app
+      document.getElementById('onboard-screen').style.display = 'none';
+      document.getElementById('sign-screen').style.display    = 'none';
+      onWalletConnected();
+      showToast('✅ Wallet connected!', 'success');
+    }
+  } catch (_) {}
+});
+
 function startWalletPoll(pollUserId) {
   // Clear any existing poll
   if (_wcPollTimer) { clearInterval(_wcPollTimer); _wcPollTimer = null; }
@@ -1406,8 +1431,15 @@ function startWalletPoll(pollUserId) {
         clearInterval(_wcPollTimer);
         _wcPollTimer = null;
         walletAddress = data.walletAddress;
+        // Persist to localStorage so it survives WebView resume
+        localStorage.setItem(`gsb_wallet_${userId}`, walletAddress);
+        if (/^0x[0-9a-fA-F]{40}$/.test(walletAddress)) {
+          localStorage.setItem(`gsb_evm_wallet_${userId}`, walletAddress);
+        } else {
+          localStorage.setItem(`gsb_sol_wallet_${userId}`, walletAddress);
+        }
         onWalletConnected();
-        showToast('Wallet connected!', 'success');
+        showToast('✅ Wallet connected!', 'success');
         return;
       }
     } catch (_) {}
