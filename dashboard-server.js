@@ -4072,7 +4072,7 @@ app.post('/api/swap/dca/stop', express.json(), (req, res) => {
 // ── Pump Bot routes ───────────────────────────────────────────────────────────
 
 // POST /api/pump/create — create a new pump session
-app.post('/api/pump/create', express.json(), (req, res) => {
+app.post('/api/pump/create', express.json(), async (req, res) => {
   const { userId, tokenAddress, chain, totalAmount, intervalAmount, rateName, receivingWallet,
           isPumpFun, totalSol, solPerBuy } = req.body;
   // Solana sessions (any token) = SOL-denominated; EVM = USDC-denominated
