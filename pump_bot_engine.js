@@ -1,17 +1,28 @@
+// ── Shared: parse Solana private key (base58 OR JSON byte array) ───────────────
+function parseSolKeypair(raw) {
+  const { Keypair } = require('@solana/web3.js');
+  const bs58 = require('bs58');
+  const key = (raw || '').trim();
+  if (!key) throw new Error('Solana private key not set');
+  try {
+    return Keypair.fromSecretKey(bs58.decode(key));
+  } catch {
+    try {
+      const arr = JSON.parse(key);
+      return Keypair.fromSecretKey(Uint8Array.from(arr));
+    } catch {
+      throw new Error('Invalid Solana private key — must be base58 or JSON byte array');
+    }
+  }
+}
+
 // ── Solana buy via PumpPortal (pump.fun bonding curve, pre-graduation) ────────
 async function executeOneBuySolPumpFun(session) {
   const { Connection, Keypair, VersionedTransaction } = require('@solana/web3.js');
   const bs58 = require('bs58');
 
   const solPrivKey = process.env.SOLANA_PUMP_PRIVATE_KEY || process.env.SOL_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY;
-  if (!solPrivKey) throw new Error('SOLANA_PUMP_PRIVATE_KEY not set');
-
-  let keypair;
-  try {
-    keypair = Keypair.fromSecretKey(bs58.decode(solPrivKey));
-  } catch {
-    throw new Error('Invalid Solana private key — set SOLANA_PUMP_PRIVATE_KEY');
-  }
+  const keypair = parseSolKeypair(solPrivKey);
 
   const solAmount = session.solPerBuy || 0.01; // SOL per buy
   const mint      = session.tokenAddress;
@@ -56,7 +67,6 @@ async function executeOneBuySolana(session) {
   const bs58 = require('bs58');
 
   const solPrivKey = process.env.SOLANA_PUMP_PRIVATE_KEY || process.env.SOL_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY;
-  if (!solPrivKey) throw new Error('SOLANA_PUMP_PRIVATE_KEY not set');
 
   const SOL_USDC   = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const outputMint = session.tokenAddress;
@@ -74,10 +84,9 @@ async function executeOneBuySolana(session) {
   // Get swap transaction
   let keypair;
   try {
-    const decoded = bs58.decode(solPrivKey);
-    keypair = Keypair.fromSecretKey(decoded);
-  } catch {
-    throw new Error('Invalid Solana private key — set SOLANA_PUMP_PRIVATE_KEY');
+    keypair = parseSolKeypair(solPrivKey);
+  } catch(e) {
+    throw e;
   }
 
   const swapRes = await fetch('https://quote-api.jup.ag/v6/swap', {
@@ -353,7 +362,7 @@ async function sendSplTokensToUser(session) {
 
   const solPrivKey = process.env.SOLANA_PUMP_PRIVATE_KEY || process.env.SOL_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY;
   if (!solPrivKey) throw new Error('SOLANA_PUMP_PRIVATE_KEY not set');
-  const keypair = Keypair.fromSecretKey(bs58.decode(solPrivKey));
+  const keypair = parseSolKeypair(solPrivKey);
 
   const connection   = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
   const mintPubkey   = new PublicKey(session.tokenAddress);
