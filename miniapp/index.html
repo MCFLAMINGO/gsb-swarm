@@ -537,57 +537,76 @@
 </div>
 <!-- ── /ONBOARDING ────────────────────────────────────────────── -->
 
-<div id="connect-screen" class="connect-screen" style="display:none">
-  <div class="connect-icon" id="connect-icon">🔗</div>
-  <div class="connect-title" id="connect-title">Connect Your Wallet</div>
-  <div class="connect-sub" id="connect-sub">Connect once. Swap forever.<br>Non-custodial. Your keys, your tokens.</div>
-  <div id="disconnect-row" style="display:none;width:100%;margin-bottom:8px">
-    <button onclick="disconnectWallet()" style="width:100%;padding:12px;background:rgba(239,68,68,0.12);border:1px solid var(--red);color:var(--red);border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">🔓 Disconnect current wallet</button>
-    <div style="text-align:center;color:var(--muted);font-size:11px;margin:10px 0">or connect a different one</div>
-  </div>
+<!-- ── SIGN / CONNECT SCREEN ─────────────────────────────────────── -->
+<div id="sign-screen" class="connect-screen" style="display:none">
+  <div class="connect-icon">🔐</div>
+  <div class="connect-title">Connect Signing Wallet</div>
+  <div class="connect-sub">This wallet signs transactions and funds the agent. Your keys never leave your device.</div>
 
-  <!-- Multi-wallet setup -->
-  <div id="wallet-picker-section" style="width:100%;display:flex;flex-direction:column;gap:10px">
-    <div style="font-size:12px;color:var(--muted);text-align:center;margin-bottom:4px;line-height:1.6">
-      Paste your wallets once — saved on this device forever.<br>The wallet you use to fund the agent also receives your tokens.
-    </div>
-
-    <!-- Solana -->
-    <div style="background:var(--surface);border-radius:10px;padding:12px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span style="font-size:18px">👻</span>
-        <span style="font-size:13px;font-weight:700">Solana</span>
-        <span style="font-size:11px;color:var(--muted)">(Phantom, Backpack, etc.)</span>
-      </div>
-      <input id="wallet-sol" class="input" placeholder="Paste Solana address (base58)" style="width:100%;box-sizing:border-box;font-size:12px" />
-    </div>
-
-    <!-- EVM -->
-    <div style="background:var(--surface);border-radius:10px;padding:12px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span style="font-size:18px">🦊</span>
-        <span style="font-size:13px;font-weight:700">Base / ETH / ARB</span>
-        <span style="font-size:11px;color:var(--muted)">(MetaMask, Coinbase, Rabby)</span>
-      </div>
-      <input id="wallet-evm" class="input" placeholder="Paste 0x address" style="width:100%;box-sizing:border-box;font-size:12px" />
-    </div>
-
-    <button onclick="saveMultiWallet()" class="btn-primary" style="width:100%;padding:15px;border-radius:12px;font-weight:700;font-size:15px">
-      ✅ Save Wallets
+  <div style="width:100%;display:flex;flex-direction:column;gap:10px">
+    <!-- Phantom -->
+    <button class="wallet-option" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;text-align:left" onclick="connectSigner('phantom')">
+      <span style="font-size:28px">👻</span>
+      <div><div style="font-size:14px;font-weight:700">Phantom</div><div style="font-size:11px;color:var(--muted)">Solana</div></div>
     </button>
-    <div style="font-size:11px;color:var(--muted);text-align:center">You only need to do this once. Addresses are saved on this device.</div>
+    <!-- MetaMask -->
+    <button class="wallet-option" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;text-align:left" onclick="connectSigner('metamask')">
+      <span style="font-size:28px">🦊</span>
+      <div><div style="font-size:14px;font-weight:700">MetaMask</div><div style="font-size:11px;color:var(--muted)">EVM — Base, ETH, ARB</div></div>
+    </button>
+    <!-- Coinbase -->
+    <button class="wallet-option" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;text-align:left" onclick="connectSigner('coinbase')">
+      <span style="font-size:28px">🔵</span>
+      <div><div style="font-size:14px;font-weight:700">Coinbase Wallet</div><div style="font-size:11px;color:var(--muted)">EVM</div></div>
+    </button>
+    <!-- Paste fallback -->
+    <div id="sign-paste-row" style="display:none;margin-top:4px">
+      <input id="sign-paste-input" class="input" placeholder="Paste wallet address" style="width:100%;box-sizing:border-box;font-size:13px" />
+      <button onclick="connectSignerPaste()" class="btn-primary" style="width:100%;margin-top:8px;padding:14px;border-radius:12px;font-weight:700">Connect</button>
+    </div>
+    <button onclick="document.getElementById('sign-paste-row').style.display='block'" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:4px 0">Paste address instead</button>
   </div>
 
-  <!-- hidden single-paste (used as fallback by connectWith) -->
-  <div id="paste-wallet-section" style="display:none;width:100%;margin-top:8px">
-    <input id="paste-wallet-input" class="input" placeholder="0x... (EVM) or base58 (Solana)" style="width:100%;box-sizing:border-box;font-size:13px" />
-    <button onclick="connectWithPaste()" class="btn-primary" style="width:100%;margin-top:10px;padding:14px;border-radius:12px;font-weight:700;font-size:15px">Connect</button>
-  </div>
-  <!-- Cancel/close — only shown when already connected (switching) -->
-  <div id="cancel-connect-row" style="display:none;width:100%;margin-top:8px">
-    <button onclick="closeConnectScreen()" style="width:100%;padding:12px;background:none;border:1px solid var(--border);color:var(--muted);border-radius:10px;font-size:13px;cursor:pointer">✕ Cancel</button>
+  <div id="sign-cancel-row" style="display:none;width:100%;margin-top:8px">
+    <button onclick="closeSignScreen()" style="width:100%;padding:12px;background:none;border:1px solid var(--border);color:var(--muted);border-radius:10px;font-size:13px;cursor:pointer">✕ Cancel</button>
   </div>
 </div>
+<!-- ── /SIGN / CONNECT SCREEN ──────────────────────────────────── -->
+
+<!-- ── MY RECEIVING WALLETS SCREEN ─────────────────────────────── -->
+<div id="connect-screen" class="connect-screen" style="display:none;padding:0;align-items:stretch;justify-content:flex-start">
+
+  <!-- Header row -->
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 20px 0">
+    <div style="font-size:17px;font-weight:800">My Receiving Wallets</div>
+    <button id="cancel-connect-row" onclick="closeConnectScreen()" style="display:none;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;padding:0 4px">✕</button>
+  </div>
+  <div style="font-size:12px;color:var(--muted);padding:6px 20px 16px;line-height:1.55">
+    Paste each address once. Tokens are automatically delivered to the right wallet based on the token’s chain.
+  </div>
+
+  <!-- Wallet list -->
+  <div id="wallet-list" style="padding:0 16px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:65vh">
+    <!-- rendered by renderWalletList() -->
+  </div>
+
+  <!-- Add chain button -->
+  <div id="add-chain-row" style="display:none;padding:12px 16px 0">
+    <select id="add-chain-select" style="width:100%;padding:10px 12px;font-size:13px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--text);margin-bottom:8px">
+      <!-- populated by renderAddChainOptions() -->
+    </select>
+  </div>
+
+  <!-- Save button -->
+  <div style="padding:16px">
+    <button onclick="saveReceivingWallets()" class="btn-primary" style="width:100%;padding:15px;border-radius:12px;font-weight:700;font-size:15px">
+      ✅ Save Wallets
+    </button>
+    <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px">Addresses are saved on this device. Never shared.</div>
+  </div>
+
+</div>
+<!-- ── /MY RECEIVING WALLETS SCREEN ──────────────────────────── -->
 
 <div id="app-screen">
   <div class="tabs">
@@ -999,171 +1018,217 @@ function switchTab(tab) {
 // ── Wallet Connection ──────────────────────────────────────────────────────────
 const IS_TELEGRAM = !!(window.Telegram?.WebApp?.initData);
 
-function connectWallet() {
-  // Fresh connect — hide switch-specific UI
-  document.getElementById('disconnect-row').style.display    = 'none';
-  document.getElementById('cancel-connect-row').style.display = 'none';
-  document.getElementById('connect-title').textContent = 'Connect Your Wallet';
-  document.getElementById('connect-sub').textContent   = 'Connect once. Swap forever. Non-custodial.';
-  document.getElementById('connect-screen').style.display = 'flex';
-  document.getElementById('app-screen').style.display = 'none';
-  // Always show wallet picker first — paste is a fallback via "Paste Address" button
-  document.getElementById('paste-wallet-section').style.display = 'none';
-  document.getElementById('wallet-picker-section').style.display = 'grid';
-  // Pre-fill saved wallets so user can see/update them
-  const savedSol = localStorage.getItem(`gsb_sol_wallet_${userId}`);
-  const savedEvm = localStorage.getItem(`gsb_evm_wallet_${userId}`);
-  if (savedSol) document.getElementById('wallet-sol').value = savedSol;
-  if (savedEvm) document.getElementById('wallet-evm').value = savedEvm;
+// ── CHAIN WALLET MAP ────────────────────────────────────────────────────────
+// All supported chains. Top 5 shown by default; rest added via +
+const CHAIN_DEFS = [
+  { id: 'solana',   label: 'Solana',        icon: '👻', hint: 'Phantom, Backpack — base58 address',  type: 'sol',  placeholder: 'Paste Solana address (base58)',    validate: v => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v) },
+  { id: 'evm',      label: 'Base / ETH / ARB / Polygon', icon: '🔷', hint: 'MetaMask, Coinbase, Rabby — one address works for all EVM chains', type: 'evm', placeholder: 'Paste 0x address', validate: v => /^0x[0-9a-fA-F]{40}$/.test(v) },
+  { id: 'bsc',      label: 'BNB Chain',     icon: '🟡', hint: 'MetaMask — 0x address',                type: 'evm',  placeholder: 'Paste 0x address',               validate: v => /^0x[0-9a-fA-F]{40}$/.test(v) },
+  { id: 'bitcoin',  label: 'Bitcoin',       icon: '₿',  hint: 'Native BTC address',                 type: 'btc',  placeholder: 'Paste BTC address (bc1... or 1...)', validate: v => /^(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,62}$/.test(v) },
+  { id: 'ton',      label: 'TON',           icon: '💬', hint: 'Tonkeeper — UQ... address',             type: 'ton',  placeholder: 'Paste TON address (UQ...)',       validate: v => v.length >= 48 },
+  // Add-ons (not shown by default)
+  { id: 'sui',      label: 'Sui',           icon: '💧', hint: 'Sui wallet — 0x address',              type: 'evm',  placeholder: 'Paste Sui 0x address',           validate: v => /^0x[0-9a-fA-F]{40,}$/.test(v) },
+  { id: 'aptos',    label: 'Aptos',         icon: '🌀', hint: 'Petra wallet — 0x address',             type: 'evm',  placeholder: 'Paste Aptos 0x address',         validate: v => /^0x[0-9a-fA-F]{40,}$/.test(v) },
+  { id: 'avax',     label: 'Avalanche',     icon: '❄️', hint: 'Core wallet — 0x address',              type: 'evm',  placeholder: 'Paste 0x address',               validate: v => /^0x[0-9a-fA-F]{40}$/.test(v) },
+];
+const TOP_5_IDS   = ['solana','evm','bsc','bitcoin','ton'];
+const STORAGE_KEY = id => `gsb_rwallet_${id}_${userId}`; // receiving wallet per chain
+
+function getReceivingWallet(chainId) {
+  return localStorage.getItem(STORAGE_KEY(chainId)) || '';
+}
+function setReceivingWallet(chainId, addr) {
+  localStorage.setItem(STORAGE_KEY(chainId), addr);
+  // Sync legacy keys for backward compat
+  if (chainId === 'solana') localStorage.setItem(`gsb_sol_wallet_${userId}`, addr);
+  if (chainId === 'evm')    localStorage.setItem(`gsb_evm_wallet_${userId}`, addr);
+  localStorage.setItem(`gsb_wallet_${userId}`, addr); // primary
+}
+function getActiveWalletAddress() {
+  // Return first saved address: SOL preferred, then EVM, then any
+  for (const id of ['solana','evm',...CHAIN_DEFS.map(c=>c.id)]) {
+    const v = getReceivingWallet(id);
+    if (v) return v;
+  }
+  return null;
 }
 
-function switchWallet() {
-  // Show connect screen in switch mode — keep app-screen visible behind, show cancel
-  document.getElementById('connect-title').textContent = 'Switch Wallet';
-  document.getElementById('connect-sub').textContent   = 'Connect a different wallet or disconnect.';
-  document.getElementById('disconnect-row').style.display    = 'block';
-  document.getElementById('cancel-connect-row').style.display = 'block';
-  document.getElementById('paste-wallet-section').style.display = 'none';
-  document.getElementById('wallet-picker-section').style.display = 'grid';
-  document.getElementById('connect-screen').style.display = 'flex';
-  document.getElementById('app-screen').style.display = 'none';
-  // Pre-fill saved wallets so user can see/update them
-  const savedSol = localStorage.getItem(`gsb_sol_wallet_${userId}`);
-  const savedEvm = localStorage.getItem(`gsb_evm_wallet_${userId}`);
-  if (savedSol) document.getElementById('wallet-sol').value = savedSol;
-  if (savedEvm) document.getElementById('wallet-evm').value = savedEvm;
+// ── Wallet screen render ──────────────────────────────────────────────────
+function getVisibleChains() {
+  const extra = JSON.parse(localStorage.getItem(`gsb_extra_chains_${userId}`) || '[]');
+  const ids   = [...TOP_5_IDS, ...extra.filter(id => !TOP_5_IDS.includes(id))];
+  return ids.map(id => CHAIN_DEFS.find(c => c.id === id)).filter(Boolean);
 }
 
-function disconnectWallet() {
-  walletAddress = null;
-  localStorage.removeItem('gsb_wallet');
-  // Keep userId so session state isn't lost
-  const badge = document.getElementById('wallet-badge');
-  badge.textContent = 'Connect Wallet';
-  badge.classList.remove('connected');
-  // Hide switch screen, show fresh connect
-  document.getElementById('disconnect-row').style.display    = 'none';
-  document.getElementById('cancel-connect-row').style.display = 'none';
-  document.getElementById('connect-title').textContent = 'Connect Your Wallet';
-  document.getElementById('connect-sub').textContent   = 'Connect once. Swap forever. Non-custodial.';
-  document.getElementById('paste-wallet-section').style.display = 'none';
-  document.getElementById('wallet-picker-section').style.display = 'grid';
-  document.getElementById('app-screen').style.display = 'none';
-  document.getElementById('connect-screen').style.display = 'flex';
+function renderWalletList() {
+  const chains  = getVisibleChains();
+  const allIds  = CHAIN_DEFS.map(c => c.id);
+  const extraIds = CHAIN_DEFS.map(c=>c.id).filter(id => !TOP_5_IDS.includes(id));
+  const addedExtra = JSON.parse(localStorage.getItem(`gsb_extra_chains_${userId}`) || '[]');
+  const notYetAdded = extraIds.filter(id => !addedExtra.includes(id));
+
+  const list = document.getElementById('wallet-list');
+  list.innerHTML = chains.map(c => {
+    const saved = getReceivingWallet(c.id);
+    return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="font-size:20px">${c.icon}</span>
+        <div>
+          <div style="font-size:13px;font-weight:700">${c.label}</div>
+          <div style="font-size:11px;color:var(--muted)">${c.hint}</div>
+        </div>
+        ${saved ? `<span style="margin-left:auto;font-size:11px;color:var(--accent);white-space:nowrap">✓ ${saved.slice(0,5)}…${saved.slice(-4)}</span>` : ''}
+      </div>
+      <input
+        id="rw-${c.id}"
+        class="input"
+        placeholder="${c.placeholder}"
+        value="${saved}"
+        style="width:100%;box-sizing:border-box;font-size:12px"
+      />
+    </div>`;
+  }).join('');
+
+  // + Add chain button
+  const addRow = document.getElementById('add-chain-row');
+  if (notYetAdded.length > 0) {
+    addRow.style.display = 'block';
+    const sel = document.getElementById('add-chain-select');
+    sel.innerHTML = `<option value="">+ Add another chain...</option>` +
+      notYetAdded.map(id => {
+        const c = CHAIN_DEFS.find(x => x.id === id);
+        return `<option value="${id}">${c.icon} ${c.label}</option>`;
+      }).join('');
+    sel.onchange = () => {
+      if (!sel.value) return;
+      const extra = JSON.parse(localStorage.getItem(`gsb_extra_chains_${userId}`) || '[]');
+      if (!extra.includes(sel.value)) extra.push(sel.value);
+      localStorage.setItem(`gsb_extra_chains_${userId}`, JSON.stringify(extra));
+      renderWalletList();
+    };
+  } else {
+    addRow.style.display = 'none';
+  }
 }
 
-function closeConnectScreen() {
+function openWalletScreen() {
+  renderWalletList();
+  const hasWallets = !!getActiveWalletAddress();
+  const cancelBtn  = document.getElementById('cancel-connect-row');
+  cancelBtn.style.display = hasWallets ? 'block' : 'none';
+  document.getElementById('connect-screen').style.display = 'flex';
+  document.getElementById('app-screen').style.display = 'none';
+}
+
+// ── Signing wallet connect (Phantom / MetaMask / Coinbase / paste) ──────────
+
+function openSignScreen(canCancel = false) {
+  document.getElementById('sign-screen').style.display = 'flex';
   document.getElementById('connect-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'none';
+  document.getElementById('sign-cancel-row').style.display = canCancel ? 'block' : 'none';
+  document.getElementById('sign-paste-row').style.display = 'none';
+}
+
+function closeSignScreen() {
+  document.getElementById('sign-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'block';
 }
 
-function connectWithPaste() {
-  const val = document.getElementById('paste-wallet-input').value.trim();
-  if (!val) { showToast('Paste your wallet address', 'error'); return; }
-  // Basic validation: EVM 0x address or Solana base58 (32-44 chars)
-  const isEVM     = /^0x[0-9a-fA-F]{40}$/.test(val);
-  const isSolana  = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(val);
-  if (!isEVM && !isSolana) { showToast('Invalid wallet address', 'error'); return; }
-  walletAddress = val;
-  onWalletConnected();
-}
-
-async function connectWith(provider) {
-  if (provider === 'paste') {
-    document.getElementById('paste-wallet-section').style.display = 'block';
-    document.getElementById('wallet-picker-section').style.display = 'none';
-    setTimeout(() => document.getElementById('paste-wallet-input').focus(), 100);
-    return;
-  }
+async function connectSigner(provider) {
   if (provider === 'phantom') {
     if (window.phantom?.solana) {
       try {
         const resp = await window.phantom.solana.connect();
         walletAddress = resp.publicKey.toString();
         onWalletConnected(); return;
-      } catch(e) { showToast('Connection cancelled', 'error'); return; }
+      } catch(e) { showToast('Cancelled', 'error'); return; }
     }
-    // No extension — show paste with Phantom-specific hint
-    document.getElementById('paste-wallet-input').placeholder = 'Paste your Solana address from Phantom';
-    document.getElementById('paste-wallet-section').style.display = 'block';
-    document.getElementById('wallet-picker-section').style.display = 'none';
-    showToast('Open Phantom → copy your address → paste here', '');
-    setTimeout(() => document.getElementById('paste-wallet-input').focus(), 100);
+    // No extension — fall to paste
+    const inp = document.getElementById('sign-paste-input');
+    inp.placeholder = 'Paste your Solana address from Phantom';
+    document.getElementById('sign-paste-row').style.display = 'block';
+    showToast('Open Phantom → copy address → paste here', '');
     return;
   }
-
-  if (provider === 'metamask') {
-    const evmProvider = (window.ethereum?.providers?.find(p => p.isMetaMask))
-      || (window.ethereum?.isMetaMask ? window.ethereum : null)
-      || window.ethereum || null;
-    if (evmProvider) {
-      try {
-        const accounts = await evmProvider.request({ method: 'eth_requestAccounts' });
-        walletAddress = accounts[0]; onWalletConnected(); return;
-      } catch(e) { showToast('Connection cancelled', 'error'); return; }
-    }
-    document.getElementById('paste-wallet-input').placeholder = 'Paste your 0x address from MetaMask';
-    document.getElementById('paste-wallet-section').style.display = 'block';
-    document.getElementById('wallet-picker-section').style.display = 'none';
-    showToast('Open MetaMask → copy your address → paste here', '');
-    setTimeout(() => document.getElementById('paste-wallet-input').focus(), 100);
-    return;
+  const evmProvider =
+    provider === 'coinbase'
+      ? (window.coinbaseWalletExtension || (window.ethereum?.isCoinbaseWallet ? window.ethereum : null) || (window.ethereum?.providers?.find(p => p.isCoinbaseWallet)))
+      : ((window.ethereum?.providers?.find(p => p.isMetaMask)) || (window.ethereum?.isMetaMask ? window.ethereum : null) || window.ethereum);
+  if (evmProvider) {
+    try {
+      const accounts = await evmProvider.request({ method: 'eth_requestAccounts' });
+      walletAddress = accounts[0];
+      onWalletConnected(); return;
+    } catch(e) { showToast('Cancelled', 'error'); return; }
   }
-
-  if (provider === 'coinbase') {
-    const evmProvider = window.coinbaseWalletExtension
-      || (window.ethereum?.isCoinbaseWallet ? window.ethereum : null)
-      || (window.ethereum?.providers?.find(p => p.isCoinbaseWallet)) || null;
-    if (evmProvider) {
-      try {
-        const accounts = await evmProvider.request({ method: 'eth_requestAccounts' });
-        walletAddress = accounts[0]; onWalletConnected(); return;
-      } catch(e) { showToast('Connection cancelled', 'error'); return; }
-    }
-    document.getElementById('paste-wallet-input').placeholder = 'Paste your 0x address from Coinbase Wallet';
-    document.getElementById('paste-wallet-section').style.display = 'block';
-    document.getElementById('wallet-picker-section').style.display = 'none';
-    showToast('Open Coinbase Wallet → copy your address → paste here', '');
-    setTimeout(() => document.getElementById('paste-wallet-input').focus(), 100);
-    return;
-  }
-
-  // Paste Address button
-  document.getElementById('paste-wallet-input').placeholder = '0x... (EVM) or base58 (Solana)';
-  document.getElementById('paste-wallet-section').style.display = 'block';
-  document.getElementById('wallet-picker-section').style.display = 'none';
-  setTimeout(() => document.getElementById('paste-wallet-input').focus(), 100);
+  // No extension — fall to paste
+  const lbl = provider === 'coinbase' ? 'Coinbase Wallet' : 'MetaMask';
+  document.getElementById('sign-paste-input').placeholder = `Paste your 0x address from ${lbl}`;
+  document.getElementById('sign-paste-row').style.display = 'block';
+  showToast(`Open ${lbl} → copy address → paste here`, '');
 }
 
-function saveMultiWallet() {
-  const solVal = document.getElementById('wallet-sol').value.trim();
-  const evmVal = document.getElementById('wallet-evm').value.trim();
+function connectSignerPaste() {
+  const val = document.getElementById('sign-paste-input').value.trim();
+  const isEVM    = /^0x[0-9a-fA-F]{40}$/.test(val);
+  const isSolana = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(val);
+  if (!isEVM && !isSolana) { showToast('Invalid address', 'error'); return; }
+  walletAddress = val;
+  onWalletConnected();
+}
 
-  const solOk = solVal && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(solVal);
-  const evmOk = evmVal && /^0x[0-9a-fA-F]{40}$/.test(evmVal);
+function connectWallet()  { openSignScreen(); }  // called by onboarding + legacy
+function switchWallet()   { openSignScreen(true); }  // called from badge when already connected
 
-  if (!solOk && !evmVal && !evmOk) {
-    showToast('Paste at least one wallet address', 'error'); return;
+function closeConnectScreen() {
+  document.getElementById('connect-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'block';
+}
+
+function saveReceivingWallets() {
+  const chains  = getVisibleChains();
+  let   saved   = 0;
+  let   invalid = null;
+
+  for (const c of chains) {
+    const input = document.getElementById(`rw-${c.id}`);
+    if (!input) continue;
+    const val = input.value.trim();
+    if (!val) continue; // blank = skip, don't overwrite existing
+    if (!c.validate(val)) { invalid = `Invalid ${c.label} address`; break; }
+    setReceivingWallet(c.id, val);
+    saved++;
   }
-  if (solVal && !solOk) {
-    showToast('Invalid Solana address — must be base58, 32–44 chars', 'error'); return;
-  }
-  if (evmVal && !evmOk) {
-    showToast('Invalid EVM address — must start with 0x and be 42 chars', 'error'); return;
-  }
 
-  if (solOk) localStorage.setItem(`gsb_sol_wallet_${userId}`, solVal);
-  if (evmOk) localStorage.setItem(`gsb_evm_wallet_${userId}`, evmVal);
+  if (invalid) { showToast(invalid, 'error'); return; }
+  if (saved === 0) { showToast('Paste at least one address', 'error'); return; }
 
-  // Primary walletAddress: SOL preferred (most sessions start on Solana)
-  walletAddress = solOk ? solVal : evmVal;
-  // Also write legacy key so all tabs + init restore path can find the wallet
-  localStorage.setItem(`gsb_wallet_${userId}`, walletAddress);
+  // Set active walletAddress from best saved
+  walletAddress = getActiveWalletAddress();
   showToast('Wallets saved');
   onWalletConnected();
 }
 
+// Legacy alias — used by completeOnboarding path
+function saveMultiWallet() { saveReceivingWallets(); }
+
+function disconnectWallet() {
+  // Clear all receiving wallets
+  CHAIN_DEFS.forEach(c => localStorage.removeItem(STORAGE_KEY(c.id)));
+  localStorage.removeItem(`gsb_wallet_${userId}`);
+  localStorage.removeItem(`gsb_sol_wallet_${userId}`);
+  localStorage.removeItem(`gsb_evm_wallet_${userId}`);
+  walletAddress = null;
+  const badge = document.getElementById('wallet-badge');
+  badge.textContent = 'My Wallets';
+  badge.classList.remove('connected');
+  openWalletScreen();
+}
+
 function onWalletConnected() {
+  document.getElementById('sign-screen').style.display = 'none';
   document.getElementById('connect-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'block';
   const short = walletAddress.slice(0,6) + '...' + walletAddress.slice(-4);
@@ -2373,66 +2438,42 @@ function shouldShowOnboarding() {
 function completeOnboarding() {
   localStorage.setItem(ONBOARD_KEY, String(Date.now()));
   document.getElementById('onboard-screen').style.display = 'none';
-  // After onboarding: show app if wallet known, else show connect screen
-  const savedSol = localStorage.getItem(`gsb_sol_wallet_${userId}`);
-  const savedEvm = localStorage.getItem(`gsb_evm_wallet_${userId}`);
-  const saved    = localStorage.getItem(`gsb_wallet_${userId}`);
-  const primary  = savedSol || savedEvm || saved;
+  // After onboarding: restore signing wallet if known, else prompt to connect
+  const primary = getActiveWalletAddress() || localStorage.getItem(`gsb_wallet_${userId}`);
   if (primary) {
     walletAddress = primary;
     onWalletConnected();
   } else {
-    connectWallet();
+    openSignScreen(); // first-time: prompt to connect signing wallet
   }
 }
 
 window.addEventListener('load', () => {
+  const primary = getActiveWalletAddress() || localStorage.getItem(`gsb_wallet_${userId}`);
+
   // ── Onboarding gate ───────────────────────────────────────
   if (shouldShowOnboarding()) {
     document.getElementById('onboard-screen').style.display = 'flex';
-    // Background: restore wallet + load trending while user reads
-    const _sol = localStorage.getItem(`gsb_sol_wallet_${userId}`);
-    const _evm = localStorage.getItem(`gsb_evm_wallet_${userId}`);
-    const _leg = localStorage.getItem(`gsb_wallet_${userId}`);
-    const _primary = _sol || _evm || _leg;
-    if (_primary) { walletAddress = _primary; } // set silently — onWalletConnected fires after Get Started
+    if (primary) walletAddress = primary; // restore silently while user reads
     loadTrending('base');
     setTimeout(() => updateQuote(), 500);
     if (window.ethereum) {
-      window.ethereum.on('accountsChanged', (accounts) => {
-        if (accounts.length > 0) { walletAddress = accounts[0]; onWalletConnected(); }
-      });
+      window.ethereum.on('accountsChanged', (a) => { if (a.length) { walletAddress = a[0]; onWalletConnected(); } });
     }
-    return; // stop here — rest of init runs after Get Started is tapped
+    return;
   }
 
-  // ── Normal init (onboarding already seen recently) ──────────────────
-  // Restore saved wallets — prefer chain-specific keys, fallback to legacy key
-  const savedSol = localStorage.getItem(`gsb_sol_wallet_${userId}`);
-  const savedEvm = localStorage.getItem(`gsb_evm_wallet_${userId}`);
-  let saved = localStorage.getItem(`gsb_wallet_${userId}`);
-  if (!saved) {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith('gsb_wallet_') && !k.startsWith('gsb_sol_wallet_') && !k.startsWith('gsb_evm_wallet_') && localStorage.getItem(k)) {
-        saved = localStorage.getItem(k);
-        break;
-      }
-    }
-  }
-  // Primary walletAddress: SOL preferred, else EVM, else legacy
-  const primary = savedSol || savedEvm || saved;
+  // ── Normal init ─────────────────────────────────────────────────
   if (primary) {
     walletAddress = primary;
-    onWalletConnected();
+    onWalletConnected(); // auto-restore — skips sign screen
+  } else {
+    openSignScreen(); // no wallet saved — prompt to connect
   }
   setTimeout(() => updateQuote(), 500);
-  // Load trending in background so it's ready when user clicks
   loadTrending('base');
   if (window.ethereum) {
-    window.ethereum.on('accountsChanged', (accounts) => {
-      if (accounts.length > 0) { walletAddress = accounts[0]; onWalletConnected(); }
-    });
+    window.ethereum.on('accountsChanged', (a) => { if (a.length) { walletAddress = a[0]; onWalletConnected(); } });
   }
 });
 </script>
