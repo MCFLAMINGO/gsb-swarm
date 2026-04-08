@@ -422,9 +422,9 @@
 
   <!-- Paste address (shown in Telegram where no wallet extension exists) -->
   <div id="paste-wallet-section" style="display:none;width:100%;margin-top:16px">
-    <div style="font-size:13px;color:var(--muted);margin-bottom:10px;text-align:center">Paste your wallet address below<br><span style="font-size:11px;opacity:.7">(EVM: 0x... &nbsp;|&nbsp; Solana: base58)</span></div>
-    <input id="paste-wallet-input" class="input" placeholder="0x... or Solana address" style="width:100%;box-sizing:border-box;font-size:13px" />
-    <button onclick="connectWithPaste()" class="btn-primary" style="width:100%;margin-top:10px;padding:14px;border-radius:12px;font-weight:700;font-size:15px">Connect</button>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:10px;text-align:center">Paste your wallet address below<br><span style="font-size:11px;opacity:.7">Copy it from Phantom, MetaMask, or any wallet app</span></div>
+    <input id="paste-wallet-input" class="input" placeholder="0x... (EVM) or base58 (Solana)" style="width:100%;box-sizing:border-box;font-size:13px" />
+    <button onclick="connectWithPaste()" class="btn-primary" style="width:100%;margin-top:10px;padding:14px;border-radius:12px;font-weight:700;font-size:15px">Connect Wallet</button>
   </div>
 
   <!-- Wallet picker (shown in desktop browser where injected wallets may exist) -->
@@ -946,10 +946,11 @@ async function connectWith(provider) {
     } catch(e) { showToast('Connection cancelled', 'error'); }
     return;
   }
-  // Fallback: show paste input instead of window.open (avoids Telegram link dialog)
+  // Fallback: wallet extension not detected — show paste with helpful message
   document.getElementById('paste-wallet-section').style.display = 'block';
   document.getElementById('wallet-picker-section').style.display = 'none';
-  showToast('Paste your wallet address to connect', '');
+  const walletNames = { metamask: 'MetaMask', coinbase: 'Coinbase Wallet', phantom: 'Phantom' };
+  showToast(`${walletNames[provider] || 'Wallet'} not detected — paste your address instead`, '');
 }
 
 function onWalletConnected() {
