@@ -1718,7 +1718,7 @@ function renderPumpSession(s) {
     error:           '⚠️ Error',
   }[s.status] || s.status;
 
-  const _isSolSess  = s.isPumpFun;  // only pump.fun sessions are SOL-denominated; plain Solana USDC sessions use USD
+  const _isSolSess  = s.chain === 'solana'; // all Solana sessions are SOL-denominated
   const _budgetVal   = _isSolSess ? (s.totalSol || s.maxSol || 0) : (s.totalAmount || 0);
   const _spentVal    = s.totalSpent || 0;
   const _budgetLabel = _isSolSess ? `${_budgetVal} SOL` : `$${_budgetVal}`;
@@ -1730,7 +1730,7 @@ function renderPumpSession(s) {
       <span style="color:${statusColor};font-weight:700;font-size:13px">${statusLabel}</span>
       <span style="font-size:11px;color:var(--muted)">${s.buys?.length || 0} buys</span>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:6px;font-family:monospace;word-break:break-all">${s.tokenAddress?.slice(0,20)}...</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px;font-family:monospace;word-break:break-all;text-transform:none">${s.tokenAddress?.slice(0,20)}...</div>
     <div style="width:100%;background:var(--surface);border-radius:4px;height:6px;margin-bottom:8px">
       <div style="height:6px;border-radius:4px;background:var(--accent);width:${progress}%"></div>
     </div>
