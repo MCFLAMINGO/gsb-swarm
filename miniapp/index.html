@@ -2469,13 +2469,18 @@ function completeOnboarding() {
 }
 
 window.addEventListener('load', () => {
-  const primary = getActiveWalletAddress() || localStorage.getItem(`gsb_wallet_${userId}`);
+  // Never auto-restore in dev/browser context — always start fresh so testing
+  // begins with a clean sign screen (no stale dev_user localStorage leaking in)
+  const isRealUser = tg?.initDataUnsafe?.user?.id;
+  const primary = isRealUser
+    ? (getActiveWalletAddress() || localStorage.getItem(`gsb_wallet_${userId}`))
+    : null;
 
   // ── Onboarding gate ───────────────────────────────────────
   if (shouldShowOnboarding()) {
     document.getElementById('onboard-screen').style.display = 'flex';
     if (primary) walletAddress = primary; // restore silently while user reads
-    updateBadge(); // show correct badge text even during onboarding
+    updateBadge();
     loadTrending('base');
     setTimeout(() => updateQuote(), 500);
     if (window.ethereum) {
@@ -2487,9 +2492,9 @@ window.addEventListener('load', () => {
   // ── Normal init ─────────────────────────────────────────────────
   if (primary) {
     walletAddress = primary;
-    onWalletConnected(); // auto-restore — skips sign screen
+    onWalletConnected(); // real Telegram user — auto-restore
   } else {
-    openSignScreen(); // no wallet saved — prompt to connect
+    openSignScreen(); // no wallet / dev context — prompt to connect
   }
   setTimeout(() => updateQuote(), 500);
   loadTrending('base');
