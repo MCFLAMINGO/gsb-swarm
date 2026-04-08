@@ -56,8 +56,27 @@ async function getTokenData(input) {
       ? `https://api.dexscreener.com/latest/dex/tokens/${input}`
       : `https://api.dexscreener.com/latest/dex/search?q=${input.replace('$','')}`;
     const res = await axios.get(url, { timeout: 8000 });
-    const pairs = res.data?.pairs || [];
-    // Filter to Base, sort by liquidity
+    let pairs = res.data?.pairs || [];
+
+    // If token lookup returned nothing, try as a pair address (e.g. PumpSwap pool)
+    if (!pairs.length && isAddress) {
+      const chainSlug = CHAIN_INPUT === 'ethereum' ? 'ethereum' : CHAIN_INPUT;
+      try {
+        const pairRes = await axios.get(`https://api.dexscreener.com/latest/dex/pairs/${chainSlug}/${input}`, { timeout: 8000 });
+        const pairPairs = pairRes.data?.pairs || [];
+        if (pairPairs.length) {
+          // Re-lookup by the actual token mint
+          const tokenMint = pairPairs[0]?.baseToken?.address;
+          if (tokenMint && tokenMint !== input) {
+            const mintRes = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`, { timeout: 8000 });
+            pairs = mintRes.data?.pairs || pairPairs;
+          } else {
+            pairs = pairPairs;
+          }
+        }
+      } catch {}
+    }
+
     // Filter to requested chain; fall back to all chains sorted by liquidity
     let basePairs = pairs.filter(p => p.chainId === CHAIN_INPUT);
     if (!basePairs.length) basePairs = pairs; // fallback: any chain
