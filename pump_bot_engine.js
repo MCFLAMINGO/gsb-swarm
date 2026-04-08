@@ -253,34 +253,43 @@ async function executeOneBuy(session) {
 async function checkDepositReceived(session) {
   const chain = session.chain || 'base';
 
-  // ── Solana sessions (pump.fun or Jupiter): check for SOL deposit via Solana RPC ──
+  // ── Solana sessions: check for SOL deposit via Solana RPC ──
   if (session.chain === 'solana') {
-    try {
-      const { Connection, PublicKey } = require('@solana/web3.js');
-      const bs58 = require('bs58');
-      const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
-      const GSB_SOL_WALLET = process.env.GSB_SOL_WALLET || 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs';
-      const cutoff = session.createdAt - 60_000;
-      const expectedLamports = Math.round(session.totalSol * 1e9); // totalSol in SOL → lamports
+    // Try multiple RPCs in sequence — public mainnet is rate-limited from server IPs
+    const SOL_RPCS = [
+      process.env.SOLANA_RPC_URL,
+      'https://rpc.ankr.com/solana',
+      'https://api.mainnet-beta.solana.com',
+    ].filter(Boolean);
 
-      // Get recent confirmed transactions for the wallet
-      const sigs = await connection.getSignaturesForAddress(new PublicKey(GSB_SOL_WALLET), { limit: 20 });
-      for (const sigInfo of sigs) {
-        if (!sigInfo.blockTime) continue;
-        if (sigInfo.blockTime * 1000 < cutoff) break;
-        const tx = await connection.getTransaction(sigInfo.signature, { maxSupportedTransactionVersion: 0 });
-        if (!tx || !tx.meta) continue;
-        // Check SOL balance change on our wallet
-        const accts = tx.transaction.message.staticAccountKeys || tx.transaction.message.accountKeys;
-        const idx   = accts.findIndex(k => k.toBase58() === GSB_SOL_WALLET);
-        if (idx === -1) continue;
-        const delta = (tx.meta.postBalances[idx] || 0) - (tx.meta.preBalances[idx] || 0);
-        if (delta >= expectedLamports) return true;
+    for (const rpcUrl of SOL_RPCS) {
+      try {
+        const { Connection, PublicKey } = require('@solana/web3.js');
+        const connection = new Connection(rpcUrl, { commitment: 'confirmed' });
+        const GSB_SOL_WALLET = process.env.GSB_SOL_WALLET || 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs';
+        const cutoff = session.createdAt - 60_000;
+        const expectedLamports = Math.round(session.totalSol * 1e9);
+
+        const sigs = await connection.getSignaturesForAddress(new PublicKey(GSB_SOL_WALLET), { limit: 25 });
+        for (const sigInfo of sigs) {
+          if (!sigInfo.blockTime) continue;
+          if (sigInfo.blockTime * 1000 < cutoff) break;
+          const tx = await connection.getTransaction(sigInfo.signature, { maxSupportedTransactionVersion: 0 });
+          if (!tx || !tx.meta) continue;
+          const accts = tx.transaction.message.staticAccountKeys || tx.transaction.message.accountKeys;
+          const idx   = accts.findIndex(k => k.toBase58() === GSB_SOL_WALLET);
+          if (idx === -1) continue;
+          const delta = (tx.meta.postBalances[idx] || 0) - (tx.meta.preBalances[idx] || 0);
+          // Allow 1% tolerance for rounding / fee edge cases
+          if (delta >= Math.round(expectedLamports * 0.99)) return true;
+        }
+        return false; // RPC responded — no matching deposit found
+      } catch (err) {
+        console.error(`[pump] SOL deposit check failed on ${rpcUrl}: ${err.message} — trying next RPC`);
       }
-      return false;
-    } catch {
-      return false;
     }
+    console.error('[pump] All Solana RPCs failed for deposit check — session', session.sessionId);
+    return false;
   }
 
   // ── EVM sessions: Poll Blockscout for inbound USDC transfers ────────────────

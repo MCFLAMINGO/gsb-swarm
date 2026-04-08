@@ -45,7 +45,10 @@ async function getTokenData(input) {
   // Try DexScreener first
   let dexData = null;
   try {
-    const isAddress = input.startsWith('0x');
+    // Detect both EVM (0x...) and Solana (base58, 32-44 chars) addresses
+    const isEvmAddress = input.startsWith('0x') && input.length === 42;
+    const isSolAddress = !input.startsWith('0x') && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(input);
+    const isAddress = isEvmAddress || isSolAddress;
     const url = isAddress
       ? `https://api.dexscreener.com/latest/dex/tokens/${input}`
       : `https://api.dexscreener.com/latest/dex/search?q=${input.replace('$','')}`;
@@ -230,7 +233,7 @@ async function analyzeToken(input) {
   const { dex, cg } = await getTokenData(input);
 
   if (!dex) {
-    return { error: `Token ${input} not found on Base DEX`, input };
+    return { error: `Token ${input} not found on ${CHAIN_INPUT.toUpperCase()} — check the symbol or contract address`, input };
   }
 
   // ── Safety check (honeypot.is) ───────────────────────────────────────────────
