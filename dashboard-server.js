@@ -3718,6 +3718,58 @@ const pumpBot    = require('./pump_bot_engine');
 // Serve mini app
 app.use('/miniapp', express.static(path.join(__dirname, 'miniapp')));
 
+// ── Serve WalletConnect /wc page ─────────────────────────────────────────────
+app.use('/miniapp-wc', express.static(path.join(__dirname, 'miniapp-wc')));
+
+// ── /wc route alias (short URL) — redirect to miniapp-wc ─────────────────────
+app.get('/wc', (req, res) => {
+  const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  res.redirect(301, '/miniapp-wc/' + qs);
+});
+
+// ── WalletConnect user wallet store ──────────────────────────────────────────
+// In-memory store (keyed by userId) — also syncs to dcaEngine wallet file
+const wcWalletStore = new Map(); // userId → { walletAddress, chain, connectedAt }
+
+// POST /api/user/set-wallet — called from /wc page after wallet connects
+app.post('/api/user/set-wallet', express.json(), (req, res) => {
+  const { userId, walletAddress, chain } = req.body || {};
+  if (!userId || !walletAddress) {
+    return res.status(400).json({ ok: false, error: 'userId and walletAddress required' });
+  }
+  const entry = { userId: String(userId), walletAddress, chain: chain || 'evm', connectedAt: Date.now() };
+  wcWalletStore.set(String(userId), entry);
+  // Also persist via dcaEngine so the miniapp swap flow sees the same wallet
+  try {
+    dcaEngine.saveWallet({ userId: String(userId), userName: String(userId), walletAddress });
+  } catch (e) {
+    console.warn('[wc] dcaEngine.saveWallet failed:', e.message);
+  }
+  console.log(`[wc] Wallet saved for userId ${userId}: ${walletAddress} (${chain})`);
+  res.json({ ok: true, userId: String(userId), walletAddress, chain: entry.chain });
+});
+
+// GET /api/user/wallet?userId= — miniapp polls this to auto-restore wallet
+app.get('/api/user/wallet', (req, res) => {
+  const userId = req.query.userId ? String(req.query.userId) : null;
+  if (!userId) return res.status(400).json({ ok: false, error: 'userId required' });
+  // Check in-memory store first
+  const entry = wcWalletStore.get(userId);
+  if (entry) {
+    return res.json({ ok: true, walletAddress: entry.walletAddress, chain: entry.chain, source: 'wc' });
+  }
+  // Fall back to dcaEngine wallet file
+  try {
+    const dca = dcaEngine.getWallet(userId);
+    if (dca && dca.walletAddress) {
+      return res.json({ ok: true, walletAddress: dca.walletAddress, chain: 'evm', source: 'dca' });
+    }
+  } catch (e) {
+    console.warn('[wc] dcaEngine.getWallet failed:', e.message);
+  }
+  return res.json({ ok: false, walletAddress: null });
+});
+
 // ── Wallet management ─────────────────────────────────────────────────────────
 app.post('/api/swap/wallet', express.json(), (req, res) => {
   const { userId, userName, walletAddress } = req.body;

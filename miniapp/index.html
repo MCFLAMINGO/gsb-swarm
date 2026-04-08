@@ -1145,20 +1145,17 @@ function closeSignScreen() {
 }
 
 async function connectSigner(provider) {
-  // In Telegram: no injected providers — open wallet app via deeplink, user copies address back
+  // In Telegram: WebView blocks wallet deeplinks — open /wc page in system browser
+  // The /wc page handles WalletConnect natively, saves wallet server-side, then redirects back.
   if (IS_TELEGRAM) {
-    const walletLinks = {
-      phantom:  'https://phantom.app/ul/browse/' + encodeURIComponent('https://gsb-swarm-production.up.railway.app/miniapp/') + '?ref=' + encodeURIComponent('https://gsb-swarm-production.up.railway.app'),
-      metamask: 'https://metamask.app.link/dapp/gsb-swarm-production.up.railway.app/miniapp/',
-      coinbase: 'https://go.cb-w.com/dapp?cb_url=' + encodeURIComponent('https://gsb-swarm-production.up.railway.app/miniapp/'),
-    };
-    const labels = { phantom: 'Phantom', metamask: 'MetaMask', coinbase: 'Coinbase Wallet' };
-    const lbl = labels[provider] || provider;
-    const link = walletLinks[provider];
-    if (link) _openWalletLink(link);
-    // Update hint and focus paste input
-    document.getElementById('sign-paste-hint').textContent = `${lbl} opening… copy your address there and paste it below.`;
-    setTimeout(() => document.getElementById('sign-paste-input').focus(), 600);
+    const _wcUserId   = tg?.initDataUnsafe?.user?.id || userId || 'unknown';
+    const _returnUrl  = encodeURIComponent('https://t.me/gsb_swap_bot');
+    const wcUrl       = `${API_BASE}/wc?userId=${_wcUserId}&returnUrl=${_returnUrl}`;
+    _openWalletLink(wcUrl);
+    // Update hint — tell user to come back after connecting
+    document.getElementById('sign-paste-hint').textContent = 'Connect your wallet in the browser window that just opened, then return here.';
+    // Start polling for wallet address saved server-side (up to 3 min)
+    startWalletPoll(_wcUserId);
     return;
   }
 
@@ -1390,6 +1387,35 @@ async function approveUSDC() {
 
 // ── Wallet deeplink launcher ─────────────────────────────────────────────────
 // Telegram WebView traps <a href> and window.open — they resolve to the
+// ── WC wallet polling — auto-restore after user connects via /wc page ────────
+let _wcPollTimer = null;
+
+function startWalletPoll(pollUserId) {
+  // Clear any existing poll
+  if (_wcPollTimer) { clearInterval(_wcPollTimer); _wcPollTimer = null; }
+  let attempts = 0;
+  const MAX_ATTEMPTS = 36; // 3 minutes at 5s intervals
+  _wcPollTimer = setInterval(async () => {
+    attempts++;
+    try {
+      const r = await fetch(`${API_BASE}/api/user/wallet?userId=${encodeURIComponent(String(pollUserId))}`);
+      const data = await r.json();
+      if (data.ok && data.walletAddress) {
+        clearInterval(_wcPollTimer);
+        _wcPollTimer = null;
+        walletAddress = data.walletAddress;
+        onWalletConnected();
+        showToast('Wallet connected!', 'success');
+        return;
+      }
+    } catch (_) {}
+    if (attempts >= MAX_ATTEMPTS) {
+      clearInterval(_wcPollTimer);
+      _wcPollTimer = null;
+    }
+  }, 5000);
+}
+
 // wallet's download page instead of the installed app. Fix:
 //   iOS  : tg.openLink() → system Safari → iOS universal link → wallet app
 //   Android: tg.openLink() → Chrome → universal link → wallet app
@@ -1952,7 +1978,7 @@ function completeOnboarding() {
   openSignScreen(); // always go to sign screen after welcome
 }
 
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
   // Restore wallet only for real Telegram users — dev/browser always starts clean
   const isRealUser = tg?.initDataUnsafe?.user?.id;
   const primary = isRealUser
@@ -1970,6 +1996,20 @@ window.addEventListener('load', () => {
     // Known Telegram user — skip welcome, go straight to app
     walletAddress = primary;
     onWalletConnected();
+  } else if (isRealUser) {
+    // No local wallet saved — check server (user may have connected via /wc)
+    try {
+      const r = await fetch(`${API_BASE}/api/user/wallet?userId=${encodeURIComponent(String(userId))}`);
+      const data = await r.json();
+      if (data.ok && data.walletAddress) {
+        walletAddress = data.walletAddress;
+        onWalletConnected();
+        return;
+      }
+    } catch (_) {}
+    // Still no wallet — show welcome screen
+    document.getElementById('onboard-screen').style.display = 'flex';
+    updateBadge();
   } else {
     // No wallet saved — show welcome screen, then sign screen
     document.getElementById('onboard-screen').style.display = 'flex';
