@@ -760,7 +760,8 @@
       <!-- Receiving wallet -->
       <div style="margin-bottom:20px">
         <div class="pump-label">Your Receiving Wallet</div>
-        <input type="text" id="pump-wallet" placeholder="Your wallet address to receive purchased tokens" autocomplete="off" style="width:100%;font-size:12px">
+        <input type="text" id="pump-wallet" placeholder="Your wallet address to receive purchased tokens" autocomplete="off" style="width:100%;font-size:12px" oninput="updatePumpChainNote()">
+        <div id="pump-wallet-warn" style="display:none;margin-top:8px;padding:10px 12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.35);border-radius:8px;font-size:12px;color:#ef4444;line-height:1.5"></div>
       </div>
 
       <!-- Preview -->
@@ -1717,10 +1718,14 @@ function updatePumpChainNote() {
     solRow.style.display  = 'none';
   }
 
-  // Update wallet placeholder + auto-fill from connected wallet if field is empty
+  // ── Receiving wallet: auto-fill + mismatch guard ──────────────────────
   const walletInput = document.getElementById('pump-wallet');
+  const walletWarn  = document.getElementById('pump-wallet-warn');
+  const startBtn    = document.querySelector('#panel-dca button[onclick="startPumpBot()"]');
+
   if (walletInput) {
     walletInput.placeholder = isSol ? 'Solana wallet address (base58)' : '0x... EVM wallet address';
+
     // Auto-fill receiving wallet: prefer chain-specific saved wallet, fallback to walletAddress
     if (!walletInput.value.trim()) {
       const storedSol = localStorage.getItem(`gsb_sol_wallet_${userId}`);
@@ -1732,6 +1737,37 @@ function updatePumpChainNote() {
         if (isSol && isSolWallet)   walletInput.value = walletAddress;
         if (!isSol && !isSolWallet) walletInput.value = walletAddress;
       }
+    }
+
+    // Mismatch check: validate whatever is in the field against selected chain
+    const val       = walletInput.value.trim();
+    const storedSol = localStorage.getItem(`gsb_sol_wallet_${userId}`);
+    const storedEvm = localStorage.getItem(`gsb_evm_wallet_${userId}`);
+    let   warn      = '';
+
+    if (val) {
+      const isEvmVal = val.startsWith('0x');
+      if (isSol && isEvmVal) {
+        warn = '⚠️ This looks like an EVM address. Solana tokens cannot be sent to a 0x wallet. '
+             + (storedSol ? `Your saved Solana address is ${storedSol.slice(0,6)}...${storedSol.slice(-4)} — clear the field to auto-fill it.` : 'Go to Connect Wallet and add your Solana address.');
+      } else if (!isSol && !isEvmVal) {
+        warn = '⚠️ This looks like a Solana address. EVM tokens cannot be sent to a base58 wallet. '
+             + (storedEvm ? `Your saved EVM address is ${storedEvm.slice(0,6)}...${storedEvm.slice(-4)} — clear the field to auto-fill it.` : 'Go to Connect Wallet and add your 0x EVM address.');
+      }
+    } else {
+      // Field is empty — no wallet saved for this chain
+      if (isSol && !storedSol)  warn = '⚠️ No Solana wallet saved. Tap Connect Wallet and add your Solana address so purchased tokens can be returned to you.';
+      if (!isSol && !storedEvm) warn = '⚠️ No EVM wallet saved. Tap Connect Wallet and add your 0x address so purchased tokens can be returned to you.';
+    }
+
+    if (walletWarn) {
+      walletWarn.style.display = warn ? 'block' : 'none';
+      walletWarn.textContent   = warn;
+    }
+    if (startBtn) {
+      startBtn.disabled          = !!warn;
+      startBtn.style.opacity     = warn ? '0.45' : '1';
+      startBtn.style.cursor      = warn ? 'not-allowed' : '';
     }
   }
 
