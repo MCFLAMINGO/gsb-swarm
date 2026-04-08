@@ -1061,24 +1061,51 @@ async function saveWallet() {
 }
 
 async function checkApproval() {
-  if (!walletAddress) return;
+  if (!walletAddress || walletAddress.startsWith('0x') === false) {
+    // Solana wallets don't need USDC approval
+    document.getElementById('approve-banner').style.display = 'none';
+    return;
+  }
   try {
-    const r = await fetch(`${API_BASE}/api/swap/approval-status?wallet=${walletAddress}`);
+    const r = await fetch(`${API_BASE}/api/pump/approval-status?wallet=${walletAddress}`);
     const d = await r.json();
     document.getElementById('approve-banner').style.display = d.approved ? 'none' : 'flex';
   } catch {
-    document.getElementById('approve-banner').style.display = 'flex';
+    document.getElementById('approve-banner').style.display = 'none'; // fail open — don't block
   }
 }
 
 async function approveUSDC() {
   if (!walletAddress) return showToast('Connect wallet first', 'error');
-  // Send user to Uniswap swap page — approval prompt appears before first swap
-  const url = 'https://app.uniswap.org/#/swap?chain=base&inputCurrency=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-  IS_TELEGRAM ? tg.openLink(url) : window.open(url, '_blank');
-  showToast('Approve USDC on Uniswap, then come back', 'success');
-  // Re-check after 30s to auto-hide banner if they approved
-  setTimeout(checkApproval, 30000);
+  if (!walletAddress.startsWith('0x')) return showToast('Solana sessions do not need USDC approval', '');
+
+  const provider = window.ethereum;
+  if (!provider) {
+    showToast('No EVM wallet detected — install MetaMask or Coinbase Wallet', 'error');
+    return;
+  }
+
+  const AGENT_WALLET = '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
+  const USDC_BASE    = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+  // ERC-20 approve(address spender, uint256 amount) — maxUint256
+  const MAX = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+  const spenderPad = AGENT_WALLET.replace('0x','').toLowerCase().padStart(64,'0');
+  const data = '0x095ea7b3' + spenderPad + MAX;
+
+  try {
+    const accounts = await provider.request({ method: 'eth_requestAccounts' });
+    const from = accounts[0];
+    showToast('Approve in your wallet...', '');
+    await provider.request({
+      method: 'eth_sendTransaction',
+      params: [{ from, to: USDC_BASE, data, gas: '0xf424' }],
+    });
+    showToast('USDC approved — you will never need to do this again', 'success');
+    setTimeout(checkApproval, 5000); // re-check after tx lands
+  } catch(e) {
+    if (e.code === 4001) return showToast('Approval cancelled', 'error');
+    showToast('Approval failed: ' + (e.message || 'unknown error'), 'error');
+  }
 }
 
 
@@ -1646,6 +1673,21 @@ async function startPumpBot() {
     return showToast('You selected Solana — receiving wallet must be a Solana address, not 0x', 'error');
   if (!isSol && !receivingWallet.startsWith('0x'))
     return showToast('You selected ' + chain.toUpperCase() + ' — receiving wallet must be a 0x EVM address, not a Solana address', 'error');
+
+  // ── EVM: require USDC approval before session creation ──────────────────────
+  if (!isSol) {
+    try {
+      const approvalCheck = await fetch(`${API_BASE}/api/pump/approval-status?wallet=${walletAddress}&chain=${chain}`);
+      const approvalData  = await approvalCheck.json();
+      if (!approvalData.approved) {
+        showToast('Approve USDC first — tap the Approve button above', 'error');
+        document.getElementById('approve-banner').style.display = 'flex';
+        return;
+      }
+    } catch {
+      // Network error checking approval — let server gate catch it
+    }
+  }
 
   let body;
   if (isSol) {

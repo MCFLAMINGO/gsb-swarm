@@ -4005,6 +4005,32 @@ app.get('/api/swap/approval-status', async (req, res) => {
     res.json({ approved: false });
   }
 });
+// GET /api/pump/approval-status — checks user's USDC allowance granted to the GSB agent wallet
+// Works across all supported EVM chains (Base, Ethereum, Arbitrum, Polygon)
+app.get('/api/pump/approval-status', async (req, res) => {
+  const { wallet, chain } = req.query;
+  if (!wallet || !wallet.startsWith('0x')) return res.json({ approved: false });
+  const AGENT_WALLET = process.env.AGENT_EVM_WALLET || '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
+  const CHAIN_CONFIG = {
+    base:     { rpc: process.env.BASE_RPC_URL   || 'https://base.drpc.org',              usdc: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
+    ethereum: { rpc: process.env.ETH_RPC_URL    || 'https://eth.drpc.org',               usdc: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' },
+    arbitrum: { rpc: process.env.ARB_RPC_URL    || 'https://arbitrum.drpc.org',          usdc: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' },
+    polygon:  { rpc: process.env.POLYGON_RPC_URL || 'https://polygon.drpc.org',          usdc: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174' },
+  };
+  const cfg = CHAIN_CONFIG[chain] || CHAIN_CONFIG.base;
+  try {
+    const { createPublicClient, http } = require('viem');
+    const ALLOW_ABI = [{ name:'allowance', type:'function', inputs:[{name:'owner',type:'address'},{name:'spender',type:'address'}], outputs:[{name:'',type:'uint256'}], stateMutability:'view' }];
+    const pc = createPublicClient({ transport: http(cfg.rpc) });
+    const allowance = await pc.readContract({ address: cfg.usdc, abi: ALLOW_ABI, functionName: 'allowance', args: [wallet, AGENT_WALLET] });
+    // Approved if allowance >= 1 USDC (1e6) — any meaningful approval counts
+    res.json({ approved: allowance >= BigInt('1000000'), allowance: allowance.toString() });
+  } catch(e) {
+    console.error('[pump/approval-status]', e.message);
+    res.json({ approved: false, error: e.message });
+  }
+});
+
 app.get('/api/swap/approve-link', (req, res) => {
   // Deep-link to Uniswap token approval page for USDC on Base
   const url = 'https://app.uniswap.org/#/swap?chain=base&inputCurrency=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -4060,6 +4086,43 @@ app.post('/api/pump/create', express.json(), (req, res) => {
   if (!isSolana && (!totalAmount || !intervalAmount)) {
     return res.status(400).json({ ok: false, error: 'EVM sessions require totalAmount and intervalAmount' });
   }
+
+  // ── EVM gate: verify USDC approval against agent wallet before creating session ───────
+  if (!isSolana) {
+    try {
+      const AGENT_WALLET = process.env.AGENT_EVM_WALLET || '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
+      const CHAIN_USDC   = {
+        base: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        ethereum: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        arbitrum: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+        polygon:  '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+      };
+      const CHAIN_RPC = {
+        base: process.env.BASE_RPC_URL || 'https://base.drpc.org',
+        ethereum: process.env.ETH_RPC_URL || 'https://eth.drpc.org',
+        arbitrum: process.env.ARB_RPC_URL || 'https://arbitrum.drpc.org',
+        polygon:  process.env.POLYGON_RPC_URL || 'https://polygon.drpc.org',
+      };
+      const targetChain = (chain || 'base').toLowerCase();
+      const usdcAddr    = CHAIN_USDC[targetChain] || CHAIN_USDC.base;
+      const rpcUrl      = CHAIN_RPC[targetChain]  || CHAIN_RPC.base;
+      const { createPublicClient, http } = require('viem');
+      const ALLOW_ABI = [{ name:'allowance', type:'function', inputs:[{name:'owner',type:'address'},{name:'spender',type:'address'}], outputs:[{name:'',type:'uint256'}], stateMutability:'view' }];
+      const pc = createPublicClient({ transport: http(rpcUrl) });
+      // receivingWallet is the user's EVM wallet — approval must come from this wallet
+      const approverWallet = receivingWallet;
+      if (approverWallet && /^0x[0-9a-fA-F]{40}$/.test(approverWallet)) {
+        const allowance = await pc.readContract({ address: usdcAddr, abi: ALLOW_ABI, functionName: 'allowance', args: [approverWallet, AGENT_WALLET] });
+        if (allowance < BigInt('1000000')) { // < 1 USDC — not approved
+          return res.status(403).json({ ok: false, error: 'USDC approval required. Tap “Approve USDC” in the app before starting a session.' });
+        }
+      }
+    } catch(e) {
+      console.warn('[pump/create] approval check failed — proceeding:', e.message);
+      // Non-blocking: if on-chain check fails (RPC issue), let session proceed — engine will catch it
+    }
+  }
+
   try {
     const session = pumpBot.createSession({
       userId: String(userId), tokenAddress,
