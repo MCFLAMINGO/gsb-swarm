@@ -495,32 +495,32 @@
     <div class="onboard-step">
       <div class="onboard-step-num">1</div>
       <div class="onboard-step-text">
-        <strong>Connect your wallet</strong><br>
-        <span>Paste your Solana or EVM address. This is where your purchased tokens will be returned.</span>
+        <strong>Connect your funding wallet</strong><br>
+        <span>Phantom, MetaMask, or Coinbase. This is the wallet that sends money to the agent. Solana or EVM.</span>
       </div>
     </div>
 
     <div class="onboard-step">
       <div class="onboard-step-num">2</div>
       <div class="onboard-step-text">
-        <strong>Approve USDC — once, forever</strong><br>
-        <span>EVM users sign one approval. The agent can then pull USDC on each buy interval without you touching your wallet again.</span>
+        <strong>Funding wallet → Agent wallet</strong><br>
+        <span>You send SOL or USDC to the agent. It executes all buys on your behalf — rapidly, at your chosen rate.</span>
       </div>
     </div>
 
     <div class="onboard-step">
       <div class="onboard-step-num">3</div>
       <div class="onboard-step-text">
-        <strong>Set your target &amp; fund the agent</strong><br>
-        <span>Pick a token, set your budget and buy rate. Send SOL or USDC to the agent wallet to start. Bot buys automatically until the budget is gone.</span>
+        <strong>Agent wallet → Receiving wallet</strong><br>
+        <span>When all buys are done, purchased tokens are sent to your receiving wallet. Must match the <em>token’s</em> chain — not your funding wallet. Buy a Solana token with Base USDC, just use a Solana receiving address.</span>
       </div>
     </div>
 
     <div class="onboard-step">
       <div class="onboard-step-num">4</div>
       <div class="onboard-step-text">
-        <strong>Tokens delivered to you</strong><br>
-        <span>When the session completes, 90% of purchased tokens are sent directly to your wallet. Non-custodial. The agent never holds your assets longer than it has to.</span>
+        <strong>You keep 90%. Agent keeps 10%.</strong><br>
+        <span>Non-custodial. Your keys never leave your wallet. The agent never holds assets longer than the session.</span>
       </div>
     </div>
 
@@ -540,31 +540,31 @@
 <!-- ── SIGN / CONNECT SCREEN ─────────────────────────────────────── -->
 <div id="sign-screen" class="connect-screen" style="display:none">
   <div class="connect-icon">🔐</div>
-  <div class="connect-title">Connect Signing Wallet</div>
-  <div class="connect-sub">This wallet signs transactions and funds the agent. Your keys never leave your device.</div>
+  <div class="connect-title">Connect Funding Wallet</div>
+  <div class="connect-sub">This wallet funds the agent. Once connected it handles all buys — no further approvals needed per transaction.</div>
 
-  <div style="width:100%;display:flex;flex-direction:column;gap:10px">
-    <!-- Phantom -->
+  <!-- Browser: show wallet extension buttons -->
+  <div id="sign-extension-btns" style="width:100%;display:flex;flex-direction:column;gap:10px">
     <button class="wallet-option" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;text-align:left" onclick="connectSigner('phantom')">
       <span style="font-size:28px">👻</span>
       <div><div style="font-size:14px;font-weight:700">Phantom</div><div style="font-size:11px;color:var(--muted)">Solana</div></div>
     </button>
-    <!-- MetaMask -->
     <button class="wallet-option" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;text-align:left" onclick="connectSigner('metamask')">
       <span style="font-size:28px">🦊</span>
       <div><div style="font-size:14px;font-weight:700">MetaMask</div><div style="font-size:11px;color:var(--muted)">EVM — Base, ETH, ARB</div></div>
     </button>
-    <!-- Coinbase -->
     <button class="wallet-option" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;text-align:left" onclick="connectSigner('coinbase')">
       <span style="font-size:28px">🔵</span>
       <div><div style="font-size:14px;font-weight:700">Coinbase Wallet</div><div style="font-size:11px;color:var(--muted)">EVM</div></div>
     </button>
-    <!-- Paste fallback -->
-    <div id="sign-paste-row" style="display:none;margin-top:4px">
-      <input id="sign-paste-input" class="input" placeholder="Paste wallet address" style="width:100%;box-sizing:border-box;font-size:13px" />
-      <button onclick="connectSignerPaste()" class="btn-primary" style="width:100%;margin-top:8px;padding:14px;border-radius:12px;font-weight:700">Connect</button>
-    </div>
-    <button onclick="document.getElementById('sign-paste-row').style.display='block'" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:4px 0">Paste address instead</button>
+    <button onclick="document.getElementById('sign-paste-row').style.display='block';this.style.display='none'" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:4px 0">Paste address instead</button>
+  </div>
+
+  <!-- Paste input (always visible in Telegram, shown on demand in browser) -->
+  <div id="sign-paste-row" style="display:none;width:100%;margin-top:4px">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.5">Open your wallet app, copy your address, paste it here.</div>
+    <input id="sign-paste-input" class="input" placeholder="Paste Solana or 0x EVM address" style="width:100%;box-sizing:border-box;font-size:13px" />
+    <button onclick="connectSignerPaste()" class="btn-primary" style="width:100%;margin-top:10px;padding:15px;border-radius:12px;font-weight:700;font-size:15px">→ Connect Wallet</button>
   </div>
 
   <div id="sign-cancel-row" style="display:none;width:100%;margin-top:8px">
@@ -620,8 +620,8 @@
   <!-- ── SWAP PANEL ───────────────────────────────────────────────── -->
   <div class="panel active" id="panel-swap">
     <div id="approve-banner" class="approve-banner" style="display:none">
-      <p>Approve USDC once to enable swaps — sign once in your wallet, never again.</p>
-      <button class="btn btn-secondary" onclick="approveUSDC()">Approve USDC →</button>
+      <p><strong>One-time setup:</strong> Approve USDC to activate this wallet as your funding source. Sign once — works forever.</p>
+      <button class="btn btn-secondary" onclick="approveUSDC()">Approve Funding Wallet →</button>
     </div>
     <div class="card">
       <div class="card-title">You Pay</div>
@@ -696,7 +696,7 @@
     <!-- Config form -->
     <div class="card" id="pump-config-card" style="padding:20px 18px 24px">
       <div class="card-title" style="margin-bottom:4px">⚡ Pump Bot</div>
-      <p style="font-size:12px;color:var(--muted);margin:0 0 20px;line-height:1.6">Deploy rapid buys on any token. Deposit funds, bot buys at your chosen speed. Tokens sent back after (minus 10% fee).</p>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 20px;line-height:1.6">Your funding wallet sends to the agent. Agent executes all buys. Tokens delivered to your receiving wallet when done. 10% fee.</p>
 
       <!-- Token address + chain -->
       <div style="display:grid;grid-template-columns:1fr 90px;gap:10px;margin-bottom:20px">
@@ -778,8 +778,9 @@
 
       <!-- Receiving wallet -->
       <div style="margin-bottom:20px">
-        <div class="pump-label">Your Receiving Wallet</div>
-        <input type="text" id="pump-wallet" placeholder="Your wallet address to receive purchased tokens" autocomplete="off" style="width:100%;font-size:12px" oninput="updatePumpChainNote()">
+        <div class="pump-label">Receiving Wallet <span style="font-weight:400;color:var(--muted)">— where tokens land after buys complete</span></div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;line-height:1.5">Must match the <strong>token’s chain</strong>, not your funding wallet. Fund with USDC on Base, receive a Solana token — just paste a Solana address here.</div>
+        <input type="text" id="pump-wallet" placeholder="Paste wallet address (must match token chain)" autocomplete="off" style="width:100%;font-size:12px" oninput="updatePumpChainNote()">
         <div id="pump-wallet-warn" style="display:none;margin-top:8px;padding:10px 12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.35);border-radius:8px;font-size:12px;color:#ef4444;line-height:1.5"></div>
       </div>
 
@@ -1129,8 +1130,16 @@ function openSignScreen(canCancel = false) {
   document.getElementById('app-screen').style.display      = 'none';
   document.getElementById('sign-screen').style.display     = 'flex';
   document.getElementById('sign-cancel-row').style.display = canCancel ? 'block' : 'none';
-  document.getElementById('sign-paste-row').style.display  = 'none';
   document.getElementById('sign-paste-input').value        = '';
+
+  // In Telegram webview there are no wallet extensions — go straight to paste
+  if (IS_TELEGRAM) {
+    document.getElementById('sign-extension-btns').style.display = 'none';
+    document.getElementById('sign-paste-row').style.display      = 'block';
+  } else {
+    document.getElementById('sign-extension-btns').style.display = 'flex';
+    document.getElementById('sign-paste-row').style.display      = 'none';
+  }
 }
 
 function closeSignScreen() {
@@ -1270,51 +1279,160 @@ async function saveWallet() {
 }
 
 async function checkApproval() {
-  if (!walletAddress || walletAddress.startsWith('0x') === false) {
-    // Solana wallets don't need USDC approval
-    document.getElementById('approve-banner').style.display = 'none';
+  const banner = document.getElementById('approve-banner');
+  // Solana wallets — no ERC-20 approval needed
+  if (!walletAddress || !walletAddress.startsWith('0x')) {
+    if (banner) banner.style.display = 'none';
+    isApproved = !!walletAddress;
     return;
   }
+  // Check localStorage cache first — avoids network hit for already-approved wallets
+  const cacheKey = `gsb_approved_${walletAddress}`;
+  if (localStorage.getItem(cacheKey) === '1') {
+    if (banner) banner.style.display = 'none';
+    isApproved = true;
+    return;
+  }
+  // Check on-chain
   try {
-    const r = await fetch(`${API_BASE}/api/pump/approval-status?wallet=${walletAddress}`);
+    const chain = document.getElementById('chain-select')?.value || 'base';
+    const r = await fetch(`${API_BASE}/api/pump/approval-status?wallet=${walletAddress}&chain=${chain}`);
     const d = await r.json();
-    document.getElementById('approve-banner').style.display = d.approved ? 'none' : 'flex';
+    if (d.approved) {
+      localStorage.setItem(cacheKey, '1');
+      isApproved = true;
+    }
+    if (banner) banner.style.display = d.approved ? 'none' : 'flex';
   } catch {
-    document.getElementById('approve-banner').style.display = 'none'; // fail open — don't block
+    if (banner) banner.style.display = 'none'; // fail open
   }
 }
 
+let _approvalPollTimer = null;
+
 async function approveUSDC() {
   if (!walletAddress) return showToast('Connect wallet first', 'error');
-  if (!walletAddress.startsWith('0x')) return showToast('Solana sessions do not need USDC approval', '');
-
-  const provider = window.ethereum;
-  if (!provider) {
-    showToast('No EVM wallet detected — install MetaMask or Coinbase Wallet', 'error');
+  if (!walletAddress.startsWith('0x')) {
+    // Solana — no approval needed, direct send model
+    showToast('Solana wallet — no approval needed. Just send SOL or USDC to start.', '');
     return;
   }
 
-  const AGENT_WALLET = '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
-  const USDC_BASE    = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-  // ERC-20 approve(address spender, uint256 amount) — maxUint256
-  const MAX = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
-  const spenderPad = AGENT_WALLET.replace('0x','').toLowerCase().padStart(64,'0');
-  const data = '0x095ea7b3' + spenderPad + MAX;
+  // Detect chain from current UI selection (swap panel)
+  const chain = document.getElementById('chain-select')?.value || 'base';
 
-  try {
-    const accounts = await provider.request({ method: 'eth_requestAccounts' });
-    const from = accounts[0];
-    showToast('Approve in your wallet...', '');
-    await provider.request({
-      method: 'eth_sendTransaction',
-      params: [{ from, to: USDC_BASE, data, gas: '0xf424' }],
-    });
-    showToast('USDC approved — you will never need to do this again', 'success');
-    setTimeout(checkApproval, 5000); // re-check after tx lands
-  } catch(e) {
-    if (e.code === 4001) return showToast('Approval cancelled', 'error');
-    showToast('Approval failed: ' + (e.message || 'unknown error'), 'error');
+  // If window.ethereum is available (browser with extension) — sign directly
+  if (window.ethereum && !IS_TELEGRAM) {
+    try {
+      const AGENT_WALLET = '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
+      const USDC_ADDRS   = {
+        base: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        ethereum: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        arbitrum: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+        polygon:  '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+      };
+      const usdcAddr = USDC_ADDRS[chain] || USDC_ADDRS.base;
+      const MAX      = 'f'.repeat(64);
+      const pad      = AGENT_WALLET.replace('0x','').toLowerCase().padStart(64,'0');
+      const data     = '0x095ea7b3' + pad + MAX;
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      showToast('Approve in your wallet…', '');
+      await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{ from: accounts[0], to: usdcAddr, data, gas: '0xf424' }],
+      });
+      showToast('Approved — polling for confirmation…', '');
+      startApprovalPolling(chain);
+      return;
+    } catch(e) {
+      if (e.code === 4001) return showToast('Approval cancelled', 'error');
+      // Fall through to deeplink
+    }
   }
+
+  // Telegram / mobile — use deeplink to open wallet app
+  try {
+    const r = await fetch(`${API_BASE}/api/pump/approve-deeplink?wallet=${walletAddress}&chain=${chain}`);
+    const d = await r.json();
+    if (!d.ok) return showToast('Could not build approve link', 'error');
+
+    // Show modal with options
+    showApproveModal(d);
+  } catch(e) {
+    showToast('Could not build approve link — try again', 'error');
+  }
+}
+
+function showApproveModal(d) {
+  // Remove any existing modal
+  document.getElementById('approve-modal')?.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'approve-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
+  modal.innerHTML = `
+    <div style="background:var(--surface);border-radius:20px 20px 0 0;padding:24px 20px 32px;width:100%;max-width:480px;border-top:1px solid var(--border)">
+      <div style="font-size:17px;font-weight:800;margin-bottom:6px">🔐 Approve USDC Once</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.6">
+        Sign once in your wallet to enable this as your funding wallet on <strong>${d.chain}</strong>.
+        The agent can then execute buys without asking you to sign each time.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <a href="${d.metamaskLink}" onclick="onApproveDeeplinkTapped()" style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--card);border:1px solid var(--border);border-radius:12px;text-decoration:none;color:var(--text)">
+          <span style="font-size:26px">🦊</span>
+          <div><div style="font-weight:700;font-size:14px">MetaMask</div><div style="font-size:11px;color:var(--muted)">Tap to approve in MetaMask</div></div>
+        </a>
+        <a href="${d.phantomEvmLink}" onclick="onApproveDeeplinkTapped()" style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--card);border:1px solid var(--border);border-radius:12px;text-decoration:none;color:var(--text)">
+          <span style="font-size:26px">👻</span>
+          <div><div style="font-weight:700;font-size:14px">Phantom (EVM)</div><div style="font-size:11px;color:var(--muted)">Tap to approve in Phantom</div></div>
+        </a>
+        <a href="${d.eip681}" onclick="onApproveDeeplinkTapped()" style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--card);border:1px solid var(--border);border-radius:12px;text-decoration:none;color:var(--text)">
+          <span style="font-size:26px">🔗</span>
+          <div><div style="font-weight:700;font-size:14px">Other Wallet</div><div style="font-size:11px;color:var(--muted)">Opens any EIP-681 compatible wallet</div></div>
+        </a>
+      </div>
+      <div id="approve-modal-status" style="margin-top:16px;font-size:12px;color:var(--muted);text-align:center;display:none">Waiting for on-chain confirmation…</div>
+      <button onclick="document.getElementById('approve-modal').remove();clearTimeout(_approvalPollTimer)" style="margin-top:16px;width:100%;padding:12px;background:none;border:1px solid var(--border);border-radius:10px;color:var(--muted);font-size:13px;cursor:pointer">✕ Cancel</button>
+    </div>`;
+
+  document.body.appendChild(modal);
+}
+
+function onApproveDeeplinkTapped() {
+  // User tapped a deeplink — start polling for on-chain confirmation
+  setTimeout(() => {
+    const statusEl = document.getElementById('approve-modal-status');
+    if (statusEl) statusEl.style.display = 'block';
+    const chain = document.getElementById('chain-select')?.value || 'base';
+    startApprovalPolling(chain);
+  }, 2000); // small delay to let wallet open
+}
+
+function startApprovalPolling(chain = 'base') {
+  clearTimeout(_approvalPollTimer);
+  let attempts = 0;
+  const MAX_ATTEMPTS = 24; // poll for ~2 min (5s intervals)
+  async function poll() {
+    attempts++;
+    try {
+      const r = await fetch(`${API_BASE}/api/pump/approval-status?wallet=${walletAddress}&chain=${chain}`);
+      const d = await r.json();
+      if (d.approved) {
+        isApproved = true;
+        localStorage.setItem(`gsb_approved_${walletAddress}`, '1');
+        document.getElementById('approve-modal')?.remove();
+        showToast('✅ USDC approved — this wallet is ready to fund the agent', 'success');
+        return;
+      }
+    } catch {}
+    if (attempts < MAX_ATTEMPTS) {
+      _approvalPollTimer = setTimeout(poll, 5000);
+    } else {
+      const statusEl = document.getElementById('approve-modal-status');
+      if (statusEl) statusEl.textContent = 'Not detected yet — may take a few more minutes to confirm on-chain.';
+    }
+  }
+  poll();
 }
 
 
@@ -1826,16 +1944,14 @@ function updatePumpChainNote() {
     if (val) {
       const isEvmVal = val.startsWith('0x');
       if (isSol && isEvmVal) {
-        warn = '⚠️ This looks like an EVM address. Solana tokens cannot be sent to a 0x wallet. '
-             + (storedSol ? `Your saved Solana address is ${storedSol.slice(0,6)}...${storedSol.slice(-4)} — clear the field to auto-fill it.` : 'Go to Connect Wallet and add your Solana address.');
+        warn = '⚠️ Token chain is Solana but you pasted an EVM (0x) address. Solana tokens cannot be delivered to a 0x wallet — paste a Solana (base58) receiving address.';
       } else if (!isSol && !isEvmVal) {
-        warn = '⚠️ This looks like a Solana address. EVM tokens cannot be sent to a base58 wallet. '
-             + (storedEvm ? `Your saved EVM address is ${storedEvm.slice(0,6)}...${storedEvm.slice(-4)} — clear the field to auto-fill it.` : 'Go to Connect Wallet and add your 0x EVM address.');
+        warn = '⚠️ Token chain is EVM but you pasted a Solana address. EVM tokens cannot be delivered to a base58 wallet — paste a 0x receiving address.';
       }
     } else {
-      // Field is empty — no wallet saved for this chain
-      if (isSol && !storedSol)  warn = '⚠️ No Solana wallet saved. Tap Connect Wallet and add your Solana address so purchased tokens can be returned to you.';
-      if (!isSol && !storedEvm) warn = '⚠️ No EVM wallet saved. Tap Connect Wallet and add your 0x address so purchased tokens can be returned to you.';
+      // Field is empty
+      if (isSol)  warn = 'Paste a Solana receiving wallet — this is where your purchased tokens land. Your funding wallet chain doesn’t need to match.';
+      if (!isSol) warn = 'Paste a 0x EVM receiving wallet — this is where your purchased tokens land. Your funding wallet chain doesn’t need to match.';
     }
 
     if (walletWarn) {

@@ -4031,8 +4031,50 @@ app.get('/api/pump/approval-status', async (req, res) => {
   }
 });
 
+// GET /api/pump/approve-deeplink
+// Returns a deep link for the user to sign a one-time USDC approve in their wallet
+// EVM: EIP-681 link → MetaMask / Phantom EVM
+// Solana: not needed (direct send model)
+app.get('/api/pump/approve-deeplink', (req, res) => {
+  const { wallet, chain = 'base' } = req.query;
+  if (!wallet) return res.status(400).json({ ok: false, error: 'wallet required' });
+
+  const AGENT_WALLET = process.env.AGENT_EVM_WALLET || '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
+
+  const CHAIN_CONFIG = {
+    base:     { chainId: 8453,  usdc: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', name: 'Base' },
+    ethereum: { chainId: 1,     usdc: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', name: 'Ethereum' },
+    arbitrum: { chainId: 42161, usdc: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', name: 'Arbitrum' },
+    polygon:  { chainId: 137,   usdc: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', name: 'Polygon' },
+  };
+  const cfg = CHAIN_CONFIG[chain] || CHAIN_CONFIG.base;
+
+  // MaxUint256 approve amount
+  const MAX_UINT256 = '115792089237316195423570985008687907853269984665640564039457584007913129639935';
+
+  // EIP-681: ethereum:<contract>@<chainId>/approve?address=<spender>&uint256=<amount>
+  const eip681 = `ethereum:${cfg.usdc}@${cfg.chainId}/approve?address=${AGENT_WALLET}&uint256=${MAX_UINT256}`;
+
+  // MetaMask mobile deep link
+  const metamaskLink = `https://metamask.app.link/send/${cfg.usdc}@${cfg.chainId}/approve?address=${AGENT_WALLET}&uint256=${MAX_UINT256}`;
+
+  // Phantom EVM deep link (Phantom supports EVM on Base/ETH/Polygon)
+  const phantomEvmLink = `https://phantom.app/ul/v1/send?network=evm&chainId=${cfg.chainId}&to=${cfg.usdc}&data=0x095ea7b3${AGENT_WALLET.replace('0x','').toLowerCase().padStart(64,'0')}${'f'.repeat(64)}`;
+
+  res.json({
+    ok: true,
+    chain: cfg.name,
+    chainId: cfg.chainId,
+    usdcAddress: cfg.usdc,
+    spender: AGENT_WALLET,
+    eip681,
+    metamaskLink,
+    phantomEvmLink,
+  });
+});
+
 app.get('/api/swap/approve-link', (req, res) => {
-  // Deep-link to Uniswap token approval page for USDC on Base
+  // Legacy — kept for backward compat
   const url = 'https://app.uniswap.org/#/swap?chain=base&inputCurrency=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
   res.json({ ok: true, url });
 });
