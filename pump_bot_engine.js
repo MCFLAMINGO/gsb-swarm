@@ -253,24 +253,26 @@ async function executeOneBuy(session) {
 async function checkDepositReceived(session) {
   const chain = session.chain || 'base';
 
-  // ── Solana sessions: check for SOL deposit via Solana RPC ──
+  // ── Solana: detect ANY inbound SOL after session creation ──────────────────
+  // No exact-amount matching — whatever arrives becomes the budget
   if (session.chain === 'solana') {
-    // Try multiple RPCs in sequence — public mainnet is rate-limited from server IPs
     const SOL_RPCS = [
       process.env.SOLANA_RPC_URL,
-      'https://solana-rpc.publicnode.com',    // free, no key needed, handles getTransaction
-      'https://api.mainnet-beta.solana.com',  // last resort — rate-limits on getTransaction
+      'https://solana-rpc.publicnode.com',
+      'https://api.mainnet-beta.solana.com',
     ].filter(Boolean);
+
+    const GSB_SOL_WALLET = process.env.GSB_SOL_WALLET || 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs';
+    const cutoff = session.createdAt - 60_000; // 1 min grace before session creation
 
     for (const rpcUrl of SOL_RPCS) {
       try {
         const { Connection, PublicKey } = require('@solana/web3.js');
         const connection = new Connection(rpcUrl, { commitment: 'confirmed' });
-        const GSB_SOL_WALLET = process.env.GSB_SOL_WALLET || 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs';
-        const cutoff = session.createdAt - 60_000;
-        const expectedLamports = Math.round(session.totalSol * 1e9);
 
+        // ── Primary: scan recent transactions for any inbound SOL ──
         const sigs = await connection.getSignaturesForAddress(new PublicKey(GSB_SOL_WALLET), { limit: 25 });
+        let totalReceivedLamports = 0;
         for (const sigInfo of sigs) {
           if (!sigInfo.blockTime) continue;
           if (sigInfo.blockTime * 1000 < cutoff) break;
@@ -280,33 +282,42 @@ async function checkDepositReceived(session) {
           const idx   = accts.findIndex(k => k.toBase58() === GSB_SOL_WALLET);
           if (idx === -1) continue;
           const delta = (tx.meta.postBalances[idx] || 0) - (tx.meta.preBalances[idx] || 0);
-          // Allow 1% tolerance for rounding / fee edge cases
-          if (delta >= Math.round(expectedLamports * 0.99)) return true;
+          if (delta > 0) totalReceivedLamports += delta;
         }
-        return false; // RPC responded — no matching deposit found
+        if (totalReceivedLamports > 0) {
+          // Update session budget to actual amount received (minus small fee reserve)
+          const receivedSol = totalReceivedLamports / 1e9;
+          if (session.totalSol !== receivedSol) {
+            session.totalSol = Math.max(receivedSol - 0.001, 0.001); // keep 0.001 SOL for fees
+            console.log(`[pump] Deposit detected: ${receivedSol.toFixed(6)} SOL → budget set to ${session.totalSol.toFixed(6)} SOL`);
+          }
+          return true;
+        }
+        return false; // RPC responded — no inbound SOL found
       } catch (err) {
         console.error(`[pump] SOL deposit check failed on ${rpcUrl}: ${err.message} — trying next RPC`);
       }
     }
-    // ── Balance-delta fallback: single getBalance call, no getTransaction needed ──
-    // Works even when getTransaction is rate-limited (429)
-    console.warn('[pump] All getTransaction RPCs failed — falling back to balance-delta check');
+
+    // ── Balance-delta fallback: single getBalance, no getTransaction needed ──
+    console.warn('[pump] getTransaction RPCs failed — using balance-delta fallback');
     for (const rpcUrl of SOL_RPCS) {
       try {
         const { Connection, PublicKey } = require('@solana/web3.js');
-        const GSB_SOL_WALLET = process.env.GSB_SOL_WALLET || 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs';
         const connection = new Connection(rpcUrl, { commitment: 'confirmed' });
         const currentBalance = await connection.getBalance(new PublicKey(GSB_SOL_WALLET));
-        const expectedLamports = Math.round(session.totalSol * 1e9);
-        // If we have a baseline, check delta; otherwise store baseline and wait
         if (session.solBalanceAtStart === null || session.solBalanceAtStart === undefined) {
           session.solBalanceAtStart = currentBalance;
-          console.log(`[pump] Balance baseline set: ${(currentBalance/1e9).toFixed(6)} SOL`);
+          console.log(`[pump] Balance baseline: ${(currentBalance/1e9).toFixed(6)} SOL`);
           return false;
         }
         const delta = currentBalance - session.solBalanceAtStart;
-        console.log(`[pump] Balance delta: ${(delta/1e9).toFixed(6)} SOL, need ${session.totalSol} SOL`);
-        if (delta >= Math.round(expectedLamports * 0.99)) return true;
+        if (delta > 100_000) { // > 0.0001 SOL received
+          const receivedSol = delta / 1e9;
+          session.totalSol = Math.max(receivedSol - 0.001, 0.001);
+          console.log(`[pump] Balance delta: +${receivedSol.toFixed(6)} SOL → budget ${session.totalSol.toFixed(6)} SOL`);
+          return true;
+        }
         return false;
       } catch (err) {
         console.error(`[pump] Balance fallback failed on ${rpcUrl}: ${err.message}`);

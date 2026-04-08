@@ -596,7 +596,8 @@
       <div id="pump-sol-row" style="display:none;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:20px">
         <div>
           <div class="pump-label">Budget (SOL)</div>
-          <input type="number" id="pump-total-sol" placeholder="0.5" min="0.001" max="5" step="0.01" oninput="updatePumpPreview()" style="width:100%;font-size:13px">
+          <input type="number" id="pump-total-sol" placeholder="e.g. 0.25" min="0.001" max="5" step="0.01" oninput="updatePumpPreview()" style="width:100%;font-size:13px">
+          <div style="font-size:10px;color:var(--muted);margin-top:3px">Send any amount</div>
         </div>
         <div>
           <div class="pump-label">Per-Buy</div>
@@ -647,12 +648,12 @@
     <!-- Deposit instructions -->
     <div class="card" id="pump-deposit-card" style="display:none">
       <div class="card-title" id="pump-deposit-title">⚡ Fund Agent to Start</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Send the exact amount below to the agent wallet from any Solana or crypto wallet. Bot starts automatically once detected.</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Send SOL to the agent wallet below. Whatever you send becomes your budget. Bot starts automatically.</div>
 
       <!-- Amount badge -->
       <div style="background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);border-radius:10px;padding:14px;text-align:center;margin-bottom:12px">
-        <div style="font-size:11px;color:var(--muted);margin-bottom:4px" id="pump-deposit-chain-label">Send to Agent Wallet</div>
-        <div style="font-size:22px;font-weight:800;color:var(--accent)" id="pump-deposit-amount"></div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px" id="pump-deposit-chain-label">Send any amount of SOL</div>
+        <div style="font-size:16px;font-weight:700;color:var(--accent)" id="pump-deposit-amount"></div>
       </div>
 
       <!-- Address display + copy -->
@@ -1560,8 +1561,9 @@ async function startPumpBot() {
     const totalSol   = parseFloat(document.getElementById('pump-total-sol').value);
     const solPerBuy  = parseFloat(document.getElementById('pump-sol-interval').value);
     const rateName   = document.getElementById('pump-rate-sol').value;
-    if (!totalSol || totalSol <= 0) return showToast('Enter total SOL budget', 'error');
+    if (!totalSol || totalSol <= 0) return showToast('Enter an estimated SOL budget', 'error');
     if (totalSol > 5) return showToast('Max 5 SOL per session', 'error');
+    // totalSol is an estimate — actual budget is updated when deposit is detected
     body = { userId, tokenAddress, chain: 'solana', rateName, receivingWallet, isPumpFun: isPf, totalSol, solPerBuy };
   } else {
     const totalAmount    = parseFloat(document.getElementById('pump-total').value);
