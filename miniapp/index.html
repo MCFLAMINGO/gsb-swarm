@@ -1343,13 +1343,24 @@ async function runAnalyze(tokenOverride) {
         </button>
         <button class="btn btn-secondary" onclick="(function(){
           const addr = d.contractAddress||'';
-          const ch   = d.chain||'base';
+          const ch   = (d.chain||'base').toLowerCase();
+          const chainNorm = {solana:'solana',sol:'solana',ethereum:'eth',eth:'eth',arbitrum:'arb',arb:'arb',polygon:'matic',matic:'matic',bsc:'bsc',base:'base'}[ch]||ch;
           document.getElementById('pump-token').value = addr;
-          document.getElementById('pump-chain').value = ch;
-          switchTab('dca');
+          const chainEl = document.getElementById('pump-chain');
+          if(chainEl) chainEl.value = chainNorm;
+          // Auto-fill receiving wallet from connected wallet if chain matches
+          const walletEl = document.getElementById('pump-wallet');
+          if(walletEl && walletAddress) {
+            const isSolChain = chainNorm==='solana';
+            const isSolWallet = !walletAddress.startsWith('0x');
+            if(isSolChain===isSolWallet) walletEl.value = walletAddress;
+          }
+          switchTab('pump');
           updatePumpChainNote();
+          // Scroll form into view
+          setTimeout(()=>{ const el=document.getElementById('pump-config-card'); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); },150);
         })()" style="flex:1">
-          Pump It
+          🚀 Pump It
         </button>
       </div>
     `;
