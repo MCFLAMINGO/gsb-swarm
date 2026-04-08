@@ -866,15 +866,9 @@ function connectWallet() {
   document.getElementById('connect-sub').textContent   = 'Connect once. Swap forever. Non-custodial.';
   document.getElementById('connect-screen').style.display = 'flex';
   document.getElementById('app-screen').style.display = 'none';
-  // In Telegram: skip wallet picker, go straight to paste input
-  if (IS_TELEGRAM) {
-    document.getElementById('paste-wallet-section').style.display = 'block';
-    document.getElementById('wallet-picker-section').style.display = 'none';
-    setTimeout(() => document.getElementById('paste-wallet-input').focus(), 100);
-  } else {
-    document.getElementById('paste-wallet-section').style.display = 'none';
-    document.getElementById('wallet-picker-section').style.display = 'grid';
-  }
+  // Always show wallet picker first — paste is a fallback via "Paste Address" button
+  document.getElementById('paste-wallet-section').style.display = 'none';
+  document.getElementById('wallet-picker-section').style.display = 'grid';
 }
 
 function switchWallet() {
