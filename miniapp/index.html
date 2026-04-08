@@ -1614,7 +1614,8 @@ function showDepositInstructions(d) {
   const fundBtn = document.getElementById('pump-fund-btn');
   if (fundBtn) {
     fundBtn.disabled = false;
-    fundBtn.innerHTML = isSolSess ? '👻 Open in Phantom' : '📋 Copy Address';
+    const _isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    fundBtn.innerHTML = isSolSess ? (_isMobile ? '👻 Open in Phantom' : '📋 Copy Address') : '📋 Copy Address';
     fundBtn.onclick = isSolSess ? fundAgentWithWallet : copyDepositAddr;
   }
 }
@@ -1634,18 +1635,26 @@ function fundAgentWithWallet() {
   if (!destAddr) return showToast('Session not ready', 'error');
 
   if (isSol) {
-    // Parse SOL amount
-    const amtMatch = amountText.match(/([\d.]+)/);
-    const solAmt   = amtMatch ? parseFloat(amtMatch[1]) : null;
-    if (!solAmt) return showToast('Could not read amount', 'error');
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-    // Phantom universal link — opens Phantom app and pre-fills send
-    // solana:<address>?amount=<SOL>&label=GSB+Agent&message=Fund+GSB+Pump+Bot
-    const phantomLink = `solana:${destAddr}?amount=${solAmt}&label=GSB+Agent&message=Fund+GSB+Pump+Bot`;
-
-    // Try to open deep link; fallback to copy
-    window.open(phantomLink, '_blank');
-    showToast('Opening Phantom — or use Copy Address to send manually', '');
+    if (isMobile) {
+      // Mobile: deep link opens Phantom app with send pre-filled
+      const amtMatch = amountText.match(/([\d.]+)/);
+      const solAmt   = amtMatch ? parseFloat(amtMatch[1]) : null;
+      if (!solAmt) return showToast('Could not read amount', 'error');
+      const phantomLink = `solana:${destAddr}?amount=${solAmt}&label=GSB+Agent&message=Fund+GSB+Pump+Bot`;
+      window.open(phantomLink, '_blank');
+      showToast('Opening Phantom — or use Copy Address to send manually', '');
+    } else {
+      // Desktop: deep link opens a blank browser tab — just copy address instead
+      navigator.clipboard.writeText(destAddr).catch(() => {
+        const el = document.createElement('textarea');
+        el.value = destAddr; document.body.appendChild(el);
+        el.select(); document.execCommand('copy');
+        document.body.removeChild(el);
+      });
+      showToast('Address copied — open Phantom or any wallet and send SOL to this address', '');
+    }
 
   } else {
     // EVM: open MetaMask deep link
