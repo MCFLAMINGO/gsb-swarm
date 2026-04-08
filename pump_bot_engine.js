@@ -429,7 +429,7 @@ async function sendTokensToUser(session) {
 }
 
 // ── Session lifecycle ─────────────────────────────────────────────────────────
-const VALID_SOL_INTERVALS = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1]; // SOL per buy
+const VALID_SOL_INTERVALS = [0.005, 0.01, 0.02, 0.05, 0.1]; // SOL per buy (min 0.005 — DexScreener minimum)
 const MAX_SESSION_SOL     = 5; // max 5 SOL per pump.fun session
 
 function createSession({ userId, tokenAddress, chain, totalAmount, intervalAmount, rateName, receivingWallet,
