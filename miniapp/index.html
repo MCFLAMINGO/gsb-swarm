@@ -478,7 +478,7 @@
 
 <div class="header">
   <div class="logo">⚡ GSB Swap</div>
-  <div class="wallet-badge" id="wallet-badge" onclick="walletAddress ? switchWallet() : connectWallet()">Connect Wallet</div>
+  <div class="wallet-badge" id="wallet-badge" onclick="handleBadgeClick()">Connect Wallet</div>
 </div>
 
 <!-- ── ONBOARDING ────────────────────────────────────────────── -->
@@ -1209,6 +1209,7 @@ function saveReceivingWallets() {
 
   // Set active walletAddress from best saved
   walletAddress = getActiveWalletAddress();
+  updateBadge();
   showToast('Wallets saved');
   onWalletConnected();
 }
@@ -1223,20 +1224,37 @@ function disconnectWallet() {
   localStorage.removeItem(`gsb_sol_wallet_${userId}`);
   localStorage.removeItem(`gsb_evm_wallet_${userId}`);
   walletAddress = null;
-  const badge = document.getElementById('wallet-badge');
-  badge.textContent = 'My Wallets';
-  badge.classList.remove('connected');
+  updateBadge();
   openWalletScreen();
+}
+
+function updateBadge() {
+  const badge = document.getElementById('wallet-badge');
+  const hasReceiving = getVisibleChains().some(c => !!getReceivingWallet(c.id));
+  if (hasReceiving) {
+    badge.textContent = 'My Receiving Wallets';
+  } else if (walletAddress) {
+    badge.textContent = walletAddress.slice(0,6) + '...' + walletAddress.slice(-4);
+  } else {
+    badge.textContent = 'Connect Wallet';
+  }
+  badge.classList.toggle('connected', !!(walletAddress || hasReceiving));
+}
+
+function handleBadgeClick() {
+  const hasReceiving = getVisibleChains().some(c => !!getReceivingWallet(c.id));
+  if (hasReceiving || walletAddress) {
+    openWalletScreen(); // already connected — go straight to receiving wallets
+  } else {
+    connectWallet(); // not connected yet — sign first
+  }
 }
 
 function onWalletConnected() {
   document.getElementById('sign-screen').style.display = 'none';
   document.getElementById('connect-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'block';
-  const short = walletAddress.slice(0,6) + '...' + walletAddress.slice(-4);
-  const badge = document.getElementById('wallet-badge');
-  badge.textContent = short;
-  badge.classList.add('connected');
+  updateBadge();
   saveWallet();
   checkApproval();
   loadPumpSession();
@@ -2457,6 +2475,7 @@ window.addEventListener('load', () => {
   if (shouldShowOnboarding()) {
     document.getElementById('onboard-screen').style.display = 'flex';
     if (primary) walletAddress = primary; // restore silently while user reads
+    updateBadge(); // show correct badge text even during onboarding
     loadTrending('base');
     setTimeout(() => updateQuote(), 500);
     if (window.ethereum) {
