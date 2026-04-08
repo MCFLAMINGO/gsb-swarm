@@ -4083,40 +4083,52 @@ app.get('/api/pump/approval-status', async (req, res) => {
   }
 });
 
-// GET /open-wallet — intermediate redirect page
-// Telegram WebView can't forward custom schemes or universal links directly.
-// We serve a plain HTTPS page that immediately does window.location.href = deeplink.
-// tg.openLink() opens this in system browser → system browser fires the universal link → wallet app.
+// GET /open-wallet — intermediate redirect page for wallet deeplinks
+// Only used for wallet app deeplinks (metamask.app.link, phantom.app, etc.)
+// NOT used for our own /wc page — that goes via tg.openLink() directly.
 app.get('/open-wallet', (req, res) => {
   const { url } = req.query;
   if (!url) return res.redirect('https://gsb-swarm-production.up.railway.app/miniapp/');
   const decoded = decodeURIComponent(url);
-  // Basic allowlist — only forward to known wallet domains
-  const allowed = [
-    'metamask.app.link', 'phantom.app', 'go.cb-w.com',
-    'ethereum:', 'https://link.trustwallet.com', 'rainbow.me'
-  ];
-  const ok = allowed.some(a => decoded.startsWith('https://') || decoded.startsWith('ethereum:'));
-  if (!ok) return res.status(400).send('Invalid redirect target');
-  res.send(`<!DOCTYPE html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Opening wallet...</title>
-<style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0a0a0f;color:#fff;font-family:system-ui;font-size:15px}</style>
-</head><body>
-<div style="text-align:center">
-  <div style="font-size:40px;margin-bottom:16px">🔐</div>
-  <div>Opening your wallet…</div>
-  <div style="font-size:12px;color:#888;margin-top:8px">You can close this tab after approving</div>
-</div>
-<script>
-  // Fire immediately — system browser handles the universal link / custom scheme
-  window.location.href = ${JSON.stringify(decoded)};
-  // Fallback: if still here after 2s, show copy prompt
-  setTimeout(function() {
-    document.body.innerHTML = '<div style="text-align:center;padding:32px"><div style="font-size:40px;margin-bottom:16px">🔗</div><div style="margin-bottom:16px">Could not open wallet automatically.</div><input id="l" value=' + JSON.stringify(decoded) + ' style="width:90%;padding:10px;background:#1a1a2e;border:1px solid #333;color:#fff;border-radius:8px;font-size:11px" readonly onclick="this.select()"><br><button onclick="navigator.clipboard.writeText(document.getElementById(\'l\').value)" style="margin-top:12px;padding:10px 20px;background:#6366f1;border:none;border-radius:8px;color:#fff;cursor:pointer">Copy Link</button><div style="margin-top:12px;font-size:11px;color:#888">Paste this in MetaMask or Phantom browser</div></div>';
-  }, 2000);
-</script>
-</body></html>`);
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Opening Wallet...</title>
+  <style>
+    body { font-family: system-ui; text-align: center; padding: 40px 20px; background: #0a0a0f; color: #fff; }
+    h2 { font-size: 20px; margin-bottom: 8px; }
+    p  { color: #888; font-size: 14px; margin-bottom: 24px; }
+    .copy-btn { padding: 12px 24px; background: #6366f1; border: none; border-radius: 10px; color: #fff; font-size: 14px; cursor: pointer; display: none; }
+    #link-box { width: 100%; max-width: 480px; padding: 10px; background: #1a1a2e; border: 1px solid #333; color: #fff; border-radius: 8px; font-size: 11px; margin-bottom: 12px; display: none; }
+  </style>
+</head>
+<body>
+  <div style="font-size:48px;margin-bottom:16px">🔐</div>
+  <h2>Opening your wallet…</h2>
+  <p>You can close this tab after approving.</p>
+  <input id="link-box" readonly onclick="this.select()" />
+  <br>
+  <button class="copy-btn" id="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('link-box').value).then(()=>this.textContent='Copied!')">Copy Link</button>
+  <p id="fallback-msg" style="display:none;margin-top:16px;font-size:12px">If the wallet didn't open, copy the link above and paste it in your wallet's browser.</p>
+  <script>
+    var target = ${JSON.stringify(decoded)};
+    // Fire immediately
+    setTimeout(function() { window.location.href = target; }, 300);
+    // After 4s show manual fallback (wallet app had time to open)
+    setTimeout(function() {
+      var lb = document.getElementById('link-box');
+      var cb = document.getElementById('copy-btn');
+      var fm = document.getElementById('fallback-msg');
+      lb.value = target;
+      lb.style.display = 'block';
+      cb.style.display = 'inline-block';
+      fm.style.display = 'block';
+    }, 4000);
+  </script>
+</body>
+</html>`);
 });
 
 // GET /api/pump/approve-deeplink
