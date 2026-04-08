@@ -1610,10 +1610,16 @@ function showDepositInstructions(d) {
 
   // Title + amount label
   document.getElementById('pump-deposit-title').textContent  = '⚡ Fund Agent to Start';
-  document.getElementById('pump-deposit-chain-label').textContent = isSolSess ? 'Agent SOL Wallet:' : 'Agent USDC Wallet:';
+  document.getElementById('pump-deposit-chain-label').textContent = isSolSess ? 'Send any amount of SOL' : 'Send any amount of USDC';
   document.getElementById('pump-deposit-amount').textContent = isSolSess
     ? `${amt} SOL`
     : `$${amt} ${token}`;
+
+  // Footer text
+  const _footerEl = document.getElementById('pump-deposit-footer');
+  if (_footerEl) _footerEl.textContent = isSolSess
+    ? 'Opens Phantom. Bot detects SOL deposit and starts automatically.'
+    : 'Copy address — paste into MetaMask or any EVM wallet to send USDC.';
 
   // Update Fund Agent button label for chain
   const fundBtn = document.getElementById('pump-fund-btn');
@@ -1781,14 +1787,21 @@ async function loadPumpSession() {
       const _addr  = d.session.solDepositAddress || d.session.depositAddress
         || (_isSol ? 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs' : '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d');
       const _amt   = _isSol ? (d.session.totalSol || '') : (d.session.totalAmount || '');
-      document.getElementById('pump-deposit-chain-label').textContent = _isSol ? 'Send any amount of SOL' : 'Send USDC to fund the bot';
+      document.getElementById('pump-deposit-chain-label').textContent = _isSol ? 'Send any amount of SOL' : 'Send any amount of USDC';
       document.getElementById('pump-deposit-addr').textContent = _addr;
       document.getElementById('pump-deposit-amount').textContent = _isSol ? `${_amt} SOL` : `$${_amt} USDC`;
+      // Footer
+      const _footerEl2 = document.getElementById('pump-deposit-footer');
+      if (_footerEl2) _footerEl2.textContent = _isSol
+        ? 'Opens Phantom. Bot detects SOL deposit and starts automatically.'
+        : 'Copy address — paste into MetaMask or any EVM wallet to send USDC.';
       // Update Fund Agent button
       const _fundBtn = document.getElementById('pump-fund-btn');
       if (_fundBtn) {
         _fundBtn.disabled = false;
-        _fundBtn.innerHTML = _isSol ? '👋 Fund Agent with SOL' : '👋 Fund Agent with USDC';
+        const _isMob = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        _fundBtn.innerHTML = _isSol ? (_isMob ? '👻 Open in Phantom' : '📋 Copy Address') : '📋 Copy Address';
+        _fundBtn.onclick = _isSol ? fundAgentWithWallet : copyDepositAddr;
       }
       renderPumpSession(d.session);
       startPumpPoller();
