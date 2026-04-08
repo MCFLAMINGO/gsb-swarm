@@ -1375,15 +1375,32 @@ async function approveUSDC() {
   }
 }
 
+// ── Wallet deeplink launcher ─────────────────────────────────────────────────
+// Telegram WebView traps <a href> and window.open — they resolve to the
+// wallet's download page instead of the installed app. Fix:
+//   iOS  : tg.openLink() → system Safari → iOS universal link → wallet app
+//   Android: tg.openLink() → Chrome → universal link → wallet app
+// The intent:// trick is an alternative Android path but less reliable with
+// universal links, so we use tg.openLink() universally and fall back to copy.
 function _openWalletLink(url) {
-  // In Telegram WebView, <a href> and window.open are trapped in the WebView
-  // and just open the wallet's download page. tg.openLink() breaks out to the
-  // system browser, which can then trigger the wallet app via its registered URL scheme.
-  if (IS_TELEGRAM && tg?.openLink) {
-    tg.openLink(url);
-  } else {
-    window.open(url, '_blank');
+  try {
+    if (IS_TELEGRAM && tg?.openLink) {
+      tg.openLink(url);        // hands off to system browser → wallet app
+    } else {
+      window.open(url, '_blank');
+    }
+  } catch(e) {
+    // Last resort: copy to clipboard + toast
+    navigator.clipboard?.writeText(url).catch(() => {});
+    showToast('Link copied — paste in your browser to open wallet', '');
   }
+}
+
+// Copy EIP-681 link to clipboard — shown as manual fallback in the modal
+function _copyApproveLink(url) {
+  navigator.clipboard?.writeText(url)
+    .then(() => showToast('Approve link copied — paste in MetaMask / Phantom browser', 'success'))
+    .catch(() => showToast('Copy failed — open wallet manually', 'error'));
 }
 
 function showApproveModal(d) {
@@ -1419,6 +1436,9 @@ function showApproveModal(d) {
       <div style="font-size:12px;color:var(--muted);margin-bottom:6px;line-height:1.5">One-time only. Sign once on <strong>${d.chain}</strong> — the agent can pull USDC for every buy from here on.</div>
       <div style="font-size:11px;color:var(--accent);margin-bottom:18px;padding:8px 10px;background:rgba(99,102,241,0.08);border-radius:8px;line-height:1.5">ℹ️ Tap your wallet → sign the approval → come back here. Confirmation is detected automatically.</div>
       <div style="display:flex;flex-direction:column;gap:10px">${rows}</div>
+      <div style="margin-top:8px;text-align:center">
+        <button onclick="_copyApproveLink('${d.eip681}')" style="background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;text-decoration:underline">📋 Copy link to open in wallet browser manually</button>
+      </div>
       <div id="approve-modal-status" style="margin-top:14px;font-size:12px;color:var(--muted);text-align:center;display:none">⏳ Waiting for on-chain confirmation…</div>
       <button onclick="document.getElementById('approve-modal').remove();clearTimeout(_approvalPollTimer)" style="margin-top:14px;width:100%;padding:12px;background:none;border:1px solid var(--border);border-radius:10px;color:var(--muted);font-size:13px;cursor:pointer">✕ Cancel</button>
     </div>`;
