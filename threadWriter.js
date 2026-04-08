@@ -303,7 +303,7 @@ function buildThread(topic, liveData, narrative) {
     const mcStr  = marketCap > 1e6 ? '$' + (marketCap/1e6).toFixed(1) + 'M' : '$' + Math.round(marketCap/1e3) + 'K';
     const ts = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     return [
-      `1/ ${name} ($${symbol}) data drop. Thread.`,
+      `1/ $${symbol} — ${name} data drop. Thread.`,
       `2/ ${name} is ${trend} right now. Here are the numbers.`,
       `3/ Price: $${parseFloat(priceUsd).toFixed(6)} | 24h: ${priceChange24h > 0 ? '+' : ''}${priceChange24h}%`,
       `4/ Liquidity: ${liqStr} | 24h Volume: ${volStr} | MCap: ${mcStr}`,
@@ -505,7 +505,7 @@ async function buildTokenIntelReport({ symbol, contractAddress, chain, memoryCon
   const cachedNote = skipXSearch && memoryContext ? `\n\n[Cached research — updated within last hour. Fresh price pulled now.]` : '';
 
   const threadTweets = [
-    `1/ ${displayName} (${displayTicker}) — ${angle.opener} from GSB Swarm 🤖${cachedNote}`,
+    `1/ ${displayTicker} — ${angle.opener} from GSB Swarm 🤖${cachedNote}`,
     `2/ On-chain snapshot:\n${priceStr} ${changeStr}\n${liqStr} | ${volStr}\nChain: ${chainStr}${detectedContract ? `\nCA: ${detectedContract}` : ''}`,
     `3/ X sentiment scan (${tweets.length} tweets):\n${tweetSummary}`,
     ...(tweets.slice(1, 4).map((t, i) =>
