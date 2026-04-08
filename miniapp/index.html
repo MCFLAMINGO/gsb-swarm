@@ -1626,7 +1626,10 @@ function showDepositInstructions(d) {
   if (fundBtn) {
     fundBtn.disabled = false;
     const _isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    fundBtn.innerHTML = isSolSess ? (_isMobile ? '👻 Open in Phantom' : '📋 Copy Address') : '📋 Copy Address';
+    const _hasPhantom = !!(window.phantom?.solana?.isPhantom || window.solana?.isPhantom);
+    fundBtn.innerHTML = isSolSess
+      ? (_isMobile ? '👻 Open in Phantom' : (_hasPhantom ? '👻 Send with Phantom' : '📋 Copy Address'))
+      : '📋 Copy Address';
     fundBtn.onclick = isSolSess ? fundAgentWithWallet : copyDepositAddr;
   }
 }
@@ -1657,14 +1660,44 @@ function fundAgentWithWallet() {
       window.location.href = phantomLink;
       showToast('Choose your wallet to send SOL', '');
     } else {
-      // Desktop: deep link opens a blank browser tab — just copy address instead
-      navigator.clipboard.writeText(destAddr).catch(() => {
-        const el = document.createElement('textarea');
-        el.value = destAddr; document.body.appendChild(el);
-        el.select(); document.execCommand('copy');
-        document.body.removeChild(el);
-      });
-      showToast('Wallet ready — open Phantom or any Solana wallet and send SOL', '');
+      // Desktop: use Phantom browser extension if available
+      const phantom = window.phantom?.solana || window.solana;
+      if (phantom?.isPhantom) {
+        // Phantom extension detected — trigger send via signAndSendTransaction
+        (async () => {
+          try {
+            const { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } = await import('https://cdn.jsdelivr.net/npm/@solana/web3.js@1.95.8/lib/index.iife.min.js').catch(() => null) || {};
+            if (!Connection) throw new Error('web3 unavailable');
+            const amtMatch = amountText.match(/([\d.]+)/);
+            const solAmt = amtMatch ? parseFloat(amtMatch[1]) : null;
+            if (!solAmt) return showToast('Could not read amount', 'error');
+            const conn = new Connection('https://solana-rpc.publicnode.com', 'confirmed');
+            if (!phantom.isConnected) await phantom.connect();
+            const from = phantom.publicKey;
+            const to   = new PublicKey(destAddr);
+            const lamports = Math.round(solAmt * LAMPORTS_PER_SOL);
+            const { blockhash } = await conn.getLatestBlockhash();
+            const tx = new Transaction({ recentBlockhash: blockhash, feePayer: from });
+            tx.add(SystemProgram.transfer({ fromPubkey: from, toPubkey: to, lamports }));
+            const { signature } = await phantom.signAndSendTransaction(tx);
+            showToast('SOL sent! Bot starting...', 'success');
+            console.log('[fund] tx:', signature);
+          } catch(e) {
+            // Fallback: copy address
+            navigator.clipboard.writeText(destAddr).catch(() => {});
+            showToast('Open Phantom and send SOL to the copied address', '');
+          }
+        })();
+      } else {
+        // No extension — copy address and instruct
+        navigator.clipboard.writeText(destAddr).catch(() => {
+          const el = document.createElement('textarea');
+          el.value = destAddr; document.body.appendChild(el);
+          el.select(); document.execCommand('copy');
+          document.body.removeChild(el);
+        });
+        showToast('Address copied — paste into Phantom or any Solana wallet to send SOL', '');
+      }
     }
 
   } else {
