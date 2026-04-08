@@ -2559,57 +2559,44 @@ window.addEventListener('load', async () => {
 });
 </script>
 
-<!-- Reown AppKit — persistent signing session for Telegram (EVM + Solana) -->
+<!-- Reown AppKit — EthersAdapter + SolanaAdapter (no wagmi/viem — browser safe) -->
 <script type="module">
-import { createAppKit } from 'https://esm.sh/@reown/appkit@1.8.19'
-import { WagmiAdapter }  from 'https://esm.sh/@reown/appkit-adapter-wagmi@1.8.19'
+import { createAppKit }  from 'https://esm.sh/@reown/appkit@1.8.19'
+import { EthersAdapter } from 'https://esm.sh/@reown/appkit-adapter-ethers@1.8.19'
 import { SolanaAdapter } from 'https://esm.sh/@reown/appkit-adapter-solana@1.8.19'
-import {
-  mainnet, base, arbitrum, polygon, solana
-} from 'https://esm.sh/@reown/appkit@1.8.19/networks'
-import {
-  PhantomWalletAdapter,
-  SolflareWalletAdapter
-} from 'https://esm.sh/@solana/wallet-adapter-wallets@0.19.32'
+import { base, mainnet, arbitrum, polygon, solana }
+  from 'https://esm.sh/@reown/appkit@1.8.19/networks'
 
-const PROJECT_ID = 'ff5dd5e462b92932d7b28c00b81695e8';
+try {
+  const modal = createAppKit({
+    adapters:  [new EthersAdapter(), new SolanaAdapter()],
+    networks:  [base, mainnet, arbitrum, polygon, solana],
+    projectId: 'ff5dd5e462b92932d7b28c00b81695e8',
+    metadata: {
+      name:        'GSB Swarm',
+      description: 'GSB Intelligence Swarm',
+      url:         'https://gsb-swarm-production.up.railway.app',
+      icons:       ['https://gsb-swarm-production.up.railway.app/favicon.ico'],
+    },
+    features:  { analytics: false, email: false, socials: false },
+    themeMode: 'dark',
+  });
 
-const wagmiAdapter = new WagmiAdapter({
-  projectId: PROJECT_ID,
-  networks: [base, mainnet, arbitrum, polygon],
-});
+  window.gsbModal = modal;
 
-const solanaAdapter = new SolanaAdapter({
-  wallets: [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
-});
-
-const modal = createAppKit({
-  adapters: [wagmiAdapter, solanaAdapter],
-  networks:  [base, mainnet, arbitrum, polygon, solana],
-  projectId: PROJECT_ID,
-  metadata: {
-    name:        'GSB Swarm',
-    description: 'GSB Intelligence Swarm',
-    url:         'https://gsb-swarm-production.up.railway.app',
-    icons:       ['https://gsb-swarm-production.up.railway.app/favicon.ico'],
-  },
-  features: { analytics: false, email: false, socials: false },
-  themeMode: 'dark',
-});
-
-// Expose globally so the main script can use it
-window.gsbModal = modal;
-
-// When AppKit reconnects a persisted session, push the address into the app
-modal.subscribeAccount(({ address, chainId, status }) => {
-  if (status === 'connected' && address) {
-    // If the main app hasn't got a wallet yet, hydrate it now
-    if (typeof walletAddress !== 'undefined' && !walletAddress) {
-      walletAddress = address;
-      if (typeof onWalletConnected === 'function') onWalletConnected();
+  // Auto-hydrate walletAddress when AppKit reconnects persisted session
+  modal.subscribeAccount(({ address, status }) => {
+    if (status === 'connected' && address) {
+      if (typeof walletAddress !== 'undefined' && !walletAddress) {
+        walletAddress = address;
+        if (typeof onWalletConnected === 'function') onWalletConnected();
+      }
     }
-  }
-});
+  });
+} catch(e) {
+  console.warn('[GSB] AppKit init failed:', e.message);
+  window.gsbModal = null;
+}
 </script>
 </body>
 </html>

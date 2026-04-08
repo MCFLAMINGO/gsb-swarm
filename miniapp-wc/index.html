@@ -6,297 +6,105 @@
   <title>GSB — Connect Wallet</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     :root {
-      --bg:       #0a0a0f;
-      --surface:  #13131a;
-      --surface2: #1c1c27;
-      --border:   #2a2a3a;
-      --accent:   #6366f1;
-      --accent-h: #818cf8;
-      --muted:    #6b7280;
-      --text:     #f1f5f9;
-      --success:  #22c55e;
-      --error:    #ef4444;
+      --bg: #0a0a0f; --surface: #13131a; --surface2: #1c1c27;
+      --border: #2a2a3a; --accent: #6366f1; --accent-h: #818cf8;
+      --muted: #6b7280; --text: #f1f5f9; --success: #22c55e; --error: #ef4444;
     }
-
-    html, body {
-      height: 100%;
-      background: var(--bg);
-      color: var(--text);
+    html, body { height: 100%; background: var(--bg); color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-      -webkit-font-smoothing: antialiased;
-    }
+      -webkit-font-smoothing: antialiased; }
+    body { display: flex; flex-direction: column; align-items: center;
+      justify-content: center; min-height: 100vh; padding: 24px 16px; }
 
-    body {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      padding: 24px 16px;
-    }
-
-    /* ── Logo ── */
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 32px;
-    }
-    .logo-icon {
-      width: 44px;
-      height: 44px;
+    .logo { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
+    .logo-icon { width: 44px; height: 44px;
       background: linear-gradient(135deg, var(--accent), #a855f7);
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .logo-text {
-      font-size: 22px;
-      font-weight: 800;
-      letter-spacing: -0.03em;
+      border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+    .logo-text { font-size: 22px; font-weight: 800; letter-spacing: -0.03em;
       background: linear-gradient(135deg, var(--accent-h), #c084fc);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
 
-    /* ── Card ── */
-    .card {
-      width: 100%;
-      max-width: 420px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 28px 24px;
-    }
+    .card { width: 100%; max-width: 420px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 20px; padding: 28px 24px; }
+    .card-title { font-size: 20px; font-weight: 700; text-align: center; margin-bottom: 6px; }
+    .card-sub { font-size: 13px; color: var(--muted); text-align: center;
+      margin-bottom: 24px; line-height: 1.5; }
 
-    .card-title {
-      font-size: 20px;
-      font-weight: 700;
-      text-align: center;
-      margin-bottom: 6px;
-    }
-    .card-sub {
-      font-size: 13px;
-      color: var(--muted);
-      text-align: center;
-      margin-bottom: 24px;
-      line-height: 1.5;
-    }
-
-    /* ── Connect button ── */
     #connect-btn {
-      width: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      padding: 16px;
+      width: 100%; display: flex; align-items: center; justify-content: center;
+      gap: 12px; padding: 16px;
       background: linear-gradient(135deg, var(--accent), #a855f7);
-      border: none;
-      border-radius: 14px;
-      cursor: pointer;
-      color: #fff;
-      font-size: 16px;
-      font-weight: 700;
-      letter-spacing: -0.01em;
-      transition: opacity 0.15s, transform 0.1s;
-      margin-bottom: 16px;
+      border: none; border-radius: 14px; cursor: pointer; color: #fff;
+      font-size: 16px; font-weight: 700; letter-spacing: -0.01em;
+      transition: opacity 0.15s, transform 0.1s; margin-bottom: 16px;
     }
     #connect-btn:hover { opacity: 0.9; }
     #connect-btn:active { transform: scale(0.98); }
     #connect-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-    /* ── Network badges ── */
-    .network-row {
-      display: flex;
-      justify-content: center;
-      gap: 8px;
-      margin-bottom: 20px;
-      flex-wrap: wrap;
-    }
-    .net-badge {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 4px 10px;
-      font-size: 11px;
-      color: var(--muted);
-      font-weight: 500;
-    }
-    .net-dot {
-      width: 6px; height: 6px;
-      border-radius: 50%;
-    }
-    .net-dot.sol { background: #9945ff; }
+    .network-row { display: flex; justify-content: center; gap: 8px;
+      margin-bottom: 20px; flex-wrap: wrap; }
+    .net-badge { display: flex; align-items: center; gap: 5px; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 20px; padding: 4px 10px;
+      font-size: 11px; color: var(--muted); font-weight: 500; }
+    .net-dot { width: 6px; height: 6px; border-radius: 50%; }
+    .net-dot.sol  { background: #9945ff; }
     .net-dot.base { background: #0052ff; }
-    .net-dot.eth { background: #627eea; }
-    .net-dot.arb { background: #12aaff; }
+    .net-dot.eth  { background: #627eea; }
+    .net-dot.arb  { background: #12aaff; }
 
-    /* ── Wallet row (shown after connect) ── */
-    .wallet-row {
-      display: none;
-      align-items: center;
-      gap: 10px;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 12px 14px;
-      margin-bottom: 16px;
-    }
-    .wallet-dot {
-      width: 10px; height: 10px;
-      border-radius: 50%;
-      background: var(--success);
-      flex-shrink: 0;
-      box-shadow: 0 0 6px rgba(34,197,94,0.5);
-    }
-    .wallet-addr {
-      flex: 1;
-      font-size: 13px;
-      font-family: monospace;
-      color: var(--text);
-      word-break: break-all;
-    }
-    .wallet-chain-badge {
-      font-size: 10px;
-      background: rgba(99,102,241,0.2);
-      color: var(--accent-h);
-      border-radius: 6px;
-      padding: 3px 8px;
-      font-weight: 600;
-      text-transform: uppercase;
-      flex-shrink: 0;
-    }
+    .wallet-row { display: none; align-items: center; gap: 10px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 14px; padding: 12px 14px; margin-bottom: 16px; }
+    .wallet-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--success);
+      flex-shrink: 0; box-shadow: 0 0 6px rgba(34,197,94,0.5); }
+    .wallet-addr { flex: 1; font-size: 13px; font-family: monospace;
+      color: var(--text); word-break: break-all; }
+    .wallet-chain-badge { font-size: 10px; background: rgba(99,102,241,0.2);
+      color: var(--accent-h); border-radius: 6px; padding: 3px 8px;
+      font-weight: 600; text-transform: uppercase; flex-shrink: 0; }
 
-    /* ── Status / Spinner ── */
-    .status-row {
-      display: none;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      margin: 16px 0;
-      font-size: 14px;
-      color: var(--muted);
-    }
-    .spinner {
-      width: 20px; height: 20px;
-      border: 2px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-    }
+    .status-row { display: none; align-items: center; justify-content: center;
+      gap: 10px; margin: 16px 0; font-size: 14px; color: var(--muted); }
+    .spinner { width: 20px; height: 20px; border: 2px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin 0.7s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Success state ── */
-    .success-card {
-      display: none;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      padding: 12px 0;
-    }
-    .success-icon {
-      width: 64px; height: 64px;
-      background: rgba(34,197,94,0.15);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 0 auto 16px;
-    }
-    .success-icon svg { color: var(--success); }
-    .success-title {
-      font-size: 18px; font-weight: 700;
-      color: var(--success);
-      margin-bottom: 6px;
-    }
-    .success-addr {
-      font-size: 12px;
-      color: var(--muted);
-      font-family: monospace;
-      word-break: break-all;
-      margin-bottom: 16px;
-    }
-    .success-sub {
-      font-size: 13px;
-      color: var(--muted);
-      line-height: 1.5;
-    }
-    .return-btn {
-      margin-top: 18px;
-      background: var(--accent);
-      color: #fff;
-      border: none;
-      border-radius: 12px;
-      padding: 13px 28px;
-      font-size: 15px; font-weight: 700;
-      cursor: pointer;
-      transition: opacity 0.15s;
-    }
+    .success-card { display: none; flex-direction: column; align-items: center;
+      text-align: center; padding: 12px 0; }
+    .success-icon { width: 64px; height: 64px; background: rgba(34,197,94,0.15);
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 16px; }
+    .success-title { font-size: 18px; font-weight: 700; color: var(--success); margin-bottom: 6px; }
+    .success-addr { font-size: 12px; color: var(--muted); font-family: monospace;
+      word-break: break-all; margin-bottom: 16px; }
+    .success-sub { font-size: 13px; color: var(--muted); line-height: 1.5; }
+    .return-btn { margin-top: 18px; background: var(--accent); color: #fff; border: none;
+      border-radius: 12px; padding: 13px 28px; font-size: 15px; font-weight: 700;
+      cursor: pointer; transition: opacity 0.15s; }
     .return-btn:hover { opacity: 0.9; }
 
-    /* ── Error state ── */
-    .err-msg {
-      display: none;
-      background: rgba(239,68,68,0.1);
-      border: 1px solid rgba(239,68,68,0.3);
-      border-radius: 12px;
-      padding: 12px 16px;
-      font-size: 13px;
-      color: #fca5a5;
-      text-align: center;
-      margin-top: 12px;
-    }
+    .err-msg { display: none; background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3); border-radius: 12px;
+      padding: 12px 16px; font-size: 13px; color: #fca5a5; text-align: center; margin-top: 12px; }
 
-    /* ── Info bullets ── */
-    .info-list {
-      list-style: none;
-      margin-top: 4px;
-    }
-    .info-list li {
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      font-size: 12px;
-      color: var(--muted);
-      margin-bottom: 7px;
-      line-height: 1.4;
-    }
-    .info-list li::before {
-      content: '✓';
-      color: var(--accent-h);
-      font-size: 11px;
-      margin-top: 1px;
-      flex-shrink: 0;
-    }
+    .info-list { list-style: none; margin-top: 4px; }
+    .info-list li { display: flex; align-items: flex-start; gap: 8px;
+      font-size: 12px; color: var(--muted); margin-bottom: 7px; line-height: 1.4; }
+    .info-list li::before { content: '✓'; color: var(--accent-h); font-size: 11px;
+      margin-top: 1px; flex-shrink: 0; }
 
-    /* ── AppKit web component dark theme override ── */
-    :root {
-      --wui-color-modal-bg-one: #13131a;
-      --wui-color-modal-bg-two: #1c1c27;
-      --wui-border-radius-l: 20px;
-      --wui-border-radius-m: 14px;
-    }
+    .footer { margin-top: 24px; font-size: 11px; color: var(--muted); text-align: center; }
 
-    /* ── Footer ── */
-    .footer {
-      margin-top: 24px;
-      font-size: 11px;
-      color: var(--muted);
-      text-align: center;
-    }
+    /* Loading state */
+    #sdk-status { font-size: 12px; color: var(--muted); text-align: center;
+      padding: 4px 0 8px; min-height: 20px; }
   </style>
 </head>
 <body>
 
-  <!-- Logo -->
   <div class="logo">
     <div class="logo-icon">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
@@ -306,31 +114,30 @@
     <span class="logo-text">GSB Swarm</span>
   </div>
 
-  <!-- Main Card -->
   <div class="card" id="main-card">
     <div class="card-title">Connect Your Wallet</div>
     <div class="card-sub" id="card-sub">Sign transactions for swaps, DCA, and pump operations.</div>
 
-    <!-- Wallet buttons / connect UI -->
     <div id="connect-section">
-
-      <!-- Connected wallet row (shown when already connected) -->
+      <!-- Connected wallet row -->
       <div class="wallet-row" id="wallet-row">
         <div class="wallet-dot"></div>
         <div class="wallet-addr" id="wallet-addr-display"></div>
         <div class="wallet-chain-badge" id="wallet-chain-badge">—</div>
       </div>
 
-      <!-- Big connect button -->
-      <button id="connect-btn">
+      <div id="sdk-status"></div>
+
+      <button id="connect-btn" disabled>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
-          <line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/>
+          <rect x="2" y="7" width="20" height="14" rx="2"/>
+          <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+          <line x1="12" y1="12" x2="12" y2="16"/>
+          <line x1="10" y1="14" x2="14" y2="14"/>
         </svg>
-        Connect Wallet
+        Loading…
       </button>
 
-      <!-- Supported networks -->
       <div class="network-row">
         <div class="net-badge"><div class="net-dot sol"></div>Solana</div>
         <div class="net-badge"><div class="net-dot base"></div>Base</div>
@@ -346,16 +153,13 @@
       </ul>
     </div>
 
-    <!-- Status row (spinner) -->
     <div class="status-row" id="status-row">
       <div class="spinner"></div>
       <span id="status-text">Connecting…</span>
     </div>
 
-    <!-- Error message -->
     <div class="err-msg" id="err-msg"></div>
 
-    <!-- Success state -->
     <div class="success-card" id="success-card">
       <div class="success-icon">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -364,222 +168,213 @@
       </div>
       <div class="success-title">Wallet Connected!</div>
       <div class="success-addr" id="success-addr"></div>
-      <div class="success-sub">Your wallet is linked and ready to sign transactions. You can close this window or tap below to return to the bot.</div>
-      <button class="return-btn" id="return-btn" onclick="goBack()">Return to GSB Bot</button>
+      <div class="success-sub">Your wallet is linked and ready to sign transactions.</div>
+      <button class="return-btn" onclick="goBack()">Return to GSB Bot</button>
     </div>
   </div>
 
-  <div class="footer">
-    Powered by GSB Swarm · Reown AppKit · Your keys stay in your wallet
-  </div>
+  <div class="footer">Powered by GSB Swarm · Reown AppKit · Your keys stay in your wallet</div>
 
-  <!-- Reown AppKit via ESM — no build step needed -->
-  <script type="module">
-    import { createAppKit } from 'https://esm.sh/@reown/appkit@1.8.19'
-    import { WagmiAdapter }  from 'https://esm.sh/@reown/appkit-adapter-wagmi@1.8.19'
-    import { SolanaAdapter } from 'https://esm.sh/@reown/appkit-adapter-solana@1.8.19'
-    import {
-      mainnet, base, arbitrum, polygon, solana
-    } from 'https://esm.sh/@reown/appkit@1.8.19/networks'
-    import {
-      PhantomWalletAdapter,
-      SolflareWalletAdapter
-    } from 'https://esm.sh/@solana/wallet-adapter-wallets@0.19.32'
+  <script>
+    // ── Synchronous helpers (no module dependency) ───────────────────────────
+    const _params   = new URLSearchParams(window.location.search);
+    const userId    = _params.get('userId')    || 'unknown';
+    const returnUrl = _params.get('returnUrl') || 'https://t.me/gsb_swap_bot';
 
-    // ─── Config ───────────────────────────────────────────────────────────────
-    const PROJECT_ID = 'ff5dd5e462b92932d7b28c00b81695e8'
-    const API_BASE   = 'https://gsb-swarm-production.up.railway.app'
-
-    const _params   = new URLSearchParams(window.location.search)
-    const userId    = _params.get('userId')    || 'unknown'
-    const returnUrl = _params.get('returnUrl') || 'https://t.me/gsb_swap_bot'
-
-    // Telegram setup
     if (window.Telegram?.WebApp) {
-      window.Telegram.WebApp.ready()
-      window.Telegram.WebApp.expand()
+      window.Telegram.WebApp.ready();
+      window.Telegram.WebApp.expand();
     }
 
-    // ─── Adapters ─────────────────────────────────────────────────────────────
-    const wagmiAdapter = new WagmiAdapter({
-      projectId: PROJECT_ID,
-      networks: [base, mainnet, arbitrum, polygon],
-    })
-
-    const solanaAdapter = new SolanaAdapter({
-      wallets: [
-        new PhantomWalletAdapter(),
-        new SolflareWalletAdapter(),
-      ],
-    })
-
-    // ─── AppKit modal ─────────────────────────────────────────────────────────
-    const modal = createAppKit({
-      adapters: [wagmiAdapter, solanaAdapter],
-      networks: [base, mainnet, arbitrum, polygon, solana],
-      projectId: PROJECT_ID,
-      metadata: {
-        name:        'GSB Swarm',
-        description: 'GSB Intelligence Swarm — Connect wallet to sign swaps',
-        url:         'https://gsb-swarm-production.up.railway.app',
-        icons:       ['https://gsb-swarm-production.up.railway.app/favicon.ico'],
-      },
-      features: {
-        analytics: false,
-        email:     false,
-        socials:   false,
-      },
-      themeMode: 'dark',
-      themeVariables: {
-        '--w3m-color-mix':            '#6366f1',
-        '--w3m-color-mix-strength':   20,
-        '--w3m-font-family':          '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
-        '--w3m-border-radius-master': '4px',
-      },
-    })
-
-    // ─── UI helpers ───────────────────────────────────────────────────────────
-    function showStatus(msg) {
-      document.getElementById('status-row').style.display = 'flex'
-      document.getElementById('status-text').textContent  = msg
-    }
-    function hideStatus() {
-      document.getElementById('status-row').style.display = 'none'
+    function setStatus(msg) {
+      document.getElementById('sdk-status').textContent = msg;
     }
     function showError(msg) {
-      const el = document.getElementById('err-msg')
-      el.textContent    = msg
-      el.style.display  = 'block'
-      hideStatus()
+      const el = document.getElementById('err-msg');
+      el.textContent = msg; el.style.display = 'block';
     }
-
     function showSuccess(address) {
-      document.getElementById('connect-section').style.display = 'none'
-      document.getElementById('status-row').style.display      = 'none'
-      document.getElementById('err-msg').style.display         = 'none'
-      document.getElementById('card-sub').style.display        = 'none'
-      document.getElementById('success-addr').textContent      = address
-      document.getElementById('success-card').style.display    = 'flex'
+      document.getElementById('connect-section').style.display = 'none';
+      document.getElementById('status-row').style.display      = 'none';
+      document.getElementById('err-msg').style.display         = 'none';
+      document.getElementById('card-sub').style.display        = 'none';
+      document.getElementById('success-addr').textContent      = address;
+      document.getElementById('success-card').style.display    = 'flex';
     }
-
-    window.goBack = function() {
-      if (returnUrl && returnUrl !== 'null') {
-        window.location.href = returnUrl
-      }
+    function goBack() {
+      if (returnUrl && returnUrl !== 'null') window.location.href = returnUrl;
     }
+    window.goBack = goBack;
 
-    // ─── Core: save wallet + show success ─────────────────────────────────────
     async function onWalletConnected(address, chain) {
-      chain = chain || 'evm'
-      showStatus('Saving wallet…')
-
-      // Save to localStorage for miniapp to pick up
-      const chainId = chain === 'solana' ? 'sol' : 'evm'
+      chain = chain || 'evm';
+      document.getElementById('status-row').style.display = 'flex';
+      document.getElementById('status-text').textContent  = 'Saving wallet…';
       try {
-        localStorage.setItem(`gsb_${chainId}_wallet_${userId}`, address)
-        localStorage.setItem(`gsb_wallet_${userId}`, address)
-        localStorage.setItem('gsb_connected_address', address)
-        localStorage.setItem('gsb_connected_chain',   chain)
-      } catch (_) {}
-
-      // Save server-side
+        localStorage.setItem(`gsb_${chain === 'solana' ? 'sol' : 'evm'}_wallet_${userId}`, address);
+        localStorage.setItem(`gsb_wallet_${userId}`, address);
+        localStorage.setItem('gsb_connected_address', address);
+        localStorage.setItem('gsb_connected_chain',   chain);
+      } catch(_) {}
       try {
-        const resp = await fetch(`${API_BASE}/api/user/set-wallet`, {
-          method:  'POST',
+        await fetch('https://gsb-swarm-production.up.railway.app/api/user/set-wallet', {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ userId, walletAddress: address, chain }),
-        })
-        const data = await resp.json().catch(() => ({}))
-        if (!resp.ok) console.warn('[wc] set-wallet not ok:', data)
-      } catch (err) {
-        console.warn('[wc] Failed to save wallet server-side:', err.message)
-      }
-
-      showSuccess(address)
-
-      // Auto-redirect after 2.5 s
-      if (returnUrl && returnUrl !== 'null') {
-        setTimeout(goBack, 2500)
-      }
+          body: JSON.stringify({ userId, walletAddress: address, chain }),
+        });
+      } catch(e) { console.warn('[wc] server save failed:', e.message); }
+      showSuccess(address);
+      if (returnUrl && returnUrl !== 'null') setTimeout(goBack, 2500);
     }
 
-    // ─── AppKit state listeners ───────────────────────────────────────────────
-    // Subscribe to account changes
-    modal.subscribeAccount(({ address, chainId, status }) => {
-      if (status === 'connected' && address) {
-        // Determine chain type from chainId
-        // Solana chainId in AppKit is 'solana:mainnet' or numeric 900+
-        const isSolana = typeof chainId === 'string'
-          ? chainId.startsWith('solana')
-          : (chainId >= 900 && chainId <= 999)
+    if (!userId || userId === 'unknown') {
+      document.getElementById('card-sub').textContent =
+        'Open this page from the GSB bot to link your wallet automatically.';
+    }
 
-        const chainName = isSolana ? 'solana' : 'evm'
+    // ── Pending address from AppKit (set by module script) ───────────────────
+    window._wcPendingAddress   = null;
+    window._wcPendingChain     = null;
+    window._wcModalReady       = false;
 
-        // Update the wallet row display
-        const row = document.getElementById('wallet-row')
-        row.style.display = 'flex'
-        document.getElementById('wallet-addr-display').textContent =
-          address.length > 20
-            ? address.slice(0, 8) + '…' + address.slice(-6)
-            : address
-        document.getElementById('wallet-chain-badge').textContent =
-          isSolana ? 'Solana' : (chainId === 8453 ? 'Base' : chainId === 1 ? 'ETH' : chainId === 42161 ? 'ARB' : 'EVM')
-
-        // Change button text
-        const btn = document.getElementById('connect-btn')
-        btn.textContent = 'Confirm & Link Wallet'
-
-        // If we haven't already shown success, store state for confirm click
-        window._pendingAddress   = address
-        window._pendingChainName = chainName
-      } else if (status === 'disconnected') {
-        document.getElementById('wallet-row').style.display = 'none'
-        const btn = document.getElementById('connect-btn')
-        btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
-          <line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/>
-        </svg> Connect Wallet`
-        window._pendingAddress   = null
-        window._pendingChainName = null
-      }
-    })
-
-    // ─── Connect button ────────────────────────────────────────────────────────
+    // Button wired AFTER modal is ready (module sets _wcModalReady + re-enables)
     document.getElementById('connect-btn').addEventListener('click', async () => {
-      document.getElementById('err-msg').style.display = 'none'
-
-      // If wallet already connected in AppKit, treat click as "confirm"
-      if (window._pendingAddress) {
-        showStatus('Linking wallet…')
-        document.getElementById('connect-btn').disabled = true
-        await onWalletConnected(window._pendingAddress, window._pendingChainName)
-        return
+      document.getElementById('err-msg').style.display = 'none';
+      if (!window._wcModalReady) {
+        showError('Wallet SDK still loading — please wait a moment and try again.');
+        return;
       }
-
-      // Otherwise open AppKit modal
-      modal.open()
-    })
-
-    // ─── Auto-restore persisted session on page load ──────────────────────────
-    // AppKit auto-reconnects — subscribeAccount will fire if session exists.
-    // If not, check localStorage fallback from previous sessions.
-    window.addEventListener('load', () => {
-      if (!userId || userId === 'unknown') {
-        document.getElementById('card-sub').textContent =
-          'Open this page from the GSB bot to link your wallet automatically.'
+      // If AppKit already has a session, go straight to confirm
+      if (window._wcPendingAddress) {
+        await onWalletConnected(window._wcPendingAddress, window._wcPendingChain || 'evm');
+        return;
       }
+      // Open AppKit modal
+      try {
+        window.gsbModal.open();
+      } catch(e) {
+        showError('Could not open wallet selector: ' + e.message);
+      }
+    });
+  </script>
 
-      // Check if AppKit has a live session already (it auto-reconnects)
-      const state = modal.getState ? modal.getState() : null
+  <!-- AppKit module — EthersAdapter (no wagmi/viem) + SolanaAdapter -->
+  <script type="module">
+    import { createAppKit }    from 'https://esm.sh/@reown/appkit@1.8.19'
+    import { EthersAdapter }   from 'https://esm.sh/@reown/appkit-adapter-ethers@1.8.19'
+    import { SolanaAdapter }   from 'https://esm.sh/@reown/appkit-adapter-solana@1.8.19'
+    import { base, mainnet, arbitrum, polygon, solana }
+      from 'https://esm.sh/@reown/appkit@1.8.19/networks'
+
+    const PROJECT_ID = 'ff5dd5e462b92932d7b28c00b81695e8';
+
+    try {
+      const ethersAdapter  = new EthersAdapter();
+      const solanaAdapter  = new SolanaAdapter();  // auto-discovers Phantom/Solflare via Wallet Standard
+
+      const modal = createAppKit({
+        adapters:  [ethersAdapter, solanaAdapter],
+        networks:  [base, mainnet, arbitrum, polygon, solana],
+        projectId: PROJECT_ID,
+        metadata: {
+          name:        'GSB Swarm',
+          description: 'GSB Intelligence Swarm — connect wallet to sign swaps',
+          url:         'https://gsb-swarm-production.up.railway.app',
+          icons:       ['https://gsb-swarm-production.up.railway.app/favicon.ico'],
+        },
+        features:  { analytics: false, email: false, socials: false },
+        themeMode: 'dark',
+        themeVariables: {
+          '--w3m-color-mix':            '#6366f1',
+          '--w3m-color-mix-strength':   20,
+          '--w3m-border-radius-master': '4px',
+        },
+      });
+
+      // Expose globally
+      window.gsbModal = modal;
+      window._wcModalReady = true;
+
+      // Enable button + update label
+      const btn = document.getElementById('connect-btn');
+      btn.disabled = false;
+      btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="2" y="7" width="20" height="14" rx="2"/>
+        <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+        <line x1="12" y1="12" x2="12" y2="16"/>
+        <line x1="10" y1="14" x2="14" y2="14"/>
+      </svg> Connect Wallet`;
+      document.getElementById('sdk-status').textContent = '';
+
+      // Listen for account changes
+      modal.subscribeAccount(({ address, chainId, status }) => {
+        if (status === 'connected' && address) {
+          const isSolana = typeof chainId === 'string'
+            ? chainId.startsWith('solana')
+            : (chainId >= 900 && chainId <= 999);
+          const chainName  = isSolana ? 'solana' : 'evm';
+          const chainLabel = isSolana ? 'Solana'
+            : chainId === 8453   ? 'Base'
+            : chainId === 1      ? 'ETH'
+            : chainId === 42161  ? 'ARB'
+            : chainId === 137    ? 'MATIC'
+            : 'EVM';
+
+          window._wcPendingAddress = address;
+          window._wcPendingChain   = chainName;
+
+          // Show wallet row
+          const row = document.getElementById('wallet-row');
+          row.style.display = 'flex';
+          document.getElementById('wallet-addr-display').textContent =
+            address.length > 20
+              ? address.slice(0, 8) + '…' + address.slice(-6)
+              : address;
+          document.getElementById('wallet-chain-badge').textContent = chainLabel;
+
+          // Update button to confirm step
+          btn.disabled = false;
+          btn.textContent = 'Confirm & Link Wallet ✓';
+
+        } else if (status === 'disconnected') {
+          window._wcPendingAddress = null;
+          window._wcPendingChain   = null;
+          document.getElementById('wallet-row').style.display = 'none';
+          btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="7" width="20" height="14" rx="2"/>
+            <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+            <line x1="12" y1="12" x2="12" y2="16"/>
+            <line x1="10" y1="14" x2="14" y2="14"/>
+          </svg> Connect Wallet`;
+        }
+      });
+
+      // Auto-reconnect: if AppKit has a persisted session, surface it immediately
+      const state = modal.getState ? modal.getState() : null;
       if (state?.address) {
-        window._pendingAddress   = state.address
-        window._pendingChainName = 'evm'
-        document.getElementById('wallet-row').style.display = 'flex'
+        window._wcPendingAddress = state.address;
+        window._wcPendingChain   = 'evm';
+        const row = document.getElementById('wallet-row');
+        row.style.display = 'flex';
         document.getElementById('wallet-addr-display').textContent =
-          state.address.slice(0, 8) + '…' + state.address.slice(-6)
-        document.getElementById('connect-btn').textContent = 'Confirm & Link Wallet'
+          state.address.slice(0, 8) + '…' + state.address.slice(-6);
+        btn.textContent = 'Confirm & Link Wallet ✓';
       }
-    })
+
+    } catch(err) {
+      console.error('[AppKit] init failed:', err);
+      document.getElementById('sdk-status').textContent = '';
+      // Re-enable button so user can at least try injected wallets
+      const btn = document.getElementById('connect-btn');
+      btn.disabled = false;
+      btn.textContent = 'Connect Wallet';
+      window._wcModalReady = true; // allow click even if modal failed
+      window.gsbModal = null;
+      // Show error but non-blocking
+      const errEl = document.getElementById('err-msg');
+      errEl.textContent = 'Wallet SDK failed to load. You can still connect by pasting your address in the bot.';
+      errEl.style.display = 'block';
+    }
   </script>
 
 </body>
