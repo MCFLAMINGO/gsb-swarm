@@ -1643,8 +1643,8 @@ function fundAgentWithWallet() {
       const solAmt   = amtMatch ? parseFloat(amtMatch[1]) : null;
       if (!solAmt) return showToast('Could not read amount', 'error');
       const phantomLink = `solana:${destAddr}?amount=${solAmt}&label=GSB+Agent&message=Fund+GSB+Pump+Bot`;
-      window.open(phantomLink, '_blank');
-      showToast('Opening Phantom — or use Copy Address to send manually', '');
+      window.location.href = phantomLink;
+      showToast('Choose your wallet to send SOL', '');
     } else {
       // Desktop: deep link opens a blank browser tab — just copy address instead
       navigator.clipboard.writeText(destAddr).catch(() => {
