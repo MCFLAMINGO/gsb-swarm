@@ -2559,44 +2559,7 @@ window.addEventListener('load', async () => {
 });
 </script>
 
-<!-- Reown AppKit — EthersAdapter + SolanaAdapter (no wagmi/viem — browser safe) -->
-<script type="module">
-import { createAppKit }  from 'https://esm.sh/@reown/appkit@1.8.19'
-import { EthersAdapter } from 'https://esm.sh/@reown/appkit-adapter-ethers@1.8.19'
-import { SolanaAdapter } from 'https://esm.sh/@reown/appkit-adapter-solana@1.8.19'
-import { base, mainnet, arbitrum, polygon, solana }
-  from 'https://esm.sh/@reown/appkit@1.8.19/networks'
-
-try {
-  const modal = createAppKit({
-    adapters:  [new EthersAdapter(), new SolanaAdapter()],
-    networks:  [base, mainnet, arbitrum, polygon, solana],
-    projectId: 'ff5dd5e462b92932d7b28c00b81695e8',
-    metadata: {
-      name:        'GSB Swarm',
-      description: 'GSB Intelligence Swarm',
-      url:         'https://gsb-swarm-production.up.railway.app',
-      icons:       ['https://gsb-swarm-production.up.railway.app/favicon.ico'],
-    },
-    features:  { analytics: false, email: false, socials: false },
-    themeMode: 'dark',
-  });
-
-  window.gsbModal = modal;
-
-  // Auto-hydrate walletAddress when AppKit reconnects persisted session
-  modal.subscribeAccount(({ address, status }) => {
-    if (status === 'connected' && address) {
-      if (typeof walletAddress !== 'undefined' && !walletAddress) {
-        walletAddress = address;
-        if (typeof onWalletConnected === 'function') onWalletConnected();
-      }
-    }
-  });
-} catch(e) {
-  console.warn('[GSB] AppKit init failed:', e.message);
-  window.gsbModal = null;
-}
-</script>
+<!-- gsbModal: reserved for future AppKit integration once bundler is available -->
+<script>window.gsbModal = null;</script>
 </body>
 </html>

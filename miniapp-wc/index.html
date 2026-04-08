@@ -31,52 +31,44 @@
     .card-sub { font-size: 13px; color: var(--muted); text-align: center;
       margin-bottom: 24px; line-height: 1.5; }
 
-    #connect-btn {
-      width: 100%; display: flex; align-items: center; justify-content: center;
-      gap: 12px; padding: 16px;
-      background: linear-gradient(135deg, var(--accent), #a855f7);
-      border: none; border-radius: 14px; cursor: pointer; color: #fff;
-      font-size: 16px; font-weight: 700; letter-spacing: -0.01em;
-      transition: opacity 0.15s, transform 0.1s; margin-bottom: 16px;
-    }
-    #connect-btn:hover { opacity: 0.9; }
-    #connect-btn:active { transform: scale(0.98); }
-    #connect-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .wallet-btn { width: 100%; display: flex; align-items: center; gap: 14px;
+      padding: 14px 16px; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 14px; cursor: pointer; color: var(--text); font-size: 15px;
+      font-weight: 600; margin-bottom: 10px; transition: border-color 0.15s, background 0.15s;
+      text-align: left; }
+    .wallet-btn:hover { border-color: var(--accent); background: #1e1e2e; }
+    .wallet-btn:active { opacity: 0.8; }
+    .wallet-btn img { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; }
+    .wallet-btn-info { flex: 1; }
+    .wallet-btn-name { font-size: 14px; font-weight: 700; }
+    .wallet-btn-hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-    .network-row { display: flex; justify-content: center; gap: 8px;
-      margin-bottom: 20px; flex-wrap: wrap; }
-    .net-badge { display: flex; align-items: center; gap: 5px; background: var(--surface2);
-      border: 1px solid var(--border); border-radius: 20px; padding: 4px 10px;
-      font-size: 11px; color: var(--muted); font-weight: 500; }
-    .net-dot { width: 6px; height: 6px; border-radius: 50%; }
-    .net-dot.sol  { background: #9945ff; }
-    .net-dot.base { background: #0052ff; }
-    .net-dot.eth  { background: #627eea; }
-    .net-dot.arb  { background: #12aaff; }
+    .divider { display: flex; align-items: center; gap: 12px; margin: 16px 0;
+      color: var(--muted); font-size: 12px; }
+    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
-    .wallet-row { display: none; align-items: center; gap: 10px;
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 14px; padding: 12px 14px; margin-bottom: 16px; }
-    .wallet-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--success);
-      flex-shrink: 0; box-shadow: 0 0 6px rgba(34,197,94,0.5); }
-    .wallet-addr { flex: 1; font-size: 13px; font-family: monospace;
-      color: var(--text); word-break: break-all; }
-    .wallet-chain-badge { font-size: 10px; background: rgba(99,102,241,0.2);
-      color: var(--accent-h); border-radius: 6px; padding: 3px 8px;
-      font-weight: 600; text-transform: uppercase; flex-shrink: 0; }
+    /* WalletConnect QR */
+    #wc-section { display: none; flex-direction: column; align-items: center; margin-top: 8px; }
+    #wc-qr { width: 220px; height: 220px; background: #fff; border-radius: 16px;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 12px; overflow: hidden; }
+    #wc-qr img { width: 100%; height: 100%; }
+    #wc-qr canvas { width: 100% !important; height: 100% !important; }
+    .wc-hint { font-size: 12px; color: var(--muted); text-align: center; line-height: 1.5; }
+    #wc-cancel { margin-top: 12px; background: none; border: 1px solid var(--border);
+      border-radius: 10px; color: var(--muted); font-size: 13px; padding: 8px 20px; cursor: pointer; }
+    #wc-cancel:hover { color: var(--text); border-color: var(--accent); }
 
     .status-row { display: none; align-items: center; justify-content: center;
-      gap: 10px; margin: 16px 0; font-size: 14px; color: var(--muted); }
+      gap: 10px; margin: 20px 0; font-size: 14px; color: var(--muted); }
     .spinner { width: 20px; height: 20px; border: 2px solid var(--border);
-      border-top-color: var(--accent); border-radius: 50%;
-      animation: spin 0.7s linear infinite; }
+      border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
     .success-card { display: none; flex-direction: column; align-items: center;
       text-align: center; padding: 12px 0; }
     .success-icon { width: 64px; height: 64px; background: rgba(34,197,94,0.15);
-      border-radius: 50%; display: flex; align-items: center; justify-content: center;
-      margin: 0 auto 16px; }
+      border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; }
     .success-title { font-size: 18px; font-weight: 700; color: var(--success); margin-bottom: 6px; }
     .success-addr { font-size: 12px; color: var(--muted); font-family: monospace;
       word-break: break-all; margin-bottom: 16px; }
@@ -90,17 +82,7 @@
       border: 1px solid rgba(239,68,68,0.3); border-radius: 12px;
       padding: 12px 16px; font-size: 13px; color: #fca5a5; text-align: center; margin-top: 12px; }
 
-    .info-list { list-style: none; margin-top: 4px; }
-    .info-list li { display: flex; align-items: flex-start; gap: 8px;
-      font-size: 12px; color: var(--muted); margin-bottom: 7px; line-height: 1.4; }
-    .info-list li::before { content: '✓'; color: var(--accent-h); font-size: 11px;
-      margin-top: 1px; flex-shrink: 0; }
-
     .footer { margin-top: 24px; font-size: 11px; color: var(--muted); text-align: center; }
-
-    /* Loading state */
-    #sdk-status { font-size: 12px; color: var(--muted); text-align: center;
-      padding: 4px 0 8px; min-height: 20px; }
   </style>
 </head>
 <body>
@@ -116,46 +98,64 @@
 
   <div class="card" id="main-card">
     <div class="card-title">Connect Your Wallet</div>
-    <div class="card-sub" id="card-sub">Sign transactions for swaps, DCA, and pump operations.</div>
+    <div class="card-sub" id="card-sub">Choose your wallet to link it to your GSB account.</div>
 
-    <div id="connect-section">
-      <!-- Connected wallet row -->
-      <div class="wallet-row" id="wallet-row">
-        <div class="wallet-dot"></div>
-        <div class="wallet-addr" id="wallet-addr-display"></div>
-        <div class="wallet-chain-badge" id="wallet-chain-badge">—</div>
-      </div>
-
-      <div id="sdk-status"></div>
-
-      <button id="connect-btn" disabled>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="2" y="7" width="20" height="14" rx="2"/>
-          <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
-          <line x1="12" y1="12" x2="12" y2="16"/>
-          <line x1="10" y1="14" x2="14" y2="14"/>
-        </svg>
-        Loading…
+    <div id="wallet-btns">
+      <!-- Phantom -->
+      <button class="wallet-btn" onclick="connectInjected('phantom')" id="btn-phantom">
+        <img src="https://raw.githubusercontent.com/phantom-labs/press-kit/refs/heads/main/Phantom-Icon_App_60x60.png"
+             onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 60 60%22><rect width=%2260%22 height=%2260%22 rx=%2212%22 fill=%22%234e44ce%22/><text x=%2230%22 y=%2242%22 text-anchor=%22middle%22 fill=%22white%22 font-size=%2230%22>👻</text></svg>'"
+             alt="Phantom">
+        <div class="wallet-btn-info">
+          <div class="wallet-btn-name">Phantom</div>
+          <div class="wallet-btn-hint" id="phantom-hint">Solana · EVM</div>
+        </div>
       </button>
 
-      <div class="network-row">
-        <div class="net-badge"><div class="net-dot sol"></div>Solana</div>
-        <div class="net-badge"><div class="net-dot base"></div>Base</div>
-        <div class="net-badge"><div class="net-dot eth"></div>Ethereum</div>
-        <div class="net-badge"><div class="net-dot arb"></div>Arbitrum</div>
-      </div>
+      <!-- MetaMask -->
+      <button class="wallet-btn" onclick="connectInjected('metamask')" id="btn-metamask">
+        <img src="https://raw.githubusercontent.com/MetaMask/brand-resources/master/SVG/SVG_MetaMask_Icon_Color.svg"
+             onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 60 60%22><rect width=%2260%22 height=%2260%22 rx=%2212%22 fill=%22%23f6851b%22/><text x=%2230%22 y=%2242%22 text-anchor=%22middle%22 fill=%22white%22 font-size=%2228%22>🦊</text></svg>'"
+             alt="MetaMask">
+        <div class="wallet-btn-info">
+          <div class="wallet-btn-name">MetaMask</div>
+          <div class="wallet-btn-hint">EVM — Base, ETH, ARB, Polygon</div>
+        </div>
+      </button>
 
-      <ul class="info-list">
-        <li>Phantom, Solflare, MetaMask, Coinbase &amp; 300+ wallets</li>
-        <li>Session persists — connect once, swap forever</li>
-        <li>One-time USDC approve enables all future EVM swaps</li>
-        <li>Solana swaps sign instantly via your wallet</li>
-      </ul>
+      <!-- Coinbase -->
+      <button class="wallet-btn" onclick="connectInjected('coinbase')" id="btn-coinbase">
+        <img src="https://www.coinbase.com/img/favicon/favicon.ico"
+             onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 60 60%22><rect width=%2260%22 height=%2260%22 rx=%2212%22 fill=%22%230052ff%22/><text x=%2230%22 y=%2242%22 text-anchor=%22middle%22 fill=%22white%22 font-size=%2228%22>C</text></svg>'"
+             alt="Coinbase">
+        <div class="wallet-btn-info">
+          <div class="wallet-btn-name">Coinbase Wallet</div>
+          <div class="wallet-btn-hint">EVM</div>
+        </div>
+      </button>
+
+      <div class="divider">or scan QR with any wallet</div>
+
+      <button class="wallet-btn" onclick="openWalletConnect()" id="btn-wc">
+        <img src="https://avatars.githubusercontent.com/u/37784886?s=60"
+             onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 60 60%22><rect width=%2260%22 height=%2260%22 rx=%2212%22 fill=%22%233b99fc%22/><text x=%2230%22 y=%2242%22 text-anchor=%22middle%22 fill=%22white%22 font-size=%2228%22>⧫</text></svg>'"
+             alt="WalletConnect">
+        <div class="wallet-btn-info">
+          <div class="wallet-btn-name">WalletConnect</div>
+          <div class="wallet-btn-hint">Scan QR with any wallet app</div>
+        </div>
+      </button>
     </div>
 
     <div class="status-row" id="status-row">
       <div class="spinner"></div>
       <span id="status-text">Connecting…</span>
+    </div>
+
+    <div id="wc-section">
+      <div id="wc-qr"></div>
+      <div class="wc-hint">Open your wallet app and scan this QR code.</div>
+      <button id="wc-cancel" onclick="cancelWC()">Cancel</button>
     </div>
 
     <div class="err-msg" id="err-msg"></div>
@@ -168,48 +168,53 @@
       </div>
       <div class="success-title">Wallet Connected!</div>
       <div class="success-addr" id="success-addr"></div>
-      <div class="success-sub">Your wallet is linked and ready to sign transactions.</div>
+      <div class="success-sub">Your wallet is linked to your GSB account. Tap below to return to the bot.</div>
       <button class="return-btn" onclick="goBack()">Return to GSB Bot</button>
     </div>
   </div>
 
-  <div class="footer">Powered by GSB Swarm · Reown AppKit · Your keys stay in your wallet</div>
+  <div class="footer">Powered by GSB Swarm · Your keys stay in your wallet</div>
 
   <script>
-    // ── Synchronous helpers (no module dependency) ───────────────────────────
-    const _params   = new URLSearchParams(window.location.search);
-    const userId    = _params.get('userId')    || 'unknown';
-    const returnUrl = _params.get('returnUrl') || 'https://t.me/gsb_swap_bot';
+    const WC_PROJECT_ID = 'ff5dd5e462b92932d7b28c00b81695e8';
+    const API_BASE      = 'https://gsb-swarm-production.up.railway.app';
+    const _params       = new URLSearchParams(window.location.search);
+    const userId        = _params.get('userId')    || 'unknown';
+    const returnUrl     = _params.get('returnUrl') || 'https://t.me/gsb_swap_bot';
 
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.ready();
       window.Telegram.WebApp.expand();
     }
 
-    function setStatus(msg) {
-      document.getElementById('sdk-status').textContent = msg;
+    // ── UI helpers ────────────────────────────────────────────────────────────
+    function showStatus(msg) {
+      document.getElementById('status-row').style.display = 'flex';
+      document.getElementById('status-text').textContent  = msg;
     }
+    function hideStatus() { document.getElementById('status-row').style.display = 'none'; }
     function showError(msg) {
       const el = document.getElementById('err-msg');
-      el.textContent = msg; el.style.display = 'block';
+      el.textContent = msg; el.style.display = 'block'; hideStatus();
     }
+    function setDisabled(d) { document.querySelectorAll('.wallet-btn').forEach(b => b.disabled = d); }
     function showSuccess(address) {
-      document.getElementById('connect-section').style.display = 'none';
-      document.getElementById('status-row').style.display      = 'none';
-      document.getElementById('err-msg').style.display         = 'none';
-      document.getElementById('card-sub').style.display        = 'none';
-      document.getElementById('success-addr').textContent      = address;
-      document.getElementById('success-card').style.display    = 'flex';
+      document.getElementById('wallet-btns').style.display  = 'none';
+      document.getElementById('wc-section').style.display   = 'none';
+      document.getElementById('status-row').style.display   = 'none';
+      document.getElementById('err-msg').style.display      = 'none';
+      document.getElementById('card-sub').style.display     = 'none';
+      document.getElementById('success-addr').textContent   = address;
+      document.getElementById('success-card').style.display = 'flex';
     }
     function goBack() {
       if (returnUrl && returnUrl !== 'null') window.location.href = returnUrl;
     }
-    window.goBack = goBack;
 
+    // ── Save wallet + show success ────────────────────────────────────────────
     async function onWalletConnected(address, chain) {
       chain = chain || 'evm';
-      document.getElementById('status-row').style.display = 'flex';
-      document.getElementById('status-text').textContent  = 'Saving wallet…';
+      showStatus('Saving wallet…');
       try {
         localStorage.setItem(`gsb_${chain === 'solana' ? 'sol' : 'evm'}_wallet_${userId}`, address);
         localStorage.setItem(`gsb_wallet_${userId}`, address);
@@ -217,9 +222,8 @@
         localStorage.setItem('gsb_connected_chain',   chain);
       } catch(_) {}
       try {
-        await fetch('https://gsb-swarm-production.up.railway.app/api/user/set-wallet', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        await fetch(`${API_BASE}/api/user/set-wallet`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId, walletAddress: address, chain }),
         });
       } catch(e) { console.warn('[wc] server save failed:', e.message); }
@@ -227,154 +231,155 @@
       if (returnUrl && returnUrl !== 'null') setTimeout(goBack, 2500);
     }
 
-    if (!userId || userId === 'unknown') {
-      document.getElementById('card-sub').textContent =
-        'Open this page from the GSB bot to link your wallet automatically.';
+    // ── Injected wallets ──────────────────────────────────────────────────────
+    async function connectInjected(provider) {
+      document.getElementById('err-msg').style.display = 'none';
+      setDisabled(true);
+      showStatus(`Connecting to ${provider === 'phantom' ? 'Phantom' : provider === 'coinbase' ? 'Coinbase Wallet' : 'MetaMask'}…`);
+      try {
+        if (provider === 'phantom') {
+          if (window.phantom?.solana) {
+            const resp = await window.phantom.solana.connect();
+            await onWalletConnected(resp.publicKey.toString(), 'solana'); return;
+          }
+          if (window.phantom?.ethereum) {
+            const accounts = await window.phantom.ethereum.request({ method: 'eth_requestAccounts' });
+            await onWalletConnected(accounts[0], 'evm'); return;
+          }
+          // Phantom not installed — open Phantom deep link to this page
+          const thisPage = encodeURIComponent(window.location.href);
+          const phantomLink = `https://phantom.app/ul/browse/${thisPage}?ref=${encodeURIComponent('https://gsb-swarm-production.up.railway.app')}`;
+          hideStatus(); setDisabled(false);
+          showError('Phantom not installed. Tap here to open in Phantom browser.');
+          document.getElementById('err-msg').style.cursor = 'pointer';
+          document.getElementById('err-msg').onclick = () => window.location.href = phantomLink;
+          return;
+        }
+        let evmProvider = null;
+        if (provider === 'coinbase') {
+          evmProvider = window.coinbaseWalletExtension
+            || (window.ethereum?.isCoinbaseWallet ? window.ethereum : null)
+            || window.ethereum?.providers?.find(p => p.isCoinbaseWallet);
+        } else {
+          evmProvider = window.ethereum?.providers?.find(p => p.isMetaMask)
+            || (window.ethereum?.isMetaMask ? window.ethereum : null)
+            || window.ethereum;
+        }
+        if (!evmProvider) {
+          hideStatus(); setDisabled(false);
+          showError(`${provider === 'coinbase' ? 'Coinbase Wallet' : 'MetaMask'} not found. Use WalletConnect to scan a QR code.`);
+          return;
+        }
+        const accounts = await evmProvider.request({ method: 'eth_requestAccounts' });
+        await onWalletConnected(accounts[0], 'evm');
+      } catch(err) {
+        hideStatus(); setDisabled(false);
+        showError(err.code === 4001 ? 'Connection cancelled.' : 'Connection failed: ' + (err.message || err));
+      }
     }
 
-    // ── Pending address from AppKit (set by module script) ───────────────────
-    window._wcPendingAddress   = null;
-    window._wcPendingChain     = null;
-    window._wcModalReady       = false;
+    // ── WalletConnect QR ──────────────────────────────────────────────────────
+    let wcProvider = null, wcSdkLoaded = false;
 
-    // Button wired AFTER modal is ready (module sets _wcModalReady + re-enables)
-    document.getElementById('connect-btn').addEventListener('click', async () => {
+    function loadWCSdk(cb) {
+      if (wcSdkLoaded) { cb(); return; }
+      showStatus('Loading WalletConnect…');
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js';
+      s.onload  = () => { wcSdkLoaded = true; hideStatus(); cb(); };
+      s.onerror = () => { hideStatus(); showError('Could not load WalletConnect SDK. Check your connection.'); };
+      document.head.appendChild(s);
+    }
+
+    async function openWalletConnect() {
       document.getElementById('err-msg').style.display = 'none';
-      if (!window._wcModalReady) {
-        showError('Wallet SDK still loading — please wait a moment and try again.');
-        return;
-      }
-      // If AppKit already has a session, go straight to confirm
-      if (window._wcPendingAddress) {
-        await onWalletConnected(window._wcPendingAddress, window._wcPendingChain || 'evm');
-        return;
-      }
-      // Open AppKit modal
-      try {
-        window.gsbModal.open();
-      } catch(e) {
-        showError('Could not open wallet selector: ' + e.message);
-      }
-    });
-  </script>
-
-  <!-- AppKit module — EthersAdapter (no wagmi/viem) + SolanaAdapter -->
-  <script type="module">
-    import { createAppKit }    from 'https://esm.sh/@reown/appkit@1.8.19'
-    import { EthersAdapter }   from 'https://esm.sh/@reown/appkit-adapter-ethers@1.8.19'
-    import { SolanaAdapter }   from 'https://esm.sh/@reown/appkit-adapter-solana@1.8.19'
-    import { base, mainnet, arbitrum, polygon, solana }
-      from 'https://esm.sh/@reown/appkit@1.8.19/networks'
-
-    const PROJECT_ID = 'ff5dd5e462b92932d7b28c00b81695e8';
-
-    try {
-      const ethersAdapter  = new EthersAdapter();
-      const solanaAdapter  = new SolanaAdapter();  // auto-discovers Phantom/Solflare via Wallet Standard
-
-      const modal = createAppKit({
-        adapters:  [ethersAdapter, solanaAdapter],
-        networks:  [base, mainnet, arbitrum, polygon, solana],
-        projectId: PROJECT_ID,
-        metadata: {
-          name:        'GSB Swarm',
-          description: 'GSB Intelligence Swarm — connect wallet to sign swaps',
-          url:         'https://gsb-swarm-production.up.railway.app',
-          icons:       ['https://gsb-swarm-production.up.railway.app/favicon.ico'],
-        },
-        features:  { analytics: false, email: false, socials: false },
-        themeMode: 'dark',
-        themeVariables: {
-          '--w3m-color-mix':            '#6366f1',
-          '--w3m-color-mix-strength':   20,
-          '--w3m-border-radius-master': '4px',
-        },
-      });
-
-      // Expose globally
-      window.gsbModal = modal;
-      window._wcModalReady = true;
-
-      // Enable button + update label
-      const btn = document.getElementById('connect-btn');
-      btn.disabled = false;
-      btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect x="2" y="7" width="20" height="14" rx="2"/>
-        <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
-        <line x1="12" y1="12" x2="12" y2="16"/>
-        <line x1="10" y1="14" x2="14" y2="14"/>
-      </svg> Connect Wallet`;
-      document.getElementById('sdk-status').textContent = '';
-
-      // Listen for account changes
-      modal.subscribeAccount(({ address, chainId, status }) => {
-        if (status === 'connected' && address) {
-          const isSolana = typeof chainId === 'string'
-            ? chainId.startsWith('solana')
-            : (chainId >= 900 && chainId <= 999);
-          const chainName  = isSolana ? 'solana' : 'evm';
-          const chainLabel = isSolana ? 'Solana'
-            : chainId === 8453   ? 'Base'
-            : chainId === 1      ? 'ETH'
-            : chainId === 42161  ? 'ARB'
-            : chainId === 137    ? 'MATIC'
-            : 'EVM';
-
-          window._wcPendingAddress = address;
-          window._wcPendingChain   = chainName;
-
-          // Show wallet row
-          const row = document.getElementById('wallet-row');
-          row.style.display = 'flex';
-          document.getElementById('wallet-addr-display').textContent =
-            address.length > 20
-              ? address.slice(0, 8) + '…' + address.slice(-6)
-              : address;
-          document.getElementById('wallet-chain-badge').textContent = chainLabel;
-
-          // Update button to confirm step
-          btn.disabled = false;
-          btn.textContent = 'Confirm & Link Wallet ✓';
-
-        } else if (status === 'disconnected') {
-          window._wcPendingAddress = null;
-          window._wcPendingChain   = null;
-          document.getElementById('wallet-row').style.display = 'none';
-          btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="2" y="7" width="20" height="14" rx="2"/>
-            <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
-            <line x1="12" y1="12" x2="12" y2="16"/>
-            <line x1="10" y1="14" x2="14" y2="14"/>
-          </svg> Connect Wallet`;
+      setDisabled(true);
+      document.getElementById('wallet-btns').style.display = 'none';
+      loadWCSdk(async () => {
+        try {
+          const EthereumProvider = window.EthereumProvider || window.WalletConnectEthereumProvider
+            || window['@walletconnect/ethereum-provider']?.EthereumProvider;
+          if (!EthereumProvider) throw new Error('EthereumProvider not found in bundle');
+          showStatus('Initializing WalletConnect…');
+          wcProvider = await EthereumProvider.init({
+            projectId: WC_PROJECT_ID,
+            chains: [1, 8453],
+            showQrModal: false,
+            methods: ['eth_requestAccounts', 'eth_accounts', 'personal_sign', 'eth_sendTransaction'],
+            events: ['accountsChanged', 'chainChanged', 'disconnect'],
+            metadata: { name: 'GSB Swarm', description: 'GSB Intelligence Swarm',
+              url: 'https://gsb-swarm-production.up.railway.app',
+              icons: ['https://gsb-swarm-production.up.railway.app/favicon.ico'] },
+          });
+          hideStatus();
+          wcProvider.on('display_uri', uri => showQR(uri));
+          wcProvider.on('connect', async () => {
+            document.getElementById('wc-section').style.display = 'none';
+            showStatus('Connected! Fetching address…');
+            try {
+              const accounts = await wcProvider.request({ method: 'eth_accounts' });
+              if (accounts?.[0]) await onWalletConnected(accounts[0], 'evm');
+            } catch(e) {
+              showError('Connected but failed to get address: ' + e.message);
+              setDisabled(false);
+              document.getElementById('wallet-btns').style.display = 'block';
+            }
+          });
+          wcProvider.on('disconnect', () => {
+            if (document.getElementById('success-card').style.display === 'flex') return;
+            cancelWC(); showError('WalletConnect session ended.');
+          });
+          await wcProvider.enable();
+        } catch(err) {
+          hideStatus();
+          document.getElementById('wallet-btns').style.display = 'block';
+          setDisabled(false);
+          showError('WalletConnect error: ' + (err.message || err));
         }
       });
-
-      // Auto-reconnect: if AppKit has a persisted session, surface it immediately
-      const state = modal.getState ? modal.getState() : null;
-      if (state?.address) {
-        window._wcPendingAddress = state.address;
-        window._wcPendingChain   = 'evm';
-        const row = document.getElementById('wallet-row');
-        row.style.display = 'flex';
-        document.getElementById('wallet-addr-display').textContent =
-          state.address.slice(0, 8) + '…' + state.address.slice(-6);
-        btn.textContent = 'Confirm & Link Wallet ✓';
-      }
-
-    } catch(err) {
-      console.error('[AppKit] init failed:', err);
-      document.getElementById('sdk-status').textContent = '';
-      // Re-enable button so user can at least try injected wallets
-      const btn = document.getElementById('connect-btn');
-      btn.disabled = false;
-      btn.textContent = 'Connect Wallet';
-      window._wcModalReady = true; // allow click even if modal failed
-      window.gsbModal = null;
-      // Show error but non-blocking
-      const errEl = document.getElementById('err-msg');
-      errEl.textContent = 'Wallet SDK failed to load. You can still connect by pasting your address in the bot.';
-      errEl.style.display = 'block';
     }
+
+    async function showQR(uri) {
+      const container = document.getElementById('wc-qr');
+      document.getElementById('wc-section').style.display = 'flex';
+      hideStatus();
+      if (typeof QRCode === 'undefined') {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+        s.onload  = () => renderQR(uri, container);
+        s.onerror = () => renderQRFallback(uri, container);
+        document.head.appendChild(s);
+      } else { renderQR(uri, container); }
+    }
+    function renderQR(uri, c) {
+      c.innerHTML = '';
+      try { new QRCode(c, { text: uri, width: 220, height: 220, colorDark: '#000', colorLight: '#fff', correctLevel: QRCode.CorrectLevel.M }); }
+      catch(e) { renderQRFallback(uri, c); }
+    }
+    function renderQRFallback(uri, c) {
+      c.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(uri)}&margin=4" style="width:220px;height:220px;border-radius:8px;" />`;
+    }
+    function cancelWC() {
+      document.getElementById('wc-section').style.display  = 'none';
+      document.getElementById('wallet-btns').style.display = 'block';
+      setDisabled(false); document.getElementById('err-msg').style.display = 'none';
+      if (wcProvider) { try { wcProvider.disconnect(); } catch(_) {} wcProvider = null; }
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+    window.addEventListener('load', () => {
+      if (!userId || userId === 'unknown') {
+        document.getElementById('card-sub').textContent =
+          'Open this page from the GSB bot to link your wallet automatically.';
+      }
+      // Update hints if extensions not present
+      if (!window.ethereum && !window.phantom) {
+        ['phantom-hint'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.textContent = 'Tap to open in Phantom browser';
+        });
+      }
+    });
   </script>
 
 </body>
