@@ -541,28 +541,30 @@
 <div id="sign-screen" class="connect-screen" style="display:none">
   <div class="connect-icon">🔐</div>
   <div class="connect-title">Connect Funding Wallet</div>
-  <div class="connect-sub">Step 1 of 2 — paste your wallet address to connect.<br><span style="font-size:11px;color:var(--muted)">Step 2: approve USDC once so the agent can execute buys on your behalf.</span></div>
+  <div class="connect-sub">Choose your wallet. It opens, you copy your address, paste it back here.</div>
 
-  <!-- Browser: show wallet extension buttons -->
+  <!-- Wallet buttons — shown in both Telegram and browser -->
   <div id="sign-extension-btns" style="width:100%;display:flex;flex-direction:column;gap:10px">
     <button class="wallet-option" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;text-align:left" onclick="connectSigner('phantom')">
       <span style="font-size:28px">👻</span>
-      <div><div style="font-size:14px;font-weight:700">Phantom</div><div style="font-size:11px;color:var(--muted)">Solana</div></div>
+      <div><div style="font-size:14px;font-weight:700">Phantom</div><div style="font-size:11px;color:var(--muted)">Solana · EVM</div></div>
+      <span style="margin-left:auto;font-size:11px;color:var(--muted)">open →</span>
     </button>
     <button class="wallet-option" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;text-align:left" onclick="connectSigner('metamask')">
       <span style="font-size:28px">🦊</span>
-      <div><div style="font-size:14px;font-weight:700">MetaMask</div><div style="font-size:11px;color:var(--muted)">EVM — Base, ETH, ARB</div></div>
+      <div><div style="font-size:14px;font-weight:700">MetaMask</div><div style="font-size:11px;color:var(--muted)">EVM — Base, ETH, ARB, Polygon</div></div>
+      <span style="margin-left:auto;font-size:11px;color:var(--muted)">open →</span>
     </button>
     <button class="wallet-option" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;text-align:left" onclick="connectSigner('coinbase')">
       <span style="font-size:28px">🔵</span>
       <div><div style="font-size:14px;font-weight:700">Coinbase Wallet</div><div style="font-size:11px;color:var(--muted)">EVM</div></div>
+      <span style="margin-left:auto;font-size:11px;color:var(--muted)">open →</span>
     </button>
-    <button onclick="document.getElementById('sign-paste-row').style.display='block';this.style.display='none'" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:4px 0">Paste address instead</button>
   </div>
 
-  <!-- Paste input (always visible in Telegram, shown on demand in browser) -->
-  <div id="sign-paste-row" style="display:none;width:100%;margin-top:4px">
-    <div style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.5">Open Phantom or MetaMask → copy your wallet address → paste below.<br><span style="font-size:11px">After connecting, you'll approve USDC once to enable buys.</span></div>
+  <!-- Paste input — always visible, pre-focused after wallet tap -->
+  <div id="sign-paste-row" style="width:100%;margin-top:16px">
+    <div id="sign-paste-hint" style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.5">Copy your address from the wallet app and paste it below.</div>
     <input id="sign-paste-input" class="input" placeholder="Paste Solana or 0x EVM address" style="width:100%;box-sizing:border-box;font-size:13px" />
     <button onclick="connectSignerPaste()" class="btn-primary" style="width:100%;margin-top:10px;padding:15px;border-radius:12px;font-weight:700;font-size:15px">→ Connect Wallet</button>
   </div>
@@ -1131,15 +1133,10 @@ function openSignScreen(canCancel = false) {
   document.getElementById('sign-screen').style.display     = 'flex';
   document.getElementById('sign-cancel-row').style.display = canCancel ? 'block' : 'none';
   document.getElementById('sign-paste-input').value        = '';
-
-  // In Telegram webview there are no wallet extensions — go straight to paste
-  if (IS_TELEGRAM) {
-    document.getElementById('sign-extension-btns').style.display = 'none';
-    document.getElementById('sign-paste-row').style.display      = 'block';
-  } else {
-    document.getElementById('sign-extension-btns').style.display = 'flex';
-    document.getElementById('sign-paste-row').style.display      = 'none';
-  }
+  document.getElementById('sign-paste-hint').textContent   = 'Copy your address from the wallet app and paste it below.';
+  // Always show wallet buttons + paste row — in Telegram the buttons open via deeplink
+  document.getElementById('sign-extension-btns').style.display = 'flex';
+  document.getElementById('sign-paste-row').style.display      = 'block';
 }
 
 function closeSignScreen() {
@@ -1148,8 +1145,25 @@ function closeSignScreen() {
 }
 
 async function connectSigner(provider) {
+  // In Telegram: no injected providers — open wallet app via deeplink, user copies address back
+  if (IS_TELEGRAM) {
+    const walletLinks = {
+      phantom:  'https://phantom.app/ul/browse/' + encodeURIComponent('https://gsb-swarm-production.up.railway.app/miniapp/') + '?ref=' + encodeURIComponent('https://gsb-swarm-production.up.railway.app'),
+      metamask: 'https://metamask.app.link/dapp/gsb-swarm-production.up.railway.app/miniapp/',
+      coinbase: 'https://go.cb-w.com/dapp?cb_url=' + encodeURIComponent('https://gsb-swarm-production.up.railway.app/miniapp/'),
+    };
+    const labels = { phantom: 'Phantom', metamask: 'MetaMask', coinbase: 'Coinbase Wallet' };
+    const lbl = labels[provider] || provider;
+    const link = walletLinks[provider];
+    if (link) _openWalletLink(link);
+    // Update hint and focus paste input
+    document.getElementById('sign-paste-hint').textContent = `${lbl} opening… copy your address there and paste it below.`;
+    setTimeout(() => document.getElementById('sign-paste-input').focus(), 600);
+    return;
+  }
+
+  // Browser: try injected provider first
   if (provider === 'phantom') {
-    // Try Phantom Solana first
     if (window.phantom?.solana) {
       try {
         const resp = await window.phantom.solana.connect();
@@ -1157,7 +1171,6 @@ async function connectSigner(provider) {
         onWalletConnected(); return;
       } catch(e) { showToast('Cancelled', 'error'); return; }
     }
-    // Try Phantom EVM (injected when inside Phantom in-app browser)
     if (window.phantom?.ethereum) {
       try {
         const accounts = await window.phantom.ethereum.request({ method: 'eth_requestAccounts' });
@@ -1165,17 +1178,17 @@ async function connectSigner(provider) {
         onWalletConnected(); return;
       } catch(e) { showToast('Cancelled', 'error'); return; }
     }
-    // No extension — fall to paste
-    const inp = document.getElementById('sign-paste-input');
-    inp.placeholder = 'Paste your Solana or EVM address from Phantom';
-    document.getElementById('sign-paste-row').style.display = 'block';
-    showToast('Open Phantom → copy address → paste here', '');
+    // No extension
+    document.getElementById('sign-paste-hint').textContent = 'Open Phantom → copy your address → paste below.';
+    document.getElementById('sign-paste-input').focus();
     return;
   }
+
   const evmProvider =
     provider === 'coinbase'
       ? (window.coinbaseWalletExtension || (window.ethereum?.isCoinbaseWallet ? window.ethereum : null) || (window.ethereum?.providers?.find(p => p.isCoinbaseWallet)))
       : ((window.ethereum?.providers?.find(p => p.isMetaMask)) || (window.ethereum?.isMetaMask ? window.ethereum : null) || window.ethereum);
+
   if (evmProvider) {
     try {
       const accounts = await evmProvider.request({ method: 'eth_requestAccounts' });
@@ -1183,11 +1196,11 @@ async function connectSigner(provider) {
       onWalletConnected(); return;
     } catch(e) { showToast('Cancelled', 'error'); return; }
   }
-  // No extension — fall to paste
+
+  // No extension — prompt paste
   const lbl = provider === 'coinbase' ? 'Coinbase Wallet' : 'MetaMask';
-  document.getElementById('sign-paste-input').placeholder = `Paste your 0x address from ${lbl}`;
-  document.getElementById('sign-paste-row').style.display = 'block';
-  showToast(`Open ${lbl} → copy address → paste here`, '');
+  document.getElementById('sign-paste-hint').textContent = `Open ${lbl} → copy your address → paste below.`;
+  document.getElementById('sign-paste-input').focus();
 }
 
 function connectSignerPaste() {
