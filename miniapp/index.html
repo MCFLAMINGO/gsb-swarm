@@ -2298,19 +2298,31 @@ async function updateQuote() {
       const r = await fetch(`${API_BASE}/api/swap/quote?tokenIn=${tokenIn}&tokenOut=${tokenOut}&amount=${amount}&chain=${chain}`);
       const d = await r.json();
 
-      if (d.ok && d.price) {
+      if (d.ok && (d.estimatedOut || d.price)) {
         const fee       = amount * 0.005;
-        const netAmount = amount - fee;
-        const outAmount = netAmount / d.price;
         const slippage  = parseFloat(document.getElementById('slippage-select').value);
+        // Use estimatedOut directly from API (already accounts for routing)
+        const outAmount = d.estimatedOut || ((amount - fee) / d.price);
         const minOut    = outAmount * (1 - slippage / 100);
 
-        document.getElementById('amount-out').value = outAmount.toFixed(2) + ' ' + tokenOut;
-        document.getElementById('q-price').textContent = `$${d.price.toFixed(8)}`;
+        // Format output amount — handle huge and tiny numbers
+        const fmtOut = outAmount >= 1 ? outAmount.toLocaleString('en-US', {maximumFractionDigits:4})
+                     : outAmount < 0.000001 ? outAmount.toExponential(4)
+                     : outAmount.toFixed(6);
+
+        // Format price — handle scientific notation
+        const price = d.price || 0;
+        const fmtPrice = price === 0 ? '—'
+                       : price < 0.000001 ? '$' + price.toExponential(4)
+                       : price < 0.01    ? '$' + price.toFixed(8)
+                       : '$' + price.toFixed(6);
+
+        document.getElementById('amount-out').value = fmtOut + ' ' + tokenOut;
+        document.getElementById('q-price').textContent = fmtPrice;
         const chg = d.change24h || 0;
         document.getElementById('q-change').innerHTML = `<span class="${chg>=0?'change-pos':'change-neg'}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>`;
         document.getElementById('q-fee').textContent  = `$${fee.toFixed(4)} USDC`;
-        document.getElementById('q-min').textContent  = `${minOut.toFixed(6)} ${tokenOut}`;
+        document.getElementById('q-min').textContent  = `${minOut < 0.000001 ? minOut.toExponential(4) : minOut.toFixed(6)} ${tokenOut}`;
         document.getElementById('quote-card').style.display = 'block';
 
         swapBtn.disabled = false;
