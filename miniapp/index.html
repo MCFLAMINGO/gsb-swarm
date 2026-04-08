@@ -2368,15 +2368,24 @@ async function executeSwap() {
     });
     const d = await r.json();
 
-    if (d.ok && d.solana && d.transaction) {
+    if (d.ok && d.solana && d.transaction && !IS_TELEGRAM) {
+      // Desktop only — sign the Jupiter tx directly in Phantom extension
       await executeSolanaSwap(d, tokenIn, tokenOut, amount);
+    } else if (d.ok && (d.uniswapUrl || d.solana)) {
+      // Telegram (and EVM) — open deeplink in system browser, user signs there
+      const link = d.uniswapUrl;
+      const label = chain === 'solana' ? 'Opening Jupiter…' : 'Opening Uniswap…';
+      if (IS_TELEGRAM) {
+        tg.openLink(link);
+      } else {
+        window.open(link, '_blank');
+      }
+      showToast(label, 'success');
+      addSwapHistory(tokenIn, tokenOut, amount, link);
     } else if (d.ok && d.txUrl) {
       showToast('Swap submitted!', 'success');
       IS_TELEGRAM ? tg.openLink(d.txUrl) : window.open(d.txUrl, '_blank');
       addSwapHistory(tokenIn, tokenOut, amount, d.txUrl);
-    } else if (d.ok && d.uniswapUrl) {
-      IS_TELEGRAM ? tg.openLink(d.uniswapUrl) : window.open(d.uniswapUrl, '_blank');
-      showToast(chain === 'solana' ? 'Opening Jupiter...' : 'Opening Uniswap...', 'success');
     } else {
       showToast(d.error || 'Swap failed', 'error');
     }

@@ -3838,12 +3838,15 @@ app.post('/api/swap/execute', express.json(), async (req, res) => {
         return res.json({ ok: true, uniswapUrl: fallbackUrl, solanaFallback: true, price: priceData.price, feeUsd: parseFloat(feeUsd) });
       }
 
-      // Return transaction + requestId so client can sign then POST to /api/swap/solana-execute
+      // Return transaction + requestId for desktop Phantom signing
+      // Also include Jupiter deeplink so Telegram (read-only WC) can open it in system browser
+      const jupDeeplink = `https://jup.ag/swap/${SOL_USDC}-${outputMint}?inAmount=${lamports}`;
       return res.json({
         ok: true,
         solana: true,
-        transaction:   jupData.transaction,   // base64 transaction for wallet to sign
+        transaction:   jupData.transaction,   // base64 transaction for wallet to sign (desktop)
         requestId:     jupData.requestId,      // needed for /execute
+        uniswapUrl:    jupDeeplink,            // always include — Telegram uses this
         price:         priceData.price,
         contractAddress: outputMint,
         feeUsd:        parseFloat(feeUsd),
