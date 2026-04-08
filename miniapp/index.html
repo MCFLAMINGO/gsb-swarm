@@ -541,7 +541,7 @@
 <div id="sign-screen" class="connect-screen" style="display:none">
   <div class="connect-icon">🔐</div>
   <div class="connect-title">Connect Funding Wallet</div>
-  <div class="connect-sub">This wallet funds the agent. Once connected it handles all buys — no further approvals needed per transaction.</div>
+  <div class="connect-sub">Step 1 of 2 — paste your wallet address to connect.<br><span style="font-size:11px;color:var(--muted)">Step 2: approve USDC once so the agent can execute buys on your behalf.</span></div>
 
   <!-- Browser: show wallet extension buttons -->
   <div id="sign-extension-btns" style="width:100%;display:flex;flex-direction:column;gap:10px">
@@ -562,7 +562,7 @@
 
   <!-- Paste input (always visible in Telegram, shown on demand in browser) -->
   <div id="sign-paste-row" style="display:none;width:100%;margin-top:4px">
-    <div style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.5">Open your wallet app, copy your address, paste it here.</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.5">Open Phantom or MetaMask → copy your wallet address → paste below.<br><span style="font-size:11px">After connecting, you'll approve USDC once to enable buys.</span></div>
     <input id="sign-paste-input" class="input" placeholder="Paste Solana or 0x EVM address" style="width:100%;box-sizing:border-box;font-size:13px" />
     <button onclick="connectSignerPaste()" class="btn-primary" style="width:100%;margin-top:10px;padding:15px;border-radius:12px;font-weight:700;font-size:15px">→ Connect Wallet</button>
   </div>
