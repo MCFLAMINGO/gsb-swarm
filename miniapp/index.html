@@ -1531,6 +1531,249 @@ function showApproveModal(d) {
 
 const SOL_FEE_WALLET = 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs';
 
+// ── Analyze ──────────────────────────────────────────────────────
+let analyzeInFlight = false;
+let pumpSession = null;
+let pumpPoller  = null;
+
+async function runAnalyze(tokenOverride) {
+  const rawInput = (tokenOverride || document.getElementById('analyze-input').value || '').trim();
+  const isSolAddr = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(rawInput);
+  const isEvmAddr = rawInput.startsWith('0x') && rawInput.length >= 40;
+  const symbol = (isSolAddr || isEvmAddr) ? rawInput : rawInput.toUpperCase();
+  if (!symbol) { showToast('Enter a token symbol', 'error'); return; }
+  if (analyzeInFlight) return;
+  if (tokenOverride) {
+    document.getElementById('analyze-input').value = symbol;
+    switchTab('analyze');
+  }
+  const chain  = document.getElementById('analyze-chain').value;
+  const btn    = document.getElementById('analyze-btn');
+  const result = document.getElementById('analyze-result');
+  analyzeInFlight = true;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+  result.innerHTML = `<div class="card" style="text-align:center;padding:30px;color:var(--muted)"><span class="spinner-white"></span> Analyzing ${symbol}...</div>`;
+  try {
+    const chainParam = chain ? `&chain=${chain}` : '';
+    const r = await fetch(`${API_BASE}/api/analyze?token=${encodeURIComponent(symbol)}${chainParam}`);
+    const d = await r.json();
+    if (d.error) { result.innerHTML = `<div class="card" style="color:var(--red);text-align:center;padding:20px">${d.error}</div>`; return; }
+    const rec   = (d.analysis?.recommendation || 'HOLD').toUpperCase();
+    const conf  = d.analysis?.confidence || 0;
+    const price = d.currentPrice || d.price || 0;
+    const chg   = d.marketData?.priceChange24h || d.analysis?.priceChange24h || 0;
+    const liq   = Number(d.marketData?.liquidity) || 0;
+    const vol   = Number(d.marketData?.volume24h) || 0;
+    const targets = d.analysis?.targets || [];
+    const entry   = d.analysis?.entryZone || {};
+    const summary = d.analysis?.summary || d.analysis?.summaryShort || '';
+    const trend   = d.analysis?.trend || '';
+    const recClass = rec === 'BUY' ? 'rec-buy' : rec === 'AVOID' ? 'rec-avoid' : 'rec-hold';
+    const chgColor = chg >= 0 ? 'var(--accent)' : 'var(--red)';
+    const chgSign  = chg >= 0 ? '+' : '';
+    const formatUsd = (n) => { if (!n||isNaN(n)) return '—'; if (n>=1e9) return '$'+(n/1e9).toFixed(2)+'B'; if (n>=1e6) return '$'+(n/1e6).toFixed(2)+'M'; if (n>=1e3) return '$'+(n/1e3).toFixed(1)+'K'; return '$'+n.toFixed(2); };
+    const formatPrice = (p) => { if (!p) return '—'; if (p<0.000001) return '$'+p.toExponential(2); if (p<0.01) return '$'+p.toFixed(8); if (p<1) return '$'+p.toFixed(6); return '$'+p.toFixed(4); };
+    result.innerHTML = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+          <div><div style="font-size:22px;font-weight:800">${d.symbol||symbol}</div><div style="font-size:13px;color:var(--muted)">${d.name||''}</div></div>
+          <span class="rec-badge ${recClass}">${rec}</span>
+        </div>
+        <div style="font-size:28px;font-weight:800;margin-bottom:4px">${formatPrice(price)}</div>
+        <div style="font-size:14px;font-weight:600;color:${chgColor};margin-bottom:12px">${chgSign}${chg.toFixed(2)}% (24h)</div>
+        <div style="margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="color:var(--muted)">AI Confidence</span><span style="font-weight:700;color:var(--accent)">${conf}%</span></div>
+          <div class="confidence-bar-wrap"><div class="confidence-bar" style="width:${conf}%"></div></div>
+        </div>
+        <div class="price-row"><span>Liquidity</span><span class="price-val">${formatUsd(liq)}</span></div>
+        <div class="price-row"><span>Volume 24h</span><span class="price-val">${formatUsd(vol)}</span></div>
+        ${trend ? `<div class="price-row"><span>Trend</span><span class="price-val" style="text-transform:capitalize">${trend}</span></div>` : ''}
+      </div>
+      ${targets.length ? `<div class="card"><div class="card-title">Price Targets</div><div class="price-target-row">${targets.map((t,i)=>`<div class="price-target"><div class="pt-label">Target ${i+1}</div><div class="pt-val">${formatPrice(t)}</div></div>`).join('')}${entry.min?`<div class="price-target"><div class="pt-label" style="color:var(--yellow)">Entry Zone</div><div class="pt-val" style="color:var(--yellow)">${formatPrice(entry.min)}–${formatPrice(entry.max)}</div></div>`:''}</div></div>` : ''}
+      ${summary ? `<div class="card"><div class="card-title">AI Summary</div><div style="font-size:13px;line-height:1.6;color:var(--text)">${summary}</div></div>` : ''}
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn btn-primary" onclick="document.getElementById('token-out').value='${d.symbol||symbol}';switchTab('swap');updateQuote();" style="flex:1">Buy ${d.symbol||symbol}</button>
+        <button class="btn btn-secondary" onclick="(function(){const addr=d.contractAddress||'';const ch=(d.chain||'base').toLowerCase();const chainNorm={solana:'solana',sol:'solana',ethereum:'eth',eth:'eth',arbitrum:'arb',arb:'arb',polygon:'matic',matic:'matic',bsc:'bsc',base:'base'}[ch]||ch;document.getElementById('pump-token').value=addr;const chainEl=document.getElementById('pump-chain');if(chainEl)chainEl.value=chainNorm;const walletEl=document.getElementById('pump-wallet');if(walletEl&&walletAddress){const isSolChain=chainNorm==='solana';const isSolWallet=!walletAddress.startsWith('0x');if(isSolChain===isSolWallet)walletEl.value=walletAddress;}switchTab('dca');updatePumpChainNote();setTimeout(()=>{const el=document.getElementById('pump-config-card');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},150);})()" style="flex:1">🚀 Pump It</button>
+      </div>
+    `;
+  } catch(e) {
+    result.innerHTML = `<div class="card" style="color:var(--red);text-align:center;padding:20px">Analysis failed. Try again.</div>`;
+  } finally {
+    analyzeInFlight = false;
+    btn.disabled = false;
+    btn.textContent = '⚡ Go';
+  }
+}
+
+// ── Trending ──────────────────────────────────────────────────────
+const GECKO_NETWORKS = { base:'base', eth:'eth', ethereum:'eth', solana:'solana', sol:'solana', bsc:'bsc', bnb:'bsc', arbitrum:'arbitrum', arb:'arbitrum', polygon:'polygon_pos', matic:'polygon_pos' };
+
+async function loadTrending(chain, pillEl) {
+  trendingChain = chain || trendingChain;
+  if (pillEl) { document.querySelectorAll('.chain-pill').forEach(p => p.classList.remove('active')); pillEl.classList.add('active'); }
+  const list = document.getElementById('trending-list');
+  list.innerHTML = '<div class="trending-loading"><span class="spinner-white"></span> Loading...</div>';
+  try {
+    const network = GECKO_NETWORKS[trendingChain] || 'base';
+    const r = await fetch(`https://api.geckoterminal.com/api/v2/networks/${network}/trending_pools?page=1`);
+    const data = await r.json();
+    const pools = (data?.data || []).slice(0, 10);
+    if (!pools.length) { list.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;font-size:13px">No trending data available</div>'; return; }
+    list.innerHTML = pools.map((p, i) => {
+      const a   = p.attributes || {};
+      const vol = Number(a.volume_usd?.h24 || 0);
+      const chg = Number(a.price_change_percentage?.h24 || 0);
+      const name = a.name || 'Unknown';
+      const sym = name.split('/')[0].trim();
+      const chgColor = chg >= 0 ? 'var(--accent)' : 'var(--red)';
+      const chgSign  = chg >= 0 ? '+' : '';
+      const fmtVol = vol>=1e6 ? '$'+(vol/1e6).toFixed(1)+'M vol' : vol>=1e3 ? '$'+(vol/1e3).toFixed(0)+'K vol' : '$'+vol.toFixed(0)+' vol';
+      return `<div class="trending-item"><div class="trending-rank">#${i+1}</div><div class="trending-info"><div class="trending-name">${sym}</div><div class="trending-vol">${fmtVol}</div></div><span class="trending-change" style="color:${chgColor}">${chgSign}${chg.toFixed(1)}%</span><button class="trending-analyze-btn" onclick="analyzeFromTrending('${sym}')">Analyze ↗</button></div>`;
+    }).join('');
+  } catch(e) {
+    list.innerHTML = '<div style="text-align:center;color:var(--red);padding:20px;font-size:13px">Failed to load trending data</div>';
+  }
+}
+
+function analyzeFromTrending(symbol) {
+  document.getElementById('analyze-input').value = symbol;
+  switchTab('analyze');
+  runAnalyze(symbol);
+}
+
+function refreshTrending() { loadTrending(trendingChain); }
+
+// ── Pump Bot ──────────────────────────────────────────────────────
+function isSolanaSession() { return document.getElementById('pump-chain').value === 'solana'; }
+function isPumpFunToken() { const addr = (document.getElementById('pump-token').value||'').trim(); return isSolanaSession() && addr.endsWith('pump'); }
+
+function updatePumpChainNote() {
+  const isSol = isSolanaSession();
+  const isPf  = isPumpFunToken();
+  const note   = document.getElementById('pump-chain-note');
+  const evmRow = document.getElementById('pump-evm-row');
+  const solRow = document.getElementById('pump-sol-row');
+  if (isSol) {
+    note.style.display='block'; note.style.color='var(--yellow)'; note.style.background='rgba(245,158,11,0.08)';
+    note.innerHTML = isPf ? '🔥 <strong>pump.fun bonding curve detected.</strong> Budget and per-buy in SOL. Bot uses PumpPortal API directly on the bonding curve.' : '⚡ <strong>Solana token.</strong> Budget and per-buy in SOL. Bot buys via Jupiter. Paste the full mint address.';
+    evmRow.style.display='none'; solRow.style.display='grid';
+  } else { note.style.display='none'; evmRow.style.display='grid'; solRow.style.display='none'; }
+  const walletInput = document.getElementById('pump-wallet');
+  const walletWarn  = document.getElementById('pump-wallet-warn');
+  const startBtn    = document.querySelector('#panel-dca button[onclick="startPumpBot()"]');
+  if (walletInput) {
+    walletInput.placeholder = isSol ? 'Solana wallet address (base58)' : '0x... EVM wallet address';
+    if (!walletInput.value.trim()) {
+      const storedSol = localStorage.getItem(`gsb_sol_wallet_${userId}`);
+      const storedEvm = localStorage.getItem(`gsb_evm_wallet_${userId}`);
+      if (isSol && storedSol) walletInput.value = storedSol;
+      else if (!isSol && storedEvm) walletInput.value = storedEvm;
+      else if (walletAddress) { const isSolWallet = !walletAddress.startsWith('0x'); if (isSol&&isSolWallet) walletInput.value=walletAddress; if (!isSol&&!isSolWallet) walletInput.value=walletAddress; }
+    }
+    const val = walletInput.value.trim();
+    const storedSol = localStorage.getItem(`gsb_sol_wallet_${userId}`);
+    const storedEvm = localStorage.getItem(`gsb_evm_wallet_${userId}`);
+    let warn = '';
+    if (val) {
+      const isEvmVal = val.startsWith('0x');
+      if (isSol && isEvmVal) warn = '⚠️ EVM address detected. Solana tokens cannot be sent to a 0x wallet.' + (storedSol ? ` Your Solana address: ${storedSol.slice(0,6)}...${storedSol.slice(-4)}` : '');
+      else if (!isSol && !isEvmVal) warn = '⚠️ Solana address detected. EVM tokens cannot be sent to a base58 wallet.' + (storedEvm ? ` Your EVM address: ${storedEvm.slice(0,6)}...${storedEvm.slice(-4)}` : '');
+    } else {
+      if (isSol && !storedSol) warn = '⚠️ No Solana wallet saved. Add your Solana address in Connect Wallet.';
+      if (!isSol && !storedEvm) warn = '⚠️ No EVM wallet saved. Add your 0x address in Connect Wallet.';
+    }
+    if (walletWarn) { walletWarn.style.display = warn ? 'block' : 'none'; walletWarn.textContent = warn; }
+    if (startBtn) { startBtn.disabled = !!warn; startBtn.style.opacity = warn ? '0.45' : '1'; startBtn.style.cursor = warn ? 'not-allowed' : ''; }
+  }
+  updatePumpPreview();
+}
+
+function updatePumpPreview() {
+  const rateMap = { '30s':'30 sec','1m':'1 min','2m':'2 min','5m':'5 min' };
+  const preview = document.getElementById('pump-preview');
+  const text    = document.getElementById('pump-preview-text');
+  const isSol   = isSolanaSession();
+  const isPf    = isPumpFunToken();
+  if (isSol) {
+    const total = parseFloat(document.getElementById('pump-total-sol').value) || 0;
+    const interval = parseFloat(document.getElementById('pump-sol-interval').value) || 0.01;
+    const rate = document.getElementById('pump-rate-sol').value;
+    if (!total || total <= 0) { preview.style.display='none'; return; }
+    const numBuys = Math.ceil(total/interval);
+    const rateMs  = {'30s':30,'1m':60,'2m':120,'5m':300}[rate]||60;
+    const totalSec = numBuys*rateMs;
+    const mins = Math.floor(totalSec/60); const secs = totalSec%60;
+    preview.style.display='block';
+    text.textContent = `${isPf?'🔥 pump.fun':'⚡ Jupiter'}: ${numBuys} buys × ${interval} SOL every ${rateMap[rate]} = ~${mins>0?mins+'m '+secs+'s':secs+'s'} total. Deposit ${total} SOL to GSB Solana wallet. 90% of tokens returned. 10% fee.`;
+  } else {
+    const total = parseFloat(document.getElementById('pump-total').value) || 0;
+    const interval = parseFloat(document.getElementById('pump-interval').value) || 0.02;
+    const rate = document.getElementById('pump-rate').value;
+    if (!total || total <= 0) { preview.style.display='none'; return; }
+    const numBuys = Math.ceil(total/interval);
+    const rateMs  = {'30s':30,'1m':60,'2m':120,'5m':300}[rate]||60;
+    const totalSec = numBuys*rateMs;
+    const mins = Math.floor(totalSec/60); const secs = totalSec%60;
+    preview.style.display='block';
+    text.textContent = `${numBuys} buys × $${interval} every ${rateMap[rate]} = ~${mins>0?mins+'m '+secs+'s':secs+'s'} total runtime. Deposit $${total} USDC. 90% of tokens returned. 10% platform fee.`;
+  }
+}
+
+async function startPumpBot() {
+  if (!walletAddress) return showToast('Connect wallet first', 'error');
+  const tokenAddress    = document.getElementById('pump-token').value.trim();
+  const chain           = document.getElementById('pump-chain').value;
+  const receivingWallet = document.getElementById('pump-wallet').value.trim();
+  const isSol          = isSolanaSession();
+  const isPf            = isPumpFunToken();
+  if (!tokenAddress)    return showToast('Enter token mint address', 'error');
+  if (!receivingWallet) return showToast('Enter your receiving wallet', 'error');
+  if (tokenAddress.toLowerCase() === receivingWallet.toLowerCase()) return showToast('Token address and receiving wallet are the same', 'error');
+  const GSB_WALLETS = ['F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs','0x592b6eebd4c99b49cf23f722e4f62faef4cd044d'];
+  if (GSB_WALLETS.some(w => tokenAddress.toLowerCase()===w.toLowerCase())) return showToast("That's the GSB deposit wallet, not a token address", 'error');
+  if (isSol && tokenAddress.startsWith('0x')) return showToast('Solana needs a base58 mint address, not a 0x address', 'error');
+  if (!isSol && !tokenAddress.startsWith('0x')) return showToast('EVM chains need a 0x contract address', 'error');
+  if (isSol && receivingWallet.startsWith('0x')) return showToast('Solana selected — receiving wallet must be a Solana address', 'error');
+  if (!isSol && !receivingWallet.startsWith('0x')) return showToast(chain.toUpperCase()+' selected — receiving wallet must be a 0x EVM address', 'error');
+  if (!isSol) {
+    try {
+      const approvalCheck = await fetch(`${API_BASE}/api/pump/approval-status?wallet=${walletAddress}&chain=${chain}`);
+      const approvalData  = await approvalCheck.json();
+      if (!approvalData.approved) { showToast('Approve USDC first — tap the Approve button above', 'error'); document.getElementById('approve-banner').style.display='flex'; return; }
+    } catch {}
+  }
+  let body;
+  if (isSol) {
+    const totalSol  = parseFloat(document.getElementById('pump-total-sol').value);
+    const solPerBuy = parseFloat(document.getElementById('pump-sol-interval').value);
+    const rateName  = document.getElementById('pump-rate-sol').value;
+    if (!totalSol||totalSol<=0) return showToast('Enter an estimated SOL budget', 'error');
+    if (totalSol>5) return showToast('Max 5 SOL per session', 'error');
+    body = { userId, tokenAddress, chain:'solana', rateName, receivingWallet, isPumpFun:isPf, totalSol, solPerBuy };
+  } else {
+    const totalAmount    = parseFloat(document.getElementById('pump-total').value);
+    const intervalAmount = parseFloat(document.getElementById('pump-interval').value);
+    const rateName       = document.getElementById('pump-rate').value;
+    if (!totalAmount||totalAmount<=0) return showToast('Enter total budget', 'error');
+    if (totalAmount>1000) return showToast('Max $1,000 per session', 'error');
+    body = { userId, tokenAddress, chain, totalAmount, intervalAmount, rateName, receivingWallet };
+  }
+  try {
+    const r = await fetch(`${API_BASE}/api/pump/create`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    const d = await r.json();
+    if (!d.ok) return showToast(d.error||'Failed to create session', 'error');
+    pumpSession = d.session;
+    showToast(isSol ? 'Session created — send SOL to start' : 'Session created — send USDC to start', 'success');
+    showDepositInstructions(d);
+    startPumpPoller();
+  } catch(e) { showToast('Network error', 'error'); }
+}
+
+function onApproveDeeplinkTapped() {
+  // Stub — called after approve deeplink is opened, nothing needed
+}
+
 function showDepositInstructions(d) {
   const isSolSess = d.session?.chain === 'solana';
   const amt       = d.depositAmount;
@@ -2090,6 +2333,102 @@ function flipTokens() {
   inSel.value = outIn.value;
   outIn.value = tmp;
   updateQuote();
+}
+
+// ── Execute Swap ──────────────────────────────────────────────────
+async function executeSwap() {
+  if (!walletAddress) return connectSigner();
+  const amount   = parseFloat(document.getElementById('amount-in').value);
+  const tokenIn  = document.getElementById('token-in').value;
+  const tokenOut = document.getElementById('token-out').value;
+  const chain    = document.getElementById('chain-select').value;
+  const slippage = document.getElementById('slippage-select').value;
+
+  const btn = document.getElementById('swap-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Preparing swap...';
+
+  try {
+    const r = await fetch(`${API_BASE}/api/swap/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, walletAddress, tokenIn, tokenOut, amount, chain, slippage }),
+    });
+    const d = await r.json();
+
+    if (d.ok && d.solana && d.transaction) {
+      await executeSolanaSwap(d, tokenIn, tokenOut, amount);
+    } else if (d.ok && d.txUrl) {
+      showToast('Swap submitted!', 'success');
+      IS_TELEGRAM ? tg.openLink(d.txUrl) : window.open(d.txUrl, '_blank');
+      addSwapHistory(tokenIn, tokenOut, amount, d.txUrl);
+    } else if (d.ok && d.uniswapUrl) {
+      IS_TELEGRAM ? tg.openLink(d.uniswapUrl) : window.open(d.uniswapUrl, '_blank');
+      showToast(chain === 'solana' ? 'Opening Jupiter...' : 'Opening Uniswap...', 'success');
+    } else {
+      showToast(d.error || 'Swap failed', 'error');
+    }
+  } catch(e) {
+    showToast('Network error', 'error');
+  }
+  btn.disabled = false;
+  btn.textContent = `Swap ${document.getElementById('token-in').value} → ${document.getElementById('token-out').value}`;
+}
+
+async function executeSolanaSwap(swapData, tokenIn, tokenOut, amount) {
+  const solProvider = window.phantom?.solana || window.solana || window.solflare;
+  if (!solProvider || !solProvider.isConnected) {
+    const solUsdc = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+    const lamports = Math.round(parseFloat(amount) * 1_000_000);
+    const jupUrl = `https://jup.ag/swap/${solUsdc}-${swapData.contractAddress}?inAmount=${lamports}`;
+    IS_TELEGRAM ? tg.openLink(jupUrl) : window.open(jupUrl, '_blank');
+    showToast('Opening Jupiter (connect Phantom in browser for fee-tracked swaps)', 'success');
+    return;
+  }
+  try {
+    showToast('Approve in Phantom / Solflare...', '');
+    const txBytes     = Uint8Array.from(atob(swapData.transaction), c => c.charCodeAt(0));
+    const signedBytes = await solProvider.signTransaction({ serialize: () => txBytes, serializeMessage: () => txBytes });
+    let signedB64;
+    if (signedBytes?.serialize) {
+      signedB64 = btoa(String.fromCharCode(...signedBytes.serialize()));
+    } else if (signedBytes?.signature) {
+      const sig = signedBytes.signature;
+      showToast('Swap submitted!', 'success');
+      const txUrl = `https://solscan.io/tx/${sig}`;
+      addSwapHistory(tokenIn, tokenOut, amount, txUrl);
+      IS_TELEGRAM ? tg.openLink(txUrl) : window.open(txUrl, '_blank');
+      return;
+    } else {
+      throw new Error('Could not serialize signed transaction');
+    }
+    const execRes  = await fetch(`${API_BASE}/api/swap/solana-execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signedTransaction: signedB64, requestId: swapData.requestId }),
+    });
+    const execData = await execRes.json();
+    if (execData.ok) {
+      showToast('Solana swap confirmed!', 'success');
+      addSwapHistory(tokenIn, tokenOut, amount, execData.txUrl);
+      IS_TELEGRAM ? tg.openLink(execData.txUrl) : window.open(execData.txUrl, '_blank');
+    } else {
+      showToast(execData.error || 'Swap execution failed', 'error');
+    }
+  } catch (e) {
+    showToast('Solana sign error: ' + (e.message || 'User rejected'), 'error');
+  }
+}
+
+function addSwapHistory(tokenIn, tokenOut, amount, txUrl) {
+  const history = document.getElementById('swap-history');
+  if (!history) return;
+  const time = new Date().toLocaleTimeString();
+  history.innerHTML = `<div style="padding:10px;border-bottom:1px solid var(--border);font-size:13px">
+    <span style="color:var(--accent)">✅</span> ${amount} ${tokenIn} → ${tokenOut}
+    <span style="float:right;color:var(--muted)">${time}</span>
+    ${txUrl ? `<br><a href="${txUrl}" target="_blank" style="color:var(--accent);font-size:11px">View tx ↗</a>` : ''}
+  </div>` + history.innerHTML;
 }
 
 function showToast(msg, type = '') {
