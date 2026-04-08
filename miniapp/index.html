@@ -1151,7 +1151,9 @@ async function connectSigner(provider) {
     const _wcUserId   = tg?.initDataUnsafe?.user?.id || userId || 'unknown';
     const _returnUrl  = encodeURIComponent('https://t.me/gsb_swap_bot');
     const wcUrl       = `${API_BASE}/wc?userId=${_wcUserId}&returnUrl=${_returnUrl}`;
-    _openWalletLink(wcUrl);
+    // Use tg.openLink directly — no /open-wallet wrapper needed for our own HTTPS pages
+    if (tg?.openLink) tg.openLink(wcUrl, { try_instant_view: false });
+    else window.open(wcUrl, '_blank');
     // Update hint — tell user to come back after connecting
     document.getElementById('sign-paste-hint').textContent = 'Connect your wallet in the browser window that just opened, then return here.';
     // Start polling for wallet address saved server-side (up to 3 min)
