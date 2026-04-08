@@ -1345,12 +1345,11 @@ async function approveUSDC() {
   // Detect chain from current UI selection (swap panel)
   const chain = document.getElementById('chain-select')?.value || 'base';
 
-  // Detect available EVM provider — AppKit session first, then injected
-  const _appkitEvmProvider = window.gsbModal?.getWalletProvider ? window.gsbModal.getWalletProvider() : null;
-  const evmProvider = _appkitEvmProvider || window.phantom?.ethereum || (window.ethereum?.isMetaMask && window.ethereum) || window.ethereum;
+  // Detect available EVM provider (injected wallet — desktop/Phantom browser only)
+  const evmProvider = window.phantom?.ethereum || (window.ethereum?.isMetaMask && window.ethereum) || window.ethereum;
 
-  // If a real EVM provider is available (AppKit session counts even in Telegram) — sign directly
-  if (evmProvider && (!IS_TELEGRAM || _appkitEvmProvider)) {
+  // Sign directly if injected provider available and not in Telegram WebView
+  if (evmProvider && !IS_TELEGRAM) {
     try {
       const AGENT_WALLET = '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
       const USDC_ADDRS   = {
@@ -2372,18 +2371,12 @@ async function executeSwap() {
     });
     const d = await r.json();
 
-    // Determine if AppKit has a live signing session
-    const _appkitState   = window.gsbModal?.getState ? window.gsbModal.getState() : null;
-    const _appkitHasEvm  = !!(window.gsbModal?.getWalletProvider?.()) && chain !== 'solana';
-    const _appkitHasSol  = !!(window.gsbModal?.getSolanaClient?.()) && chain === 'solana';
-    const _hasAppkitSess = _appkitHasEvm || _appkitHasSol;
-
-    if (d.ok && d.solana && d.transaction && (_appkitHasSol || !IS_TELEGRAM)) {
-      // AppKit Solana session or desktop Phantom — sign directly
+    if (d.ok && d.solana && d.transaction && !IS_TELEGRAM) {
+      // Desktop: sign Solana tx directly via injected Phantom
       await executeSolanaSwap(d, tokenIn, tokenOut, amount);
-    } else if (d.ok && !d.solana && _appkitHasEvm) {
-      // AppKit EVM session — sign via provider directly (works in Telegram)
-      await executeEvmSwap(d, tokenIn, tokenOut, amount, chain);
+    } else if (d.ok && d.solana && d.transaction && IS_TELEGRAM) {
+      // Telegram: use Phantom signAndSendTransaction deeplink
+      await executeSolanaSwapDeeplink(d, tokenIn, tokenOut, amount);
     } else if (d.ok && (d.uniswapUrl || d.solana)) {
       // Fallback — open deeplink in system browser
       const link = d.uniswapUrl;
@@ -2409,41 +2402,31 @@ async function executeSwap() {
   btn.textContent = `Swap ${document.getElementById('token-in').value} → ${document.getElementById('token-out').value}`;
 }
 
-// ── EVM swap via AppKit provider (works in Telegram WebView) ────────────────
-async function executeEvmSwap(swapData, tokenIn, tokenOut, amount, chain) {
-  const evmProvider = window.gsbModal?.getWalletProvider?.();
-  if (!evmProvider) {
-    showToast('Wallet not connected — tap Connect first', 'error');
-    return;
-  }
-  try {
-    showToast('Approve swap in your wallet…', '');
-    // swapData.transaction is a hex-encoded calldata or the server returns tx params
-    // Build the tx from swapData fields the server provides
-    const tx = {
-      from:  walletAddress,
-      to:    swapData.to    || swapData.contractAddress,
-      data:  swapData.data  || swapData.calldata || '0x',
-      value: swapData.value || '0x0',
-    };
-    const txHash = await evmProvider.request({
-      method: 'eth_sendTransaction',
-      params: [tx],
-    });
-    const txUrl = `https://basescan.org/tx/${txHash}`;
-    showToast('Swap submitted!', 'success');
-    addSwapHistory(tokenIn, tokenOut, amount, txUrl);
-  } catch (e) {
-    if (e.code === 4001) showToast('Swap cancelled', 'error');
-    else showToast('Swap error: ' + (e.message || e), 'error');
-  }
+// ── Solana swap via Phantom deeplink (Telegram) ────────────────────────
+async function executeSolanaSwapDeeplink(swapData, tokenIn, tokenOut, amount) {
+  // swapData.transaction is base64-encoded serialized transaction from server
+  // Use Phantom's signAndSendTransaction deeplink so user signs in Phantom app
+  const dappUrl   = encodeURIComponent('https://gsb-swarm-production.up.railway.app/miniapp/');
+  const redirect  = encodeURIComponent('https://gsb-swarm-production.up.railway.app/miniapp/?swapDone=1');
+  const txBase58  = swapData.transaction; // server should provide base58; if base64, we pass as-is
+
+  // Phantom signAndSendTransaction deeplink
+  // https://docs.phantom.com/phantom-deeplinks/provider-methods/signandsendtransaction
+  const phantomUrl = `https://phantom.app/ul/v1/signAndSendTransaction` +
+    `?dapp_encryption_public_key=${encodeURIComponent(dappUrl)}` +
+    `&redirect_link=${redirect}` +
+    `&payload=${encodeURIComponent(JSON.stringify({ transaction: txBase58, sendOptions: { skipPreflight: false } }))}`;
+
+  showToast('Opening Phantom to sign swap…', 'success');
+  addSwapHistory(tokenIn, tokenOut, amount, 'https://solscan.io');
+  if (IS_TELEGRAM && tg?.openLink) tg.openLink(phantomUrl, { try_instant_view: false });
+  else window.open(phantomUrl, '_blank');
 }
 
 async function executeSolanaSwap(swapData, tokenIn, tokenOut, amount) {
-  // Prefer AppKit Solana client (works in Telegram), fall back to injected Phantom
-  const appkitSol = window.gsbModal?.getSolanaClient?.();
-  const solProvider = appkitSol || window.phantom?.solana || window.solana || window.solflare;
-  if (!solProvider || (!appkitSol && !solProvider.isConnected)) {
+  // Desktop: sign via injected Phantom / Solflare
+  const solProvider = window.phantom?.solana || window.solana || window.solflare;
+  if (!solProvider || !solProvider.isConnected) {
     const solUsdc = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
     const lamports = Math.round(parseFloat(amount) * 1_000_000);
     const jupUrl = `https://jup.ag/swap/${solUsdc}-${swapData.contractAddress}?inAmount=${lamports}`;
