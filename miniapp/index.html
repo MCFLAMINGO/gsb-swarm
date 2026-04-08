@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>GSB Swap</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://unpkg.com/@walletconnect/modal@2.7.0/dist/index.umd.js"></script>
   <style>
     :root {
       --bg: #0d0d0d;
@@ -427,23 +428,28 @@
     <button onclick="connectWithPaste()" class="btn-primary" style="width:100%;margin-top:10px;padding:14px;border-radius:12px;font-weight:700;font-size:15px">Connect Wallet</button>
   </div>
 
-  <!-- Wallet picker (shown in desktop browser where injected wallets may exist) -->
-  <div id="wallet-picker-section" class="wallets-grid">
-    <div class="wallet-option" onclick="connectWith('metamask')">
-      <div class="w-icon">🦊</div>
-      <div class="w-name">MetaMask</div>
-    </div>
-    <div class="wallet-option" onclick="connectWith('coinbase')">
-      <div class="w-icon">🔵</div>
-      <div class="w-name">Coinbase</div>
-    </div>
-    <div class="wallet-option" onclick="connectWith('phantom')">
-      <div class="w-icon">👻</div>
-      <div class="w-name">Phantom</div>
-    </div>
-    <div class="wallet-option" onclick="connectWith('paste')">
-      <div class="w-icon">📋</div>
-      <div class="w-name">Paste Address</div>
+  <!-- Wallet picker -->
+  <div id="wallet-picker-section" style="width:100%">
+    <button onclick="connectWithWC()" class="btn-primary" style="width:100%;padding:16px;border-radius:12px;font-weight:700;font-size:15px;margin-bottom:10px">
+      🔗 Connect Wallet
+    </button>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div class="wallet-option" onclick="connectWith('phantom')">
+        <div class="w-icon">👻</div>
+        <div class="w-name">Phantom</div>
+      </div>
+      <div class="wallet-option" onclick="connectWith('metamask')">
+        <div class="w-icon">🦊</div>
+        <div class="w-name">MetaMask</div>
+      </div>
+      <div class="wallet-option" onclick="connectWith('coinbase')">
+        <div class="w-icon">🔵</div>
+        <div class="w-name">Coinbase</div>
+      </div>
+      <div class="wallet-option" onclick="connectWith('paste')">
+        <div class="w-icon">📋</div>
+        <div class="w-name">Paste Address</div>
+      </div>
     </div>
   </div>
   <!-- Cancel/close — only shown when already connected (switching) -->
@@ -915,6 +921,53 @@ function connectWithPaste() {
   if (!isEVM && !isSolana) { showToast('Invalid wallet address', 'error'); return; }
   walletAddress = val;
   onWalletConnected();
+}
+
+// ── WalletConnect modal ──────────────────────────────────────────────────────
+const WC_PROJECT_ID = '1b6e1680337cab24003c74cd44c2bd57';
+let wcModal = null;
+
+async function connectWithWC() {
+  try {
+    // Lazy-init modal
+    if (!wcModal) {
+      const { WalletConnectModal } = window.WalletConnectModal || window['@walletconnect/modal'] || {};
+      if (!WalletConnectModal) {
+        // Library not loaded yet — fall back to paste
+        showToast('Loading wallet connect...', '');
+        connectWith('paste');
+        return;
+      }
+      wcModal = new WalletConnectModal({
+        projectId: WC_PROJECT_ID,
+        chains: ['eip155:8453', 'eip155:1', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'],
+        themeMode: 'dark',
+        themeVariables: {
+          '--wcm-background-color': '#0d0d0d',
+          '--wcm-accent-color': '#6366f1',
+        },
+      });
+      wcModal.subscribeModal(state => {
+        if (!state.open) {
+          // Modal closed — check if account was connected
+          const session = wcModal.getSession?.();
+          if (session) {
+            const accounts = session.namespaces?.eip155?.accounts || session.namespaces?.solana?.accounts || [];
+            if (accounts.length) {
+              const raw = accounts[0]; // format: eip155:1:0x... or solana:...:addr
+              walletAddress = raw.split(':').pop();
+              onWalletConnected();
+            }
+          }
+        }
+      });
+    }
+    await wcModal.openModal();
+  } catch(e) {
+    console.error('[wc]', e);
+    showToast('Wallet connect failed — paste your address instead', '');
+    connectWith('paste');
+  }
 }
 
 async function connectWith(provider) {
