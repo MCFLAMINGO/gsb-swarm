@@ -1411,16 +1411,19 @@ function showApproveModal(d) {
   // Phantom EVM: browse deeplink opens EIP-681 inside Phantom's in-app browser
   const phantomBrowseLink = `https://phantom.app/ul/browse/${encodeURIComponent(d.eip681)}?ref=${encodeURIComponent('https://gsb-swarm-production.up.railway.app')}`;
 
-  // Wallet options: [emoji, label, subtitle, url]
+  // Store URLs on window so onclick handlers can reference them safely
+  // (avoids escaping issues with special chars in template literals)
+  window._approveLinks = { phantom: phantomBrowseLink, metamask: d.metamaskLink, coinbase: coinbaseLink, eip681: d.eip681 };
+
   const wallets = [
-    ['👻', 'Phantom',            'Opens Phantom — approve USDC once',         phantomBrowseLink],
-    ['🦊', 'MetaMask',           'Opens MetaMask — approve USDC once',         d.metamaskLink],
-    ['🔵', 'Coinbase Wallet',    'Opens Coinbase Wallet — approve USDC once',  coinbaseLink],
-    ['🔗', 'Trust / Rainbow / Other', 'Any EIP-681 compatible wallet',         d.eip681],
+    ['👻', 'Phantom',                 'Opens Phantom — approve USDC once',        'phantom'],
+    ['🦊', 'MetaMask',                'Opens MetaMask — approve USDC once',        'metamask'],
+    ['🔵', 'Coinbase Wallet',         'Opens Coinbase Wallet — approve USDC once', 'coinbase'],
+    ['🔗', 'Trust / Rainbow / Other', 'Any EIP-681 compatible wallet',             'eip681'],
   ];
 
-  const rows = wallets.map(([icon, label, sub, url]) => `
-    <button onclick="_openWalletLink('${url.replace(/'/g,"\\'")}');onApproveDeeplinkTapped();"
+  const rows = wallets.map(([icon, label, sub, key]) => `
+    <button onclick="_openWalletLink(window._approveLinks['${key}']);onApproveDeeplinkTapped();"
       style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--card);border:1px solid var(--border);border-radius:12px;color:var(--text);width:100%;text-align:left;cursor:pointer">
       <span style="font-size:26px">${icon}</span>
       <div><div style="font-weight:700;font-size:14px">${label}</div><div style="font-size:11px;color:var(--muted)">${sub}</div></div>
@@ -1437,7 +1440,7 @@ function showApproveModal(d) {
       <div style="font-size:11px;color:var(--accent);margin-bottom:18px;padding:8px 10px;background:rgba(99,102,241,0.08);border-radius:8px;line-height:1.5">ℹ️ Tap your wallet → sign the approval → come back here. Confirmation is detected automatically.</div>
       <div style="display:flex;flex-direction:column;gap:10px">${rows}</div>
       <div style="margin-top:8px;text-align:center">
-        <button onclick="_copyApproveLink('${d.eip681}')" style="background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;text-decoration:underline">📋 Copy link to open in wallet browser manually</button>
+        <button onclick="_copyApproveLink(window._approveLinks['eip681'])" style="background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;text-decoration:underline">📋 Copy link to open in wallet browser manually</button>
       </div>
       <div id="approve-modal-status" style="margin-top:14px;font-size:12px;color:var(--muted);text-align:center;display:none">⏳ Waiting for on-chain confirmation…</div>
       <button onclick="document.getElementById('approve-modal').remove();clearTimeout(_approvalPollTimer)" style="margin-top:14px;width:100%;padding:12px;background:none;border:1px solid var(--border);border-radius:10px;color:var(--muted);font-size:13px;cursor:pointer">✕ Cancel</button>
