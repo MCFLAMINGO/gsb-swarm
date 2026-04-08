@@ -5,21 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>GSB Swap</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script type="module">
-    import { createAppKit } from 'https://cdn.jsdelivr.net/npm/@reown/appkit@1.6.8/+esm';
-    import { WagmiAdapter } from 'https://cdn.jsdelivr.net/npm/@reown/appkit-adapter-wagmi@1.6.8/+esm';
-    window._wcReady = false;
-    try {
-      const adapter = new WagmiAdapter({ projectId: '1b6e1680337cab24003c74cd44c2bd57', networks: [] });
-      window._wcModal = createAppKit({
-        adapters: [adapter],
-        projectId: '1b6e1680337cab24003c74cd44c2bd57',
-        metadata: { name: 'GSB Swarm', description: 'GSB Agent Gas Bible', url: location.origin, icons: [] },
-        themeMode: 'dark',
-      });
-      window._wcReady = true;
-    } catch(e) { console.warn('[wc init]', e); }
-  </script>
+
   <style>
     :root {
       --bg: #0d0d0d;
@@ -443,28 +429,19 @@
   </div>
 
   <!-- Wallet picker -->
-  <div id="wallet-picker-section" style="width:100%">
-    <button onclick="connectWithWC()" class="btn-primary" style="width:100%;padding:16px;border-radius:12px;font-weight:700;font-size:15px;margin-bottom:10px">
-      🔗 Connect Wallet
+  <div id="wallet-picker-section" style="width:100%;display:flex;flex-direction:column;gap:10px">
+    <button onclick="connectWith('phantom')" style="width:100%;padding:14px;border-radius:12px;font-weight:700;font-size:15px;background:#ab9ff2;color:#000;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px">
+      <span style="font-size:22px">👻</span> Connect with Phantom
     </button>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      <div class="wallet-option" onclick="connectWith('phantom')">
-        <div class="w-icon">👻</div>
-        <div class="w-name">Phantom</div>
-      </div>
-      <div class="wallet-option" onclick="connectWith('metamask')">
-        <div class="w-icon">🦊</div>
-        <div class="w-name">MetaMask</div>
-      </div>
-      <div class="wallet-option" onclick="connectWith('coinbase')">
-        <div class="w-icon">🔵</div>
-        <div class="w-name">Coinbase</div>
-      </div>
-      <div class="wallet-option" onclick="connectWith('paste')">
-        <div class="w-icon">📋</div>
-        <div class="w-name">Paste Address</div>
-      </div>
-    </div>
+    <button onclick="connectWith('metamask')" style="width:100%;padding:14px;border-radius:12px;font-weight:700;font-size:15px;background:#f6851b;color:#000;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px">
+      <span style="font-size:22px">🦊</span> Connect with MetaMask
+    </button>
+    <button onclick="connectWith('coinbase')" style="width:100%;padding:14px;border-radius:12px;font-weight:700;font-size:15px;background:#0052ff;color:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px">
+      <span style="font-size:22px">🔵</span> Connect with Coinbase
+    </button>
+    <button onclick="connectWith('paste')" style="width:100%;padding:14px;border-radius:12px;font-weight:600;font-size:14px;background:var(--surface);color:var(--muted);border:1px solid var(--border);cursor:pointer">
+      📋 Paste Wallet Address
+    </button>
   </div>
   <!-- Cancel/close — only shown when already connected (switching) -->
   <div id="cancel-connect-row" style="display:none;width:100%;margin-top:8px">
@@ -935,33 +912,6 @@ function connectWithPaste() {
   if (!isEVM && !isSolana) { showToast('Invalid wallet address', 'error'); return; }
   walletAddress = val;
   onWalletConnected();
-}
-
-// ── WalletConnect modal ──────────────────────────────────────────────────────
-const WC_PROJECT_ID = '1b6e1680337cab24003c74cd44c2bd57';
-let wcModal = null;
-
-async function connectWithWC() {
-  try {
-    if (!window._wcReady || !window._wcModal) {
-      showToast('Wallet connect loading — try again in a moment', '');
-      setTimeout(connectWithWC, 1500);
-      return;
-    }
-    window._wcModal.open();
-    // Subscribe to account changes
-    window._wcModal.subscribeAccount?.(({ address, isConnected }) => {
-      if (isConnected && address && !walletAddress) {
-        walletAddress = address;
-        window._wcModal.close?.();
-        onWalletConnected();
-      }
-    });
-  } catch(e) {
-    console.error('[wc]', e);
-    showToast('Wallet connect unavailable — paste your address instead', '');
-    connectWith('paste');
-  }
 }
 
 async function connectWith(provider) {
