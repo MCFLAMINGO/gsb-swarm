@@ -987,9 +987,12 @@ function switchTab(tab) {
   document.querySelectorAll('.nav-btn').forEach((el,i) => el.classList.toggle('active', TABS[i] === tab));
   document.getElementById('panel-' + tab).classList.add('active');
 
-  if (tab === 'trending') loadTrending(trendingChain);
-  if (tab === 'limits')   loadLimitOrders();
-  if (tab === 'referral') loadReferralStats();
+  if (tab === 'trending')  loadTrending(trendingChain);
+  if (tab === 'limits')    loadLimitOrders();
+  if (tab === 'referral')  loadReferralStats();
+  if (tab === 'portfolio') loadPortfolio();
+  if (tab === 'dca')       updatePumpChainNote();
+  if (tab === 'swap')      updateQuote();
 }
 
 // ── Wallet Connection ──────────────────────────────────────────────────────────
@@ -1153,6 +1156,8 @@ function saveMultiWallet() {
 
   // Primary walletAddress: SOL preferred (most sessions start on Solana)
   walletAddress = solOk ? solVal : evmVal;
+  // Also write legacy key so all tabs + init restore path can find the wallet
+  localStorage.setItem(`gsb_wallet_${userId}`, walletAddress);
   showToast('Wallets saved');
   onWalletConnected();
 }
