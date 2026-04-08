@@ -638,14 +638,21 @@
 
     <!-- Deposit instructions -->
     <div class="card" id="pump-deposit-card" style="display:none">
-      <div class="card-title" id="pump-deposit-title">Send Funds to Start</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Send exactly the amount below to the swarm wallet. Bot starts automatically on detection.</div>
-      <div style="background:var(--surface);border-radius:8px;padding:10px;font-size:11px;word-break:break-all;margin-bottom:8px">
-        <div style="color:var(--muted);margin-bottom:4px" id="pump-deposit-chain-label">Swarm Wallet:</div>
-        <div style="font-family:monospace;color:var(--text)" id="pump-deposit-addr"></div>
+      <div class="card-title" id="pump-deposit-title">⚡ Fund Agent to Start</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Click below to send SOL directly from your connected wallet. The agent starts buying automatically once funded.</div>
+      <div style="background:var(--surface);border-radius:8px;padding:10px;font-size:13px;font-weight:700;text-align:center;color:var(--accent);margin-bottom:12px" id="pump-deposit-amount"></div>
+      <!-- Primary: sign with connected wallet -->
+      <button class="btn btn-primary" id="pump-fund-btn" style="width:100%;padding:14px;font-size:15px;font-weight:700" onclick="fundAgentWithWallet()">👋 Fund Agent
+      </button>
+      <div style="text-align:center;color:var(--muted);font-size:11px;margin:10px 0">or send manually</div>
+      <!-- Fallback: manual copy -->
+      <div style="background:var(--surface);border-radius:8px;padding:10px;font-size:11px;word-break:break-all;margin-bottom:8px;display:flex;align-items:center;gap:8px">
+        <div style="flex:1">
+          <div style="color:var(--muted);margin-bottom:2px" id="pump-deposit-chain-label">Agent Wallet:</div>
+          <div style="font-family:monospace;color:var(--text)" id="pump-deposit-addr"></div>
+        </div>
+        <button onclick="copyDepositAddr()" style="background:none;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;white-space:nowrap">Copy</button>
       </div>
-      <div style="background:var(--surface);border-radius:8px;padding:10px;font-size:13px;font-weight:700;text-align:center;color:var(--accent)" id="pump-deposit-amount"></div>
-      <button class="btn btn-outline" style="width:100%;margin-top:10px" onclick="copyDepositAddr()">Copy Address</button>
     </div>
 
   </div>
@@ -1532,22 +1539,28 @@ async function startPumpBot() {
 const SOL_FEE_WALLET = 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs';
 
 function showDepositInstructions(d) {
-  const isPf    = d.session && d.session.isPumpFun;
-  const chain   = document.getElementById('pump-chain').value;
-  const isSol   = chain === 'solana';
+  const isSolSess = d.session?.chain === 'solana';
+  const amt       = d.depositAmount;
+  const token     = d.depositToken || 'USDC';
+
   document.getElementById('pump-config-card').style.display  = 'none';
   document.getElementById('pump-deposit-card').style.display = 'block';
   document.getElementById('pump-deposit-addr').textContent   = d.depositAddress;
-  const token = d.depositToken || 'USDC';
-  const amt   = d.depositAmount;
-  if (isPf) {
-    document.getElementById('pump-deposit-title').textContent        = 'Send SOL to Start';
-    document.getElementById('pump-deposit-chain-label').textContent  = 'GSB Solana Wallet:';
-    document.getElementById('pump-deposit-amount').textContent       = `Send exactly ${amt} SOL`;
-  } else {
-    document.getElementById('pump-deposit-title').textContent        = isSol ? 'Send Solana USDC to Start' : 'Send Base USDC to Start';
-    document.getElementById('pump-deposit-chain-label').textContent  = isSol ? 'GSB Solana Wallet:' : 'Swarm Wallet (Base):';
-    document.getElementById('pump-deposit-amount').textContent       = `Send exactly $${amt} ${token}${isSol ? ' (Solana USDC)' : ' (Base USDC)'}`;
+
+  // Title + amount label
+  document.getElementById('pump-deposit-title').textContent  = '⚡ Fund Agent to Start';
+  document.getElementById('pump-deposit-chain-label').textContent = isSolSess ? 'Agent SOL Wallet:' : 'Agent USDC Wallet:';
+  document.getElementById('pump-deposit-amount').textContent = isSolSess
+    ? `${amt} SOL`
+    : `$${amt} ${token}`;
+
+  // Update Fund Agent button label for chain
+  const fundBtn = document.getElementById('pump-fund-btn');
+  if (fundBtn) {
+    fundBtn.disabled = false;
+    fundBtn.innerHTML = isSolSess
+      ? '👋 Fund Agent with SOL'
+      : '👋 Fund Agent with USDC';
   }
 }
 
@@ -1555,6 +1568,92 @@ function copyDepositAddr() {
   const addr = document.getElementById('pump-deposit-addr').textContent;
   navigator.clipboard?.writeText(addr);
   showToast('Address copied', 'success');
+}
+
+// ── Fund Agent: sign transfer directly from connected wallet (SOL or EVM) ──────
+async function fundAgentWithWallet() {
+  const btn        = document.getElementById('pump-fund-btn');
+  const destAddr   = document.getElementById('pump-deposit-addr').textContent.trim();
+  const amountText = document.getElementById('pump-deposit-amount').textContent;
+  const isSol      = isSolanaSession();
+
+  if (!destAddr) return showToast('Session not ready', 'error');
+
+  try {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Waiting for approval...';
+
+    if (isSol) {
+      // ── Solana: sign SOL transfer via Phantom / Solflare ──────────────────
+      const solProvider = window.phantom?.solana || window.solana || window.solflare;
+      if (!solProvider) throw new Error('No Solana wallet — connect Phantom or use Copy to send manually');
+      if (!solProvider.isConnected) await solProvider.connect();
+
+      const amtMatch = amountText.match(/([\d.]+)\s*SOL/);
+      if (!amtMatch) throw new Error('Could not read SOL amount');
+      const lamports = Math.round(parseFloat(amtMatch[1]) * 1e9);
+
+      // Backend builds the unsigned tx (blockhash + SystemProgram.transfer)
+      const r = await fetch(`${API_BASE}/api/pump/fund-tx`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chain: 'solana', fromWallet: walletAddress, toWallet: destAddr, lamports }),
+      });
+      const d = await r.json();
+      if (!d.ok || !d.tx) throw new Error(d.error || 'Could not build transaction');
+
+      const txBytes = Uint8Array.from(atob(d.tx), c => c.charCodeAt(0));
+      // Phantom signAndSendTransaction with base64 serialized tx
+      const result = await solProvider.request({
+        method: 'signAndSendTransaction',
+        params: { message: d.tx },
+      });
+      const sig = result?.signature || result;
+      showToast(`✅ Funded! ${String(sig).slice(0,12)}...`, 'success');
+
+    } else {
+      // ── EVM: send USDC via MetaMask / window.ethereum ──────────────────────
+      if (!window.ethereum) throw new Error('No EVM wallet — connect MetaMask or use Copy to send manually');
+
+      const amtMatch = amountText.match(/([\d.]+)/);
+      if (!amtMatch) throw new Error('Could not read amount');
+      const usdcAmount = parseFloat(amtMatch[1]);
+      const usdcUnits  = BigInt(Math.round(usdcAmount * 1e6)); // USDC has 6 decimals
+
+      // USDC contract addresses per chain
+      const USDC_CONTRACTS = {
+        base:     '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        ethereum: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        arbitrum: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+        polygon:  '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
+      };
+      const chain       = document.getElementById('pump-chain')?.value || 'base';
+      const usdcContract = USDC_CONTRACTS[chain] || USDC_CONTRACTS.base;
+
+      // ERC-20 transfer(address,uint256) call
+      const iface = '0xa9059cbb' // transfer(address,uint256) selector
+        + destAddr.replace('0x','').padStart(64,'0')
+        + usdcUnits.toString(16).padStart(64,'0');
+
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      const from = accounts[0];
+
+      const txHash = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{ from, to: usdcContract, data: iface, gas: '0x186A0' }],
+      });
+      showToast(`✅ Funded! ${String(txHash).slice(0,12)}...`, 'success');
+    }
+
+    btn.innerHTML = '✅ Funded — Agent starting...';
+    // Poller picks up the confirmed deposit automatically
+
+  } catch (err) {
+    console.error('[fundAgent]', err);
+    showToast((err.message || String(err)) + ' — use Copy to send manually', 'error');
+    btn.disabled = false;
+    btn.innerHTML = '👋 Fund Agent';
+  }
 }
 
 function startPumpPoller() {
@@ -1662,14 +1761,19 @@ async function loadPumpSession() {
       pumpSession = d.session;
       document.getElementById('pump-config-card').style.display = 'none';
       document.getElementById('pump-deposit-card').style.display = d.session.status === 'pending_deposit' ? 'block' : 'none';
-      const _isPf  = d.session.isPumpFun;
       const _isSol = d.session.chain === 'solana';
-      const _addr  = d.session.solDepositAddress || d.session.depositAddress || ((_isPf || _isSol) ? 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs' : '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d');
-      const _amt   = _isPf ? (d.session.totalSol || d.session.maxSol || '') : (d.session.totalAmount || '');
-      const _unit  = _isPf ? 'SOL' : (_isSol ? '(Solana USDC)' : '(Base USDC)');
-      document.getElementById('pump-deposit-chain-label').textContent = (_isSol || _isPf) ? 'GSB Solana Wallet:' : 'Swarm Wallet (Base):';
+      const _addr  = d.session.solDepositAddress || d.session.depositAddress
+        || (_isSol ? 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs' : '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d');
+      const _amt   = _isSol ? (d.session.totalSol || '') : (d.session.totalAmount || '');
+      document.getElementById('pump-deposit-chain-label').textContent = _isSol ? 'Agent SOL Wallet:' : 'Agent USDC Wallet:';
       document.getElementById('pump-deposit-addr').textContent = _addr;
-      document.getElementById('pump-deposit-amount').textContent = _isPf ? `Send exactly ${_amt} SOL` : `Send exactly $${_amt} USDC ${_unit}`;
+      document.getElementById('pump-deposit-amount').textContent = _isSol ? `${_amt} SOL` : `$${_amt} USDC`;
+      // Update Fund Agent button
+      const _fundBtn = document.getElementById('pump-fund-btn');
+      if (_fundBtn) {
+        _fundBtn.disabled = false;
+        _fundBtn.innerHTML = _isSol ? '👋 Fund Agent with SOL' : '👋 Fund Agent with USDC';
+      }
       renderPumpSession(d.session);
       startPumpPoller();
     }

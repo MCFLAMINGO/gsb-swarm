@@ -4099,6 +4099,55 @@ app.post('/api/pump/cancel', express.json(), (req, res) => {
   res.json({ ok: cancelled, error: cancelled ? null : 'Session not found or already complete' });
 });
 
+// POST /api/pump/fund-tx — build an unsigned SOL transfer tx for Phantom to sign
+// The user's wallet signs; backend never touches their key
+app.post('/api/pump/fund-tx', express.json(), async (req, res) => {
+  try {
+    const { fromWallet, toWallet, lamports } = req.body;
+    if (!fromWallet || !toWallet || !lamports) {
+      return res.status(400).json({ ok: false, error: 'fromWallet, toWallet, lamports required' });
+    }
+    if (lamports < 1_000_000 || lamports > 5_000_000_000) {
+      return res.status(400).json({ ok: false, error: 'lamports out of range (0.001 – 5 SOL)' });
+    }
+    // Only allow funding to the known GSB SOL wallet
+    const GSB_SOL_WALLET = process.env.GSB_SOL_WALLET || 'F7U3MrnsoZ3umLTmH9Wtae6VGhnWQPRj4Z1Vtv2QSRFs';
+    if (toWallet !== GSB_SOL_WALLET) {
+      return res.status(400).json({ ok: false, error: 'Invalid destination' });
+    }
+
+    const { Connection, PublicKey, Transaction, SystemProgram } = require('@solana/web3.js');
+    const connection = new Connection(
+      process.env.SOLANA_RPC_URL || 'https://solana-rpc.publicnode.com',
+      { commitment: 'confirmed' }
+    );
+
+    // Get recent blockhash
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+
+    // Build transfer transaction (unsigned — user signs via Phantom)
+    const tx = new Transaction({
+      recentBlockhash: blockhash,
+      feePayer: new PublicKey(fromWallet),
+    }).add(
+      SystemProgram.transfer({
+        fromPubkey: new PublicKey(fromWallet),
+        toPubkey:   new PublicKey(GSB_SOL_WALLET),
+        lamports:   BigInt(Math.round(lamports)),
+      })
+    );
+
+    // Serialize without signing — Phantom will sign client-side
+    const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
+    const txBase64   = Buffer.from(serialized).toString('base64');
+
+    res.json({ ok: true, tx: txBase64, blockhash, lastValidBlockHeight });
+  } catch (err) {
+    console.error('[fund-tx]', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET /api/swarm-memory — return current swarm memory (narratives + pinned context)
 app.get('/api/swarm-memory', (req, res) => {
   res.json({
