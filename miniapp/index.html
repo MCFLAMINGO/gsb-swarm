@@ -2454,22 +2454,23 @@ async function executeSwap() {
     const d = await r.json();
 
     if (d.ok && d.solana && d.transaction && !IS_TELEGRAM) {
-      // Desktop: sign Solana tx directly via injected Phantom
-      await executeSolanaSwap(d, tokenIn, tokenOut, amount);
+      // Desktop: sign via injected Phantom — use base64 tx
+      const desktopData = { ...d, transaction: d.transactionB64 || d.transaction };
+      await executeSolanaSwap(desktopData, tokenIn, tokenOut, amount);
     } else if (d.ok && d.solana && d.transaction && IS_TELEGRAM) {
-      // Telegram: use Phantom signAndSendTransaction deeplink
+      // Telegram: Phantom deeplink with base58 tx — Connect flow handles session
       await executeSolanaSwapDeeplink(d, tokenIn, tokenOut, amount);
-    } else if (d.ok && (d.uniswapUrl || d.solana)) {
-      // Fallback — open deeplink in system browser
-      const link = d.uniswapUrl;
-      const label = chain === 'solana' ? 'Opening Jupiter…' : 'Opening Uniswap…';
-      if (IS_TELEGRAM) {
-        tg.openLink(link);
-      } else {
-        window.open(link, '_blank');
-      }
-      showToast(label, 'success');
-      addSwapHistory(tokenIn, tokenOut, amount, link);
+      // DO NOT fall through to Jupiter URL — Phantom handles this
+    } else if (d.ok && d.solanaFallback && d.uniswapUrl && IS_TELEGRAM) {
+      // Jupiter API unavailable fallback — open Jupiter directly
+      tg.openLink(d.uniswapUrl);
+      showToast('Opening Jupiter…', 'success');
+      addSwapHistory(tokenIn, tokenOut, amount, d.uniswapUrl);
+    } else if (d.ok && d.uniswapUrl && chain !== 'solana') {
+      // EVM — open Uniswap
+      IS_TELEGRAM ? tg.openLink(d.uniswapUrl) : window.open(d.uniswapUrl, '_blank');
+      showToast('Opening Uniswap…', 'success');
+      addSwapHistory(tokenIn, tokenOut, amount, d.uniswapUrl);
     } else if (d.ok && d.txUrl) {
       showToast('Swap submitted!', 'success');
       IS_TELEGRAM ? tg.openLink(d.txUrl) : window.open(d.txUrl, '_blank');

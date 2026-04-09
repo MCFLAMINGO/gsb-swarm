@@ -3795,6 +3795,25 @@ app.get('/api/swap/quote', async (req, res) => {
   res.json({ ok: true, ...quote });
 });
 
+// ── base58 encode (no dependency — pure Node Buffer) ───────────────────────
+function _b58encode(buf) {
+  const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let digits = [0];
+  for (const byte of buf) {
+    let carry = byte;
+    for (let i = 0; i < digits.length; i++) {
+      carry += digits[i] << 8;
+      digits[i] = carry % 58;
+      carry = (carry / 58) | 0;
+    }
+    while (carry > 0) { digits.push(carry % 58); carry = (carry / 58) | 0; }
+  }
+  let result = '';
+  for (let i = 0; i < buf.length && buf[i] === 0; i++) result += '1';
+  for (let i = digits.length - 1; i >= 0; i--) result += ALPHABET[digits[i]];
+  return result;
+}
+
 // ── Execute swap (returns Uniswap URL for user to confirm) ───────────────────
 app.post('/api/swap/execute', express.json(), async (req, res) => {
   const { userId, walletAddress, tokenIn, tokenOut, amount, chain = 'base', slippage = 1 } = req.body;
@@ -3839,19 +3858,20 @@ app.post('/api/swap/execute', express.json(), async (req, res) => {
         return res.json({ ok: true, uniswapUrl: fallbackUrl, solanaFallback: true, price: priceData.price, feeUsd: parseFloat(feeUsd) });
       }
 
-      // Return transaction + requestId for desktop Phantom signing
-      // Also include Jupiter deeplink so Telegram (read-only WC) can open it in system browser
+      // Convert base64 tx → base58 for Phantom deeplink encryption
+      const txBase58 = _b58encode(Buffer.from(jupData.transaction, 'base64'));
       const jupDeeplink = `https://jup.ag/swap/${SOL_USDC}-${outputMint}?inAmount=${lamports}`;
       return res.json({
         ok: true,
         solana: true,
-        transaction:   jupData.transaction,   // base64 transaction for wallet to sign (desktop)
-        requestId:     jupData.requestId,      // needed for /execute
-        uniswapUrl:    jupDeeplink,            // always include — Telegram uses this
-        price:         priceData.price,
+        transaction:    txBase58,              // base58 — Phantom deeplink ready
+        transactionB64: jupData.transaction,   // base64 — kept for desktop signing
+        requestId:      jupData.requestId,
+        uniswapUrl:     jupDeeplink,
+        price:          priceData.price,
         contractAddress: outputMint,
-        feeUsd:        parseFloat(feeUsd),
-        feeRecipient:  referralAccount || GSB_SOL_WALLET,
+        feeUsd:         parseFloat(feeUsd),
+        feeRecipient:   referralAccount || GSB_SOL_WALLET,
         referralActive: !!referralAccount,
       });
     } else {
