@@ -1145,15 +1145,8 @@ function closeSignScreen() {
 }
 
 async function connectSigner(provider) {
-  // In Telegram: if AppKit already has a live session, use it — no redirect needed
   if (IS_TELEGRAM) {
-    const _appkitState = window.gsbModal?.getState ? window.gsbModal.getState() : null;
-    if (_appkitState?.address) {
-      walletAddress = _appkitState.address;
-      onWalletConnected();
-      return;
-    }
-    // No live session — open /wc page so user can connect via Reown AppKit
+    // Telegram: open /wc page for wallet connection, then poll for saved wallet
     const _wcUserId  = tg?.initDataUnsafe?.user?.id || userId || 'unknown';
     const _returnUrl = encodeURIComponent('https://t.me/gsb_swap_bot');
     const wcUrl      = `${API_BASE}/wc?userId=${_wcUserId}&returnUrl=${_returnUrl}`;
@@ -2542,7 +2535,6 @@ window.addEventListener('load', async () => {
 });
 </script>
 
-<!-- gsbModal: reserved for future AppKit integration once bundler is available -->
-<script>window.gsbModal = null;</script>
+
 </body>
 </html>
