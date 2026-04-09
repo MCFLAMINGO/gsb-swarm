@@ -503,7 +503,10 @@ async function poll() {
 setInterval(checkAlerts, 60_000);
 
 async function startBot() {
-  try { await tgRequest('deleteWebhook', { drop_pending_updates: false }); } catch {}
+  // Drop any existing webhook + evict any hanging getUpdates session from old container
+  try { await tgRequest('deleteWebhook', { drop_pending_updates: true }); } catch {}
+  // Wait 2s for old long-poll (timeout:20) to be evicted by Telegram
+  await new Promise(r => setTimeout(r, 2000));
   console.log('[bot] GSB Swap Bot starting...');
   poll();
 }
