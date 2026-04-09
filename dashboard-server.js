@@ -185,7 +185,6 @@ function refreshDashboardCache() {
       try {
         const data = JSON.parse(body);
         ceoDashCache.lastAlphaScan = { data: data?.data || data, fetchedAt: Date.now() };
-        console.log('[dash-cache] Alpha scan refreshed');
       } catch (e) { console.warn('[dash-cache] Parse error:', e.message); }
     });
   });
@@ -193,9 +192,9 @@ function refreshDashboardCache() {
   req.setTimeout(10000, () => req.destroy());
 }
 
-// Start cache refresh (every 5 min)
+// Start cache refresh (every 15 min — GeckoTerminal trending pools)
 refreshDashboardCache();
-setInterval(refreshDashboardCache, 5 * 60 * 1000);
+setInterval(refreshDashboardCache, 15 * 60 * 1000);
 
 // ── Worker Status Tracking ──────────────────────────────────────────────────
 const workerStatus = {};
