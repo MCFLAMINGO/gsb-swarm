@@ -4,7 +4,7 @@
   "description": "GSB Intelligence Swarm - 4 ACP provider agents for Agent Gas Bible",
   "main": "dashboard-server.js",
   "scripts": {
-    "start": "node --experimental-require-module dashboard-server.js"
+    "start": "node --experimental-require-module --no-warnings dashboard-server.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

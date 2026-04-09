@@ -20,7 +20,7 @@ if (baseAcpConfigV2.chain?.rpcUrls?.public?.http) {
   baseAcpConfigV2.chain.rpcUrls.public.http = [RPC_URL];
 }
 
-console.log('[acp] RPC endpoint:', RPC_URL);
+// RPC_URL logged at debug level only
 
 const ACP_MAX_RETRIES = 3;
 
