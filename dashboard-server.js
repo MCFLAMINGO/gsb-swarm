@@ -3834,13 +3834,15 @@ app.post('/api/swap/execute', express.json(), async (req, res) => {
       const referralAccount = process.env.JUPITER_REFERRAL_ACCOUNT || null;
       const jupApiKey       = process.env.JUP_API_KEY || '';
 
+      // Only pass taker if it's a valid Solana base58 address — EVM 0x addresses cause Jupiter to reject
+      const isSolanaWallet = walletAddress && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(walletAddress);
       const jupParams = new URLSearchParams({
         inputMint:  SOL_USDC,
         outputMint: outputMint,
         amount:     String(lamports),
-        taker:      walletAddress || '',
         slippageBps: String(Math.round(parseFloat(slippage) * 100)),
       });
+      if (isSolanaWallet) jupParams.set('taker', walletAddress);
       if (referralAccount) {
         jupParams.set('referralAccount', referralAccount);
         jupParams.set('referralFee', '50'); // 50 bps = 0.5%; Jupiter keeps 20%, you keep 80%
@@ -3853,8 +3855,8 @@ app.post('/api/swap/execute', express.json(), async (req, res) => {
       const jupData = await jupRes.json();
 
       if (!jupData.transaction) {
-        // Fallback: deep link if API unavailable or no taker wallet
-        const fallbackUrl = `https://jup.ag/swap/${SOL_USDC}-${outputMint}?inAmount=${lamports}`;
+        // Fallback: Jupiter deeplink — use human-readable amount (USDC has 6 decimals)
+        const fallbackUrl = `https://jup.ag/swap/USDC-${outputMint}?inputAmount=${parseFloat(amount).toFixed(2)}`;
         return res.json({ ok: true, uniswapUrl: fallbackUrl, solanaFallback: true, price: priceData.price, feeUsd: parseFloat(feeUsd) });
       }
 
