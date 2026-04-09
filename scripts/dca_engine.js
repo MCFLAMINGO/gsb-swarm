@@ -91,10 +91,11 @@ async function getTokenPrice(token, chain = 'base') {
     const p = pairs[0];
     if (!p) return null;
     return {
-      price: parseFloat(p.priceUsd || '0'),
+      price:           parseFloat(p.priceUsd || '0'),
+      change24h:       parseFloat(p.priceChange?.h24 || '0'),
       contractAddress: p.baseToken?.address,
-      symbol: p.baseToken?.symbol,
-      pairAddress: p.pairAddress,
+      symbol:          p.baseToken?.symbol,
+      pairAddress:     p.pairAddress,
     };
   } catch { return null; }
 }
@@ -228,11 +229,18 @@ async function searchTokens(query, chain = 'base') {
 async function getQuote(tokenIn, tokenOut, amount, chain = 'base') {
   const priceData = await getTokenPrice(tokenOut, chain);
   if (!priceData) return null;
+  // fee is always 0.5% of the USD input value
+  // if tokenIn is not USDC, convert: estimatedIn = amount * tokenInPrice
+  const isUsdcIn = /^usdc$/i.test(tokenIn);
+  const feeUsd = isUsdcIn
+    ? parseFloat((amount * 0.005).toFixed(6))
+    : parseFloat((amount * (priceData.price || 0) * 0.005).toFixed(6));
   return {
-    price: priceData.price,
-    change24h: 0,
+    price:           priceData.price,
+    change24h:       priceData.change24h || 0,
     contractAddress: priceData.contractAddress,
-    estimatedOut: amount / priceData.price,
+    estimatedOut:    amount / priceData.price,
+    feeUsd,
   };
 }
 

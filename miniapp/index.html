@@ -2295,10 +2295,10 @@ async function updateQuote() {
       const d = await r.json();
 
       if (d.ok && (d.estimatedOut || d.price)) {
-        const fee       = amount * 0.005;
+        const feeUsd    = d.feeUsd != null ? d.feeUsd : amount * 0.005;
         const slippage  = parseFloat(document.getElementById('slippage-select').value);
         // Use estimatedOut directly from API (already accounts for routing)
-        const outAmount = d.estimatedOut || ((amount - fee) / d.price);
+        const outAmount = d.estimatedOut || (amount / d.price);
         const minOut    = outAmount * (1 - slippage / 100);
 
         // Format output amount — handle huge and tiny numbers
@@ -2317,7 +2317,7 @@ async function updateQuote() {
         document.getElementById('q-price').textContent = fmtPrice;
         const chg = d.change24h || 0;
         document.getElementById('q-change').innerHTML = `<span class="${chg>=0?'change-pos':'change-neg'}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>`;
-        document.getElementById('q-fee').textContent  = `$${fee.toFixed(4)} USDC`;
+        document.getElementById('q-fee').textContent  = `$${feeUsd.toFixed(4)} USDC`;
         document.getElementById('q-min').textContent  = `${minOut < 0.000001 ? minOut.toExponential(4) : minOut.toFixed(6)} ${tokenOut}`;
         document.getElementById('quote-card').style.display = 'block';
 
