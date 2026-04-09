@@ -3805,6 +3805,7 @@ app.post('/api/swap/execute', express.json(), async (req, res) => {
     const GSB_SWARM_WALLET = '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
     const GSB_SOL_WALLET   = '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d'; // update to SOL address when ready
     const FEE_BPS = 50; // 0.5%
+    const feeUsd  = (parseFloat(amount) * FEE_BPS / 10000).toFixed(4);
     let uniswapUrl;
     if (chain === 'solana') {
       // ── Jupiter Swap API V2 /order — returns transaction for user to sign ──────
@@ -3862,7 +3863,6 @@ app.post('/api/swap/execute', express.json(), async (req, res) => {
     }
 
     // Log fee event for tracking
-    const feeUsd = (parseFloat(amount) * FEE_BPS / 10000).toFixed(4);
     console.log(`[fee] swap ${tokenIn}→${tokenOut} $${amount} | fee ~$${feeUsd} | wallet ${walletAddress || 'anon'} | chain ${chain}`);
     if (!global.feeLog) global.feeLog = [];
     global.feeLog.push({ ts: new Date().toISOString(), tokenIn, tokenOut, amount: parseFloat(amount), feeUsd: parseFloat(feeUsd), walletAddress, chain });
