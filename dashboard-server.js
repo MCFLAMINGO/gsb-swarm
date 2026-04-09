@@ -3517,7 +3517,7 @@ let copyTraderState = { running: false, log: [], startedAt: null, budget: 0 };
 const COPY_TRADER_AUTO_BUDGET = parseFloat(process.env.COPY_TRADER_BUDGET || '0');
 if (COPY_TRADER_AUTO_BUDGET > 0 && process.env.AGENT_WALLET_PRIVATE_KEY) {
   setTimeout(() => {
-    if (copyTraderProcess) return;
+    if (copyTraderProcess || copyTraderState.manuallyStopped) return;
     const wallet = process.env.COPY_TRADER_WALLET || null;
     copyTraderState = { running: true, log: ['[auto-start] Copy trader launching...'], startedAt: new Date().toISOString(), budget: COPY_TRADER_AUTO_BUDGET };
     const args = ['scripts/copy_trader.py', '--budget', String(COPY_TRADER_AUTO_BUDGET)];
@@ -3540,11 +3540,11 @@ if (COPY_TRADER_AUTO_BUDGET > 0 && process.env.AGENT_WALLET_PRIVATE_KEY) {
       copyTraderState.running = false;
       copyTraderState.log.push(`[process exited code ${code}]`);
       copyTraderProcess = null;
-      // Auto-restart on crash after 30s
-      if (code !== 0 && COPY_TRADER_AUTO_BUDGET > 0) {
+      // Auto-restart on crash after 30s — only if not manually stopped
+      if (code !== 0 && COPY_TRADER_AUTO_BUDGET > 0 && !copyTraderState.manuallyStopped) {
         console.log('[copy-trader] Crashed — restarting in 30s...');
         setTimeout(() => {
-          if (!copyTraderProcess) {
+          if (!copyTraderProcess && !copyTraderState.manuallyStopped) {
             const args2 = ['scripts/copy_trader.py', '--budget', String(COPY_TRADER_AUTO_BUDGET)];
             if (wallet) args2.push('--wallet', wallet); else args2.push('--hunt');
             copyTraderProcess = spawn('python3', args2, { cwd: __dirname, env: { ...process.env } });
@@ -3566,7 +3566,7 @@ app.post('/api/copy-trader/start', requireOperator, express.json(), async (req, 
   }
   const budget = parseFloat(req.body.budget) || 10;
   const wallet = req.body.wallet || null;
-  copyTraderState = { running: true, log: [], startedAt: new Date().toISOString(), budget };
+  copyTraderState = { running: true, manuallyStopped: false, log: [], startedAt: new Date().toISOString(), budget };
 
   const args = ['scripts/copy_trader.py', '--budget', String(budget)];
   if (wallet) args.push('--wallet', wallet);
@@ -3596,6 +3596,7 @@ app.post('/api/copy-trader/start', requireOperator, express.json(), async (req, 
 });
 
 app.post('/api/copy-trader/stop', requireOperator, (req, res) => {
+  copyTraderState.manuallyStopped = true;  // prevents auto-restart
   if (!copyTraderProcess) return res.json({ ok: false, error: 'Not running' });
   copyTraderProcess.kill('SIGTERM');
   copyTraderProcess = null;
