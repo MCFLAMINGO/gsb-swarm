@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>GSB Swap</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bs58@6.0.0/index.min.js"></script>
 
   <style>
     :root {
@@ -1002,6 +1004,93 @@ let isApproved     = false;
 let quoteTimer     = null;
 let dcaOrders      = [];
 let trendingChain  = 'base';
+
+// ── Phantom Deeplink Session (Solana) ─────────────────────────────────────
+let _phantomSession    = null;  // session token from connect response
+let _phantomEncPubkey  = null;  // Phantom's X25519 pubkey (Uint8Array)
+
+function _getDappKeyPair() {
+  // Persist keypair across page reloads (Phantom redirects back = full reload)
+  const stored = sessionStorage.getItem('gsb_dapp_kp');
+  if (stored) {
+    try {
+      const { pk, sk } = JSON.parse(stored);
+      return { publicKey: new Uint8Array(pk), secretKey: new Uint8Array(sk) };
+    } catch (_) {}
+  }
+  const kp = nacl.box.keyPair();
+  sessionStorage.setItem('gsb_dapp_kp', JSON.stringify({
+    pk: Array.from(kp.publicKey),
+    sk: Array.from(kp.secretKey),
+  }));
+  return kp;
+}
+
+function _loadPhantomSession() {
+  try {
+    const s = sessionStorage.getItem('gsb_phantom_session');
+    if (!s) return;
+    const { session, encPubkey } = JSON.parse(s);
+    _phantomSession   = session;
+    _phantomEncPubkey = new Uint8Array(encPubkey);
+  } catch (_) {}
+}
+
+function _savePhantomSession(session, encPubkeyBytes) {
+  _phantomSession   = session;
+  _phantomEncPubkey = encPubkeyBytes;
+  sessionStorage.setItem('gsb_phantom_session', JSON.stringify({
+    session,
+    encPubkey: Array.from(encPubkeyBytes),
+  }));
+}
+
+// Kick off a Phantom Connect deeplink (step 1)
+function connectPhantomDeeplink() {
+  const kp         = _getDappKeyPair();
+  const dappPubkey = bs58.encode(kp.publicKey);
+  const redirect   = encodeURIComponent(
+    `https://gsb-swarm-production.up.railway.app/miniapp/?phantom_connected=1&userId=${userId}`
+  );
+  const url = `https://phantom.app/ul/v1/connect` +
+    `?dapp_encryption_public_key=${encodeURIComponent(dappPubkey)}` +
+    `&redirect_link=${redirect}` +
+    `&app_url=${encodeURIComponent('https://gsb-swarm-production.up.railway.app')}`;
+  if (IS_TELEGRAM && tg?.openLink) tg.openLink(url, { try_instant_view: false });
+  else window.open(url, '_blank');
+}
+
+// Handle ?phantom_connected=1 on page load
+async function _handlePhantomConnectResponse(params) {
+  try {
+    const phantomPubkeyB58 = params.get('phantom_encryption_public_key');
+    const dataB58          = params.get('data');
+    const nonceB58         = params.get('nonce');
+    if (!phantomPubkeyB58 || !dataB58 || !nonceB58) {
+      showToast('Phantom connect failed — missing params', 'error'); return;
+    }
+    const kp           = _getDappKeyPair();
+    const phantomBytes = bs58.decode(phantomPubkeyB58);
+    const shared       = nacl.box.before(phantomBytes, kp.secretKey);
+    const decrypted    = nacl.box.open.after(bs58.decode(dataB58), bs58.decode(nonceB58), shared);
+    if (!decrypted) { showToast('Phantom decrypt failed', 'error'); return; }
+    const payload = JSON.parse(new TextDecoder().decode(decrypted));
+    _savePhantomSession(payload.session, phantomBytes);
+    // Save the public key as signing wallet
+    walletAddress = payload.public_key;
+    setReceivingWallet('solana', payload.public_key);
+    await fetch(`${API_BASE}/api/user/set-wallet`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, walletAddress: payload.public_key, chain: 'solana' }),
+    }).catch(() => {});
+    showToast(`Phantom connected — ${payload.public_key.slice(0,6)}...${payload.public_key.slice(-4)}`, 'success');
+    onWalletConnected();
+  } catch (e) {
+    console.error('[phantom-connect]', e);
+    showToast('Phantom connect error', 'error');
+  }
+}
 
 // ── Tab switching ──────────────────────────────────────────────────────────────
 function switchTab(tab) {
@@ -2397,23 +2486,52 @@ async function executeSwap() {
 
 // ── Solana swap via Phantom deeplink (Telegram) ────────────────────────
 async function executeSolanaSwapDeeplink(swapData, tokenIn, tokenOut, amount) {
-  // swapData.transaction is base64-encoded serialized transaction from server
-  // Use Phantom's signAndSendTransaction deeplink so user signs in Phantom app
-  const dappUrl   = encodeURIComponent('https://gsb-swarm-production.up.railway.app/miniapp/');
-  const redirect  = encodeURIComponent('https://gsb-swarm-production.up.railway.app/miniapp/?swapDone=1');
-  const txBase58  = swapData.transaction; // server should provide base58; if base64, we pass as-is
+  // Step 1: if no session yet, kick off Connect flow first
+  if (!_phantomSession || !_phantomEncPubkey) {
+    showToast('Connecting Phantom — approve then swap', '');
+    // Store pending swap so we can resume after connect
+    sessionStorage.setItem('gsb_pending_swap', JSON.stringify({ swapData, tokenIn, tokenOut, amount }));
+    connectPhantomDeeplink();
+    return;
+  }
 
-  // Phantom signAndSendTransaction deeplink
-  // https://docs.phantom.com/phantom-deeplinks/provider-methods/signandsendtransaction
-  const phantomUrl = `https://phantom.app/ul/v1/signAndSendTransaction` +
-    `?dapp_encryption_public_key=${encodeURIComponent(dappUrl)}` +
-    `&redirect_link=${redirect}` +
-    `&payload=${encodeURIComponent(JSON.stringify({ transaction: txBase58, sendOptions: { skipPreflight: false } }))}`;
+  // Step 2: session exists — encrypt payload and sign
+  try {
+    const kp      = _getDappKeyPair();
+    const shared  = nacl.box.before(_phantomEncPubkey, kp.secretKey);
+    const payload = {
+      transaction:  swapData.transaction,   // base58 serialized tx from backend
+      session:      _phantomSession,
+      sendOptions:  { skipPreflight: true, maxRetries: 3 },
+    };
+    const nonce     = nacl.randomBytes(24);
+    const encrypted = nacl.box.after(
+      new TextEncoder().encode(JSON.stringify(payload)),
+      nonce,
+      shared
+    );
+    const redirect = encodeURIComponent(
+      `https://gsb-swarm-production.up.railway.app/miniapp/?swapDone=1&userId=${userId}`
+    );
+    const signUrl = `https://phantom.app/ul/v1/signAndSendTransaction` +
+      `?dapp_encryption_public_key=${encodeURIComponent(bs58.encode(kp.publicKey))}` +
+      `&nonce=${encodeURIComponent(bs58.encode(nonce))}` +
+      `&redirect_link=${redirect}` +
+      `&payload=${encodeURIComponent(bs58.encode(encrypted))}`;
 
-  showToast('Opening Phantom to sign swap…', 'success');
-  addSwapHistory(tokenIn, tokenOut, amount, 'https://solscan.io');
-  if (IS_TELEGRAM && tg?.openLink) tg.openLink(phantomUrl, { try_instant_view: false });
-  else window.open(phantomUrl, '_blank');
+    showToast('Opening Phantom — approve swap', 'success');
+    addSwapHistory(tokenIn, tokenOut, amount, 'https://solscan.io');
+    if (IS_TELEGRAM && tg?.openLink) tg.openLink(signUrl, { try_instant_view: false });
+    else window.open(signUrl, '_blank');
+  } catch (e) {
+    console.error('[phantom-sign]', e);
+    // Session may be stale — clear and reconnect
+    sessionStorage.removeItem('gsb_phantom_session');
+    _phantomSession = null; _phantomEncPubkey = null;
+    showToast('Session expired — reconnecting Phantom', 'error');
+    sessionStorage.setItem('gsb_pending_swap', JSON.stringify({ swapData, tokenIn, tokenOut, amount }));
+    connectPhantomDeeplink();
+  }
 }
 
 async function executeSolanaSwap(swapData, tokenIn, tokenOut, amount) {
@@ -2496,7 +2614,31 @@ function completeOnboarding() {
 }
 
 window.addEventListener('load', async () => {
-  // Restore wallet only for real Telegram users — dev/browser always starts clean
+  // ── Phantom deeplink response handlers ──────────────────────────────────
+  const _urlParams = new URLSearchParams(window.location.search);
+
+  if (_urlParams.get('phantom_connected') === '1') {
+    await _handlePhantomConnectResponse(_urlParams);
+    // Check if there was a pending swap queued before the connect
+    const pending = sessionStorage.getItem('gsb_pending_swap');
+    if (pending) {
+      sessionStorage.removeItem('gsb_pending_swap');
+      try {
+        const { swapData, tokenIn, tokenOut, amount } = JSON.parse(pending);
+        setTimeout(() => executeSolanaSwapDeeplink(swapData, tokenIn, tokenOut, amount), 800);
+      } catch (_) {}
+    }
+    return;
+  }
+
+  if (_urlParams.get('swapDone') === '1') {
+    showToast('Swap submitted to Solana!', 'success');
+  }
+
+  // ── Restore Phantom session from sessionStorage ──────────────────────────
+  _loadPhantomSession();
+
+  // ── Standard wallet restore ──────────────────────────────────────────────
   const isRealUser = tg?.initDataUnsafe?.user?.id;
   const primary = isRealUser
     ? (getActiveWalletAddress() || localStorage.getItem(`gsb_wallet_${userId}`))
@@ -2510,11 +2652,9 @@ window.addEventListener('load', async () => {
   setTimeout(() => updateQuote(), 500);
 
   if (primary) {
-    // Known Telegram user — skip welcome, go straight to app
     walletAddress = primary;
     onWalletConnected();
   } else if (isRealUser) {
-    // No local wallet saved — check server (user may have connected via /wc)
     try {
       const r = await fetch(`${API_BASE}/api/user/wallet?userId=${encodeURIComponent(String(userId))}`);
       const data = await r.json();
@@ -2524,11 +2664,9 @@ window.addEventListener('load', async () => {
         return;
       }
     } catch (_) {}
-    // Still no wallet — show welcome screen
     document.getElementById('onboard-screen').style.display = 'flex';
     updateBadge();
   } else {
-    // No wallet saved — show welcome screen, then sign screen
     document.getElementById('onboard-screen').style.display = 'flex';
     updateBadge();
   }
