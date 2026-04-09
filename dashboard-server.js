@@ -43,7 +43,7 @@ try {
   AcpClient = acpModule.default;
 
   // Override RPC to avoid rate limits
-  const RPC_URL = process.env.BASE_RPC_URL || 'https://base.drpc.org';
+  const RPC_URL = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
   if (baseAcpConfigV2) {
     baseAcpConfigV2.rpcEndpoint = RPC_URL;
     if (baseAcpConfigV2.chain?.rpcUrls?.default?.http) {
@@ -3235,7 +3235,7 @@ app.post('/api/copy-trader/buy-signal', requireOperator, express.json(), async (
   const WETH_BASE = '0x4200000000000000000000000000000000000006';
   const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
   const ROUTER   = '0x2626664c2603336E57B271c5C0b26F421741e481';
-  const BASE_RPC  = process.env.BASE_RPC_URL || 'https://base.drpc.org';
+  const BASE_RPC  = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
 
   const script = `
 const { createWalletClient, createPublicClient, http, parseUnits, maxUint256, encodeFunctionData } = require('viem');
@@ -4052,7 +4052,7 @@ app.get('/api/swap/approval-status', async (req, res) => {
     const USDC   = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
     const ROUTER = '0x2626664c2603336E57B271c5C0b26F421741e481';
     const ERC20_ALLOW_ABI = [{ name:'allowance', type:'function', inputs:[{name:'owner',type:'address'},{name:'spender',type:'address'}], outputs:[{name:'',type:'uint256'}], stateMutability:'view' }];
-    const pc = createPublicClient({ chain: base, transport: http(process.env.BASE_RPC_URL || 'https://base.drpc.org') });
+    const pc = createPublicClient({ chain: base, transport: http(process.env.BASE_RPC_URL || 'https://mainnet.base.org') });
     const allowance = await pc.readContract({ address: USDC, abi: ERC20_ALLOW_ABI, functionName: 'allowance', args: [wallet, ROUTER] });
     res.json({ approved: allowance >= BigInt('1000000000000') }); // >= 1M USDC (max approve)
   } catch(e) {
@@ -4067,10 +4067,10 @@ app.get('/api/pump/approval-status', async (req, res) => {
   if (!wallet || !wallet.startsWith('0x')) return res.json({ approved: false });
   const AGENT_WALLET = process.env.AGENT_EVM_WALLET || '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d';
   const CHAIN_CONFIG = {
-    base:     { rpc: process.env.BASE_RPC_URL   || 'https://base.drpc.org',              usdc: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
-    ethereum: { rpc: process.env.ETH_RPC_URL    || 'https://eth.drpc.org',               usdc: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' },
-    arbitrum: { rpc: process.env.ARB_RPC_URL    || 'https://arbitrum.drpc.org',          usdc: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' },
-    polygon:  { rpc: process.env.POLYGON_RPC_URL || 'https://polygon.drpc.org',          usdc: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174' },
+    base:     { rpc: process.env.BASE_RPC_URL   || 'https://mainnet.base.org',              usdc: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
+    ethereum: { rpc: process.env.ETH_RPC_URL    || 'https://cloudflare-eth.com',               usdc: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' },
+    arbitrum: { rpc: process.env.ARB_RPC_URL    || 'https://arb1.arbitrum.io/rpc',          usdc: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' },
+    polygon:  { rpc: process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com',          usdc: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174' },
   };
   const cfg = CHAIN_CONFIG[chain] || CHAIN_CONFIG.base;
   try {
@@ -4243,10 +4243,10 @@ app.post('/api/pump/create', express.json(), async (req, res) => {
         polygon:  '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
       };
       const CHAIN_RPC = {
-        base: process.env.BASE_RPC_URL || 'https://base.drpc.org',
-        ethereum: process.env.ETH_RPC_URL || 'https://eth.drpc.org',
-        arbitrum: process.env.ARB_RPC_URL || 'https://arbitrum.drpc.org',
-        polygon:  process.env.POLYGON_RPC_URL || 'https://polygon.drpc.org',
+        base: process.env.BASE_RPC_URL || 'https://mainnet.base.org',
+        ethereum: process.env.ETH_RPC_URL || 'https://cloudflare-eth.com',
+        arbitrum: process.env.ARB_RPC_URL || 'https://arb1.arbitrum.io/rpc',
+        polygon:  process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com',
       };
       const targetChain = (chain || 'base').toLowerCase();
       const usdcAddr    = CHAIN_USDC[targetChain] || CHAIN_USDC.base;

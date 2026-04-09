@@ -11,7 +11,7 @@ const { privateKeyToAccount } = require('viem/accounts');
 
 const USDC          = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const UNISWAP_V3    = '0x2626664c2603336E57B271c5C0b26F421741e481';
-const BASE_RPC      = process.env.BASE_RPC_URL || 'https://base.drpc.org';
+const BASE_RPC      = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
 const PRIVATE_KEY   = process.env.AGENT_WALLET_PRIVATE_KEY;
 
 const ERC20_ABI = [

@@ -19,7 +19,7 @@ const fs   = require('fs');
 const path = require('path');
 
 const PRIVATE_KEY = process.env.AGENT_WALLET_PRIVATE_KEY;
-const BASE_RPC    = process.env.BASE_RPC_URL || 'https://base.drpc.org';
+const BASE_RPC    = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
 const USDC        = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const WETH        = '0x4200000000000000000000000000000000000006';
 const ROUTER      = '0x2626664c2603336E57B271c5C0b26F421741e481';

@@ -250,7 +250,7 @@ async function executeDcaBuy(tokenAddress, usdcAmount) {
   const WETH   = '0x4200000000000000000000000000000000000006';
   const USDC   = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
   const ROUTER = '0x2626664c2603336E57B271c5C0b26F421741e481';
-  const RPC    = process.env.BASE_RPC_URL || 'https://base.drpc.org';
+  const RPC    = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
   const amount = parseFloat(usdcAmount);
   if (!amount || amount <= 0) return { ok: false, error: 'Invalid usdc_amount' };
   if (!tokenAddress || !tokenAddress.match(/^0x[a-fA-F0-9]{40}$/)) return { ok: false, error: 'Invalid token_address' };

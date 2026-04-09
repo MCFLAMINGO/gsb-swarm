@@ -167,10 +167,10 @@ const CHAIN_WETH = {
   polygon:  '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
 };
 const CHAIN_RPC = {
-  base:     process.env.BASE_RPC_URL || 'https://base.drpc.org',
-  ethereum: process.env.ETH_RPC_URL  || 'https://eth.drpc.org',
-  arbitrum: process.env.ARB_RPC_URL  || 'https://arbitrum.drpc.org',
-  polygon:  process.env.POLY_RPC_URL || 'https://polygon.drpc.org',
+  base:     process.env.BASE_RPC_URL || 'https://mainnet.base.org',
+  ethereum: process.env.ETH_RPC_URL  || 'https://cloudflare-eth.com',
+  arbitrum: process.env.ARB_RPC_URL  || 'https://arb1.arbitrum.io/rpc',
+  polygon:  process.env.POLY_RPC_URL || 'https://polygon-rpc.com',
 };
 
 // ── Viem swap executor ────────────────────────────────────────────────────────
@@ -190,8 +190,8 @@ async function executeOneBuy(session) {
   if (!pk) throw new Error('AGENT_WALLET_PRIVATE_KEY not set');
 
   const account      = privateKeyToAccount(pk.startsWith('0x') ? pk : '0x' + pk);
-  const walletClient = createWalletClient({ account, chain: viemChain, transport: http(rpc) });
-  const publicClient = createPublicClient({ chain: viemChain, transport: http(rpc) });
+  const walletClient = createWalletClient({ account, chain: viemChain, transport: http(rpc, { retryCount: 0, timeout: 15_000 }) });
+  const publicClient = createPublicClient({ chain: viemChain, transport: http(rpc, { retryCount: 0, timeout: 15_000 }) });
 
   const ERC20_ABI = [
     { name: 'approve',   type: 'function', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ name: '', type: 'bool' }] },
@@ -403,8 +403,8 @@ async function sendTokensToUser(session) {
   if (!pk) throw new Error('AGENT_WALLET_PRIVATE_KEY not set');
 
   const account      = privateKeyToAccount(pk.startsWith('0x') ? pk : '0x' + pk);
-  const walletClient = createWalletClient({ account, chain: viemChain, transport: http(rpc) });
-  const publicClient = createPublicClient({ chain: viemChain, transport: http(rpc) });
+  const walletClient = createWalletClient({ account, chain: viemChain, transport: http(rpc, { retryCount: 0, timeout: 15_000 }) });
+  const publicClient = createPublicClient({ chain: viemChain, transport: http(rpc, { retryCount: 0, timeout: 15_000 }) });
 
   const ERC20_ABI = [
     { name: 'balanceOf', type: 'function', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },

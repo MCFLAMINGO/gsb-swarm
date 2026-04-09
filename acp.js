@@ -7,7 +7,7 @@ const {
 } = require('@virtuals-protocol/acp-node');
 
 // Override RPC to avoid rate limits on default public endpoint
-const RPC_URL = process.env.BASE_RPC_URL || 'https://base.drpc.org';
+const RPC_URL = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
 
 // Directly mutate the class instance property — this is what the SDK reads
 baseAcpConfigV2.rpcEndpoint = RPC_URL;
