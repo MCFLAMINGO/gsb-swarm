@@ -240,7 +240,7 @@ const NARRATIVE_TEMPLATES = {
     `6/ Cross-agent coordination via ACP. Every subtask is an on-chain job. Every result is a verifiable deliverable.`,
     `7/ This is what "agent swarm" actually means. Not vibes. Architecture.`,
     `8/ One entry point. Five agents. Zero overhead. $GSB on @virtuals_io`,
-    `9/ ${outro}`,
+    `9/ CA (Base): 0x8E223841aA396d36a6727EfcEAFC61d691692a37 | ${outro}`,
   ],
   proof_of_work: (outro) => [
     `1/ Any agent can claim wins. Few can prove them.`,
@@ -251,7 +251,7 @@ const NARRATIVE_TEMPLATES = {
     `6/ "Proof of work" isn't a buzzword for $GSB. It's the architecture.`,
     `7/ Tokenized intelligence that walks the talk — or the job isn't paid.`,
     `8/ Check the contract. Check the jobs. $GSB doesn't need you to trust it.`,
-    `9/ ${outro}`,
+    `9/ CA (Base): 0x8E223841aA396d36a6727EfcEAFC61d691692a37 | ${outro}`,
   ],
   pre_alpha: (outro) => [
     `1/ By the time it's trending on CT, the trade is over.`,
@@ -262,7 +262,7 @@ const NARRATIVE_TEMPLATES = {
     `6/ Liquidity deployment prediction > sentiment analysis. Always.`,
     `7/ The edge is on-chain, not on Twitter. $GSB scans Base 24/7.`,
     `8/ Pre-alpha or post-hype. Pick one. $GSB on @virtuals_io`,
-    `9/ ${outro}`,
+    `9/ CA (Base): 0x8E223841aA396d36a6727EfcEAFC61d691692a37 | ${outro}`,
   ],
   dca: (outro) => [
     `1/ The best trades aren't timed. They're disciplined.`,
@@ -273,7 +273,7 @@ const NARRATIVE_TEMPLATES = {
     `6/ Every buy is an on-chain transaction. Verifiable. Auditable. Yours.`,
     `7/ Tokenized DCA engine live on @virtuals_io ACP. $GSB`,
     `8/ Most agents analyze. $GSB executes.`,
-    `9/ ${outro}`,
+    `9/ CA (Base): 0x8E223841aA396d36a6727EfcEAFC61d691692a37 | ${outro}`,
   ],
   gsb_general: (outro) => [
     `1/ What does $GSB actually do? Thread.`,
@@ -284,7 +284,7 @@ const NARRATIVE_TEMPLATES = {
     `6/ Token = ownership of the swarm's earning power. Not a meme. A machine.`,
     `7/ Deployed. Earning. Verifiable. Built on Base. Powered by Virtuals Protocol.`,
     `8/ Most AI tokens: vibes + promises. $GSB: completed jobs + USDC earned.`,
-    `9/ ${outro}`,
+    `9/ CA (Base): 0x8E223841aA396d36a6727EfcEAFC61d691692a37 | ${outro}`,
   ],
 };
 
