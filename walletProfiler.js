@@ -2,7 +2,7 @@ require('dotenv').config();
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { buildAcpClient } = require('./acp');
+const { buildAcpAgent, AssetToken } = require('./acp');
 const { CHAIN_CONFIG, resolveChain, SUPPORTED_CHAINS } = require('./chains');
 
 const AGENT_NAME = 'GSB Wallet Profiler & DCA Engine';
@@ -140,16 +140,6 @@ function validateInput(raw) {
 }
 
 const handledJobs = new Set();
-
-async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
-  const start = Date.now();
-  while (Date.now() - start < maxWaitMs) {
-    const fresh = await client.getJobById(jobId);
-    if (fresh && fresh.phase === 2) return fresh;
-    await new Promise(r => setTimeout(r, 2000));
-  }
-  throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
-}
 
 function extractContent(req) {
   if (!req) return '';
@@ -355,73 +345,92 @@ async function processJob(client, job, chain = 'base') {
 
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
-  let client;
-  client = await buildAcpClient({
+
+  const agent = await buildAcpAgent({
     privateKey: process.env.WALLET_PROFILER_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY,
     entityId: parseInt(process.env.WALLET_PROFILER_ENTITY_ID) || 1,
     agentWalletAddress: process.env.WALLET_PROFILER_WALLET_ADDRESS,
-    onNewTask: async (job) => {
-      console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase}`);
+    onEntry: async (session, entry) => {
+      if (entry.kind !== 'system') return;
+      const { type } = entry.event;
+      const jobId = session.jobId;
 
-      if (handledJobs.has(job.id)) {
-        console.log(`[${AGENT_NAME}] Job ${job.id} already in progress — skipping.`);
-        return;
-      }
-      handledJobs.add(job.id);
+      // ── job.created — validate and set budget ─────────────────────────────
+      if (type === 'job.created') {
+        if (handledJobs.has(jobId)) return;
+        handledJobs.add(jobId);
 
-      try {
-        let rawContent = extractContent(job.requirement)
-          || extractContent(job.memos?.[0]?.content)
-          || '';
-        console.log(`[${AGENT_NAME}] Job ${job.id} content: ${rawContent.slice(0, 120)}`);
-
-        // ── Skill registry routing ───────────────────────────────────────────
-        const parsed = parseJobRequirement(rawContent);
-        const skills = loadSkills(AGENT_NAME);
-        if (parsed.skillId) {
-          const skillDef = skills.find(s => s.skillId === parsed.skillId);
-          if (skillDef) {
-            const instruction = executeSkillInstruction(skillDef, parsed.params || {});
-            console.log(`[${AGENT_NAME}] Skill ${parsed.skillId} → "${instruction.slice(0, 100)}"`);
-            rawContent = instruction;
-          }
-        }
-
-        // ── Validate BEFORE accepting ────────────────────────────────────────
-        const check = validateInput(rawContent);
-        if (!check.valid) {
-          console.log(`[${AGENT_NAME}] Job ${job.id} REJECTED: ${check.reason}`);
-          await job.reject(check.reason);
-          handledJobs.delete(job.id);
-          return;
-        }
-
-        const jobChain = check.chain || 'base';
-        const chainName = CHAIN_CONFIG[jobChain]?.name || jobChain;
-        let freshJob = job;
-
-        // ACP v2: ack immediately, process async
-        if (job.phase !== 2) {
-          await job.respond(true, `Profiling wallet on ${chainName} now...`);
-          console.log(`[${AGENT_NAME}] Job ${job.id} acked — processing async`);
-          try { freshJob = await waitForTransaction(client, job.id, 30000); } catch { freshJob = job; }
-        }
-
-        await processJob(client, freshJob, jobChain);
-      } catch (err) {
-        console.error(`[${AGENT_NAME}] Job ${job.id} error:`, err.message);
-        // If we're past the REQUEST phase, use rejectPayable so the buyer is refunded
         try {
-          await job.rejectPayable(`Internal error: ${err.message}. Your payment will be refunded.`);
-          console.log(`[${AGENT_NAME}] Job ${job.id} rejectPayable issued — buyer will be refunded.`);
+          let rawContent = entry.event.requirement || entry.event.content || '';
+          console.log(`[${AGENT_NAME}] Job ${jobId} content: ${rawContent.slice(0, 120)}`);
+
+          const parsed = parseJobRequirement(rawContent);
+          const skills = loadSkills(AGENT_NAME);
+          if (parsed.skillId) {
+            const skillDef = skills.find(s => s.skillId === parsed.skillId);
+            if (skillDef) {
+              rawContent = executeSkillInstruction(skillDef, parsed.params || {});
+            }
+          }
+
+          const check = validateInput(rawContent);
+          if (!check.valid) {
+            console.log(`[${AGENT_NAME}] Job ${jobId} REJECTED: ${check.reason}`);
+            await session.reject(check.reason);
+            handledJobs.delete(jobId);
+            return;
+          }
+
+          const chainName = CHAIN_CONFIG[check.chain || 'base']?.name || (check.chain || 'base');
+          await session.setBudget(AssetToken.usdc(JOB_PRICE, session.chainId));
+          console.log(`[${AGENT_NAME}] Job ${jobId} acked for ${chainName} — budget set $${JOB_PRICE} USDC`);
+        } catch (err) {
+          console.error(`[${AGENT_NAME}] Job ${jobId} job.created error:`, err.message);
+          try { await session.reject(`Setup error: ${err.message}`); } catch (_) {}
+          handledJobs.delete(jobId);
+        }
+
+      // ── job.funded — profile/DCA and submit ───────────────────────────────
+      } else if (type === 'job.funded') {
+        try {
+          let rawContent = entry.event.requirement || entry.event.content || '';
+          if (!rawContent) {
+            const history = await session.getHistory?.() || [];
+            const reqMsg = history.find(m => m.contentType === 'requirement');
+            rawContent = reqMsg?.content || '';
+          }
+
+          const check = validateInput(rawContent);
+          const jobChain = check.chain || 'base';
+
+          // Build a fake job-like object for processJob compatibility
+          const jobProxy = {
+            id: jobId,
+            requirement: rawContent,
+            memos: [],
+            deliver: async ({ type: t, value }) => {
+              await session.submit(value);
+              console.log(`[${AGENT_NAME}] Job ${jobId} submitted.`);
+            },
+          };
+          await processJob(null, jobProxy, jobChain);
+        } catch (err) {
+          console.error(`[${AGENT_NAME}] Job ${jobId} job.funded error:`, err.message);
+          try { await session.reject(`Delivery error: ${err.message}`); } catch (_) {}
+          handledJobs.delete(jobId);
+        }
+
+      // ── job.submitted — evaluator completes ───────────────────────────────
+      } else if (type === 'job.submitted') {
+        try {
+          await session.complete('Delivered successfully.');
+          console.log(`[${AGENT_NAME}] Job ${jobId} completed.`);
         } catch (_) {}
-        handledJobs.delete(job.id);
       }
-    },
-    onEvaluate: async (job) => {
-      try { await job.evaluate(true, 'Delivered successfully.'); } catch (_) {}
     },
   });
+
+  await agent.start();
   console.log(`[${AGENT_NAME}] Online. Listening for jobs at $${JOB_PRICE} USDC each.`);
 }
 

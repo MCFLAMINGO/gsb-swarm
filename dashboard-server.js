@@ -35,24 +35,15 @@ const limitEngine   = require('./scripts/limit_engine');
 const pnlCardRoute  = require('./scripts/pnl_card_route');
 
 // ── ACP SDK (V2) ─────────────────────────────────────────────────────────────
-let AcpContractClientV2, baseAcpConfigV2, AcpClient;
+let AcpAgent_SDK, AlchemyEvmProviderAdapter_SDK, AssetToken_SDK;
 try {
-  const acpModule = require('@virtuals-protocol/acp-node');
-  AcpContractClientV2 = acpModule.AcpContractClientV2;
-  baseAcpConfigV2 = acpModule.baseAcpConfigV2;
-  AcpClient = acpModule.default;
-
-  // Override RPC to avoid rate limits
-  const RPC_URL = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
-  if (baseAcpConfigV2) {
-    baseAcpConfigV2.rpcEndpoint = RPC_URL;
-    if (baseAcpConfigV2.chain?.rpcUrls?.default?.http) {
-      baseAcpConfigV2.chain.rpcUrls.default.http = [RPC_URL];
-    }
-  }
-  console.log('[dashboard] ACP SDK loaded');
+  const acpModule = require('@virtuals-protocol/acp-node-v2');
+  AcpAgent_SDK = acpModule.AcpAgent;
+  AlchemyEvmProviderAdapter_SDK = acpModule.AlchemyEvmProviderAdapter;
+  AssetToken_SDK = acpModule.AssetToken;
+  console.log('[dashboard] ACP SDK v2 loaded');
 } catch (e) {
-  console.warn('[dashboard] ACP SDK load failed — fire-job disabled:', e.message);
+  console.warn('[dashboard] ACP SDK v2 load failed — fire-job disabled:', e.message);
 }
 
 // ── Anthropic (Claude) — lazy async import ──────────────────────────────────
@@ -499,6 +490,13 @@ function queueAccept(job, memo) {
     await sleep(5000);
   });
 }
+// queueAcceptV2 — ACP v2 version (session-based, no job.respond)
+function queueAcceptV2(session, entry) {
+  // For CEO as a provider: ack by setting budget then do work
+  // CEO primarily acts as a client (fires jobs), not a provider — so this is a no-op stub
+  console.log(`[ceo] queueAcceptV2 session=${session.jobId} event=${entry.event?.type}`);
+}
+
 
 // ── Boot ACP client ──────────────────────────────────────────────────────────
 async function initAcp() {
@@ -507,73 +505,71 @@ async function initAcp() {
     console.warn('[acp] No AGENT_WALLET_PRIVATE_KEY — fire-job disabled');
     return;
   }
-  if (!AcpContractClientV2 || !baseAcpConfigV2 || !AcpClient) {
-    console.warn('[acp] ACP SDK not loaded — fire-job disabled');
+  if (!AcpAgent_SDK || !AlchemyEvmProviderAdapter_SDK) {
+    console.warn('[acp] ACP SDK v2 not loaded — fire-job disabled');
     return;
   }
   try {
-    console.log('[acp] Initializing CEO client (V2)...');
-    const contractClient = await AcpContractClientV2.build(
-      PRIVATE_KEY, CEO_ENTITY_ID, CEO_WALLET_ADDRESS, baseAcpConfigV2
-    );
+    console.log('[acp] Initializing CEO agent (V2)...');
+    const { base } = require('viem/chains');
+    const provider = await AlchemyEvmProviderAdapter_SDK.create({
+      walletAddress: CEO_WALLET_ADDRESS,
+      privateKey: PRIVATE_KEY,
+      entityId: Number(CEO_ENTITY_ID),
+      chains: [base],
+      rpcUrl: process.env.BASE_RPC_URL || 'https://mainnet.base.org',
+    });
 
-    acpClient = new AcpClient({
-      acpContractClient: contractClient,
+    acpClient = await AcpAgent_SDK.create({ provider });
 
-      onNewTask: async (job, memo) => {
-        if (memo) {
-          console.log(`[ceo] onNewTask job ${job.id} phase=${job.phase} memo=${memo.id}`);
-          queueAccept(job, memo);
+    acpClient.on('entry', async (session, entry) => {
+      if (entry.kind !== 'system') return;
+      const { type } = entry.event;
+      const jobId = session.jobId;
+
+      // ── job.created — CEO as client: accept incoming jobs from other agents
+      if (type === 'job.created') {
+        try {
+          console.log(`[ceo] job.created ${jobId}`);
+          queueAcceptV2(session, entry);
+        } catch (err) {
+          console.error(`[ceo] job.created error job ${jobId}:`, err.message);
         }
-      },
 
-      onEvaluate: async (job) => {
-        console.log(`[ceo] evaluating job ${job.id}`);
+      // ── job.submitted — evaluate worker deliverable
+      } else if (type === 'job.submitted') {
         await sleep(2000);
         try {
-          const workerName = jobWorkerMap.get(job.id);
+          const workerName = jobWorkerMap.get(jobId);
           const worker     = workerName ? WORKER_CATALOG[workerName] : null;
-          const memos      = job.memos || [];
-          const deliverMemo = memos.find(m => m.nextPhase === 3 || m.nextPhase === 'EVALUATION')
-                           || memos[memos.length - 1];
-          const parsed = parseDeliverable(deliverMemo?.content);
+          const deliverable = entry.event.deliverable || '';
+          const parsed = parseDeliverable(deliverable);
 
           if (worker && parsed) {
             briefResults[worker.role] = parsed;
             console.log(`[ceo] ✓ Deliverable from ${workerName} stored (role: ${worker.role})`);
-
-            // Print key info
-            if (parsed.gsb_verdict)  console.log(`  → Verdict: ${parsed.gsb_verdict}`);
-            if (parsed.gsb_signal)   console.log(`  → Signal: ${parsed.gsb_signal}`);
-            if (parsed.thread)       console.log(`  → Thread: ${parsed.thread.slice(0,80)}…`);
+            if (parsed.gsb_verdict)    console.log(`  → Verdict: ${parsed.gsb_verdict}`);
+            if (parsed.gsb_signal)     console.log(`  → Signal: ${parsed.gsb_signal}`);
+            if (parsed.thread)         console.log(`  → Thread: ${parsed.thread.slice(0,80)}…`);
             if (parsed.classification) console.log(`  → Wallet: ${parsed.classification}`);
           }
 
-          // Update worker status to idle on delivery
           if (workerName) setWorkerStatus(workerName, 'idle', null);
 
-          await job.evaluate(true, 'Intelligence received.');
-          logJob(job.id, workerName || '?', 'delivered', 'delivered');
+          await session.complete('Intelligence received.');
+          logJob(jobId, workerName || '?', 'delivered', 'delivered');
           evaluatedCount++;
 
-          // Run CEO synthesis on current results
           const synthesis = await ceoSynthesize(briefResults);
           broadcast('cmd-synthesis', synthesis);
 
-          // Push brief after every 4th evaluation (one full round)
-          if (evaluatedCount % 4 === 0 && Object.keys(briefResults).length > 0) {
-            latestBrief = buildBriefSnapshot();
-            latestBrief.ceoSynthesis = synthesis;
-            broadcast('brief', latestBrief);
+          latestBrief = buildBriefSnapshot();
+          latestBrief.ceoSynthesis = synthesis;
+          broadcast('brief', latestBrief);
+          if (evaluatedCount % 4 === 0) {
             console.log('[ceo] Brief pushed to dashboard');
-          } else {
-            // Push partial brief immediately so dashboard updates as each worker delivers
-            latestBrief = buildBriefSnapshot();
-            latestBrief.ceoSynthesis = synthesis;
-            broadcast('brief', latestBrief);
           }
 
-          // ── Write CEO brief to swarm memory so agents can reuse it ─────────────
           try {
             const ta = briefResults.token_analysis;
             const symbol = ta?.symbol || ta?.name;
@@ -591,7 +587,6 @@ async function initAcp() {
               });
               console.log(`[ceo] Wrote $${symbol} to swarm memory`);
             }
-            // Also pin the full synthesis as context for any agent
             if (synthesis.summary) {
               swarmMemory.pinContext('latest_ceo_brief', JSON.stringify(synthesis));
             }
@@ -599,15 +594,16 @@ async function initAcp() {
             console.warn('[ceo] swarmMemory write failed:', memErr.message);
           }
         } catch (err) {
-          console.error(`[ceo] evaluate error job ${job.id}:`, err.message);
-          try { await job.evaluate(true, 'Approved.'); } catch (_) {}
+          console.error(`[ceo] job.submitted error job ${jobId}:`, err.message);
+          try { await session.complete('Approved.'); } catch (_) {}
         }
-      },
+      }
     });
 
+    await acpClient.start();
     acpReady = true;
     broadcast('acp_status', { ready: true });
-    console.log('[acp] CEO client ready — fire-job enabled');
+    console.log('[acp] CEO agent v2 ready — fire-job enabled');
   } catch (err) {
     console.error('[acp] Init failed:', err.message);
     broadcast('acp_status', { ready: false, error: err.message });
@@ -847,12 +843,11 @@ app.post('/api/fire-job', requireOperator, async (req, res) => {
 
   try {
     console.log(`[api] Firing job → ${workerName}: "${requirement}"`);
-    const jobId = await acpClient.initiateJob(
+    const jobId = await acpClient.createJobByOfferingName(
+      8453,
+      worker.name,
       worker.address,
-      requirement,
-      makeFare(worker.price),
-      null,
-      new Date(Date.now() + 1000 * 60 * 30),
+      { prompt: requirement },
     );
     jobWorkerMap.set(jobId, workerName);
     setWorkerStatus(workerName, 'working', jobId);
@@ -3320,12 +3315,11 @@ Focus on actionable signals. If compute tokens are up = look for AI/agent token 
     const alphaWorker = WORKER_CATALOG['GSB Alpha Scanner'];
     if (!acpClient) return res.status(503).json({ error: 'ACP client not ready — Railway may be starting up' });
 
-    const jobId = await acpClient.initiateJob(
+    const jobId = await acpClient.createJobByOfferingName(
+      8453,
+      alphaWorker.name,
       alphaWorker.address,
-      gflopRequirement,
-      makeFare(alphaWorker.price),
-      null,
-      new Date(Date.now() + 1000 * 60 * 30),
+      { prompt: gflopRequirement },
     );
     jobWorkerMap.set(jobId, 'GSB Alpha Scanner');
     setWorkerStatus('GSB Alpha Scanner', 'working', jobId);

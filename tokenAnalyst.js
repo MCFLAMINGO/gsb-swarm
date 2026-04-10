@@ -2,7 +2,7 @@ require('dotenv').config();
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { buildAcpClient } = require('./acp');
+const { buildAcpAgent, AssetToken } = require('./acp');
 const { CHAIN_CONFIG, resolveChain, SUPPORTED_CHAINS } = require('./chains');
 
 const AGENT_NAME = 'GSB Token Analyst';
@@ -106,16 +106,6 @@ function validateInput(raw) {
 
 const handledJobs = new Set();
 
-async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
-  const start = Date.now();
-  while (Date.now() - start < maxWaitMs) {
-    const fresh = await client.getJobById(jobId);
-    if (fresh && fresh.phase === 2) return fresh;
-    await new Promise(r => setTimeout(r, 2000));
-  }
-  throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
-}
-
 function extractContent(req) {
   if (!req) return '';
   if (typeof req === 'string') {
@@ -189,94 +179,111 @@ async function analyzeToken(contractAddress, chain = 'base') {
 
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
-  const client = await buildAcpClient({
+
+  const agent = await buildAcpAgent({
     privateKey:         process.env.TOKEN_ANALYST_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY,
     entityId:           parseInt(process.env.TOKEN_ANALYST_ENTITY_ID) || 1,
     agentWalletAddress: process.env.TOKEN_ANALYST_WALLET_ADDRESS,
+    onEntry: async (session, entry) => {
+      if (entry.kind !== 'system') return;
+      const { type } = entry.event;
+      const jobId = session.jobId;
 
-    onNewTask: async (job) => {
-      console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase}`);
+      // ── job.created — validate and set budget ─────────────────────────────
+      if (type === 'job.created') {
+        if (handledJobs.has(jobId)) return;
+        handledJobs.add(jobId);
 
-      if (handledJobs.has(job.id)) {
-        console.log(`[${AGENT_NAME}] Job ${job.id} already in progress — skipping.`);
-        return;
-      }
-      handledJobs.add(job.id);
-
-      try {
-        let rawContent = extractContent(job.requirement)
-          || extractContent(job.memos?.[0]?.content)
-          || '';
-        console.log(`[${AGENT_NAME}] Job ${job.id} content: ${rawContent.slice(0, 120)}`);
-
-        // ── Skill registry routing ───────────────────────────────────────────
-        const parsed = parseJobRequirement(rawContent);
-        const skills = loadSkills(AGENT_NAME);
-        if (parsed.skillId) {
-          const skillDef = skills.find(s => s.skillId === parsed.skillId);
-          if (skillDef) {
-            const instruction = executeSkillInstruction(skillDef, parsed.params || {});
-            console.log(`[${AGENT_NAME}] Skill ${parsed.skillId} → "${instruction.slice(0, 100)}"`);
-            rawContent = instruction;
-          }
-        }
-
-        // ── Extract address from JSON params or plain text ──────────────────
-        let contractAddress;
-        if (parsed.skillId && parsed.params?.address) {
-          contractAddress = parsed.params.address;
-        } else if (parsed.params?.contractAddress) {
-          contractAddress = parsed.params.contractAddress;
-        } else {
-          const addrMatch = rawContent.match(/0x[0-9a-fA-F]{40}/i);
-          contractAddress = addrMatch ? addrMatch[0] : null;
-        }
-
-        // ── Validate BEFORE accepting ────────────────────────────────────────
-        const check = validateInput(rawContent);
-        // Use extracted address if validateInput didn't find one (e.g. from JSON params)
-        if (!check.valid && contractAddress) {
-          check.valid = true;
-          check.address = contractAddress;
-        }
-        if (!check.valid) {
-          console.log(`[${AGENT_NAME}] Job ${job.id} REJECTED: ${check.reason}`);
-          await job.reject(check.reason);
-          handledJobs.delete(job.id);
-          return;
-        }
-        // Prefer the directly extracted address
-        if (contractAddress) check.address = contractAddress;
-
-        const jobChain = check.chain || 'base';
-        const chainName = CHAIN_CONFIG[jobChain]?.name || jobChain;
-
-        // ACP v2: ack immediately, process async
-        let freshJob = job;
-        if (job.phase !== 2) {
-          await job.respond(true, `Analyzing token on ${chainName} now...`);
-          console.log(`[${AGENT_NAME}] Job ${job.id} acked — processing async`);
-          try { freshJob = await waitForTransaction(client, job.id, 30000); } catch { freshJob = job; }
-        }
-
-        const report = await analyzeToken(check.address, jobChain);
-        await freshJob.deliver({ type: 'text', value: JSON.stringify(report, null, 2) });
-        console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
-      } catch (err) {
-        console.error(`[${AGENT_NAME}] Job ${job.id} error:`, err.message);
-        // If we're past the REQUEST phase, use rejectPayable so the buyer is refunded
         try {
-          await job.rejectPayable(`Internal error: ${err.message}. Your payment will be refunded.`);
-          console.log(`[${AGENT_NAME}] Job ${job.id} rejectPayable issued — buyer will be refunded.`);
-        } catch (_) {}
-        handledJobs.delete(job.id);
-      }
-    },
+          let rawContent = entry.event.requirement || entry.event.content || '';
+          console.log(`[${AGENT_NAME}] Job ${jobId} content: ${rawContent.slice(0, 120)}`);
 
-    onEvaluate: async (job) => {
-      try { await job.evaluate(true, 'Delivered successfully.'); } catch (_) {}
+          const parsed = parseJobRequirement(rawContent);
+          const skills = loadSkills(AGENT_NAME);
+          if (parsed.skillId) {
+            const skillDef = skills.find(s => s.skillId === parsed.skillId);
+            if (skillDef) {
+              rawContent = executeSkillInstruction(skillDef, parsed.params || {});
+            }
+          }
+
+          // Extract address
+          let contractAddress;
+          if (parsed.skillId && parsed.params?.address) {
+            contractAddress = parsed.params.address;
+          } else if (parsed.params?.contractAddress) {
+            contractAddress = parsed.params.contractAddress;
+          } else {
+            const addrMatch = rawContent.match(/0x[0-9a-fA-F]{40}/i);
+            contractAddress = addrMatch ? addrMatch[0] : null;
+          }
+
+          const check = validateInput(rawContent);
+          if (!check.valid && contractAddress) { check.valid = true; check.address = contractAddress; }
+          if (contractAddress) check.address = contractAddress;
+
+          if (!check.valid) {
+            console.log(`[${AGENT_NAME}] Job ${jobId} REJECTED: ${check.reason}`);
+            await session.reject(check.reason);
+            handledJobs.delete(jobId);
+            return;
+          }
+
+          const chainName = CHAIN_CONFIG[check.chain || 'base']?.name || (check.chain || 'base');
+          await session.setBudget(AssetToken.usdc(JOB_PRICE, session.chainId));
+          console.log(`[${AGENT_NAME}] Job ${jobId} acked for ${chainName} — budget set $${JOB_PRICE} USDC`);
+        } catch (err) {
+          console.error(`[${AGENT_NAME}] Job ${jobId} job.created error:`, err.message);
+          try { await session.reject(`Setup error: ${err.message}`); } catch (_) {}
+          handledJobs.delete(jobId);
+        }
+
+      // ── job.funded — analyze and submit ───────────────────────────────────
+      } else if (type === 'job.funded') {
+        try {
+          let rawContent = entry.event.requirement || entry.event.content || '';
+          if (!rawContent) {
+            const history = await session.getHistory?.() || [];
+            const reqMsg = history.find(m => m.contentType === 'requirement');
+            rawContent = reqMsg?.content || '';
+          }
+
+          const parsed = parseJobRequirement(rawContent);
+          let contractAddress;
+          if (parsed.skillId && parsed.params?.address) {
+            contractAddress = parsed.params.address;
+          } else if (parsed.params?.contractAddress) {
+            contractAddress = parsed.params.contractAddress;
+          } else {
+            const addrMatch = rawContent.match(/0x[0-9a-fA-F]{40}/i);
+            contractAddress = addrMatch ? addrMatch[0] : null;
+          }
+
+          const check = validateInput(rawContent);
+          if (!check.valid && contractAddress) { check.valid = true; check.address = contractAddress; }
+          if (contractAddress) check.address = contractAddress;
+
+          const jobChain = check.chain || 'base';
+          const report = await analyzeToken(check.address, jobChain);
+          await session.submit(JSON.stringify(report, null, 2));
+          console.log(`[${AGENT_NAME}] Job ${jobId} submitted.`);
+        } catch (err) {
+          console.error(`[${AGENT_NAME}] Job ${jobId} job.funded error:`, err.message);
+          try { await session.reject(`Delivery error: ${err.message}`); } catch (_) {}
+          handledJobs.delete(jobId);
+        }
+
+      // ── job.submitted — evaluator completes ───────────────────────────────
+      } else if (type === 'job.submitted') {
+        try {
+          await session.complete('Delivered successfully.');
+          console.log(`[${AGENT_NAME}] Job ${jobId} completed.`);
+        } catch (_) {}
+      }
     },
   });
+
+  await agent.start();
   console.log(`[${AGENT_NAME}] Online. Schema: ${JSON.stringify(REQUIREMENTS_SCHEMA)}. Listening at $${JOB_PRICE} USDC/job.`);
 }
 

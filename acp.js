@@ -1,50 +1,47 @@
-// ACP Client factory — shared across all workers
-// Uses AcpContractClientV2 (required for Graduation Evaluator and all graduated agents)
-const {
-  AcpContractClientV2,
-  baseAcpConfigV2,
-  default: AcpClient,
-} = require('@virtuals-protocol/acp-node');
+// ACP Agent factory — shared across all workers
+// Uses AcpAgent.create() from acp-node-v2 (V2 SDK)
+const { AcpAgent, AlchemyEvmProviderAdapter, AssetToken } = require('@virtuals-protocol/acp-node-v2');
+const { base } = require('viem/chains');
 
-// Override RPC to avoid rate limits on default public endpoint
 const RPC_URL = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
-
-// Directly mutate the class instance property — this is what the SDK reads
-baseAcpConfigV2.rpcEndpoint = RPC_URL;
-
-// Also patch the chain rpcUrls in case the SDK uses chain transport as fallback
-if (baseAcpConfigV2.chain?.rpcUrls?.default?.http) {
-  baseAcpConfigV2.chain.rpcUrls.default.http = [RPC_URL];
-}
-if (baseAcpConfigV2.chain?.rpcUrls?.public?.http) {
-  baseAcpConfigV2.chain.rpcUrls.public.http = [RPC_URL];
-}
-
-// RPC_URL logged at debug level only
 
 const ACP_MAX_RETRIES = 3;
 
-async function buildAcpClient({ privateKey, entityId, agentWalletAddress, onNewTask, onEvaluate }) {
+/**
+ * Build an AcpAgent (V2) for a provider/evaluator worker.
+ *
+ * @param {object} opts
+ * @param {string} opts.privateKey          - Agent wallet private key (0x-prefixed or raw)
+ * @param {number} opts.entityId            - Virtuals entity ID (use 1 for V2 self-hosted)
+ * @param {string} opts.agentWalletAddress  - On-chain agent wallet address
+ * @param {Function} opts.onEntry           - async (session, entry) => void  — handles all lifecycle events
+ *
+ * Returns the started AcpAgent instance.
+ */
+async function buildAcpAgent({ privateKey, entityId, agentWalletAddress, onEntry }) {
   // Normalize private key — SDK requires 0x-prefixed hex string
   const normalizedKey = privateKey && !privateKey.startsWith('0x') ? `0x${privateKey}` : privateKey;
+
   for (let attempt = 1; attempt <= ACP_MAX_RETRIES; attempt++) {
     try {
-      const contractClient = await AcpContractClientV2.build(
-        normalizedKey,
-        entityId,
-        agentWalletAddress,
-        baseAcpConfigV2
-      );
-
-      const client = new AcpClient({
-        acpContractClient: contractClient,
-        onNewTask,
-        onEvaluate,
+      const provider = await AlchemyEvmProviderAdapter.create({
+        walletAddress: agentWalletAddress,
+        privateKey: normalizedKey,
+        entityId: Number(entityId),
+        chains: [base],
+        rpcUrl: RPC_URL,
       });
 
-      return client;
+      const agent = await AcpAgent.create({ provider });
+
+      agent.on('entry', onEntry);
+
+      return agent;
     } catch (err) {
-      if (attempt < ACP_MAX_RETRIES && (err.message?.includes('rate limit') || err.message?.includes('RPC') || err.message?.includes('429'))) {
+      if (
+        attempt < ACP_MAX_RETRIES &&
+        (err.message?.includes('rate limit') || err.message?.includes('RPC') || err.message?.includes('429'))
+      ) {
         console.warn(`[acp] RPC error on attempt ${attempt}/${ACP_MAX_RETRIES}, retrying in ${attempt * 3}s...`, err.message);
         await new Promise(r => setTimeout(r, attempt * 3000));
       } else {
@@ -54,4 +51,4 @@ async function buildAcpClient({ privateKey, entityId, agentWalletAddress, onNewT
   }
 }
 
-module.exports = { buildAcpClient };
+module.exports = { buildAcpAgent, AssetToken };

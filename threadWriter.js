@@ -3,7 +3,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { buildAcpClient } = require('./acp');
+const { buildAcpAgent, AssetToken } = require('./acp');
 const swarmMemory = require('./swarmMemory');
 
 const AGENT_NAME = 'GSB Thread Writer';
@@ -140,16 +140,6 @@ function validateInput(raw) {
 }
 
 const handledJobs = new Set();
-
-async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
-  const start = Date.now();
-  while (Date.now() - start < maxWaitMs) {
-    const fresh = await client.getJobById(jobId);
-    if (fresh && fresh.phase === 2) return fresh;
-    await new Promise(r => setTimeout(r, 2000));
-  }
-  throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
-}
 
 function extractContent(req) {
   if (!req) return '';
@@ -612,163 +602,161 @@ function parseThreadToTweets(threadResult) {
 
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
-  let client;
-  client = await buildAcpClient({
+
+  const agent = await buildAcpAgent({
     privateKey: process.env.THREAD_WRITER_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY,
     entityId: parseInt(process.env.THREAD_WRITER_ENTITY_ID) || 1,
     agentWalletAddress: process.env.THREAD_WRITER_WALLET_ADDRESS,
-    onNewTask: async (job) => {
-      console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase}`);
+    onEntry: async (session, entry) => {
+      if (entry.kind !== 'system') return;
+      const { type } = entry.event;
+      const jobId = session.jobId;
 
-      if (handledJobs.has(job.id)) {
-        console.log(`[${AGENT_NAME}] Job ${job.id} already in progress — skipping.`);
-        return;
-      }
-      handledJobs.add(job.id);
-
-      try {
-        let content = extractContent(job.requirement)
-          || extractContent(job.memos?.[0]?.content)
-          || '';
-        console.log(`[${AGENT_NAME}] Job ${job.id} content: ${content.slice(0, 120)}`);
-
-        // ── Skill registry routing ───────────────────────────────────────────
-        const parsed = parseJobRequirement(content);
-        const skills = loadSkills(AGENT_NAME);
-        if (parsed.skillId) {
-          const skillDef = skills.find(s => s.skillId === parsed.skillId);
-          if (skillDef) {
-            const instruction = executeSkillInstruction(skillDef, parsed.params || {});
-            console.log(`[${AGENT_NAME}] Skill ${parsed.skillId} → "${instruction.slice(0, 100)}"`);
-            content = instruction;
-          }
-        }
-
-        // ── Validate BEFORE accepting ────────────────────────────────────────
-        const check = validateInput(content);
-        if (!check.valid) {
-          console.log(`[${AGENT_NAME}] Job ${job.id} REJECTED: ${check.reason}`);
-          await job.reject(check.reason);
-          handledJobs.delete(job.id);
+      // ── job.created — provider acks and sets budget ───────────────────────
+      if (type === 'job.created') {
+        if (handledJobs.has(jobId)) {
+          console.log(`[${AGENT_NAME}] Job ${jobId} already in progress — skipping.`);
           return;
         }
+        handledJobs.add(jobId);
 
-        let freshJob = job;
-
-        // ── Detect token intel report request (before respond, so we can set right message) ──
-        // Only fire if skillId is explicitly token_intel_report, OR no skillId set and content has token signal + intel keyword
-        const isIntelReport = (
-          (parsed.skillId === 'token_intel_report') ||
-          (!parsed.skillId && /\$(\w+)/.test(content) && /intel|report|research|alpha|investigate|find|look.?up/i.test(content)) ||
-          (!parsed.skillId && /\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/.test(content) && /report|intel|alpha/i.test(content))
-        );
-
-        // ACP v2: ack immediately, process async — never block onNewTask past respond()
-        if (job.phase !== 2) {
-          const acceptMsg = isIntelReport ? 'Searching X and on-chain data for token intel...' : 'Writing your thread now...';
-          await job.respond(true, acceptMsg);
-          console.log(`[${AGENT_NAME}] Job ${job.id} acked — processing async`);
-          // Wait for TRANSACTION phase in background with short timeout
-          try { freshJob = await waitForTransaction(client, job.id, 30000); } catch { freshJob = job; }
-        }
-
-        let result;
-        let threadUrl = null;
-
-        if (isIntelReport) {
-          console.log(`[${AGENT_NAME}] Job ${job.id} — token intel report mode`);
-
-          // Extract symbol and/or contract from content
-          const cashtagMatch  = content.match(/\$(\w+)/);
-          const solAddrMatch  = content.match(/\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/);
-          const evmAddrMatch  = content.match(/\b(0x[a-fA-F0-9]{40})\b/);
-          const chainMatch    = content.match(/\b(solana|sol|base|ethereum|eth|arbitrum|polygon)\b/i);
-          const symbol        = cashtagMatch ? cashtagMatch[1] : null;
-          const contractAddress = evmAddrMatch ? evmAddrMatch[1] : (solAddrMatch ? solAddrMatch[1] : null);
-          const chain         = chainMatch ? chainMatch[1].toLowerCase() : null;
-
-          // ── Check swarm memory first — skip full re-research if researched within 1 hour (per-job skip, global narrative) ──
-          const existingNarrative = symbol ? swarmMemory.readNarrative(symbol) : null;
-          const researchAge = existingNarrative?.lastResearchedAt ? Date.now() - existingNarrative.lastResearchedAt : Infinity;
-          if (existingNarrative && researchAge < swarmMemory.SKIP_RESEARCH_MS) {
-            // Researched within 1 hour — serve from cache with a fresh angle (skip X search, only refresh price)
-            console.log(`[${AGENT_NAME}] Swarm memory for $${symbol} is ${Math.round(researchAge/60000)}m old — using cached research, rotating angle`);
-            const memCtx = swarmMemory.buildContextString(symbol);
-            result = await buildTokenIntelReport({ symbol, contractAddress: contractAddress || existingNarrative.contractAddress, chain: chain || existingNarrative.chain, memoryContext: memCtx, freshAngle: true });
-          } else {
-            // Full research pass
-            result = await buildTokenIntelReport({ symbol, contractAddress, chain });
-          }
-
-          // Post the thread to X
-          if (process.env.X_API_KEY && process.env.X_ACCESS_TOKEN && result.thread_tweets?.length > 0) {
-            try {
-              threadUrl = await postThread(result.thread_tweets);
-              console.log(`[${AGENT_NAME}] Intel thread posted to X: ${threadUrl}`);
-            } catch (err) {
-              console.error(`[${AGENT_NAME}] X posting failed:`, err.message);
-            }
-          }
-
-          // ── Write narrative to swarm memory ──────────────────────────────────
-          if (symbol) {
-            swarmMemory.writeNarrative(symbol, {
-              contractAddress:  result.contract_address || contractAddress,
-              chain:            result.token_data?.chain || chain,
-              summary:          result.thread_tweets?.[0] || '',
-              priceUsd:         result.token_data?.priceUsd,
-              liquidity:        result.token_data?.liquidity,
-              volume24h:        result.token_data?.volume24h,
-              xTweetsFound:     result.x_tweets_found,
-              threadPosted:     !!threadUrl,
-              threadUrl,
-              thread_tweets:    result.thread_tweets,
-            });
-            console.log(`[${AGENT_NAME}] Wrote $${symbol} narrative to swarm memory`);
-          }
-        } else {
-          // ── For write_thread / write_alpha_report — inject swarm memory context if token is mentioned ──
-          const symbolMatch = content.match(/\$([A-Z]{2,10})\b/i);
-          const memCtx = symbolMatch ? swarmMemory.buildContextString(symbolMatch[1]) : swarmMemory.buildContextString(null);
-          const enrichedContent = memCtx ? `${content}\n\n--- Swarm Memory Context ---\n${memCtx}` : content;
-          result = await writeThread(enrichedContent);
-
-          // If X credentials are configured, post to X
-          if (process.env.X_API_KEY && process.env.X_ACCESS_TOKEN) {
-            try {
-              const tweets = parseThreadToTweets(result);
-              if (tweets.length > 0) {
-                threadUrl = await postThread(tweets);
-                console.log(`[${AGENT_NAME}] Thread posted to X: ${threadUrl}`);
-              }
-            } catch (err) {
-              console.error(`[${AGENT_NAME}] X posting failed (delivering text only):`, err.message);
-            }
-          }
-        }
-
-        // Deliver result with thread URL if available
-        const deliverable = {
-          ...result,
-          threadUrl: threadUrl || null,
-          posted: !!threadUrl,
-        };
-        await freshJob.deliver({ type: 'text', value: JSON.stringify(deliverable, null, 2) });
-        console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
-      } catch (err) {
-        console.error(`[${AGENT_NAME}] Job ${job.id} error:`, err.message);
-        // If we're past the REQUEST phase, use rejectPayable so the buyer is refunded
         try {
-          await job.rejectPayable(`Internal error: ${err.message}. Your payment will be refunded.`);
-          console.log(`[${AGENT_NAME}] Job ${job.id} rejectPayable issued — buyer will be refunded.`);
+          let content = entry.event.requirement || entry.event.content || '';
+          console.log(`[${AGENT_NAME}] Job ${jobId} content: ${content.slice(0, 120)}`);
+
+          // Skill registry routing
+          const parsed = parseJobRequirement(content);
+          const skills = loadSkills(AGENT_NAME);
+          if (parsed.skillId) {
+            const skillDef = skills.find(s => s.skillId === parsed.skillId);
+            if (skillDef) {
+              const instruction = executeSkillInstruction(skillDef, parsed.params || {});
+              console.log(`[${AGENT_NAME}] Skill ${parsed.skillId} → "${instruction.slice(0, 100)}"`);
+              content = instruction;
+            }
+          }
+
+          // Validate BEFORE accepting
+          const check = validateInput(content);
+          if (!check.valid) {
+            console.log(`[${AGENT_NAME}] Job ${jobId} REJECTED: ${check.reason}`);
+            await session.reject(check.reason);
+            handledJobs.delete(jobId);
+            return;
+          }
+
+          // Ack and set budget
+          await session.setBudget(AssetToken.usdc(JOB_PRICE, session.chainId));
+          console.log(`[${AGENT_NAME}] Job ${jobId} acked — budget set $${JOB_PRICE} USDC`);
+        } catch (err) {
+          console.error(`[${AGENT_NAME}] Job ${jobId} job.created error:`, err.message);
+          try { await session.reject(`Setup error: ${err.message}`); } catch (_) {}
+          handledJobs.delete(jobId);
+        }
+
+      // ── job.funded — do the work and submit ──────────────────────────────
+      } else if (type === 'job.funded') {
+        try {
+          let content = entry.event.requirement || entry.event.content || '';
+          if (!content) {
+            // Re-read from session history if not in event
+            const history = await session.getHistory?.() || [];
+            const reqMsg = history.find(m => m.contentType === 'requirement');
+            content = reqMsg?.content || '';
+          }
+
+          const isIntelReport = (
+            (content.includes('token_intel_report')) ||
+            (/\$(\w+)/.test(content) && /intel|report|research|alpha|investigate|find|look.?up/i.test(content)) ||
+            (/\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/.test(content) && /report|intel|alpha/i.test(content))
+          );
+
+          let result;
+          let threadUrl = null;
+
+          if (isIntelReport) {
+            console.log(`[${AGENT_NAME}] Job ${jobId} — token intel report mode`);
+            const cashtagMatch  = content.match(/\$(\w+)/);
+            const solAddrMatch  = content.match(/\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/);
+            const evmAddrMatch  = content.match(/\b(0x[a-fA-F0-9]{40})\b/);
+            const chainMatch    = content.match(/\b(solana|sol|base|ethereum|eth|arbitrum|polygon)\b/i);
+            const symbol        = cashtagMatch ? cashtagMatch[1] : null;
+            const contractAddress = evmAddrMatch ? evmAddrMatch[1] : (solAddrMatch ? solAddrMatch[1] : null);
+            const chain         = chainMatch ? chainMatch[1].toLowerCase() : null;
+
+            const existingNarrative = symbol ? swarmMemory.readNarrative(symbol) : null;
+            const researchAge = existingNarrative?.lastResearchedAt ? Date.now() - existingNarrative.lastResearchedAt : Infinity;
+            if (existingNarrative && researchAge < swarmMemory.SKIP_RESEARCH_MS) {
+              console.log(`[${AGENT_NAME}] Swarm memory for $${symbol} is ${Math.round(researchAge/60000)}m old — using cached research`);
+              const memCtx = swarmMemory.buildContextString(symbol);
+              result = await buildTokenIntelReport({ symbol, contractAddress: contractAddress || existingNarrative.contractAddress, chain: chain || existingNarrative.chain, memoryContext: memCtx, freshAngle: true });
+            } else {
+              result = await buildTokenIntelReport({ symbol, contractAddress, chain });
+            }
+
+            if (process.env.X_API_KEY && process.env.X_ACCESS_TOKEN && result.thread_tweets?.length > 0) {
+              try {
+                threadUrl = await postThread(result.thread_tweets);
+                console.log(`[${AGENT_NAME}] Intel thread posted to X: ${threadUrl}`);
+              } catch (err) {
+                console.error(`[${AGENT_NAME}] X posting failed:`, err.message);
+              }
+            }
+
+            if (symbol) {
+              swarmMemory.writeNarrative(symbol, {
+                contractAddress:  result.contract_address || contractAddress,
+                chain:            result.token_data?.chain || chain,
+                summary:          result.thread_tweets?.[0] || '',
+                priceUsd:         result.token_data?.priceUsd,
+                liquidity:        result.token_data?.liquidity,
+                volume24h:        result.token_data?.volume24h,
+                xTweetsFound:     result.x_tweets_found,
+                threadPosted:     !!threadUrl,
+                threadUrl,
+                thread_tweets:    result.thread_tweets,
+              });
+              console.log(`[${AGENT_NAME}] Wrote $${symbol} narrative to swarm memory`);
+            }
+          } else {
+            const symbolMatch = content.match(/\$([A-Z]{2,10})\b/i);
+            const memCtx = symbolMatch ? swarmMemory.buildContextString(symbolMatch[1]) : swarmMemory.buildContextString(null);
+            const enrichedContent = memCtx ? `${content}\n\n--- Swarm Memory Context ---\n${memCtx}` : content;
+            result = await writeThread(enrichedContent);
+
+            if (process.env.X_API_KEY && process.env.X_ACCESS_TOKEN) {
+              try {
+                const tweets = parseThreadToTweets(result);
+                if (tweets.length > 0) {
+                  threadUrl = await postThread(tweets);
+                  console.log(`[${AGENT_NAME}] Thread posted to X: ${threadUrl}`);
+                }
+              } catch (err) {
+                console.error(`[${AGENT_NAME}] X posting failed (delivering text only):`, err.message);
+              }
+            }
+          }
+
+          const deliverable = { ...result, threadUrl: threadUrl || null, posted: !!threadUrl };
+          await session.submit(JSON.stringify(deliverable, null, 2));
+          console.log(`[${AGENT_NAME}] Job ${jobId} submitted.`);
+        } catch (err) {
+          console.error(`[${AGENT_NAME}] Job ${jobId} job.funded error:`, err.message);
+          try { await session.reject(`Delivery error: ${err.message}`); } catch (_) {}
+          handledJobs.delete(jobId);
+        }
+
+      // ── job.submitted — evaluator completes ──────────────────────────────
+      } else if (type === 'job.submitted') {
+        try {
+          await session.complete('Delivered successfully.');
+          console.log(`[${AGENT_NAME}] Job ${jobId} completed.`);
         } catch (_) {}
-        handledJobs.delete(job.id);
       }
     },
-    onEvaluate: async (job) => {
-      try { await job.evaluate(true, 'Delivered successfully.'); } catch (_) {}
-    },
   });
+
+  await agent.start();
   console.log(`[${AGENT_NAME}] Online. Writing threads for $${JOB_PRICE} USDC each.`);
 }
 

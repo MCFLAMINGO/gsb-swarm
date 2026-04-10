@@ -2,7 +2,7 @@ require('dotenv').config();
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { buildAcpClient } = require('./acp');
+const { buildAcpAgent, AssetToken } = require('./acp');
 const swarmMemory = require('./swarmMemory');
 const { CHAIN_CONFIG, resolveChain, SUPPORTED_CHAINS } = require('./chains');
 
@@ -154,16 +154,6 @@ function extractContent(req) {
     return req.query || req.topic || req.requirement || req.content || JSON.stringify(req);
   }
   return String(req);
-}
-
-async function waitForTransaction(client, jobId, maxWaitMs = 180000) {
-  const start = Date.now();
-  while (Date.now() - start < maxWaitMs) {
-    const fresh = await client.getJobById(jobId);
-    if (fresh && fresh.phase === 2) return fresh;
-    await new Promise(r => setTimeout(r, 2000));
-  }
-  throw new Error(`Job ${jobId} did not reach TRANSACTION phase within ${maxWaitMs}ms`);
 }
 
 // ── Data sources (no API keys required) ──────────────────────────────────────
@@ -371,95 +361,103 @@ async function scanAlpha(chain = 'base') {
 
 async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
-  let client;
-  client = await buildAcpClient({
+
+  const agent = await buildAcpAgent({
     privateKey: process.env.ALPHA_SCANNER_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY,
     entityId: parseInt(process.env.ALPHA_SCANNER_ENTITY_ID) || 1,
     agentWalletAddress: process.env.ALPHA_SCANNER_WALLET_ADDRESS,
-    onNewTask: async (job) => {
-      console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase}`);
+    onEntry: async (session, entry) => {
+      if (entry.kind !== 'system') return;
+      const { type } = entry.event;
+      const jobId = session.jobId;
 
-      if (handledJobs.has(job.id)) {
-        console.log(`[${AGENT_NAME}] Job ${job.id} already in progress — skipping.`);
-        return;
-      }
-      handledJobs.add(job.id);
+      // ── job.created — validate and set budget ─────────────────────────────
+      if (type === 'job.created') {
+        if (handledJobs.has(jobId)) return;
+        handledJobs.add(jobId);
 
-      try {
-        let rawContent = extractContent(job.requirement)
-          || extractContent(job.memos?.[0]?.content)
-          || '';
-        console.log(`[${AGENT_NAME}] Job ${job.id} content: ${rawContent.slice(0, 120)}`);
-
-        // ── Skill registry routing ───────────────────────────────────────────
-        const parsed = parseJobRequirement(rawContent);
-        const skills = loadSkills(AGENT_NAME);
-        if (parsed.skillId) {
-          const skillDef = skills.find(s => s.skillId === parsed.skillId);
-          if (skillDef) {
-            const instruction = executeSkillInstruction(skillDef, parsed.params || {});
-            console.log(`[${AGENT_NAME}] Skill ${parsed.skillId} → "${instruction.slice(0, 100)}"`);
-            rawContent = instruction;
-          }
-        }
-
-        // ── Validate BEFORE accepting ────────────────────────────────────────
-        const check = validateInput(rawContent);
-        if (!check.valid) {
-          console.log(`[${AGENT_NAME}] Job ${job.id} REJECTED: ${check.reason}`);
-          await job.reject(check.reason);
-          handledJobs.delete(job.id);
-          return;
-        }
-
-        const jobChain = check.chain || 'base';
-        const chainName = CHAIN_CONFIG[jobChain]?.name || jobChain;
-        let freshJob = job;
-
-        // ACP v2: ack immediately, process async
-        if (job.phase !== 2) {
-          await job.respond(true, `Scanning ${chainName} for alpha...`);
-          console.log(`[${AGENT_NAME}] Job ${job.id} acked — processing async`);
-          try { freshJob = await waitForTransaction(client, job.id, 30000); } catch { freshJob = job; }
-        }
-
-        // If a specific token address was detected, look it up directly
-        const result = check.tokenAddress
-          ? await lookupToken(check.tokenAddress, jobChain)
-          : await scanAlpha(jobChain);
-        await freshJob.deliver({ type: 'text', value: JSON.stringify(result, null, 2) });
-        console.log(`[${AGENT_NAME}] Job ${job.id} delivered.`);
-
-        // ── Write findings to swarm memory ────────────────────────────────────
         try {
-          const sym = result.symbol || result.baseToken?.symbol;
-          const addr = result.contractAddress || check.tokenAddress;
-          if (sym) {
-            swarmMemory.writeNarrative(sym, {
-              contractAddress: addr || result.contractAddress,
-              chain:           result.chain || jobChain,
-              priceUsd:        result.priceUsd,
-              liquidity:       result.liquidity,
-              volume24h:       result.volume24h,
-              alphaVerdict:    result.gsb_signal || result.verdict,
-            });
+          let rawContent = entry.event.requirement || entry.event.content || '';
+          console.log(`[${AGENT_NAME}] Job ${jobId} content: ${rawContent.slice(0, 120)}`);
+
+          const parsed = parseJobRequirement(rawContent);
+          const skills = loadSkills(AGENT_NAME);
+          if (parsed.skillId) {
+            const skillDef = skills.find(s => s.skillId === parsed.skillId);
+            if (skillDef) {
+              rawContent = executeSkillInstruction(skillDef, parsed.params || {});
+            }
           }
-          if (addr) swarmMemory.writeFinding(`alpha:${addr}`, AGENT_NAME, result);
-        } catch (_) {}
-      } catch (err) {
-        console.error(`[${AGENT_NAME}] Job ${job.id} error:`, err.message);
-        // If we're past the REQUEST phase, use rejectPayable so the buyer is refunded
+
+          const check = validateInput(rawContent);
+          if (!check.valid) {
+            console.log(`[${AGENT_NAME}] Job ${jobId} REJECTED: ${check.reason}`);
+            await session.reject(check.reason);
+            handledJobs.delete(jobId);
+            return;
+          }
+
+          const chainName = CHAIN_CONFIG[check.chain || 'base']?.name || (check.chain || 'base');
+          await session.setBudget(AssetToken.usdc(JOB_PRICE, session.chainId));
+          console.log(`[${AGENT_NAME}] Job ${jobId} acked for ${chainName} — budget set $${JOB_PRICE} USDC`);
+        } catch (err) {
+          console.error(`[${AGENT_NAME}] Job ${jobId} job.created error:`, err.message);
+          try { await session.reject(`Setup error: ${err.message}`); } catch (_) {}
+          handledJobs.delete(jobId);
+        }
+
+      // ── job.funded — scan and submit ──────────────────────────────────────
+      } else if (type === 'job.funded') {
         try {
-          await job.rejectPayable(`Internal error: ${err.message}. Your payment will be refunded.`);
-          console.log(`[${AGENT_NAME}] Job ${job.id} rejectPayable issued — buyer will be refunded.`);
+          let rawContent = entry.event.requirement || entry.event.content || '';
+          if (!rawContent) {
+            const history = await session.getHistory?.() || [];
+            const reqMsg = history.find(m => m.contentType === 'requirement');
+            rawContent = reqMsg?.content || '';
+          }
+
+          const check = validateInput(rawContent);
+          const jobChain = check.chain || 'base';
+
+          const result = check.tokenAddress
+            ? await lookupToken(check.tokenAddress, jobChain)
+            : await scanAlpha(jobChain);
+
+          await session.submit(JSON.stringify(result, null, 2));
+          console.log(`[${AGENT_NAME}] Job ${jobId} submitted.`);
+
+          try {
+            const sym = result.symbol || result.baseToken?.symbol;
+            const addr = result.contractAddress || check.tokenAddress;
+            if (sym) {
+              swarmMemory.writeNarrative(sym, {
+                contractAddress: addr || result.contractAddress,
+                chain:           result.chain || jobChain,
+                priceUsd:        result.priceUsd,
+                liquidity:       result.liquidity,
+                volume24h:       result.volume24h,
+                alphaVerdict:    result.gsb_signal || result.verdict,
+              });
+            }
+            if (addr) swarmMemory.writeFinding(`alpha:${addr}`, AGENT_NAME, result);
+          } catch (_) {}
+        } catch (err) {
+          console.error(`[${AGENT_NAME}] Job ${jobId} job.funded error:`, err.message);
+          try { await session.reject(`Delivery error: ${err.message}`); } catch (_) {}
+          handledJobs.delete(jobId);
+        }
+
+      // ── job.submitted — evaluator completes ───────────────────────────────
+      } else if (type === 'job.submitted') {
+        try {
+          await session.complete('Delivered successfully.');
+          console.log(`[${AGENT_NAME}] Job ${jobId} completed.`);
         } catch (_) {}
-        handledJobs.delete(job.id);
       }
-    },
-    onEvaluate: async (job) => {
-      try { await job.evaluate(true, 'Delivered successfully.'); } catch (_) {}
     },
   });
+
+  await agent.start();
   console.log(`[${AGENT_NAME}] Online. Multi-chain alpha scanning (${SUPPORTED_CHAINS.join(', ')}). $${JOB_PRICE} USDC per job.`);
 }
 

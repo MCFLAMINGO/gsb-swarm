@@ -1,22 +1,26 @@
 {
   "name": "gsb-intelligence-swarm",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "GSB Intelligence Swarm - 4 ACP provider agents for Agent Gas Bible",
   "main": "dashboard-server.js",
   "scripts": {
     "start": "node --experimental-require-module --no-warnings dashboard-server.js"
   },
   "dependencies": {
+    "@aa-sdk/core": "^4.0.0",
+    "@account-kit/infra": "^4.0.0",
+    "@account-kit/smart-contracts": "^4.0.0",
     "@anthropic-ai/sdk": "^0.39.0",
-    "@virtuals-protocol/acp-node": "latest",
+    "@virtuals-protocol/acp-node-v2": "latest",
     "axios": "^1.6.0",
-    "dotenv": "^16.0.0",
-    "openai": "^4.0.0",
     "cors": "^2.8.5",
+    "dotenv": "^16.0.0",
     "express": "^4.18.0",
     "multer": "^1.4.5-lts.1",
-    "ws": "^8.0.0",
-    "resend": "^4.0.0"
+    "openai": "^4.0.0",
+    "resend": "^4.0.0",
+    "viem": "^2.0.0",
+    "ws": "^8.0.0"
   },
   "engines": {
     "node": ">=20.0.0"
