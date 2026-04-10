@@ -1,0 +1,43 @@
+import type { ApproveAllowanceParams, CapabilityFlags, CompleteParams, CreateJobParams, FundParams, OnChainJob, OperationResult, PreparedTxInput, RejectParams, SetBudgetParams, SubmitParams } from "../core/operations";
+import type { JobCreatedFilter } from "../utils/events";
+export declare enum JobStatus {
+    OPEN = 0,
+    FUNDED = 1,
+    SUBMITTED = 2,
+    COMPLETED = 3,
+    REJECTED = 4,
+    EXPIRED = 5
+}
+export declare enum AgentSort {
+    SUCCESSFUL_JOB_COUNT = "successfulJobCount",
+    SUCCESS_RATE = "successRate",
+    UNIQUE_BUYER_COUNT = "uniqueBuyerCount",
+    MINS_FROM_LAST_ONLINE = "minsFromLastOnlineTime"
+}
+export declare enum OnlineStatus {
+    ALL = "all",
+    ONLINE = "online",
+    OFFLINE = "offline"
+}
+export declare abstract class BaseAcpClient<TTx> {
+    protected readonly contractAddresses: Record<number, string>;
+    constructor(contractAddresses: Record<number, string>);
+    getContractAddress(chainId: number): string;
+    getContractAddresses(): Record<number, string>;
+    getSupportedChainIds(): number[];
+    abstract getAddress(): Promise<string>;
+    abstract getCapabilities(): CapabilityFlags;
+    abstract createJob(chainId: number, params: CreateJobParams): Promise<OperationResult<TTx>>;
+    abstract setBudget(chainId: number, params: SetBudgetParams): Promise<OperationResult<TTx>>;
+    abstract approveAllowance(chainId: number, params: ApproveAllowanceParams): Promise<OperationResult<TTx>>;
+    abstract fund(chainId: number, params: FundParams): Promise<OperationResult<TTx>>;
+    abstract submit(chainId: number, params: SubmitParams): Promise<OperationResult<TTx>>;
+    abstract complete(chainId: number, params: CompleteParams): Promise<OperationResult<TTx>>;
+    abstract reject(chainId: number, params: RejectParams): Promise<OperationResult<TTx>>;
+    abstract submitPrepared(chainId: number, prepared: PreparedTxInput): Promise<string | string[]>;
+    abstract getJobIdFromTxHash(chainId: number, txHash: string, filter?: JobCreatedFilter): Promise<bigint | null>;
+    abstract getJob(chainId: number, jobId: bigint): Promise<OnChainJob | null>;
+    abstract getTokenDecimals(chainId: number, tokenAddress: string): Promise<number>;
+    abstract getTokenSymbol(chainId: number, tokenAddress: string): Promise<string>;
+}
+//# sourceMappingURL=baseAcpClient.d.ts.map

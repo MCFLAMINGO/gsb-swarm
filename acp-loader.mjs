@@ -1,4 +1,4 @@
-// ESM bridge — imports acp-node-v2 (pure ESM) and injects into globalThis for CJS workers
-import { AcpAgent, AlchemyEvmProviderAdapter, AssetToken } from '@virtuals-protocol/acp-node-v2';
+// ESM bridge — imports vendored acp-node-v2 (patched for Node 22 ESM resolution)
+import { AcpAgent, AlchemyEvmProviderAdapter, AssetToken } from './vendor/acp-node-v2/dist/index.js';
 globalThis.__ACP_SDK__ = { AcpAgent, AlchemyEvmProviderAdapter, AssetToken };
 console.log('[acp-loader] ACP SDK v2 loaded via ESM bridge');
