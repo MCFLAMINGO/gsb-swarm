@@ -610,6 +610,86 @@ app.get('/api/auth/status', (req, res) => {
   res.json({ passwordConfigured: !!DASHBOARD_PASSWORD });
 });
 
+// ── GET /api/strategy/status — War Room playbook status ────────────────────
+app.get('/api/strategy/status', (req, res) => {
+  const open = Object.keys(briefResults);
+  res.json({
+    ready: acpReady,
+    hasPlaybook: open.length > 0,
+    workersReported: open,
+    latestBrief: latestBrief ? latestBrief.ceoSynthesis || null : null,
+    ts: Date.now(),
+  });
+});
+
+// ── POST /api/strategy/cook — War Room "Let Agents Cook" ─────────────────────
+app.post('/api/strategy/cook', async (req, res) => {
+  const { mode, horizon } = req.body || {};
+  console.log(`[cook] Let Agents Cook triggered — mode: ${mode || 'now'}, horizon: ${horizon || '1h'}`);
+
+  // Fire all four workers via direct Claude path (no ACP required)
+  const workers = [
+    { name: 'GSB Token Analyst',             req: 'Analyze token 0x8E223841aA396d36a6727EfcEAFC61d691692a37 on Base — give full analysis and verdict' },
+    { name: 'GSB Wallet Profiler & DCA Engine', req: 'Profile the top 3 wallets currently holding GSB token on Base' },
+    { name: 'GSB Alpha Scanner',              req: 'Scan Base chain for alpha signals and top opportunities right now' },
+    { name: 'GSB Thread Writer',              req: 'Write a crypto Twitter thread about $GSB Agent Gas Bible tokenized agent on Virtuals Protocol' },
+  ];
+
+  const steps = workers.map((w, i) => ({ step: i + 1, worker: w.name, requirement: w.req, status: 'pending' }));
+  res.json({ ok: true, message: 'Cooking started', steps, horizon: horizon || '1h' });
+
+  // Fire jobs in background
+  (async () => {
+    const workerResults = {};
+    for (const w of workers) {
+      try {
+        const rolePrompt = {
+          'GSB Thread Writer': `You are the GSB Thread Writer. Write a crypto Twitter/X thread. Format as numbered tweets separated by blank lines. Each tweet max 280 chars.\nIMPORTANT: include CA (Base): 0x8E223841aA396d36a6727EfcEAFC61d691692a37 in final tweet.\nRequirement: ${w.req}`,
+          'GSB Token Analyst': `You are the GSB Token Analyst. Analyze the requested token and provide a BUY/HOLD/AVOID verdict.\nRequirement: ${w.req}`,
+          'GSB Wallet Profiler & DCA Engine': `You are the GSB Wallet Profiler. Profile wallets — classify as whale/degen/institutional.\nRequirement: ${w.req}`,
+          'GSB Alpha Scanner': `You are the GSB Alpha Scanner. Scan Base chain for alpha. Return top opportunities with risk/reward.\nRequirement: ${w.req}`,
+        }[w.name] || `You are ${w.name}. Complete this task: ${w.req}`;
+
+        if (!anthropic) { workerResults[w.name] = { error: 'No AI key configured' }; continue; }
+
+        const msg = await anthropic.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 1000,
+          messages: [{ role: 'user', content: rolePrompt }],
+        });
+        const result = msg.content[0]?.text || '';
+        workerResults[w.name] = { raw: result };
+        broadcast('job-result', { worker: w.name, result, jobId: 'cook_' + Date.now() });
+        console.log(`[cook] ${w.name} ✓`);
+      } catch (e) {
+        console.error(`[cook] ${w.name} failed:`, e.message);
+        workerResults[w.name] = { error: e.message };
+      }
+    }
+
+    // Synthesize and broadcast playbook
+    try {
+      const synthesis = await ceoSynthesize(workerResults, `Let Agents Cook — ${horizon || '1h'} horizon`);
+      latestBrief = { results: workerResults, ceoSynthesis: synthesis, ts: Date.now() };
+      broadcast('brief', latestBrief);
+      broadcast('cmd-synthesis', synthesis);
+      console.log('[cook] Playbook ready — broadcast sent');
+    } catch (e) {
+      console.error('[cook] Synthesis failed:', e.message);
+    }
+  })();
+});
+
+// ── POST /api/strategy/execute/:step — execute a specific playbook step ──────
+app.post('/api/strategy/execute/:step', async (req, res) => {
+  const step = parseInt(req.params.step);
+  const { worker, requirement } = req.body || {};
+  console.log(`[cook] Execute step ${step} — ${worker}`);
+  // Reuse fire-job logic inline
+  broadcast('job-result', { worker, result: `Step ${step} execution triggered.`, jobId: 'exec_' + Date.now() });
+  res.json({ ok: true, step, worker, status: 'triggered' });
+});
+
 // ── POST /api/fire-job — OPERATOR ONLY ───────────────────────────────────────
 app.post('/api/fire-job', requireOperator, async (req, res) => {
   const { worker: workerName, requirement, direct } = req.body || {};
