@@ -12,6 +12,39 @@ const X_CLIENT_SECRET = process.env.X_CLIENT_SECRET;
 const X_CALLBACK_URL  = process.env.X_CALLBACK_URL || 'https://raiders-of-the-chain.vercel.app/auth/x/callback';
 const RAID_PRICE_USD  = parseFloat(process.env.RAID_PRICE_USD || '0.50');
 
+// OAuth 1.0a signing — uses existing X_API_KEY + X_API_SECRET + X_ACCESS_TOKEN + X_ACCESS_TOKEN_SECRET
+// This lets the GSB agent account post on behalf of itself without OAuth 2.0 flow
+function oauthSign(method, url, params) {
+  const oauth = {
+    oauth_consumer_key:     process.env.X_API_KEY,
+    oauth_nonce:            crypto.randomBytes(16).toString('hex'),
+    oauth_signature_method: 'HMAC-SHA1',
+    oauth_timestamp:        Math.floor(Date.now() / 1000).toString(),
+    oauth_token:            process.env.X_ACCESS_TOKEN,
+    oauth_version:          '1.0',
+  };
+  const all = { ...oauth, ...params };
+  const base = [
+    method.toUpperCase(),
+    encodeURIComponent(url),
+    encodeURIComponent(Object.keys(all).sort().map(k => `${encodeURIComponent(k)}=${encodeURIComponent(all[k])}`).join('&')),
+  ].join('&');
+  const sigKey = `${encodeURIComponent(process.env.X_API_SECRET)}&${encodeURIComponent(process.env.X_ACCESS_TOKEN_SECRET)}`;
+  oauth.oauth_signature = require('crypto').createHmac('sha1', sigKey).update(base).digest('base64');
+  return 'OAuth ' + Object.keys(oauth).sort().map(k => `${encodeURIComponent(k)}="${encodeURIComponent(oauth[k])}"`).join(', ');
+}
+
+async function postTweetAsGSB(text, replyToId) {
+  const body = replyToId ? { text, reply: { in_reply_to_tweet_id: replyToId } } : { text };
+  const auth = oauthSign('POST', 'https://api.twitter.com/2/tweets', {});
+  const res = await fetch('https://api.twitter.com/2/tweets', {
+    method: 'POST',
+    headers: { Authorization: auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
 // ---------------------------------------------------------------------------
 // Helper — log a job to the live feed (stored in Redis)
 // ---------------------------------------------------------------------------
@@ -146,12 +179,14 @@ router.post('/raid', async (req, res) => {
   const { wallet, targetUrl, raidType, tone, cadence, talkingPoints, agentCount } = req.body;
   if (!wallet || !targetUrl) return res.status(400).json({ error: 'wallet and targetUrl required' });
 
-  // Get connected X accounts
+  // Get connected X accounts — fall back to GSB agent account if none connected
   const accounts = await redis.get(`xaccounts:${wallet.toLowerCase()}`) || [];
-  if (accounts.length === 0) return res.status(400).json({ error: 'No X accounts connected. Connect at least one X account first.' });
+  const useGSBAccount = accounts.length === 0;
 
-  const count   = Math.min(agentCount || accounts.length, accounts.length);
-  const raiders = accounts.slice(0, count);
+  const count   = useGSBAccount ? 1 : Math.min(agentCount || accounts.length, accounts.length);
+  const raiders = useGSBAccount
+    ? [{ xUserId: 'gsb', xUsername: 'AGENTGASBIBLE', gsb: true }]
+    : accounts.slice(0, count);
 
   // Build raid content via Thread Writer
   let content;
@@ -195,7 +230,11 @@ router.post('/raid', async (req, res) => {
       }
 
       let result;
-      if (raidType === 'Like + Boost') {
+      if (account.gsb) {
+        // Post from GSB agent account using OAuth 1.0a
+        const replyId = raidType === 'Reply Raid' ? targetUrl.split('/').pop().split('?')[0] : null;
+        result = await postTweetAsGSB(raidText, replyId);
+      } else if (raidType === 'Like + Boost') {
         // Like the target tweet
         const tweetId = targetUrl.split('/').pop().split('?')[0];
         const likeRes = await fetch(`https://api.twitter.com/2/users/${account.xUserId}/likes`, {
