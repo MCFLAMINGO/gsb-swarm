@@ -398,6 +398,40 @@ const wss    = new WebSocketServer({ server, path: '/ws' });
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
+
+// ── ACP compliance endpoints — MUST be before express.static ─────────────────
+// Virtuals probes these to verify agent is hireable on ACP marketplace
+app.get('/.well-known/agent.json', (req, res) => {
+  res.json({
+    name: 'GSB Intelligence Swarm',
+    description: 'Autonomous AI agent swarm — Token Analyst, Wallet Profiler, Alpha Scanner, Thread Writer, CEO',
+    version: '2.0.0',
+    protocol: 'acp',
+    protocolVersion: '2.0',
+    endpoint: 'https://gsb-swarm-production.up.railway.app',
+    agents: [
+      { id: '019d7568-cd41-7523-9538-e501cc1875cc', name: 'GSB CEO Agent',                  role: 'ceo',            wallet: '0xb165a3b019eb1922f5dcda97b83be75484b30d27' },
+      { id: '019d755e-dfd0-7b6c-8b4c-21cfbe6fda1c', name: 'GSB Alpha Scanner',              role: 'alpha_signals',  wallet: '0x9d23bf7e4084e278a06c85e299a8ed5db3d663b5' },
+      { id: '019d756c-9eba-7600-81ba-f1c78f43277c', name: 'GSB Wallet Profiler & DCA Engine',role: 'wallet_profile', wallet: '0xeb6447a8b44837458f391e2bac39990daf6bd522' },
+      { id: '019d756b-0217-7252-8094-7854afde1703', name: 'GSB Token Analyst',               role: 'token_analysis', wallet: '0x489a9d6c79957906540491a493a7a4d13ad0701a' },
+      { id: '019d7565-5b56-778e-8550-66ec4b179a81', name: 'GSB Thread Writer',               role: 'thread',         wallet: '0x2c281b4ba71e79dd91e3a9d78ed5348bc5774df9' },
+    ],
+    capabilities: ['token_analysis', 'wallet_profile', 'alpha_signals', 'thread', 'strategy'],
+    status: 'online',
+  });
+});
+
+app.get('/acp', (req, res) => {
+  res.json({
+    protocol: 'acp',
+    version: '2.0',
+    status: 'online',
+    endpoint: 'https://gsb-swarm-production.up.railway.app',
+    acpReady,
+    workers: Object.keys(WORKER_CATALOG),
+  });
+});
+
 app.use(express.static(path.join(__dirname, 'dashboard-ui')));
 
 // ── WebSocket broadcast ──────────────────────────────────────────────────────
