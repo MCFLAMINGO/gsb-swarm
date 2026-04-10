@@ -644,14 +644,27 @@ app.get('/api/auth/status', (req, res) => {
   res.json({ passwordConfigured: !!DASHBOARD_PASSWORD });
 });
 
-// ── GET /api/strategy/status — War Room playbook status ────────────────────
-app.get('/api/strategy/status', (req, res) => {
+// ── GET /api/strategy/status — War Room playbook status + wallet balances ───────
+app.get('/api/strategy/status', async (req, res) => {
   const open = Object.keys(briefResults);
+
+  // Fetch hot wallet balances from gsb-yield-swarm
+  let wallets = {};
+  try {
+    const EXECUTOR_URL = process.env.EXECUTOR_URL || 'https://gsb-yield-swarm-production.up.railway.app';
+    const wr = await fetch(`${EXECUTOR_URL}/api/debug/balances`, { signal: AbortSignal.timeout(5000) });
+    if (wr.ok) {
+      const wd = await wr.json();
+      wallets = { wallets: wd.balances || wd };
+    }
+  } catch { /* yield-swarm unreachable — skip */ }
+
   res.json({
     ready: acpReady,
     hasPlaybook: open.length > 0,
     workersReported: open,
     latestBrief: latestBrief ? latestBrief.ceoSynthesis || null : null,
+    wallets,
     ts: Date.now(),
   });
 });
