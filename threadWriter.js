@@ -615,7 +615,7 @@ async function start() {
   let client;
   client = await buildAcpClient({
     privateKey: process.env.THREAD_WRITER_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY,
-    entityId: parseInt(process.env.THREAD_WRITER_ENTITY_ID) || 3,
+    entityId: parseInt(process.env.THREAD_WRITER_ENTITY_ID) || 1,
     agentWalletAddress: process.env.THREAD_WRITER_WALLET_ADDRESS,
     onNewTask: async (job) => {
       console.log(`[${AGENT_NAME}] New job: ${job.id} | phase=${job.phase}`);
