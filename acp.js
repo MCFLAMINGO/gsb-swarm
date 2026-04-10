@@ -25,10 +25,12 @@ if (baseAcpConfigV2.chain?.rpcUrls?.public?.http) {
 const ACP_MAX_RETRIES = 3;
 
 async function buildAcpClient({ privateKey, entityId, agentWalletAddress, onNewTask, onEvaluate }) {
+  // Normalize private key — SDK requires 0x-prefixed hex string
+  const normalizedKey = privateKey && !privateKey.startsWith('0x') ? `0x${privateKey}` : privateKey;
   for (let attempt = 1; attempt <= ACP_MAX_RETRIES; attempt++) {
     try {
       const contractClient = await AcpContractClientV2.build(
-        privateKey,
+        normalizedKey,
         entityId,
         agentWalletAddress,
         baseAcpConfigV2

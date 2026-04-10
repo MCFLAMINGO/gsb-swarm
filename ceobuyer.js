@@ -72,8 +72,9 @@ async function refreshCacheFromAlphaScanner() {
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const CEO_ENTITY_ID         = parseInt(process.env.CEO_ENTITY_ID) || 1;
-const CEO_WALLET_ADDRESS    = '0xf0d4832A4c2D33Faa1F655cd4dE5e7c551a0fE45';
-const PRIVATE_KEY           = process.env.AGENT_WALLET_PRIVATE_KEY;
+const CEO_WALLET_ADDRESS    = process.env.CEO_WALLET_ADDRESS || '0xb165a3b019eb1922f5dcda97b83be75484b30d27';
+const _RAW_KEY              = process.env.AGENT_WALLET_PRIVATE_KEY;
+const PRIVATE_KEY           = _RAW_KEY && !_RAW_KEY.startsWith('0x') ? `0x${_RAW_KEY}` : _RAW_KEY;
 
 const WORKERS = [
   {
