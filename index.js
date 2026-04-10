@@ -75,6 +75,10 @@ let dashProc = spawnDashboard();
 const app = express();
 const HEALTH_PORT = 3001;
 
+// Raiders routes
+const raidersRouter = require('./routes/raiders');
+app.use('/api/raiders', raidersRouter);
+
 app.get('/', (req, res) => res.json({
   status: 'ONLINE',
   swarm: 'GSB Intelligence Swarm',
