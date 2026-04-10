@@ -663,15 +663,13 @@ async function start() {
           (!parsed.skillId && /\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/.test(content) && /report|intel|alpha/i.test(content))
         );
 
-        if (job.phase === 2) {
-          // Already in TRANSACTION — skip respond(), deliver directly
-          console.log(`[${AGENT_NAME}] Job ${job.id} already in TRANSACTION phase.`);
-        } else {
+        // ACP v2: ack immediately, process async — never block onNewTask past respond()
+        if (job.phase !== 2) {
           const acceptMsg = isIntelReport ? 'Searching X and on-chain data for token intel...' : 'Writing your thread now...';
           await job.respond(true, acceptMsg);
-          console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
-          freshJob = await waitForTransaction(client, job.id);
-          console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase.`);
+          console.log(`[${AGENT_NAME}] Job ${job.id} acked — processing async`);
+          // Wait for TRANSACTION phase in background with short timeout
+          try { freshJob = await waitForTransaction(client, job.id, 30000); } catch { freshJob = job; }
         }
 
         let result;

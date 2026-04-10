@@ -400,13 +400,11 @@ async function start() {
         const chainName = CHAIN_CONFIG[jobChain]?.name || jobChain;
         let freshJob = job;
 
-        if (job.phase === 2) {
-          console.log(`[${AGENT_NAME}] Job ${job.id} already in TRANSACTION phase.`);
-        } else {
+        // ACP v2: ack immediately, process async
+        if (job.phase !== 2) {
           await job.respond(true, `Profiling wallet on ${chainName} now...`);
-          console.log(`[${AGENT_NAME}] Job ${job.id} accepted. Waiting for TRANSACTION phase...`);
-          freshJob = await waitForTransaction(client, job.id);
-          console.log(`[${AGENT_NAME}] Job ${job.id} in TRANSACTION phase.`);
+          console.log(`[${AGENT_NAME}] Job ${job.id} acked — processing async`);
+          try { freshJob = await waitForTransaction(client, job.id, 30000); } catch { freshJob = job; }
         }
 
         await processJob(client, freshJob, jobChain);
