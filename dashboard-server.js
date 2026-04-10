@@ -34,16 +34,15 @@ const swarmMemory = require('./swarmMemory');
 const limitEngine   = require('./scripts/limit_engine');
 const pnlCardRoute  = require('./scripts/pnl_card_route');
 
-// ── ACP SDK (V2) ─────────────────────────────────────────────────────────────
+// ── ACP SDK (V2) — loaded via acp-loader.mjs ESM bridge ──────────────────────────────────────────────────────────────
 let AcpAgent_SDK, AlchemyEvmProviderAdapter_SDK, AssetToken_SDK;
-try {
-  const acpModule = require('@virtuals-protocol/acp-node-v2');
-  AcpAgent_SDK = acpModule.AcpAgent;
-  AlchemyEvmProviderAdapter_SDK = acpModule.AlchemyEvmProviderAdapter;
-  AssetToken_SDK = acpModule.AssetToken;
+if (globalThis.__ACP_SDK__) {
+  AcpAgent_SDK = globalThis.__ACP_SDK__.AcpAgent;
+  AlchemyEvmProviderAdapter_SDK = globalThis.__ACP_SDK__.AlchemyEvmProviderAdapter;
+  AssetToken_SDK = globalThis.__ACP_SDK__.AssetToken;
   console.log('[dashboard] ACP SDK v2 loaded');
-} catch (e) {
-  console.warn('[dashboard] ACP SDK v2 load failed — fire-job disabled:', e.message);
+} else {
+  console.warn('[dashboard] ACP SDK v2 not available — fire-job disabled');
 }
 
 // ── Anthropic (Claude) — lazy async import ──────────────────────────────────

@@ -8,7 +8,7 @@ cmds = ["npm install --production"]
 cmds = ["pip3 install reportlab xlrd openpyxl pandas pypdf Pillow pypdfium2 --break-system-packages --quiet"]
 
 [start]
-cmd = "node --experimental-require-module index.js"
+cmd = "node --import ./acp-loader.mjs index.js"
 
 [variables]
 PORT = "8080"
