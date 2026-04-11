@@ -255,7 +255,7 @@ Write a CEO Intelligence Brief with these exact sections:
 Be direct, specific, use numbers from the data. No fluff. Sound like a sharp DeFi analyst, not a chatbot.`;
 
   const msg = await anthropic.messages.create({
-    model: 'claude-haiku-3-5',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 600,
     messages: [{ role: 'user', content: prompt }],
   });
