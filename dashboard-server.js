@@ -126,25 +126,25 @@ function requireOperator(req, res, next) {
 
 const WORKER_CATALOG = {
   'GSB Token Analyst': {
-    address: '0xBF56F4EC74cC1aE19c48197Eb32066c8a85dEfda',
+    address: '0x489a9d6c79957906540491a493a7a4d13ad0701a',
     price: 0.25,
     role: 'token_analysis',
     defaultReq: 'Analyze token 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 on Base',
   },
   'GSB Wallet Profiler & DCA Engine': {
-    address: '0x730e371ff3E2277c36060748dd5207CEAF50701d',
+    address: '0xeb6447a8b44837458f391e2bac39990daf6bd522',
     price: 0.50,
     role: 'wallet_profile',
     defaultReq: 'Profile wallet 0x6dA1A9793Ebe96975c240501A633ab8B3c83D14A on Base',
   },
   'GSB Alpha Scanner': {
-    address: '0x2c87651012bFA0247Fe741448DEbBF06c1b5c906',
+    address: '0x9d23bf7e4084e278a06c85e299a8ed5db3d663b5',
     price: 0.10,
     role: 'alpha_signals',
     defaultReq: 'Scan Base chain for alpha signals now',
   },
   'GSB Thread Writer': {
-    address: '0x4ab8320491A1FD8396F7F23c212cd6fC978C8Ad0',
+    address: '0x2c281b4ba71e79dd91e3a9d78ed5348bc5774df9',
     price: 0.15,
     role: 'thread',
     defaultReq: 'Write a crypto Twitter thread about $GSB Agent Gas Bible tokenized agent on Virtuals Protocol',
