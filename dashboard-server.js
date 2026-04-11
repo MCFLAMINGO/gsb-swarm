@@ -663,7 +663,7 @@ app.get('/api/strategy/status', async (req, res) => {
     ready: acpReady,
     hasPlaybook: open.length > 0,
     workersReported: open,
-    latestBrief: latestBrief ? latestBrief.ceoSynthesis || null : null,
+    latestBrief: latestBrief ? { results: latestBrief.results || {}, ceoSynthesis: latestBrief.ceoSynthesis || null, ts: latestBrief.ts } : null,
     wallets,
     ts: Date.now(),
   });
