@@ -1,8 +1,8 @@
 // ACP Agent factory — shared across all workers
 // SDK injected via --import ./acp-loader.mjs at startup
+// Uses PrivyAlchemyEvmProviderAdapter — agent wallets are Privy-custodied (created via Virtuals dashboard)
 const { base } = require('viem/chains');
 
-const RPC_URL = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
 const ACP_MAX_RETRIES = 3;
 
 function getSDK() {
@@ -10,18 +10,21 @@ function getSDK() {
   return globalThis.__ACP_SDK__;
 }
 
-async function buildAcpAgent({ privateKey, entityId, agentWalletAddress, onEntry }) {
-  const { AcpAgent, AlchemyEvmProviderAdapter } = getSDK();
-  const normalizedKey = privateKey && !privateKey.startsWith('0x') ? `0x${privateKey}` : privateKey;
+// params: { signerPrivateKey, walletId, entityId, agentWalletAddress, onEntry }
+async function buildAcpAgent({ signerPrivateKey, walletId, entityId, agentWalletAddress, onEntry }) {
+  const { AcpAgent, PrivyAlchemyEvmProviderAdapter } = getSDK();
+
+  if (!signerPrivateKey) throw new Error('[acp] signerPrivateKey is required (P256 key from Virtuals dashboard)');
+  if (!walletId)         throw new Error('[acp] walletId is required (Privy wallet ID from Virtuals dashboard)');
+  if (!agentWalletAddress) throw new Error('[acp] agentWalletAddress is required');
 
   for (let attempt = 1; attempt <= ACP_MAX_RETRIES; attempt++) {
     try {
-      const provider = await AlchemyEvmProviderAdapter.create({
+      const provider = await PrivyAlchemyEvmProviderAdapter.create({
         walletAddress: agentWalletAddress,
-        privateKey: normalizedKey,
-        entityId: Number(entityId),
+        walletId,
+        signerPrivateKey,
         chains: [base],
-        rpcUrl: RPC_URL,
       });
       const agent = await AcpAgent.create({ provider });
       agent.on('entry', onEntry);

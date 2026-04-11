@@ -604,7 +604,8 @@ async function start() {
   console.log(`[${AGENT_NAME}] Starting ACP provider...`);
 
   const agent = await buildAcpAgent({
-    privateKey: process.env.THREAD_WRITER_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY,
+    signerPrivateKey:   process.env.THREAD_WRITER_SIGNER_PK || process.env.THREAD_WRITER_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY,
+    walletId:           process.env.THREAD_WRITER_WALLET_ID,
     entityId: parseInt(process.env.THREAD_WRITER_ENTITY_ID) || 1,
     agentWalletAddress: process.env.THREAD_WRITER_WALLET_ADDRESS,
     onEntry: async (session, entry) => {
