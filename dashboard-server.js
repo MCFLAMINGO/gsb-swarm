@@ -849,7 +849,7 @@ app.post('/api/fire-job', requireOperator, async (req, res) => {
     console.log(`[api] Firing job → ${workerName}: "${requirement}"`);
     const jobId = await acpClient.createJobByOfferingName(
       8453,
-      worker.name,
+      workerName,
       worker.address,
       { prompt: requirement },
     );
@@ -3321,7 +3321,7 @@ Focus on actionable signals. If compute tokens are up = look for AI/agent token 
 
     const jobId = await acpClient.createJobByOfferingName(
       8453,
-      alphaWorker.name,
+      'GSB Alpha Scanner',
       alphaWorker.address,
       { prompt: gflopRequirement },
     );
