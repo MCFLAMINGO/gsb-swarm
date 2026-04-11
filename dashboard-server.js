@@ -35,10 +35,11 @@ const limitEngine   = require('./scripts/limit_engine');
 const pnlCardRoute  = require('./scripts/pnl_card_route');
 
 // ── ACP SDK (V2) — loaded via acp-loader.mjs ESM bridge ──────────────────────────────────────────────────────────────
-let AcpAgent_SDK, AlchemyEvmProviderAdapter_SDK, AssetToken_SDK;
+let AcpAgent_SDK, AlchemyEvmProviderAdapter_SDK, PrivyAlchemyEvmProviderAdapter_SDK, AssetToken_SDK;
 if (globalThis.__ACP_SDK__) {
   AcpAgent_SDK = globalThis.__ACP_SDK__.AcpAgent;
   AlchemyEvmProviderAdapter_SDK = globalThis.__ACP_SDK__.AlchemyEvmProviderAdapter;
+  PrivyAlchemyEvmProviderAdapter_SDK = globalThis.__ACP_SDK__.PrivyAlchemyEvmProviderAdapter;
   AssetToken_SDK = globalThis.__ACP_SDK__.AssetToken;
   console.log('[dashboard] ACP SDK v2 loaded');
 } else {
@@ -62,9 +63,10 @@ let anthropic = null;
 })();
 
 // ── Config ───────────────────────────────────────────────────────────────────
-const PRIVATE_KEY        = process.env.AGENT_WALLET_PRIVATE_KEY;
+const CEO_SIGNER_PK      = process.env.CEO_SIGNER_PK || process.env.AGENT_WALLET_PRIVATE_KEY;
+const CEO_WALLET_ID      = process.env.CEO_WALLET_ID;
 const CEO_ENTITY_ID      = parseInt(process.env.CEO_ENTITY_ID) || 1;
-const CEO_WALLET_ADDRESS = process.env.CEO_WALLET_ADDRESS || '0xf0d4832A4c2D33Faa1F655cd4dE5e7c551a0fE45';
+const CEO_WALLET_ADDRESS = process.env.CEO_WALLET_ADDRESS || '0xb165a3b019eb1922f5dcda97b83be75484b30d27';
 const PORT               = 8080; // Fixed — Railway domain set to 8080
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || null;
 
@@ -500,23 +502,26 @@ function queueAcceptV2(session, entry) {
 // ── Boot ACP client ──────────────────────────────────────────────────────────
 async function initAcp() {
   initWorkerStatus();
-  if (!PRIVATE_KEY) {
-    console.warn('[acp] No AGENT_WALLET_PRIVATE_KEY — fire-job disabled');
+  if (!CEO_SIGNER_PK) {
+    console.warn('[acp] No CEO_SIGNER_PK — fire-job disabled');
     return;
   }
-  if (!AcpAgent_SDK || !AlchemyEvmProviderAdapter_SDK) {
+  if (!CEO_WALLET_ID) {
+    console.warn('[acp] No CEO_WALLET_ID — fire-job disabled');
+    return;
+  }
+  if (!AcpAgent_SDK || !PrivyAlchemyEvmProviderAdapter_SDK) {
     console.warn('[acp] ACP SDK v2 not loaded — fire-job disabled');
     return;
   }
   try {
-    console.log('[acp] Initializing CEO agent (V2)...');
+    console.log('[acp] Initializing CEO agent (V2) via Privy...');
     const { base } = require('viem/chains');
-    const provider = await AlchemyEvmProviderAdapter_SDK.create({
+    const provider = await PrivyAlchemyEvmProviderAdapter_SDK.create({
       walletAddress: CEO_WALLET_ADDRESS,
-      privateKey: PRIVATE_KEY,
-      entityId: Number(CEO_ENTITY_ID),
+      walletId: CEO_WALLET_ID,
+      signerPrivateKey: CEO_SIGNER_PK,
       chains: [base],
-      rpcUrl: process.env.BASE_RPC_URL || 'https://mainnet.base.org',
     });
 
     acpClient = await AcpAgent_SDK.create({ provider });
