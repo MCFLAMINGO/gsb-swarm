@@ -285,7 +285,7 @@
       if (wcSdkLoaded) { cb(); return; }
       showStatus('Loading WalletConnect…');
       const s = document.createElement('script');
-      s.src = 'https://unpkg.com/@walletconnect/ethereum-provider@2.13.0/dist/index.umd.js';
+      s.src = 'https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.13.0/dist/index.umd.js';
       s.onload  = () => { wcSdkLoaded = true; hideStatus(); cb(); };
       s.onerror = () => { hideStatus(); showError('Could not load WalletConnect SDK. Check your connection.'); };
       document.head.appendChild(s);
@@ -297,10 +297,10 @@
       document.getElementById('wallet-btns').style.display = 'none';
       loadWCSdk(async () => {
         try {
-          const wcMod = window.EthereumProvider
-            || window.WalletConnectEthereumProvider
-            || window['@walletconnect/ethereum-provider'];
-          const EthereumProvider = wcMod?.EthereumProvider || wcMod?.default?.EthereumProvider || wcMod;
+          const wcMod = window['@walletconnect/ethereum-provider']
+            || window.EthereumProvider
+            || window.WalletConnectEthereumProvider;
+          const EthereumProvider = wcMod?.EthereumProvider || wcMod?.default?.EthereumProvider || wcMod?.default || wcMod;
           if (!EthereumProvider || typeof EthereumProvider.init !== 'function') throw new Error('EthereumProvider not found in bundle');
           showStatus('Initializing WalletConnect…');
           wcProvider = await EthereumProvider.init({
