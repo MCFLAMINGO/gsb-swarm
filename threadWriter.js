@@ -65,6 +65,16 @@ const REQUIREMENTS_SCHEMA = {
         type: 'number',
         description: 'Number of tweets in the thread (default 5, max 15)',
       },
+      x_credentials: {
+        type: 'object',
+        description: "Optional. Your X/Twitter API credentials to post the thread to your account. If omitted, thread is delivered as text only.",
+        properties: {
+          api_key: { type: 'string' },
+          api_secret: { type: 'string' },
+          access_token: { type: 'string' },
+          access_secret: { type: 'string' },
+        },
+      },
     },
     required: ['topic'],
   },
@@ -527,13 +537,18 @@ function percentEncode(str) {
     .replace(/\)/g, '%29');
 }
 
-function signOAuth1(method, url, params, body) {
+function signOAuth1(method, url, params, body, credentials) {
+  const apiKey       = credentials?.api_key       || process.env.X_API_KEY;
+  const apiSecret    = credentials?.api_secret    || process.env.X_API_SECRET;
+  const accessToken  = credentials?.access_token  || process.env.X_ACCESS_TOKEN;
+  const accessSecret = credentials?.access_secret || process.env.X_ACCESS_TOKEN_SECRET;
+
   const oauthParams = {
-    oauth_consumer_key: process.env.X_API_KEY,
+    oauth_consumer_key: apiKey,
     oauth_nonce: crypto.randomBytes(16).toString('hex'),
     oauth_signature_method: 'HMAC-SHA1',
     oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
-    oauth_token: process.env.X_ACCESS_TOKEN,
+    oauth_token: accessToken,
     oauth_version: '1.0',
   };
 
@@ -552,7 +567,7 @@ function signOAuth1(method, url, params, body) {
     percentEncode(paramString),
   ].join('&');
 
-  const signingKey = `${percentEncode(process.env.X_API_SECRET)}&${percentEncode(process.env.X_ACCESS_TOKEN_SECRET)}`;
+  const signingKey = `${percentEncode(apiSecret)}&${percentEncode(accessSecret)}`;
   const signature = crypto.createHmac('sha1', signingKey).update(baseString).digest('base64');
 
   oauthParams.oauth_signature = signature;
@@ -565,12 +580,12 @@ function signOAuth1(method, url, params, body) {
   return authHeader;
 }
 
-async function postTweet(text, replyToId = null) {
+async function postTweet(text, replyToId = null, credentials) {
   const url = 'https://api.twitter.com/2/tweets';
   const body = { text };
   if (replyToId) body.reply = { in_reply_to_tweet_id: replyToId };
 
-  const authHeader = signOAuth1('POST', url, {}, JSON.stringify(body));
+  const authHeader = signOAuth1('POST', url, {}, JSON.stringify(body), credentials);
 
   const res = await axios.post(url, body, {
     headers: {
@@ -581,11 +596,11 @@ async function postTweet(text, replyToId = null) {
   return res.data.data.id;
 }
 
-async function postThread(tweets) {
+async function postThread(tweets, credentials) {
   let lastId = null;
   let firstId = null;
   for (const text of tweets) {
-    const id = await postTweet(text, lastId);
+    const id = await postTweet(text, lastId, credentials);
     if (!firstId) firstId = id;
     lastId = id;
     await new Promise(r => setTimeout(r, 1000));
@@ -666,6 +681,22 @@ async function start() {
             content = reqMsg?.content || '';
           }
 
+          // Extract per-job X credentials from JSON payload (if present)
+          let jobXCredentials = null;
+          try {
+            const parsed = JSON.parse(content);
+            if (parsed && typeof parsed === 'object' && parsed.x_credentials) {
+              jobXCredentials = parsed.x_credentials;
+              console.log(`[${AGENT_NAME}] Job ${jobId} — using per-job X credentials from payload`);
+            }
+          } catch { /* plain text content — no credentials to extract */ }
+
+          // Resolve effective credentials: payload > env vars > null (text-only)
+          const xCreds = jobXCredentials
+            || (process.env.X_API_KEY && process.env.X_ACCESS_TOKEN
+                ? { api_key: process.env.X_API_KEY, api_secret: process.env.X_API_SECRET, access_token: process.env.X_ACCESS_TOKEN, access_secret: process.env.X_ACCESS_TOKEN_SECRET }
+                : null);
+
           const isIntelReport = (
             (content.includes('token_intel_report')) ||
             (/\$(\w+)/.test(content) && /intel|report|research|alpha|investigate|find|look.?up/i.test(content)) ||
@@ -695,9 +726,9 @@ async function start() {
               result = await buildTokenIntelReport({ symbol, contractAddress, chain });
             }
 
-            if (process.env.X_API_KEY && process.env.X_ACCESS_TOKEN && result.thread_tweets?.length > 0) {
+            if (xCreds && result.thread_tweets?.length > 0) {
               try {
-                threadUrl = await postThread(result.thread_tweets);
+                threadUrl = await postThread(result.thread_tweets, xCreds);
                 console.log(`[${AGENT_NAME}] Intel thread posted to X: ${threadUrl}`);
               } catch (err) {
                 console.error(`[${AGENT_NAME}] X posting failed:`, err.message);
@@ -725,11 +756,11 @@ async function start() {
             const enrichedContent = memCtx ? `${content}\n\n--- Swarm Memory Context ---\n${memCtx}` : content;
             result = await writeThread(enrichedContent);
 
-            if (process.env.X_API_KEY && process.env.X_ACCESS_TOKEN) {
+            if (xCreds) {
               try {
                 const tweets = parseThreadToTweets(result);
                 if (tweets.length > 0) {
-                  threadUrl = await postThread(tweets);
+                  threadUrl = await postThread(tweets, xCreds);
                   console.log(`[${AGENT_NAME}] Thread posted to X: ${threadUrl}`);
                 }
               } catch (err) {
