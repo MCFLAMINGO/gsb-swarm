@@ -405,4 +405,39 @@ async function fireDcaBuy(session) {
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// POST /api/raiders/send-telegram
+// Push a job result to the Telegram group/channel
+// Body: { text, chatId? }
+// ---------------------------------------------------------------------------
+router.post('/send-telegram', async (req, res) => {
+  const { text, chatId } = req.body;
+  if (!text) return res.status(400).json({ error: 'text required' });
+
+  const BOT_TOKEN = process.env.TELEGRAM_SWAP_BOT;
+  const TARGET_CHAT = chatId || process.env.TELEGRAM_GROUP_ID || process.env.TELEGRAM_CHANNEL_ID;
+  if (!BOT_TOKEN || !TARGET_CHAT) {
+    return res.status(500).json({ error: 'Telegram not configured (TELEGRAM_SWAP_BOT + TELEGRAM_GROUP_ID required)' });
+  }
+
+  try {
+    const tgRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: TARGET_CHAT,
+        text: `⚔️ *Raiders of the Chain*\n\n${text}`,
+        parse_mode: 'Markdown',
+        disable_web_page_preview: true,
+      }),
+    });
+    const data = await tgRes.json();
+    if (!data.ok) return res.status(500).json({ error: data.description });
+    res.json({ ok: true, messageId: data.result?.message_id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
