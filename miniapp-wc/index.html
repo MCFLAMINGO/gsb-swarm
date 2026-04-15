@@ -175,6 +175,8 @@
 
   <div class="footer">Powered by GSB Swarm · Your keys stay in your wallet</div>
 
+  <!-- Preload local WC bundle — avoids delay on first tap -->
+  <script src="../miniapp/wc-bundle.js"></script>
   <script>
     const WC_PROJECT_ID = 'ff5dd5e462b92932d7b28c00b81695e8';
     const API_BASE      = 'https://gsb-swarm-production.up.railway.app';
@@ -283,11 +285,22 @@
 
     function loadWCSdk(cb) {
       if (wcSdkLoaded) { cb(); return; }
+      // Use local bundle — CDN blocked in Telegram WebApp sandboxed WebView
+      if (window.WC && window.WC.EthereumProvider) {
+        wcSdkLoaded = true; cb(); return;
+      }
       showStatus('Loading WalletConnect…');
       const s = document.createElement('script');
-      s.src = 'https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.13.0/dist/index.umd.js';
+      s.src = '../miniapp/wc-bundle.js'; // local bundle served by Railway
       s.onload  = () => { wcSdkLoaded = true; hideStatus(); cb(); };
-      s.onerror = () => { hideStatus(); showError('Could not load WalletConnect SDK. Check your connection.'); };
+      s.onerror = () => {
+        // Fallback to CDN if local fails
+        const s2 = document.createElement('script');
+        s2.src = 'https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.13.0/dist/index.umd.js';
+        s2.onload  = () => { wcSdkLoaded = true; hideStatus(); cb(); };
+        s2.onerror = () => { hideStatus(); showError('Could not load WalletConnect. Check your connection.'); };
+        document.head.appendChild(s2);
+      };
       document.head.appendChild(s);
     }
 
@@ -297,11 +310,16 @@
       document.getElementById('wallet-btns').style.display = 'none';
       loadWCSdk(async () => {
         try {
-          const wcMod = window['@walletconnect/ethereum-provider']
+          // window.WC = { EthereumProvider } set by local wc-bundle.js
+          const EthereumProvider =
+            window.WC?.EthereumProvider
+            || window['@walletconnect/ethereum-provider']?.EthereumProvider
             || window.EthereumProvider
+            || window.WalletConnectEthereumProvider?.EthereumProvider
             || window.WalletConnectEthereumProvider;
-          const EthereumProvider = wcMod?.EthereumProvider || wcMod?.default?.EthereumProvider || wcMod?.default || wcMod;
-          if (!EthereumProvider || typeof EthereumProvider.init !== 'function') throw new Error('EthereumProvider not found in bundle');
+          if (!EthereumProvider || typeof EthereumProvider.init !== 'function') {
+            throw new Error('WalletConnect SDK not loaded — try refreshing');
+          }
           showStatus('Initializing WalletConnect…');
           wcProvider = await EthereumProvider.init({
             projectId: WC_PROJECT_ID,
