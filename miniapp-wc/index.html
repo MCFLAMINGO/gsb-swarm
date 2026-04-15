@@ -250,13 +250,12 @@
             const accounts = await window.phantom.ethereum.request({ method: 'eth_requestAccounts' });
             await onWalletConnected(accounts[0], 'evm'); return;
           }
-          // Phantom not installed — open Phantom deep link to this page
-          const thisPage = encodeURIComponent(window.location.href);
-          const phantomLink = `https://phantom.app/ul/browse/${thisPage}?ref=${encodeURIComponent('https://gsb-swarm-production.up.railway.app')}`;
+          // Phantom not injected — deep link directly into Phantom browser
+          const thisPage     = encodeURIComponent(window.location.href);
+          const phantomLink  = `https://phantom.app/ul/browse/${thisPage}?ref=${encodeURIComponent('https://gsb-swarm-production.up.railway.app')}`;
           hideStatus(); setDisabled(false);
-          showError('Phantom not installed. Tap here to open in Phantom browser.');
-          document.getElementById('err-msg').style.cursor = 'pointer';
-          document.getElementById('err-msg').onclick = () => window.location.href = phantomLink;
+          // In Telegram (or any WebView) just navigate immediately — no extra tap needed
+          window.location.href = phantomLink;
           return;
         }
         let evmProvider = null;
