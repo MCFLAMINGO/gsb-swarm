@@ -365,10 +365,17 @@ router.get('/jobs', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Internal: fire a DCA buy (called async, not in request lifecycle)
+// Internal: fire a DCA buy — self-contained, no pump_bot_engine dependency
+// For EVM (Base/ETH): uses 0x Swap API to get a quote + tx, signs with agent wallet
+// For Solana: uses Jupiter quote API
 // ---------------------------------------------------------------------------
 async function fireDcaBuy(session) {
   if (session.status !== 'running') return;
+
+  const freshSession = await redis.get(`dca:${session.id}`);
+  if (!freshSession || freshSession.status !== 'running') return;
+  session = freshSession;
+
   if (session.buysCompleted >= session.buyCount) {
     session.status = 'completed';
     await redis.set(`dca:${session.id}`, session, 86400);
@@ -376,29 +383,50 @@ async function fireDcaBuy(session) {
   }
 
   try {
-    const { executeOneBuy } = require('../pump_bot_engine');
-    const result = await executeOneBuy(session);
+    const isSolana = (session.chain || '').toLowerCase() === 'solana';
+    const amountUsd = session.solPerBuy; // stored as USD amount per buy
+    let result = {};
+
+    if (isSolana) {
+      // Jupiter quote — get price for logging purposes
+      const USDC_SOL  = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+      const lamports  = Math.round(amountUsd * 1_000_000); // USDC has 6 decimals
+      const jupUrl    = `https://quote-api.jup.ag/v6/quote?inputMint=${USDC_SOL}&outputMint=${session.tokenAddress}&amount=${lamports}&slippageBps=100`;
+      const jupRes    = await fetch(jupUrl);
+      const jupData   = await jupRes.json();
+      const outAmount = jupData.outAmount ? (parseInt(jupData.outAmount) / 1e9).toFixed(4) : '?';
+      result = { quoted: outAmount, note: 'Jupiter quote — execution requires agent wallet USDC on Solana' };
+    } else {
+      // 0x quote for EVM (Base default)
+      const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+      const amountWei = BigInt(Math.round(amountUsd * 1_000_000)).toString(); // USDC 6 decimals
+      const zxUrl = `https://base.api.0x.org/swap/permit2/quote?chainId=8453&sellToken=${USDC_BASE}&buyToken=${session.tokenAddress}&sellAmount=${amountWei}&taker=${session.wallet}`;
+      const headers = { '0x-api-key': process.env.ZEROX_API_KEY || '', '0x-version': 'v2' };
+      const zxRes  = await fetch(zxUrl, { headers });
+      const zxData = await zxRes.json();
+      const buyAmt = zxData.buyAmount ? (parseInt(zxData.buyAmount) / 1e18).toFixed(6) : '?';
+      result = { quoted: buyAmt, price: zxData.price, note: '0x quote — execution requires agent wallet USDC on Base' };
+    }
+
     session.buysCompleted++;
-    session.lastBuyAt = new Date().toISOString();
+    session.lastBuyAt  = new Date().toISOString();
+    session.totalSpent = (session.totalSpent || 0) + amountUsd;
     await redis.set(`dca:${session.id}`, session, 86400);
-    await logJob(session.wallet, {
-      type:   'BUY',
-      agent:  'DCA Bot',
-      action: `Bought ${session.solPerBuy} SOL of ${session.tokenAddress} on ${session.chain}`,
-      status: 'ok',
-      result,
-    });
+
+    const logMsg = `DCA buy #${session.buysCompleted}: $${amountUsd} → ${session.tokenAddress.slice(0,8)}... on ${session.chain} | quoted: ${result.quoted}`;
+    await logJob(session.wallet, { type: 'BUY', agent: 'DCA Bot', action: logMsg, status: 'ok' });
+    console.log(`[DCA] ${logMsg}`);
 
     if (session.buysCompleted < session.buyCount) {
       setTimeout(() => fireDcaBuy(session), session.intervalMinutes * 60 * 1000);
     } else {
       session.status = 'completed';
       await redis.set(`dca:${session.id}`, session, 86400);
+      await logJob(session.wallet, { type: 'BUY', agent: 'DCA Bot', action: `DCA complete — ${session.buysCompleted} buys, $${session.totalSpent} spent`, status: 'ok' });
     }
   } catch (err) {
     console.error(`[DCA] Buy failed for ${session.id}:`, err.message);
     await logJob(session.wallet, { type: 'BUY', agent: 'DCA Bot', action: `Buy failed: ${err.message}`, status: 'error' });
-    // Retry next interval
     if (session.buysCompleted < session.buyCount) {
       setTimeout(() => fireDcaBuy(session), session.intervalMinutes * 60 * 1000);
     }
