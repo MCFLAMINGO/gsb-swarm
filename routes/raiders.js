@@ -7,6 +7,83 @@ const router  = express.Router();
 const redis   = require('./redis-client');
 const crypto  = require('crypto');
 
+// ── Swap execution constants ──────────────────────────────────────────────────
+const USDC_BASE   = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const WETH_BASE   = '0x4200000000000000000000000000000000000006';
+const ROUTER_BASE = '0x2626664c2603336E57B271c5C0b26F421741e481'; // Uniswap v3 SwapRouter02
+const BASE_RPC    = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
+const SERVICE_FEE = 0.01; // 1%
+
+const ERC20_ABI = [
+  { name:'allowance',   type:'function', stateMutability:'view',
+    inputs:[{name:'owner',type:'address'},{name:'spender',type:'address'}],
+    outputs:[{name:'',type:'uint256'}] },
+  { name:'balanceOf',   type:'function', stateMutability:'view',
+    inputs:[{name:'account',type:'address'}], outputs:[{name:'',type:'uint256'}] },
+];
+
+const ROUTER_ABI = [{
+  name: 'exactInput', type: 'function', stateMutability: 'payable',
+  inputs: [{ name:'params', type:'tuple', components: [
+    {name:'path',      type:'bytes'},
+    {name:'recipient', type:'address'},
+    {name:'amountIn',  type:'uint256'},
+    {name:'amountOutMinimum', type:'uint256'},
+  ]}],
+  outputs:[{name:'amountOut',type:'uint256'}],
+}];
+
+function encodePath(tokens, fees) {
+  let encoded = tokens[0].slice(2).toLowerCase();
+  for (let i = 0; i < fees.length; i++) {
+    encoded += fees[i].toString(16).padStart(6, '0');
+    encoded += tokens[i+1].slice(2).toLowerCase();
+  }
+  return '0x' + encoded;
+}
+
+async function executeSwapOnBase({ userWallet, tokenOut, amountUsd }) {
+  const { createWalletClient, createPublicClient, http, parseUnits } = require('viem');
+  const { base } = require('viem/chains');
+  const { privateKeyToAccount } = require('viem/accounts');
+
+  const pk = process.env.AGENT_WALLET_PRIVATE_KEY;
+  if (!pk) throw new Error('AGENT_WALLET_PRIVATE_KEY not set');
+
+  const account      = privateKeyToAccount(pk);
+  const publicClient = createPublicClient({ chain: base, transport: http(BASE_RPC) });
+  const walletClient = createWalletClient({ account, chain: base, transport: http(BASE_RPC) });
+
+  // Apply 1% service fee — deduct from buy amount
+  const netAmountUsd = amountUsd * (1 - SERVICE_FEE);
+  const amountIn     = parseUnits(netAmountUsd.toFixed(6), 6); // USDC 6 decimals
+
+  // Check user's USDC allowance to router is sufficient
+  const allowance = await publicClient.readContract({
+    address: USDC_BASE, abi: ERC20_ABI,
+    functionName: 'allowance',
+    args: [userWallet, ROUTER_BASE],
+  });
+  if (BigInt(allowance) < BigInt(amountIn)) {
+    throw new Error(`Insufficient USDC allowance. User has ${Number(allowance)/1e6} USDC approved, need ${netAmountUsd.toFixed(2)}`);
+  }
+
+  // Build path: USDC → WETH (0.05%) → TOKEN (0.3%)
+  const path = encodePath([USDC_BASE, WETH_BASE, tokenOut], [500, 3000]);
+
+  // Agent wallet calls exactInput — router pulls USDC from USER via allowance
+  // recipient = userWallet so tokens go directly to user
+  const hash = await walletClient.writeContract({
+    address: ROUTER_BASE,
+    abi:     ROUTER_ABI,
+    functionName: 'exactInput',
+    args: [{ path, recipient: userWallet, amountIn: BigInt(amountIn), amountOutMinimum: 0n }],
+  });
+
+  const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 60_000 });
+  return { hash, gasUsed: receipt.gasUsed.toString(), status: receipt.status };
+}
+
 const X_CLIENT_ID     = process.env.X_CLIENT_ID;
 const X_CLIENT_SECRET = process.env.X_CLIENT_SECRET;
 const X_CALLBACK_URL  = process.env.X_CALLBACK_URL || 'https://raiders-of-the-chain.vercel.app/auth/x/callback';
@@ -388,24 +465,22 @@ async function fireDcaBuy(session) {
     let result = {};
 
     if (isSolana) {
-      // Jupiter quote — get price for logging purposes
-      const USDC_SOL  = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-      const lamports  = Math.round(amountUsd * 1_000_000); // USDC has 6 decimals
-      const jupUrl    = `https://quote-api.jup.ag/v6/quote?inputMint=${USDC_SOL}&outputMint=${session.tokenAddress}&amount=${lamports}&slippageBps=100`;
-      const jupRes    = await fetch(jupUrl);
-      const jupData   = await jupRes.json();
-      const outAmount = jupData.outAmount ? (parseInt(jupData.outAmount) / 1e9).toFixed(4) : '?';
-      result = { quoted: outAmount, note: 'Jupiter quote — execution requires agent wallet USDC on Solana' };
+      // Solana: Jupiter quote for now, execution coming soon
+      const USDC_SOL = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+      const lamports = Math.round(amountUsd * 1_000_000);
+      const jupUrl   = `https://quote-api.jup.ag/v6/quote?inputMint=${USDC_SOL}&outputMint=${session.tokenAddress}&amount=${lamports}&slippageBps=100`;
+      const jupRes   = await fetch(jupUrl);
+      const jupData  = await jupRes.json();
+      const outAmt   = jupData.outAmount ? (parseInt(jupData.outAmount) / 1e9).toFixed(4) : '?';
+      result = { quoted: outAmt, executed: false, note: 'Solana execution coming soon' };
     } else {
-      // 0x quote for EVM (Base default)
-      const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-      const amountWei = BigInt(Math.round(amountUsd * 1_000_000)).toString(); // USDC 6 decimals
-      const zxUrl = `https://base.api.0x.org/swap/permit2/quote?chainId=8453&sellToken=${USDC_BASE}&buyToken=${session.tokenAddress}&sellAmount=${amountWei}&taker=${session.wallet}`;
-      const headers = { '0x-api-key': process.env.ZEROX_API_KEY || '', '0x-version': 'v2' };
-      const zxRes  = await fetch(zxUrl, { headers });
-      const zxData = await zxRes.json();
-      const buyAmt = zxData.buyAmount ? (parseInt(zxData.buyAmount) / 1e18).toFixed(6) : '?';
-      result = { quoted: buyAmt, price: zxData.price, note: '0x quote — execution requires agent wallet USDC on Base' };
+      // Base/EVM: execute real swap via Uniswap v3 using user's USDC allowance
+      result = await executeSwapOnBase({
+        userWallet: session.wallet,
+        tokenOut:   session.tokenAddress,
+        amountUsd,
+      });
+      result.executed = true;
     }
 
     session.buysCompleted++;
@@ -413,7 +488,8 @@ async function fireDcaBuy(session) {
     session.totalSpent = (session.totalSpent || 0) + amountUsd;
     await redis.set(`dca:${session.id}`, session, 86400);
 
-    const logMsg = `DCA buy #${session.buysCompleted}: $${amountUsd} → ${session.tokenAddress.slice(0,8)}... on ${session.chain} | quoted: ${result.quoted}`;
+    const execNote = result.executed ? `tx: ${result.hash}` : `quoted: ${result.quoted} (${result.note})`;
+    const logMsg = `DCA buy #${session.buysCompleted}: $${amountUsd} → ${session.tokenAddress.slice(0,8)}... on ${session.chain} | ${execNote}`;
     await logJob(session.wallet, { type: 'BUY', agent: 'DCA Bot', action: logMsg, status: 'ok' });
     console.log(`[DCA] ${logMsg}`);
 
