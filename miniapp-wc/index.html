@@ -175,8 +175,6 @@
 
   <div class="footer">Powered by GSB Swarm · Your keys stay in your wallet</div>
 
-  <!-- Preload local WC bundle — avoids delay on first tap -->
-  <script src="../miniapp/wc-bundle.js"></script>
   <script>
     const WC_PROJECT_ID = 'ff5dd5e462b92932d7b28c00b81695e8';
     const API_BASE      = 'https://gsb-swarm-production.up.railway.app';
@@ -386,18 +384,34 @@
       if (wcProvider) { try { wcProvider.disconnect(); } catch(_) {} wcProvider = null; }
     }
 
-    // ── Init ──────────────────────────────────────────────────────────────────
+    // ── Init + Telegram context detection ─────────────────────────────────────
+    const isTelegram = !!(window.Telegram?.WebApp?.initData || window.Telegram?.WebApp?.platform);
+
     window.addEventListener('load', () => {
       if (!userId || userId === 'unknown') {
         document.getElementById('card-sub').textContent =
           'Open this page from the GSB bot to link your wallet automatically.';
       }
-      // Update hints if extensions not present
-      if (!window.ethereum && !window.phantom) {
-        ['phantom-hint'].forEach(id => {
-          const el = document.getElementById(id);
-          if (el) el.textContent = 'Tap to open in Phantom browser';
+
+      if (isTelegram) {
+        // Inside Telegram WebView — no injected wallets exist; hide them
+        ['btn-phantom', 'btn-metamask', 'btn-coinbase'].forEach(id => {
+          const btn = document.getElementById(id);
+          if (!btn) return;
+          btn.disabled = true;
+          btn.style.opacity = '0.35';
+          btn.style.cursor  = 'not-allowed';
+          const hint = btn.querySelector('.wallet-btn-hint');
+          if (hint) hint.textContent = 'Not available in Telegram';
         });
+        // Auto-start WalletConnect as primary option
+        openWalletConnect();
+      } else {
+        // Browser: update hints if extensions not present
+        if (!window.ethereum && !window.phantom) {
+          const el = document.getElementById('phantom-hint');
+          if (el) el.textContent = 'Tap to open in Phantom browser';
+        }
       }
     });
   </script>
