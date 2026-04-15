@@ -179,13 +179,17 @@
     const WC_PROJECT_ID = 'ff5dd5e462b92932d7b28c00b81695e8';
     const API_BASE      = 'https://gsb-swarm-production.up.railway.app';
     const _params       = new URLSearchParams(window.location.search);
-    const userId        = _params.get('userId')    || 'unknown';
-    const returnUrl     = _params.get('returnUrl') || 'https://t.me/gsb_swap_bot';
 
+    // Init Telegram WebApp early so we can read user.id
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.ready();
       window.Telegram.WebApp.expand();
     }
+
+    // Prefer URL param, fall back to Telegram identity
+    const _tgUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+    const userId    = _params.get('userId') || (_tgUserId ? String(_tgUserId) : 'unknown');
+    const returnUrl = _params.get('returnUrl') || 'https://t.me/gsb_swap_bot';
 
     // ── UI helpers ────────────────────────────────────────────────────────────
     function showStatus(msg) {
@@ -393,19 +397,20 @@
           'Open this page from the GSB bot to link your wallet automatically.';
       }
 
+      // If userId was resolved (URL param or Telegram identity), clear the fallback message
+      if (userId && userId !== 'unknown') {
+        const sub = document.getElementById('card-sub');
+        if (sub && sub.textContent.includes('GSB bot')) {
+          sub.textContent = 'Choose your wallet to link it to your GSB account.';
+        }
+      }
+
+      // In Telegram: update hints for wallets that need browser injection
       if (isTelegram) {
-        // Inside Telegram WebView — no injected wallets exist; hide them
-        ['btn-phantom', 'btn-metamask', 'btn-coinbase'].forEach(id => {
-          const btn = document.getElementById(id);
-          if (!btn) return;
-          btn.disabled = true;
-          btn.style.opacity = '0.35';
-          btn.style.cursor  = 'not-allowed';
-          const hint = btn.querySelector('.wallet-btn-hint');
-          if (hint) hint.textContent = 'Not available in Telegram';
-        });
-        // Auto-start WalletConnect as primary option
-        openWalletConnect();
+        if (!window.ethereum && !window.phantom) {
+          const el = document.getElementById('phantom-hint');
+          if (el) el.textContent = 'Opens in Phantom browser';
+        }
       } else {
         // Browser: update hints if extensions not present
         if (!window.ethereum && !window.phantom) {
