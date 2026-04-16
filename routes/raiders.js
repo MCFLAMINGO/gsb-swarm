@@ -84,6 +84,72 @@ async function executeSwapOnBase({ userWallet, tokenOut, amountUsd }) {
   return { hash, gasUsed: receipt.gasUsed.toString(), status: receipt.status };
 }
 
+// ── Solana swap execution constants ──────────────────────────────────────────
+const USDC_SOL_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const HELIUS_RPC    = process.env.HELIUS_RPC_URL || 'https://api.mainnet-beta.solana.com';
+
+async function executeSwapOnSolana({ userWallet, tokenOut, amountUsd }) {
+  const { Connection, Keypair, VersionedTransaction } = require('@solana/web3.js');
+  const bs58 = require('bs58');
+
+  const connection = new Connection(HELIUS_RPC, 'confirmed');
+
+  // Agent wallet from env (base58 private key)
+  const agentPkBase58 = process.env.SOLANA_AGENT_PRIVATE_KEY;
+  if (!agentPkBase58) throw new Error('SOLANA_AGENT_PRIVATE_KEY not set');
+  const agentKeypair = Keypair.fromSecretKey(bs58.decode(agentPkBase58));
+
+  const netAmount = amountUsd * (1 - SERVICE_FEE);
+  const amountLamports = Math.round(netAmount * 1_000_000); // USDC 6 decimals
+
+  // 1. Get Jupiter v6 quote
+  const quoteRes = await fetch(
+    `https://quote-api.jup.ag/v6/quote?inputMint=${USDC_SOL_MINT}&outputMint=${tokenOut}&amount=${amountLamports}&slippageBps=100&onlyDirectRoutes=false`
+  );
+  const quote = await quoteRes.json();
+  if (quote.error) throw new Error('Jupiter quote failed: ' + quote.error);
+
+  // 2. Get swap transaction — agent signs, output goes to agent then transferred
+  const swapRes = await fetch('https://quote-api.jup.ag/v6/swap', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      quoteResponse: quote,
+      userPublicKey: agentKeypair.publicKey.toString(),
+      destinationTokenAccount: userWallet, // send output tokens to user's wallet ATA
+      dynamicComputeUnitLimit: true,
+      prioritizationFeeLamports: 'auto',
+    }),
+  });
+  const swapData = await swapRes.json();
+  if (swapData.error) throw new Error('Jupiter swap failed: ' + swapData.error);
+
+  // 3. Deserialize, sign, send
+  const swapTxBuf = Buffer.from(swapData.swapTransaction, 'base64');
+  const transaction = VersionedTransaction.deserialize(swapTxBuf);
+  transaction.sign([agentKeypair]);
+
+  const rawTx = transaction.serialize();
+  const sig = await connection.sendRawTransaction(rawTx, {
+    skipPreflight: false,
+    maxRetries: 3,
+  });
+
+  // 4. Confirm
+  const latestBlockhash = await connection.getLatestBlockhash();
+  await connection.confirmTransaction(
+    { signature: sig, ...latestBlockhash },
+    'confirmed'
+  );
+
+  return {
+    hash: sig,
+    executed: true,
+    outAmount: quote.outAmount,
+    explorerUrl: `https://solscan.io/tx/${sig}`,
+  };
+}
+
 const X_CLIENT_ID     = process.env.X_CLIENT_ID;
 const X_CLIENT_SECRET = process.env.X_CLIENT_SECRET;
 const X_CALLBACK_URL  = process.env.X_CALLBACK_URL || 'https://raiders-of-the-chain.vercel.app/auth/x/callback';
@@ -443,8 +509,8 @@ router.get('/jobs', async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // Internal: fire a DCA buy — self-contained, no pump_bot_engine dependency
-// For EVM (Base/ETH): uses 0x Swap API to get a quote + tx, signs with agent wallet
-// For Solana: uses Jupiter quote API
+// For EVM (Base/ETH): uses Uniswap v3 via user's USDC allowance
+// For Solana: uses Jupiter v6 swap + Helius RPC, agent wallet signs
 // ---------------------------------------------------------------------------
 async function fireDcaBuy(session) {
   if (session.status !== 'running') return;
@@ -465,14 +531,13 @@ async function fireDcaBuy(session) {
     let result = {};
 
     if (isSolana) {
-      // Solana: Jupiter quote for now, execution coming soon
-      const USDC_SOL = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-      const lamports = Math.round(amountUsd * 1_000_000);
-      const jupUrl   = `https://quote-api.jup.ag/v6/quote?inputMint=${USDC_SOL}&outputMint=${session.tokenAddress}&amount=${lamports}&slippageBps=100`;
-      const jupRes   = await fetch(jupUrl);
-      const jupData  = await jupRes.json();
-      const outAmt   = jupData.outAmount ? (parseInt(jupData.outAmount) / 1e9).toFixed(4) : '?';
-      result = { quoted: outAmt, executed: false, note: 'Solana execution coming soon' };
+      // Solana: real execution via Jupiter v6 + Helius RPC
+      result = await executeSwapOnSolana({
+        userWallet: session.wallet,
+        tokenOut:   session.tokenAddress,
+        amountUsd,
+      });
+      result.executed = true;
     } else {
       // Base/EVM: execute real swap via Uniswap v3 using user's USDC allowance
       result = await executeSwapOnBase({
