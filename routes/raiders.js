@@ -95,8 +95,8 @@ async function executeSwapOnSolana({ userWallet, tokenOut, amountUsd }) {
   const connection = new Connection(HELIUS_RPC, 'confirmed');
 
   // Agent wallet from env (base58 private key)
-  const agentPkBase58 = process.env.SOLANA_AGENT_PRIVATE_KEY;
-  if (!agentPkBase58) throw new Error('SOLANA_AGENT_PRIVATE_KEY not set');
+  const agentPkBase58 = process.env.SOLANA_AGENT_PRIVATE_KEY || process.env.SOL_PRIVATE_KEY;
+  if (!agentPkBase58) throw new Error('SOL_PRIVATE_KEY not set in Railway');
   const agentKeypair = Keypair.fromSecretKey(bs58.decode(agentPkBase58));
 
   const netAmount = amountUsd * (1 - SERVICE_FEE);
