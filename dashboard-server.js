@@ -4751,3 +4751,74 @@ app.get('/api/tg-test', requireOperator, async (req, res) => {
     res.json({ ok: false, error: e.message });
   }
 });
+
+/* ══════════════════ THROW WATCHER PROXY ══════════════════════════════════ */
+const THROW_WATCHER_URL = process.env.THROW_WATCHER_URL || 'https://throw-watcher-production.up.railway.app';
+
+async function throwFetch(path, opts = {}) {
+  const res = await fetch(THROW_WATCHER_URL + path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+  });
+  const text = await res.text();
+  let json;
+  try { json = JSON.parse(text); } catch(_) { json = { raw: text }; }
+  return { ok: res.ok, status: res.status, json };
+}
+
+app.get('/api/throw/status', async (_req, res) => {
+  try {
+    const { ok, json } = await throwFetch('/throw-watcher/status');
+    res.status(ok ? 200 : 502).json(json);
+  } catch(e) { res.status(502).json({ error: e.message }); }
+});
+
+app.get('/api/throw/throws', async (_req, res) => {
+  try {
+    const { ok, json } = await throwFetch('/throw-watcher/throws');
+    res.status(ok ? 200 : 502).json(json);
+  } catch(e) { res.status(502).json({ error: e.message }); }
+});
+
+app.get('/api/throw/campaigns', async (_req, res) => {
+  try {
+    const { ok, json } = await throwFetch('/throw-watcher/campaigns');
+    res.status(ok ? 200 : 502).json(json);
+  } catch(e) { res.status(502).json({ error: e.message }); }
+});
+
+app.post('/api/throw/campaigns', requireOperator, async (req, res) => {
+  try {
+    const { ok, status, json } = await throwFetch('/throw-watcher/campaigns', {
+      method: 'POST', body: JSON.stringify(req.body),
+    });
+    res.status(ok ? 201 : status).json(json);
+  } catch(e) { res.status(502).json({ error: e.message }); }
+});
+
+app.put('/api/throw/campaigns/:id', requireOperator, async (req, res) => {
+  try {
+    const { ok, status, json } = await throwFetch('/throw-watcher/campaigns/' + req.params.id, {
+      method: 'PUT', body: JSON.stringify(req.body),
+    });
+    res.status(ok ? 200 : status).json(json);
+  } catch(e) { res.status(502).json({ error: e.message }); }
+});
+
+app.delete('/api/throw/campaigns/:id', requireOperator, async (req, res) => {
+  try {
+    const { ok, status, json } = await throwFetch('/throw-watcher/campaigns/' + req.params.id, {
+      method: 'DELETE',
+    });
+    res.status(ok ? 200 : status).json(json);
+  } catch(e) { res.status(502).json({ error: e.message }); }
+});
+
+app.post('/api/throw/broadcast', requireOperator, async (req, res) => {
+  try {
+    const { ok, status, json } = await throwFetch('/throw-watcher/broadcast', {
+      method: 'POST', body: JSON.stringify(req.body),
+    });
+    res.status(ok ? 200 : status).json(json);
+  } catch(e) { res.status(502).json({ error: e.message }); }
+});

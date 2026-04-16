@@ -63,6 +63,12 @@
       </svg>
       <span>Skills</span>
     </a>
+    <a href="#throw" class="nav-item" data-section="throw">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="19" x2="12" y2="5"/><path d="M5 12l7-7 7 7"/>
+      </svg>
+      <span>THROW</span>
+    </a>
   </nav>
 
   <div class="sidebar-footer">
@@ -401,6 +407,144 @@
         </div>
       </div>
     </div>
+  </section>
+
+  <!-- ══════════════════════ THROW ADMIN ══════════════════════════════════ -->
+  <section class="section" id="section-throw">
+    <div class="section-header">
+      <h2>THROW</h2>
+      <button class="btn-ghost-sm" id="throw-refresh-btn" onclick="loadThrowData()">↻ Refresh</button>
+    </div>
+
+    <!-- KPI row -->
+    <div class="throw-kpi-row">
+      <div class="throw-kpi-card">
+        <div class="throw-kpi-label">THROWS TODAY</div>
+        <div class="throw-kpi-val" id="tw-throws-today">—</div>
+      </div>
+      <div class="throw-kpi-card">
+        <div class="throw-kpi-label">VOLUME TODAY</div>
+        <div class="throw-kpi-val accent" id="tw-vol-today">—</div>
+      </div>
+      <div class="throw-kpi-card">
+        <div class="throw-kpi-label">ALL-TIME THROWS</div>
+        <div class="throw-kpi-val" id="tw-throws-total">—</div>
+      </div>
+      <div class="throw-kpi-card">
+        <div class="throw-kpi-label">ALL-TIME VOLUME</div>
+        <div class="throw-kpi-val accent" id="tw-vol-total">—</div>
+      </div>
+      <div class="throw-kpi-card">
+        <div class="throw-kpi-label">REGISTERED WALLETS</div>
+        <div class="throw-kpi-val" id="tw-wallets">—</div>
+      </div>
+      <div class="throw-kpi-card">
+        <div class="throw-kpi-label">WATCHER STATUS</div>
+        <div class="throw-kpi-val" id="tw-status">—</div>
+      </div>
+    </div>
+
+    <!-- Two-column: feed + ads -->
+    <div class="throw-cols">
+
+      <!-- Left: live throw feed -->
+      <div class="throw-col">
+        <div class="throw-col-header">LIVE THROW FEED</div>
+        <div class="throw-feed-wrap">
+          <table class="throw-feed-table">
+            <thead>
+              <tr>
+                <th>TIME</th>
+                <th>FROM</th>
+                <th>TO</th>
+                <th>AMOUNT</th>
+                <th>TOKEN</th>
+                <th>TX</th>
+              </tr>
+            </thead>
+            <tbody id="tw-feed-body">
+              <tr><td colspan="6" class="muted" style="text-align:center;padding:20px">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Right: ad campaigns -->
+      <div class="throw-col">
+        <div class="throw-col-header">
+          AD CAMPAIGNS
+          <button class="btn-ghost-sm" id="tw-new-campaign-btn" onclick="openCampaignForm()">+ New</button>
+        </div>
+
+        <!-- Campaign form (hidden by default) -->
+        <div class="tw-campaign-form hidden" id="tw-campaign-form">
+          <div class="tw-form-row">
+            <div class="tw-form-group">
+              <label>Advertiser</label>
+              <input id="tw-adv-name" type="text" placeholder="Brand name" class="tw-input" />
+            </div>
+            <div class="tw-form-group">
+              <label>Budget ($)</label>
+              <input id="tw-adv-budget" type="number" placeholder="500" class="tw-input" />
+            </div>
+          </div>
+          <div class="tw-form-row">
+            <div class="tw-form-group">
+              <label>CPM Rate ($)</label>
+              <input id="tw-adv-cpm" type="number" placeholder="2.50" step="0.01" class="tw-input" />
+            </div>
+            <div class="tw-form-group">
+              <label>Start Date</label>
+              <input id="tw-adv-start" type="date" class="tw-input" />
+            </div>
+            <div class="tw-form-group">
+              <label>End Date</label>
+              <input id="tw-adv-end" type="date" class="tw-input" />
+            </div>
+          </div>
+          <div class="tw-form-group">
+            <label>Ad Copy (max 120 chars)</label>
+            <input id="tw-adv-copy" type="text" maxlength="120" placeholder="Throw $5, get $1 back at Bud Light venues →" class="tw-input" />
+          </div>
+          <div class="tw-form-row">
+            <div class="tw-form-group">
+              <label>Image URL (optional)</label>
+              <input id="tw-adv-img" type="text" placeholder="https://..." class="tw-input" />
+            </div>
+            <div class="tw-form-group">
+              <label>Target</label>
+              <select id="tw-adv-target" class="tw-input">
+                <option value="all">All wallets</option>
+                <option value="active">Active (threw in 7d)</option>
+                <option value="new">New (registered &lt;7d)</option>
+              </select>
+            </div>
+          </div>
+          <div class="tw-form-actions">
+            <button class="btn-primary" onclick="submitCampaign()">Save Campaign</button>
+            <button class="btn-ghost-sm" onclick="closeCampaignForm()">Cancel</button>
+          </div>
+          <div class="tw-form-msg hidden" id="tw-form-msg"></div>
+        </div>
+
+        <!-- Campaigns list -->
+        <div class="tw-campaigns-list" id="tw-campaigns-list">
+          <div class="muted" style="padding:16px;text-align:center">Loading campaigns…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Push broadcast -->
+    <div class="throw-push-row">
+      <div class="throw-col-header">BROADCAST PUSH</div>
+      <div class="tw-push-form">
+        <input id="tw-push-title" type="text" placeholder="Notification title" class="tw-input" style="flex:1" />
+        <input id="tw-push-body" type="text" placeholder="Message body" class="tw-input" style="flex:2" />
+        <button class="btn-primary" onclick="sendBroadcastPush()">Send to All</button>
+      </div>
+      <div class="tw-push-msg hidden" id="tw-push-msg"></div>
+    </div>
+
   </section>
 
 </main>

@@ -940,3 +940,217 @@ document.getElementById('sf-save')?.addEventListener('click', async () => {
     await loadSkillRegistry();
   }
 });
+
+/* ══════════════════ THROW ADMIN ══════════════════════════════════════════ */
+const THROW_WATCHER = 'https://throw-watcher-production.up.railway.app';
+
+async function loadThrowData() {
+  try {
+    const [statusRes, throwsRes, campaignsRes] = await Promise.all([
+      fetch(`${API_BASE}/api/throw/status`),
+      fetch(`${API_BASE}/api/throw/throws`),
+      fetch(`${API_BASE}/api/throw/campaigns`),
+    ]);
+
+    // KPIs
+    if (statusRes.ok) {
+      const s = await statusRes.json();
+      setText('tw-throws-today', s.throwsToday ?? '—');
+      setText('tw-vol-today',    s.volumeToday != null ? '$' + s.volumeToday.toFixed(2) : '—');
+      setText('tw-throws-total', s.throwsTotal ?? '—');
+      setText('tw-vol-total',    s.volumeTotal != null ? '$' + s.volumeTotal.toFixed(2) : '—');
+      setText('tw-wallets',      s.registeredWallets ?? '—');
+      const statusEl = document.getElementById('tw-status');
+      if (statusEl) {
+        statusEl.textContent = s.watcherStatus ?? '—';
+        statusEl.style.color = s.watcherStatus === 'ok' ? 'var(--accent)' : 'var(--gold)';
+      }
+    }
+
+    // Feed
+    if (throwsRes.ok) {
+      const throws = await throwsRes.json();
+      renderThrowFeed(throws);
+    }
+
+    // Campaigns
+    if (campaignsRes.ok) {
+      const campaigns = await campaignsRes.json();
+      renderCampaigns(campaigns);
+    }
+  } catch (e) {
+    console.warn('[throw admin] loadThrowData error:', e.message);
+  }
+}
+
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+function renderThrowFeed(throws) {
+  const tbody = document.getElementById('tw-feed-body');
+  if (!tbody) return;
+  if (!throws || !throws.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">No throws yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = throws.slice(0, 50).map(t => {
+    const time = t.ts ? new Date(t.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
+    const from = t.fromHandle || (t.from ? t.from.slice(0,6) + '…' + t.from.slice(-4) : '—');
+    const to   = t.toHandle   || (t.to   ? t.to.slice(0,6)   + '…' + t.to.slice(-4)   : '—');
+    const amt  = t.amount != null ? '$' + parseFloat(t.amount).toFixed(2) : '—';
+    const token = t.token || '—';
+    const txLink = t.txHash
+      ? `<a class="tw-tx-link" href="https://explorer.tempo.fan/tx/${t.txHash}" target="_blank" rel="noopener">${t.txHash.slice(0,8)}…</a>`
+      : '—';
+    return `<tr>
+      <td>${time}</td>
+      <td class="tw-addr">${from}</td>
+      <td class="tw-addr">${to}</td>
+      <td class="tw-amount">${amt}</td>
+      <td class="muted">${token}</td>
+      <td>${txLink}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderCampaigns(campaigns) {
+  const list = document.getElementById('tw-campaigns-list');
+  if (!list) return;
+  if (!campaigns || !campaigns.length) {
+    list.innerHTML = '<div class="muted" style="padding:16px;text-align:center">No campaigns yet — create one above</div>';
+    return;
+  }
+  list.innerHTML = campaigns.map(c => {
+    const statusClass = c.status === 'active' ? 'green' : c.status === 'paused' ? 'gold' : 'red';
+    const impressions = c.impressions || 0;
+    const spend = impressions > 0 ? '$' + ((impressions / 1000) * (c.cpm || 0)).toFixed(2) : '$0.00';
+    return `<div class="tw-campaign-card">
+      <div class="tw-campaign-top">
+        <span class="tw-campaign-name">${c.advertiser || '—'}</span>
+        <span class="badge ${statusClass}">${c.status || 'draft'}</span>
+      </div>
+      <div class="tw-campaign-copy">"${c.copy || ''}"</div>
+      <div class="tw-campaign-meta">
+        <span>Budget: $${c.budget || 0}</span>
+        <span>CPM: $${c.cpm || 0}</span>
+        <span>Impr: ${impressions}</span>
+        <span>Spend: ${spend}</span>
+        <span>${c.startDate || ''} → ${c.endDate || ''}</span>
+      </div>
+      <div class="tw-campaign-actions">
+        ${c.status === 'active'
+          ? `<button class="btn-ghost-sm" onclick="toggleCampaign('${c.id}','paused')">Pause</button>`
+          : `<button class="btn-ghost-sm" onclick="toggleCampaign('${c.id}','active')">Activate</button>`}
+        <button class="btn-ghost-sm" style="color:var(--red)" onclick="deleteCampaign('${c.id}')">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openCampaignForm() {
+  document.getElementById('tw-campaign-form').classList.remove('hidden');
+  // Default dates
+  const today = new Date().toISOString().slice(0,10);
+  const future = new Date(Date.now() + 30*24*60*60*1000).toISOString().slice(0,10);
+  document.getElementById('tw-adv-start').value = today;
+  document.getElementById('tw-adv-end').value   = future;
+}
+function closeCampaignForm() {
+  document.getElementById('tw-campaign-form').classList.add('hidden');
+  hideCampaignMsg();
+}
+function showCampaignMsg(text, isErr) {
+  const el = document.getElementById('tw-form-msg');
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'tw-form-msg ' + (isErr ? 'err' : 'ok');
+}
+function hideCampaignMsg() {
+  const el = document.getElementById('tw-form-msg');
+  if (el) el.className = 'tw-form-msg hidden';
+}
+
+async function submitCampaign() {
+  const body = {
+    advertiser: document.getElementById('tw-adv-name').value.trim(),
+    budget:     parseFloat(document.getElementById('tw-adv-budget').value) || 0,
+    cpm:        parseFloat(document.getElementById('tw-adv-cpm').value)    || 0,
+    copy:       document.getElementById('tw-adv-copy').value.trim(),
+    imageUrl:   document.getElementById('tw-adv-img').value.trim(),
+    target:     document.getElementById('tw-adv-target').value,
+    startDate:  document.getElementById('tw-adv-start').value,
+    endDate:    document.getElementById('tw-adv-end').value,
+    status:     'active',
+  };
+  if (!body.advertiser || !body.copy) { showCampaignMsg('Advertiser and copy required', true); return; }
+  try {
+    const res = await fetch(`${API_BASE}/api/throw/campaigns`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-gsb-token': operatorToken || '' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    showCampaignMsg('Campaign saved ✓', false);
+    setTimeout(() => { closeCampaignForm(); loadThrowData(); }, 1200);
+  } catch (e) {
+    showCampaignMsg('Error: ' + e.message, true);
+  }
+}
+
+async function toggleCampaign(id, newStatus) {
+  try {
+    await fetch(`${API_BASE}/api/throw/campaigns/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'x-gsb-token': operatorToken || '' },
+      body: JSON.stringify({ status: newStatus }),
+    });
+    loadThrowData();
+  } catch (e) { console.warn(e); }
+}
+
+async function deleteCampaign(id) {
+  if (!confirm('Delete this campaign?')) return;
+  try {
+    await fetch(`${API_BASE}/api/throw/campaigns/${id}`, {
+      method: 'DELETE',
+      headers: { 'x-gsb-token': operatorToken || '' },
+    });
+    loadThrowData();
+  } catch (e) { console.warn(e); }
+}
+
+async function sendBroadcastPush() {
+  const title = document.getElementById('tw-push-title').value.trim();
+  const body  = document.getElementById('tw-push-body').value.trim();
+  const msgEl = document.getElementById('tw-push-msg');
+  if (!title || !body) {
+    if (msgEl) { msgEl.textContent = 'Title and body required'; msgEl.className = 'tw-push-msg err'; }
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/throw/broadcast`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-gsb-token': operatorToken || '' },
+      body: JSON.stringify({ title, body }),
+    });
+    const data = await res.json();
+    if (msgEl) {
+      msgEl.textContent = res.ok ? `Sent to ${data.sent || 0} wallets ✓` : 'Error: ' + (data.error || res.status);
+      msgEl.className = 'tw-push-msg ' + (res.ok ? 'ok' : 'err');
+      setTimeout(() => { msgEl.className = 'tw-push-msg hidden'; }, 4000);
+    }
+  } catch (e) {
+    if (msgEl) { msgEl.textContent = 'Error: ' + e.message; msgEl.className = 'tw-push-msg err'; }
+  }
+}
+
+// Hook into section navigation
+const _origNavTo = window._navTo;
+document.addEventListener('DOMContentLoaded', () => {
+  // Load throw data when throw tab is clicked
+  document.querySelectorAll('.nav-item[data-section="throw"]').forEach(el => {
+    el.addEventListener('click', () => setTimeout(loadThrowData, 100));
+  });
+});
