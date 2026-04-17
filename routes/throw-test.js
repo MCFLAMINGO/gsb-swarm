@@ -222,19 +222,21 @@ async function runThrowTest(send) {
       send({ step: 'Fund escrow fees', status: 'FAIL', detail: 'Neither party has pathUSD for escrow fee funding' });
       allPass = false; return allPass;
     }
-    await new Promise(r => setTimeout(r, 1500));
+    // Wait for fee funding tx to finalize before reading balance
+    await new Promise(r => setTimeout(r, 4000));
   } catch (e) {
     send({ step: 'Fund escrow fees', status: 'FAIL', detail: e.message });
     allPass = false; return allPass;
   }
 
   // ── Step 8: Settle → PLAYER ──
-  // Use raw BigInt balances to avoid floating point — fees eat into balance so we must read fresh
+  // Use raw BigInt balances — read AFTER all incoming txs are finalized
   send({ step: 'Escrow → PLAYER settlement', status: 'running' });
   try {
     const escrowUSDCRaw = await fetchBalanceRaw(USDC_ADDR, escrowAcct.address);
     const escrowPathRaw = await fetchBalanceRaw(PATHUSD_ADDR, escrowAcct.address);
-    const DUST_RAW = 500n; // 0.0005 in raw units
+    // Leave 500 raw dust buffer
+    const DUST_RAW = 500n;
 
     // Use pathUSD as fee token (we just funded it)
     const escrowClient = makeClient(escrowPK, PATHUSD_ADDR);
