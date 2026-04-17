@@ -234,17 +234,19 @@ async function runThrowTest(send) {
   // Settle each token separately using 94% of each balance (6% fee buffer).
   send({ step: 'Escrow → PLAYER settlement', status: 'running' });
   try {
-    const FEE_PCT = 0.06; // Tempo charges ~5-6% fee on transfers
+    // Tempo charges ~6% fee on RECEIVE + ~6% fee on SEND = ~12% total
+    // So from 100000 sent, ~88000 makes it through after both hops
+    const SEND_PCT = 0.88; // send 88% of nominal BET_AMOUNT
     let settled = [];
 
-    // Re-read escrow USDC.e balance fresh right before settling
+    // Re-read escrow USDC.e balance (RPC shows nominal, not post-receive-fee)
     const freshUSDC = await fetchBalance(USDC_ADDR, escrowAcct.address);
-    send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Fresh escrow: USDC.e $${freshUSDC.toFixed(6)} pathUSD $${escrowPath.toFixed(6)}` });
+    send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Escrow nominal: USDC.e $${freshUSDC.toFixed(6)} pathUSD $${escrowPath.toFixed(6)} — sending 88% of $${BET_AMOUNT}` });
 
     // Settle USDC.e using USDC.e as fee token (same token — most reliable)
     if (freshUSDC >= 0.002) {
-      // Apply another 6% fee buffer on top of the already-post-fee balance
-      const sendRaw = BigInt(Math.floor(freshUSDC * (1 - FEE_PCT) * 1e6));
+      // Use 88% of BET_AMOUNT not freshUSDC (RPC reports nominal pre-fee balance)
+      const sendRaw = BigInt(Math.floor(BET_AMOUNT * SEND_PCT * 1e6));
       const sendUSD = Number(sendRaw) / 1e6;
       send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Sending ${sendRaw} raw USDC.e ($${sendUSD.toFixed(6)}) fee=USDC.e` });
       const escrowClientUSDC = makeClient(escrowPK, USDC_ADDR);
@@ -255,11 +257,11 @@ async function runThrowTest(send) {
       await new Promise(r => setTimeout(r, 1500));
     }
 
-    // Settle pathUSD using pathUSD as fee token (same token — most reliable)
-    // Keep a small reserve for fees, send the rest
-    const pathToSettle = escrowPath - 0.005;
+    // Settle pathUSD using pathUSD as fee token
+    const pathToSettle = escrowPath - 0.005; // keep 0.005 as fee reserve
     if (pathToSettle >= 0.001) {
-      const sendRaw = BigInt(Math.floor(pathToSettle * FEE_BUFFER * 1e6));
+      // Same 88% rule applies
+      const sendRaw = BigInt(Math.floor(BET_AMOUNT * SEND_PCT * 1e6));
       const sendUSD = Number(sendRaw) / 1e6;
       send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Sending ${sendRaw} raw pathUSD ($${sendUSD.toFixed(6)}) fee=pathUSD` });
       const escrowClientPath = makeClient(escrowPK, PATHUSD_ADDR);
@@ -298,7 +300,7 @@ async function runThrowTest(send) {
   return allPass;
 }
 
-const ROUTE_VERSION = 'v9-fresh-read';
+const ROUTE_VERSION = 'v10-88pct';
 
 module.exports = function registerThrowTestRoute(app) {
   app.get('/api/throw-test/version', (req, res) => res.json({ version: ROUTE_VERSION }));
