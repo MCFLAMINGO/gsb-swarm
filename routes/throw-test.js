@@ -216,17 +216,32 @@ async function runThrowTest(send) {
   }
 
   // ── Step 8: Settle → PLAYER ──
+  // Re-read escrow balances fresh — fees may have been deducted from incoming transfers
   send({ step: 'Escrow → PLAYER settlement', status: 'running' });
   try {
-    // Use pathUSD as fee token since we just funded it
-    const escrowClient  = makeClient(escrowPK, PATHUSD_ADDR);
-    // Settle USDC.e pot to player (leave pathUSD for fees)
-    const settleToken   = escrowUSDC >= 0.001 ? USDC_ADDR : PATHUSD_ADDR;
-    const settleAmount  = settleToken === USDC_ADDR 
-      ? Math.max(0, escrowUSDC - 0.001)
-      : Math.max(0, escrowPath - 0.001);
+    const escrowUSDCFresh = await fetchBalance(USDC_ADDR, escrowAcct.address);
+    const escrowPathFresh = await fetchBalance(PATHUSD_ADDR, escrowAcct.address);
+
+    // Use pathUSD as fee token (we just funded it), settle USDC.e to player
+    const escrowClient = makeClient(escrowPK, PATHUSD_ADDR);
+
+    // Pick settle token — use whichever has more value, leave a dust buffer
+    const DUST = 0.0005;
+    let settleToken, settleAmount;
+    if (escrowUSDCFresh > DUST) {
+      settleToken  = USDC_ADDR;
+      settleAmount = Math.floor((escrowUSDCFresh - DUST) * 1e6) / 1e6;
+    } else if (escrowPathFresh > DUST) {
+      settleToken  = PATHUSD_ADDR;
+      settleAmount = Math.floor((escrowPathFresh - DUST) * 1e6) / 1e6;
+    } else {
+      send({ step: 'Escrow → PLAYER settlement', status: 'FAIL', detail: `Escrow empty — USDC.e $${escrowUSDCFresh} pathUSD $${escrowPathFresh}` });
+      allPass = false; return allPass;
+    }
+
+    send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Sending $${settleAmount.toFixed(6)} of ${settleToken === USDC_ADDR ? 'USDC.e' : 'pathUSD'} (escrow has $${escrowUSDCFresh.toFixed(6)} USDC.e + $${escrowPathFresh.toFixed(6)} pathUSD)` });
     const hash = await transfer(escrowClient, settleToken, playerAcct.address, settleAmount);
-    send({ step: 'Escrow → PLAYER settlement', status: 'PASS', detail: `$${settleAmount.toFixed(4)} tx: ${hash.slice(0, 18)}…` });
+    send({ step: 'Escrow → PLAYER settlement', status: 'PASS', detail: `$${settleAmount.toFixed(6)} tx: ${hash.slice(0, 18)}…` });
   } catch (e) {
     send({ step: 'Escrow → PLAYER settlement', status: 'FAIL', detail: e.message });
     allPass = false; return allPass;
