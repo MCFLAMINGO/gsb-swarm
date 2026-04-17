@@ -234,12 +234,17 @@ async function runThrowTest(send) {
   // Settle each token separately using 94% of each balance (6% fee buffer).
   send({ step: 'Escrow → PLAYER settlement', status: 'running' });
   try {
-    const FEE_BUFFER = 0.94; // send 94% — 6% covers Tempo fees
+    const FEE_PCT = 0.06; // Tempo charges ~5-6% fee on transfers
     let settled = [];
 
+    // Re-read escrow USDC.e balance fresh right before settling
+    const freshUSDC = await fetchBalance(USDC_ADDR, escrowAcct.address);
+    send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Fresh escrow: USDC.e $${freshUSDC.toFixed(6)} pathUSD $${escrowPath.toFixed(6)}` });
+
     // Settle USDC.e using USDC.e as fee token (same token — most reliable)
-    if (escrowUSDC >= 0.002) {
-      const sendRaw = BigInt(Math.floor(escrowUSDC * FEE_BUFFER * 1e6));
+    if (freshUSDC >= 0.002) {
+      // Apply another 6% fee buffer on top of the already-post-fee balance
+      const sendRaw = BigInt(Math.floor(freshUSDC * (1 - FEE_PCT) * 1e6));
       const sendUSD = Number(sendRaw) / 1e6;
       send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Sending ${sendRaw} raw USDC.e ($${sendUSD.toFixed(6)}) fee=USDC.e` });
       const escrowClientUSDC = makeClient(escrowPK, USDC_ADDR);
@@ -293,7 +298,7 @@ async function runThrowTest(send) {
   return allPass;
 }
 
-const ROUTE_VERSION = 'v8-same-fee-token';
+const ROUTE_VERSION = 'v9-fresh-read';
 
 module.exports = function registerThrowTestRoute(app) {
   app.get('/api/throw-test/version', (req, res) => res.json({ version: ROUTE_VERSION }));
