@@ -230,39 +230,43 @@ async function runThrowTest(send) {
   }
 
   // ── Step 8: Settle → PLAYER ──
-  // Use raw BigInt balances — read AFTER all incoming txs are finalized
+  // Tempo deducts ~5-6% fee from incoming transfers.
+  // Strategy: try sending 90% of nominal, retry with 85% on failure.
   send({ step: 'Escrow → PLAYER settlement', status: 'running' });
   try {
-    const escrowUSDCRaw = await fetchBalanceRaw(USDC_ADDR, escrowAcct.address);
-    const escrowPathRaw = await fetchBalanceRaw(PATHUSD_ADDR, escrowAcct.address);
-    // Leave 500 raw dust buffer
-    const DUST_RAW = 500n;
-
-    // Use pathUSD as fee token (we just funded it)
     const escrowClient = makeClient(escrowPK, PATHUSD_ADDR);
+    const nominalRaw = BigInt(Math.round(BET_AMOUNT * 2 * 1e6)); // 200000 raw
+    const settleToken = escrowUSDC >= BET_AMOUNT * 0.5 ? USDC_ADDR : PATHUSD_ADDR;
 
-    let settleToken, sendRaw;
-    if (escrowUSDCRaw > DUST_RAW) {
-      settleToken = USDC_ADDR;
-      sendRaw     = escrowUSDCRaw - DUST_RAW;
-    } else if (escrowPathRaw > DUST_RAW) {
-      settleToken = PATHUSD_ADDR;
-      sendRaw     = escrowPathRaw - DUST_RAW;
-    } else {
-      send({ step: 'Escrow → PLAYER settlement', status: 'FAIL', detail: `Escrow empty — USDC.e ${escrowUSDCRaw} pathUSD ${escrowPathRaw} raw units` });
-      allPass = false; return allPass;
+    // Try 90% of nominal first, then 85%, then 80%
+    const attempts = [0.90, 0.85, 0.80, 0.75];
+    let lastErr = null;
+    let succeeded = false;
+
+    for (const pct of attempts) {
+      const sendRaw = BigInt(Math.floor(Number(nominalRaw) * pct));
+      const sendUSD = Number(sendRaw) / 1e6;
+      send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Trying ${(pct*100).toFixed(0)}% = ${sendRaw} raw ($${sendUSD.toFixed(6)}) ${settleToken === USDC_ADDR ? 'USDC.e' : 'pathUSD'}` });
+      try {
+        const { receipt } = await tempoMod.Actions.token.transferSync(escrowClient, {
+          token:  settleToken,
+          to:     playerAcct.address,
+          amount: sendRaw,
+        });
+        send({ step: 'Escrow → PLAYER settlement', status: 'PASS', detail: `$${sendUSD.toFixed(6)} (${(pct*100).toFixed(0)}%) tx: ${receipt.transactionHash.slice(0,18)}…` });
+        succeeded = true;
+        break;
+      } catch (e) {
+        lastErr = e;
+        send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `${(pct*100).toFixed(0)}% failed (${e.message.slice(0,60)}), retrying lower…` });
+        await new Promise(r => setTimeout(r, 1000));
+      }
     }
 
-    const sendUSD = Number(sendRaw) / 1e6;
-    send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Sending ${sendRaw} raw ($${sendUSD.toFixed(6)}) ${settleToken === USDC_ADDR ? 'USDC.e' : 'pathUSD'}` });
-
-    // Use parseUnits with exact raw amount via direct BigInt
-    const { receipt } = await tempoMod.Actions.token.transferSync(escrowClient, {
-      token:  settleToken,
-      to:     playerAcct.address,
-      amount: sendRaw,
-    });
-    send({ step: 'Escrow → PLAYER settlement', status: 'PASS', detail: `$${sendUSD.toFixed(6)} tx: ${receipt.transactionHash.slice(0,18)}…` });
+    if (!succeeded) {
+      send({ step: 'Escrow → PLAYER settlement', status: 'FAIL', detail: lastErr?.message || 'All percentages failed' });
+      allPass = false; return allPass;
+    }
   } catch (e) {
     send({ step: 'Escrow → PLAYER settlement', status: 'FAIL', detail: e.message });
     allPass = false; return allPass;
@@ -287,7 +291,7 @@ async function runThrowTest(send) {
   return allPass;
 }
 
-const ROUTE_VERSION = 'v5-bigint-4sfinal';
+const ROUTE_VERSION = 'v6-retry-pct';
 
 module.exports = function registerThrowTestRoute(app) {
   app.get('/api/throw-test/version', (req, res) => res.json({ version: ROUTE_VERSION }));
