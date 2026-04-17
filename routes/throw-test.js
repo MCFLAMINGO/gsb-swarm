@@ -234,30 +234,31 @@ async function runThrowTest(send) {
   // Settle each token separately using 94% of each balance (6% fee buffer).
   send({ step: 'Escrow → PLAYER settlement', status: 'running' });
   try {
-    // Use pathUSD as fee token (we funded it in step 7b)
-    const escrowClient = makeClient(escrowPK, PATHUSD_ADDR);
-    const FEE_BUFFER = 0.94; // send 94% of each balance
+    const FEE_BUFFER = 0.94; // send 94% — 6% covers Tempo fees
     let settled = [];
 
-    // Settle USDC.e if escrow has any
-    if (escrowUSDC >= 0.001) {
+    // Settle USDC.e using USDC.e as fee token (same token — most reliable)
+    if (escrowUSDC >= 0.002) {
       const sendRaw = BigInt(Math.floor(escrowUSDC * FEE_BUFFER * 1e6));
       const sendUSD = Number(sendRaw) / 1e6;
-      send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Sending ${sendRaw} raw USDC.e ($${sendUSD.toFixed(6)})` });
-      const { receipt } = await tempoMod.Actions.token.transferSync(escrowClient, {
+      send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Sending ${sendRaw} raw USDC.e ($${sendUSD.toFixed(6)}) fee=USDC.e` });
+      const escrowClientUSDC = makeClient(escrowPK, USDC_ADDR);
+      const { receipt } = await tempoMod.Actions.token.transferSync(escrowClientUSDC, {
         token: USDC_ADDR, to: playerAcct.address, amount: sendRaw,
       });
       settled.push(`USDC.e $${sendUSD.toFixed(6)} tx:${receipt.transactionHash.slice(0,14)}…`);
       await new Promise(r => setTimeout(r, 1500));
     }
 
-    // Settle pathUSD if escrow has any (beyond the fee reserve)
-    const escrowPathAfterFee = escrowPath - 0.005; // keep 0.005 for fees
-    if (escrowPathAfterFee >= 0.001) {
-      const sendRaw = BigInt(Math.floor(escrowPathAfterFee * FEE_BUFFER * 1e6));
+    // Settle pathUSD using pathUSD as fee token (same token — most reliable)
+    // Keep a small reserve for fees, send the rest
+    const pathToSettle = escrowPath - 0.005;
+    if (pathToSettle >= 0.001) {
+      const sendRaw = BigInt(Math.floor(pathToSettle * FEE_BUFFER * 1e6));
       const sendUSD = Number(sendRaw) / 1e6;
-      send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Sending ${sendRaw} raw pathUSD ($${sendUSD.toFixed(6)})` });
-      const { receipt } = await tempoMod.Actions.token.transferSync(escrowClient, {
+      send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Sending ${sendRaw} raw pathUSD ($${sendUSD.toFixed(6)}) fee=pathUSD` });
+      const escrowClientPath = makeClient(escrowPK, PATHUSD_ADDR);
+      const { receipt } = await tempoMod.Actions.token.transferSync(escrowClientPath, {
         token: PATHUSD_ADDR, to: playerAcct.address, amount: sendRaw,
       });
       settled.push(`pathUSD $${sendUSD.toFixed(6)} tx:${receipt.transactionHash.slice(0,14)}…`);
@@ -292,7 +293,7 @@ async function runThrowTest(send) {
   return allPass;
 }
 
-const ROUTE_VERSION = 'v7-mixed-token';
+const ROUTE_VERSION = 'v8-same-fee-token';
 
 module.exports = function registerThrowTestRoute(app) {
   app.get('/api/throw-test/version', (req, res) => res.json({ version: ROUTE_VERSION }));
