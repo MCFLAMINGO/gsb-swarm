@@ -191,12 +191,40 @@ async function runThrowTest(send) {
     allPass = false;
   }
 
+  // ── Step 7b: Fund escrow with pathUSD for fees (HOST sends small amount) ──
+  send({ step: 'Fund escrow fees', status: 'running' });
+  try {
+    const hostPathBal = await fetchBalance(PATHUSD_ADDR, hostAcct.address);
+    const playerPathBal = await fetchBalance(PATHUSD_ADDR, playerAcct.address);
+    const feeAmount = 0.005; // $0.005 pathUSD for fees
+    if (hostPathBal >= feeAmount) {
+      const hostClientPath = makeClient(hostPK, PATHUSD_ADDR);
+      const hash = await transfer(hostClientPath, PATHUSD_ADDR, escrowAcct.address, feeAmount);
+      send({ step: 'Fund escrow fees', status: 'PASS', detail: `HOST → escrow $${feeAmount} pathUSD for fees tx: ${hash.slice(0,18)}…` });
+    } else if (playerPathBal >= feeAmount) {
+      const playerClientPath = makeClient(playerPK, PATHUSD_ADDR);
+      const hash = await transfer(playerClientPath, PATHUSD_ADDR, escrowAcct.address, feeAmount);
+      send({ step: 'Fund escrow fees', status: 'PASS', detail: `PLAYER → escrow $${feeAmount} pathUSD for fees tx: ${hash.slice(0,18)}…` });
+    } else {
+      send({ step: 'Fund escrow fees', status: 'FAIL', detail: 'Neither party has pathUSD for escrow fee funding' });
+      allPass = false; return allPass;
+    }
+    await new Promise(r => setTimeout(r, 1500));
+  } catch (e) {
+    send({ step: 'Fund escrow fees', status: 'FAIL', detail: e.message });
+    allPass = false; return allPass;
+  }
+
   // ── Step 8: Settle → PLAYER ──
   send({ step: 'Escrow → PLAYER settlement', status: 'running' });
   try {
+    // Use pathUSD as fee token since we just funded it
+    const escrowClient  = makeClient(escrowPK, PATHUSD_ADDR);
+    // Settle USDC.e pot to player (leave pathUSD for fees)
     const settleToken   = escrowUSDC >= 0.001 ? USDC_ADDR : PATHUSD_ADDR;
-    const escrowClient  = makeClient(escrowPK, settleToken);
-    const settleAmount  = Math.max(0, escrowTotal - 0.001);
+    const settleAmount  = settleToken === USDC_ADDR 
+      ? Math.max(0, escrowUSDC - 0.001)
+      : Math.max(0, escrowPath - 0.001);
     const hash = await transfer(escrowClient, settleToken, playerAcct.address, settleAmount);
     send({ step: 'Escrow → PLAYER settlement', status: 'PASS', detail: `$${settleAmount.toFixed(4)} tx: ${hash.slice(0, 18)}…` });
   } catch (e) {
