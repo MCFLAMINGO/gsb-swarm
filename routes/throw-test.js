@@ -287,7 +287,11 @@ async function runThrowTest(send) {
   return allPass;
 }
 
+const ROUTE_VERSION = 'v5-bigint-4sfinal';
+
 module.exports = function registerThrowTestRoute(app) {
+  app.get('/api/throw-test/version', (req, res) => res.json({ version: ROUTE_VERSION }));
+
   app.post('/api/throw-test', async (req, res) => {
     // Auth check — require dashboard token
     const auth = req.headers['authorization'] || '';
