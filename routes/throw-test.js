@@ -230,43 +230,44 @@ async function runThrowTest(send) {
   }
 
   // ── Step 8: Settle → PLAYER ──
-  // Tempo deducts ~5-6% fee from incoming transfers.
-  // Strategy: try sending 90% of nominal, retry with 85% on failure.
+  // Escrow may hold mixed tokens (HOST sent USDC.e, PLAYER sent pathUSD).
+  // Settle each token separately using 94% of each balance (6% fee buffer).
   send({ step: 'Escrow → PLAYER settlement', status: 'running' });
   try {
+    // Use pathUSD as fee token (we funded it in step 7b)
     const escrowClient = makeClient(escrowPK, PATHUSD_ADDR);
-    const nominalRaw = BigInt(Math.round(BET_AMOUNT * 2 * 1e6)); // 200000 raw
-    const settleToken = escrowUSDC >= BET_AMOUNT * 0.5 ? USDC_ADDR : PATHUSD_ADDR;
+    const FEE_BUFFER = 0.94; // send 94% of each balance
+    let settled = [];
 
-    // Try 90% of nominal first, then 85%, then 80%
-    const attempts = [0.90, 0.85, 0.80, 0.75];
-    let lastErr = null;
-    let succeeded = false;
-
-    for (const pct of attempts) {
-      const sendRaw = BigInt(Math.floor(Number(nominalRaw) * pct));
+    // Settle USDC.e if escrow has any
+    if (escrowUSDC >= 0.001) {
+      const sendRaw = BigInt(Math.floor(escrowUSDC * FEE_BUFFER * 1e6));
       const sendUSD = Number(sendRaw) / 1e6;
-      send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Trying ${(pct*100).toFixed(0)}% = ${sendRaw} raw ($${sendUSD.toFixed(6)}) ${settleToken === USDC_ADDR ? 'USDC.e' : 'pathUSD'}` });
-      try {
-        const { receipt } = await tempoMod.Actions.token.transferSync(escrowClient, {
-          token:  settleToken,
-          to:     playerAcct.address,
-          amount: sendRaw,
-        });
-        send({ step: 'Escrow → PLAYER settlement', status: 'PASS', detail: `$${sendUSD.toFixed(6)} (${(pct*100).toFixed(0)}%) tx: ${receipt.transactionHash.slice(0,18)}…` });
-        succeeded = true;
-        break;
-      } catch (e) {
-        lastErr = e;
-        send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `${(pct*100).toFixed(0)}% failed (${e.message.slice(0,60)}), retrying lower…` });
-        await new Promise(r => setTimeout(r, 1000));
-      }
+      send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Sending ${sendRaw} raw USDC.e ($${sendUSD.toFixed(6)})` });
+      const { receipt } = await tempoMod.Actions.token.transferSync(escrowClient, {
+        token: USDC_ADDR, to: playerAcct.address, amount: sendRaw,
+      });
+      settled.push(`USDC.e $${sendUSD.toFixed(6)} tx:${receipt.transactionHash.slice(0,14)}…`);
+      await new Promise(r => setTimeout(r, 1500));
     }
 
-    if (!succeeded) {
-      send({ step: 'Escrow → PLAYER settlement', status: 'FAIL', detail: lastErr?.message || 'All percentages failed' });
+    // Settle pathUSD if escrow has any (beyond the fee reserve)
+    const escrowPathAfterFee = escrowPath - 0.005; // keep 0.005 for fees
+    if (escrowPathAfterFee >= 0.001) {
+      const sendRaw = BigInt(Math.floor(escrowPathAfterFee * FEE_BUFFER * 1e6));
+      const sendUSD = Number(sendRaw) / 1e6;
+      send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Sending ${sendRaw} raw pathUSD ($${sendUSD.toFixed(6)})` });
+      const { receipt } = await tempoMod.Actions.token.transferSync(escrowClient, {
+        token: PATHUSD_ADDR, to: playerAcct.address, amount: sendRaw,
+      });
+      settled.push(`pathUSD $${sendUSD.toFixed(6)} tx:${receipt.transactionHash.slice(0,14)}…`);
+    }
+
+    if (settled.length === 0) {
+      send({ step: 'Escrow → PLAYER settlement', status: 'FAIL', detail: `Escrow empty — USDC.e $${escrowUSDC} pathUSD $${escrowPath}` });
       allPass = false; return allPass;
     }
+    send({ step: 'Escrow → PLAYER settlement', status: 'PASS', detail: settled.join(' | ') });
   } catch (e) {
     send({ step: 'Escrow → PLAYER settlement', status: 'FAIL', detail: e.message });
     allPass = false; return allPass;
@@ -291,7 +292,7 @@ async function runThrowTest(send) {
   return allPass;
 }
 
-const ROUTE_VERSION = 'v6-retry-pct';
+const ROUTE_VERSION = 'v7-mixed-token';
 
 module.exports = function registerThrowTestRoute(app) {
   app.get('/api/throw-test/version', (req, res) => res.json({ version: ROUTE_VERSION }));
