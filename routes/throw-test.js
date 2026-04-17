@@ -213,7 +213,8 @@ module.exports = function registerThrowTestRoute(app) {
     // Auth check — require dashboard token
     const auth = req.headers['authorization'] || '';
     const token = auth.replace('Bearer ', '');
-    if (token !== process.env.DASHBOARD_PASSWORD) {
+    const valid = token === process.env.DASHBOARD_PASSWORD || token === process.env.THROW_TEST_SECRET;
+    if (!valid) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
