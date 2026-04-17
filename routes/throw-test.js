@@ -40,6 +40,19 @@ async function fetchBalance(tokenAddr, walletAddr) {
   return Number(BigInt(j.result)) / 1e6;
 }
 
+// Returns raw BigInt balance (no division) — use for precise transfer amounts
+async function fetchBalanceRaw(tokenAddr, walletAddr) {
+  const data = '0x70a08231' + walletAddr.replace(/^0x/i, '').toLowerCase().padStart(64, '0');
+  const res = await fetch(TEMPO_RPC, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: tokenAddr, data }, 'latest'] }),
+  });
+  const j = await res.json();
+  if (!j.result || j.result === '0x') return 0n;
+  return BigInt(j.result);
+}
+
 async function runThrowTest(send) {
   let hostPK   = process.env.THROW_HOST_PK;
   let playerPK = process.env.THROW_PLAYER_PK;
@@ -216,32 +229,38 @@ async function runThrowTest(send) {
   }
 
   // ── Step 8: Settle → PLAYER ──
-  // Re-read escrow balances fresh — fees may have been deducted from incoming transfers
+  // Use raw BigInt balances to avoid floating point — fees eat into balance so we must read fresh
   send({ step: 'Escrow → PLAYER settlement', status: 'running' });
   try {
-    const escrowUSDCFresh = await fetchBalance(USDC_ADDR, escrowAcct.address);
-    const escrowPathFresh = await fetchBalance(PATHUSD_ADDR, escrowAcct.address);
+    const escrowUSDCRaw = await fetchBalanceRaw(USDC_ADDR, escrowAcct.address);
+    const escrowPathRaw = await fetchBalanceRaw(PATHUSD_ADDR, escrowAcct.address);
+    const DUST_RAW = 500n; // 0.0005 in raw units
 
-    // Use pathUSD as fee token (we just funded it), settle USDC.e to player
+    // Use pathUSD as fee token (we just funded it)
     const escrowClient = makeClient(escrowPK, PATHUSD_ADDR);
 
-    // Pick settle token — use whichever has more value, leave a dust buffer
-    const DUST = 0.0005;
-    let settleToken, settleAmount;
-    if (escrowUSDCFresh > DUST) {
-      settleToken  = USDC_ADDR;
-      settleAmount = Math.floor((escrowUSDCFresh - DUST) * 1e6) / 1e6;
-    } else if (escrowPathFresh > DUST) {
-      settleToken  = PATHUSD_ADDR;
-      settleAmount = Math.floor((escrowPathFresh - DUST) * 1e6) / 1e6;
+    let settleToken, sendRaw;
+    if (escrowUSDCRaw > DUST_RAW) {
+      settleToken = USDC_ADDR;
+      sendRaw     = escrowUSDCRaw - DUST_RAW;
+    } else if (escrowPathRaw > DUST_RAW) {
+      settleToken = PATHUSD_ADDR;
+      sendRaw     = escrowPathRaw - DUST_RAW;
     } else {
-      send({ step: 'Escrow → PLAYER settlement', status: 'FAIL', detail: `Escrow empty — USDC.e $${escrowUSDCFresh} pathUSD $${escrowPathFresh}` });
+      send({ step: 'Escrow → PLAYER settlement', status: 'FAIL', detail: `Escrow empty — USDC.e ${escrowUSDCRaw} pathUSD ${escrowPathRaw} raw units` });
       allPass = false; return allPass;
     }
 
-    send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Sending $${settleAmount.toFixed(6)} of ${settleToken === USDC_ADDR ? 'USDC.e' : 'pathUSD'} (escrow has $${escrowUSDCFresh.toFixed(6)} USDC.e + $${escrowPathFresh.toFixed(6)} pathUSD)` });
-    const hash = await transfer(escrowClient, settleToken, playerAcct.address, settleAmount);
-    send({ step: 'Escrow → PLAYER settlement', status: 'PASS', detail: `$${settleAmount.toFixed(6)} tx: ${hash.slice(0, 18)}…` });
+    const sendUSD = Number(sendRaw) / 1e6;
+    send({ step: 'Escrow → PLAYER settlement', status: 'running', detail: `Sending ${sendRaw} raw ($${sendUSD.toFixed(6)}) ${settleToken === USDC_ADDR ? 'USDC.e' : 'pathUSD'}` });
+
+    // Use parseUnits with exact raw amount via direct BigInt
+    const { receipt } = await tempoMod.Actions.token.transferSync(escrowClient, {
+      token:  settleToken,
+      to:     playerAcct.address,
+      amount: sendRaw,
+    });
+    send({ step: 'Escrow → PLAYER settlement', status: 'PASS', detail: `$${sendUSD.toFixed(6)} tx: ${receipt.transactionHash.slice(0,18)}…` });
   } catch (e) {
     send({ step: 'Escrow → PLAYER settlement', status: 'FAIL', detail: e.message });
     allPass = false; return allPass;
