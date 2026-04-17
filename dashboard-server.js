@@ -33,6 +33,7 @@ const { CHAIN_CONFIG, CHAIN_ALIASES, resolveChain, SUPPORTED_CHAINS } = require(
 const swarmMemory = require('./swarmMemory');
 const limitEngine   = require('./scripts/limit_engine');
 const pnlCardRoute  = require('./scripts/pnl_card_route');
+const registerThrowTest = require('./routes/throw-test');
 
 // ── ACP SDK (V2) — loaded via acp-loader.mjs ESM bridge ──────────────────────────────────────────────────────────────
 let AcpAgent_SDK, AlchemyEvmProviderAdapter_SDK, PrivyAlchemyEvmProviderAdapter_SDK, AssetToken_SDK;
@@ -4061,6 +4062,7 @@ app.post('/api/swap/solana-execute', express.json(), async (req, res) => {
 
 // ── PnL share card ──────────────────────────────────────────────────────────
 app.get('/api/pnl-card', pnlCardRoute);
+registerThrowTest(app);
 
 // ── Referral system ──────────────────────────────────────────────────────────
 const REFERRAL_FILE = '/tmp/gsb-referrals.json';
