@@ -41,13 +41,28 @@ async function fetchBalance(tokenAddr, walletAddr) {
 }
 
 async function runThrowTest(send) {
-  const hostPK   = process.env.THROW_HOST_PK;
-  const playerPK = process.env.THROW_PLAYER_PK;
+  let hostPK   = process.env.THROW_HOST_PK;
+  let playerPK = process.env.THROW_PLAYER_PK;
 
   if (!hostPK || !playerPK) {
     send({ step: 'Config check', status: 'FAIL', detail: 'THROW_HOST_PK or THROW_PLAYER_PK missing in env' });
     return false;
   }
+
+  // Normalize: ensure 0x prefix and trim whitespace
+  hostPK   = ('0x' + hostPK.trim().replace(/^0x/i, ''));
+  playerPK = ('0x' + playerPK.trim().replace(/^0x/i, ''));
+
+  // Validate length (32 bytes = 64 hex chars)
+  if (hostPK.length !== 66) {
+    send({ step: 'Config check', status: 'FAIL', detail: `THROW_HOST_PK wrong length: ${hostPK.length - 2} hex chars (need 64)` });
+    return false;
+  }
+  if (playerPK.length !== 66) {
+    send({ step: 'Config check', status: 'FAIL', detail: `THROW_PLAYER_PK wrong length: ${playerPK.length - 2} hex chars (need 64)` });
+    return false;
+  }
+  send({ step: 'Config check', status: 'PASS', detail: 'Both keys loaded and normalized' });
 
   let mods;
   try {
