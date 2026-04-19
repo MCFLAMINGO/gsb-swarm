@@ -4701,6 +4701,65 @@ app.post('/api/content/job', express.json(), async (req, res) => {
   }
 });
 
+// ── APP TESTS: E2E password (operator only) ───────────────────────────────────
+app.get('/api/e2e-password', requireOperator, (req, res) => {
+  const password = process.env.E2E_TEST_PASSWORD || '';
+  if (!password) return res.status(404).json({ error: 'E2E_TEST_PASSWORD not set in env' });
+  res.json({ password });
+});
+
+// ── APP TESTS: Proxy to playwright-worker (avoids CORS from browser) ──────────
+app.post('/api/run-app-test', requireOperator, async (req, res) => {
+  const PW_URL = process.env.PLAYWRIGHT_WORKER_URL || 'https://playwright-worker-production.up.railway.app';
+  const { appId, mode, e2ePassword } = req.body;
+
+  // Pass SSE stream directly through
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  try {
+    // Wake the worker first (it may be spun down)
+    try {
+      const wake = await fetch(`${PW_URL}/health`, { signal: AbortSignal.timeout(20000) });
+      if (!wake.ok) throw new Error('worker not healthy');
+    } catch(e) {
+      res.write(`data: ${JSON.stringify({ type: 'log', msg: `Playwright worker waking up… (${e.message})` })}\n\n`);
+    }
+
+    const pwRes = await fetch(`${PW_URL}/run-suite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appId, mode, e2ePassword }),
+      signal: AbortSignal.timeout(300000), // 5 min max
+    });
+
+    if (!pwRes.ok) {
+      const txt = await pwRes.text();
+      res.write(`data: ${JSON.stringify({ type: 'log', msg: `Worker error ${pwRes.status}: ${txt}` })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'done', result: { ok: false, error: txt } })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // Pipe SSE stream through
+    const reader = pwRes.body.getReader();
+    const pump = async () => {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+    };
+    await pump();
+  } catch(e) {
+    res.write(`data: ${JSON.stringify({ type: 'log', msg: `Proxy error: ${e.message}` })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'done', result: { ok: false, error: e.message } })}\n\n`);
+  }
+  res.end();
+});
+
 // ── Catch-all → index.html ────────────────────────────────────────────────────
 app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dashboard-ui', 'index.html'));

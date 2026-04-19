@@ -1695,3 +1695,65 @@ body {
   white-space: nowrap;
 }
 .btn-ghost-sm:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── APP TESTS ────────────────────────────────────────────────────────────── */
+.at-app-card {
+  background: var(--bg-2, #111);
+  border: 1px solid var(--border, #222);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.at-app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.at-app-name { font-weight: 700; font-size: 14px; }
+.at-app-url  { font-size: 11px; color: var(--text-2, #888); font-family: 'JetBrains Mono', monospace; }
+.at-app-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-3, #1a1a1a);
+  color: var(--text-2, #888);
+  border: 1px solid var(--border, #222);
+}
+.at-btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.at-run-quick { background: transparent; border: 1px solid var(--accent, #f39c12); color: var(--accent, #f39c12); font-size: 12px; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer; letter-spacing: .06em; }
+.at-run-quick:hover { background: var(--accent, #f39c12); color: #000; }
+.at-run-full  { background: var(--accent, #f39c12); color: #000; font-size: 12px; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer; letter-spacing: .06em; border: none; }
+.at-run-full:hover  { opacity: .85; }
+.at-run-full:disabled, .at-run-quick:disabled { opacity: .4; cursor: not-allowed; }
+.at-last-run { font-size: 11px; color: var(--text-2, #888); margin-top: 8px; }
+
+.at-worker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border, #222);
+  color: var(--text-2, #888);
+  background: var(--bg-2, #111);
+  transition: all .2s;
+}
+.at-worker.running { border-color: var(--accent, #f39c12); color: var(--accent, #f39c12); animation: at-pulse .8s infinite; }
+.at-worker.pass    { border-color: #27ae60; color: #27ae60; }
+.at-worker.fail    { border-color: #e74c3c; color: #e74c3c; }
+@keyframes at-pulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
+
+.at-result-section { margin-top: 16px; }
+.at-result-title   { font-size: 11px; letter-spacing: .08em; color: var(--text-2, #888); margin-bottom: 8px; }
+.at-result-row     { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 0; border-bottom: 1px solid var(--border, #1a1a1a); }
+.at-result-row:last-child { border-bottom: none; }
+.at-result-icon    { font-size: 14px; flex-shrink: 0; }
+.at-result-name    { flex: 1; color: var(--text-1, #ddd); }
+.at-result-note    { font-size: 10px; color: var(--text-2, #888); font-family: 'JetBrains Mono', monospace; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.at-summary-bar    { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 8px; margin-top: 12px; }
+.at-summary-bar.pass { background: rgba(39,174,96,.12); border: 1px solid rgba(39,174,96,.3); }
+.at-summary-bar.fail { background: rgba(231,76,60,.12);  border: 1px solid rgba(231,76,60,.3); }
+.at-summary-count  { font-size: 18px; font-weight: 800; }
+.at-summary-label  { font-size: 12px; color: var(--text-2, #888); }

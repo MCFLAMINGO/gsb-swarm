@@ -69,6 +69,12 @@
       </svg>
       <span>THROW</span>
     </a>
+    <a href="#apptests" class="nav-item" data-section="apptests">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+      </svg>
+      <span>APP TESTS</span>
+    </a>
   </nav>
 
   <div class="sidebar-footer">
@@ -545,6 +551,38 @@
       <div class="tw-push-msg hidden" id="tw-push-msg"></div>
     </div>
 
+  </section>
+
+  <!-- ═══ SECTION: APP TESTS ══════════════════════════════════════════════ -->
+  <section class="section" id="section-apptests">
+    <div class="section-header">
+      <h2>APP TESTS</h2>
+      <span class="muted" style="font-size:12px">5 headless browser agents per app</span>
+    </div>
+
+    <!-- App Registry -->
+    <div id="apptests-registry" style="display:flex;flex-direction:column;gap:12px;margin-bottom:24px;"></div>
+
+    <!-- Worker status strip -->
+    <div id="apptests-workers" style="display:none;margin-bottom:16px;">
+      <div style="font-size:11px;color:var(--text-2);margin-bottom:8px;letter-spacing:.08em">WORKERS</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <div class="at-worker" id="at-w1">W1 AUTH</div>
+        <div class="at-worker" id="at-w2">W2 NAV</div>
+        <div class="at-worker" id="at-w3">W3 BUTTONS</div>
+        <div class="at-worker" id="at-w4">W4 FORMS</div>
+        <div class="at-worker" id="at-w5">W5 SIGNALS</div>
+      </div>
+    </div>
+
+    <!-- Live log -->
+    <div id="apptests-log-wrap" style="display:none;">
+      <div style="font-size:11px;color:var(--text-2);margin-bottom:6px;letter-spacing:.08em">LIVE LOG</div>
+      <div id="apptests-log" style="background:var(--bg-2,#111);border:1px solid var(--border,#222);border-radius:8px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:11px;max-height:240px;overflow-y:auto;color:var(--text-1,#e0e0e0);white-space:pre-wrap;"></div>
+    </div>
+
+    <!-- Results -->
+    <div id="apptests-results" style="margin-top:16px;"></div>
   </section>
 
 </main>

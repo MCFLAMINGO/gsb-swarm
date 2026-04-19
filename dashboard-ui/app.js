@@ -1154,3 +1154,211 @@ document.addEventListener('DOMContentLoaded', () => {
     el.addEventListener('click', () => setTimeout(loadThrowData, 100));
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  APP TESTS — 5-agent UI testing dashboard
+// ══════════════════════════════════════════════════════════════════════════════
+
+const AT_WORKER_URL = window.AT_WORKER_URL || 'https://playwright-worker-production.up.railway.app';
+
+const AT_APPS = [
+  {
+    id: 'throw',
+    name: 'THROW',
+    url: 'https://www.throw5onit.com',
+    authType: 'wallet-inject',
+    badge: 'MQTT + Wallet',
+  },
+  {
+    id: 'voluntrack',
+    name: 'VolunTrack',
+    url: 'https://voluntrack-nexus.lovable.app',
+    authType: 'e2e-switcher',
+    badge: 'Supabase + E2E',
+  },
+  {
+    id: 'passithere',
+    name: 'PassItHere',
+    url: 'https://passithere.com',
+    authType: 'e2e-switcher',
+    badge: 'Supabase + E2E',
+  },
+];
+
+// Load last results from localStorage
+function atGetResults(appId) {
+  try { return JSON.parse(localStorage.getItem('at_results_' + appId) || 'null'); } catch(_) { return null; }
+}
+function atSaveResults(appId, result) {
+  try { localStorage.setItem('at_results_' + appId, JSON.stringify(result)); } catch(_) {}
+}
+
+function renderAppTestsSection() {
+  const registry = document.getElementById('apptests-registry');
+  if (!registry) return;
+  registry.innerHTML = '';
+
+  AT_APPS.forEach(app => {
+    const last = atGetResults(app.id);
+    const card = document.createElement('div');
+    card.className = 'at-app-card';
+    card.innerHTML = `
+      <div class="at-app-header">
+        <div>
+          <div class="at-app-name">${app.name}</div>
+          <div class="at-app-url">${app.url}</div>
+        </div>
+        <div class="at-app-badge">${app.badge}</div>
+      </div>
+      <div class="at-btn-row">
+        <button class="at-run-quick" onclick="runAppTest('${app.id}','quick')">▶ Quick</button>
+        <button class="at-run-full"  onclick="runAppTest('${app.id}','full')">⚡ Full Suite</button>
+      </div>
+      ${last ? `<div class="at-last-run">Last run: ${new Date(last.finishedAt).toLocaleString()} — ${last.summary?.passed}/${last.summary?.total} passed</div>` : ''}
+      <div id="at-result-${app.id}"></div>
+    `;
+    registry.appendChild(card);
+
+    // Render previous results inline
+    if (last) renderAtResults(app.id, last);
+  });
+}
+
+async function runAppTest(appId, mode) {
+  const logWrap    = document.getElementById('apptests-log-wrap');
+  const logEl      = document.getElementById('apptests-log');
+  const workersEl  = document.getElementById('apptests-workers');
+  const resultsEl  = document.getElementById('apptests-results');
+
+  // Show log + workers
+  logWrap.style.display   = '';
+  workersEl.style.display = '';
+  logEl.textContent       = '';
+  resultsEl.innerHTML     = '';
+
+  // Reset worker chips
+  ['at-w1','at-w2','at-w3','at-w4','at-w5'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.className = 'at-worker';
+  });
+
+  const appendLog = (msg) => {
+    logEl.textContent += msg + '\n';
+    logEl.scrollTop = logEl.scrollHeight;
+  };
+
+  appendLog(`[${new Date().toLocaleTimeString()}] Starting ${mode} suite for ${appId}…`);
+
+  // Wake playwright-worker (may be spun down)
+  appendLog(`[${new Date().toLocaleTimeString()}] Waking playwright-worker…`);
+  try {
+    await fetch(`${AT_WORKER_URL}/health`, { signal: AbortSignal.timeout(15000) });
+  } catch(_) {
+    appendLog('⚠️ playwright-worker not responding — it may still be spinning up (30s). Retrying…');
+  }
+
+  // Fetch E2E password from server
+  let e2ePassword = '';
+  try {
+    const r = await fetch('/api/e2e-password', { headers: { 'x-operator': window._operatorToken || '' } });
+    if (r.ok) { const j = await r.json(); e2ePassword = j.password || ''; }
+  } catch(_) {}
+
+  // POST to playwright-worker via our proxy (avoids CORS issues)
+  const workerMap = { 'W1-Auth': 'at-w1', 'W2-Navigation': 'at-w2', 'W3-Buttons': 'at-w3', 'W4-Forms': 'at-w4', 'W5-Signals': 'at-w5' };
+
+  try {
+    const resp = await fetch('/api/run-app-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-operator': window._operatorToken || '' },
+      body: JSON.stringify({ appId, mode, e2ePassword }),
+    });
+
+    if (!resp.ok) {
+      appendLog(`❌ Server error: ${resp.status}`);
+      return;
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalResult = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const evt = JSON.parse(line.slice(6));
+          if (evt.type === 'log') {
+            appendLog(evt.msg);
+          } else if (evt.type === 'worker-start') {
+            const chip = document.getElementById(workerMap[evt.worker]);
+            if (chip) chip.className = 'at-worker running';
+            appendLog(`\n── ${evt.worker} ──`);
+          } else if (evt.type === 'worker-done') {
+            const chip = document.getElementById(workerMap[evt.worker]);
+            if (chip) chip.className = `at-worker ${evt.ok ? 'pass' : 'fail'}`;
+          } else if (evt.type === 'done') {
+            finalResult = evt.result;
+          }
+        } catch(_) {}
+      }
+    }
+
+    if (finalResult) {
+      atSaveResults(appId, finalResult);
+      renderAtResults(appId, finalResult);
+      appendLog(`\n✅ Done — ${finalResult.summary?.passed}/${finalResult.summary?.total} passed in ${(finalResult.durationMs/1000).toFixed(1)}s`);
+      renderAppTestsSection(); // refresh last-run timestamps
+    }
+
+  } catch(e) {
+    appendLog(`❌ Error: ${e.message}`);
+  }
+}
+
+function renderAtResults(appId, result) {
+  const el = document.getElementById('at-result-' + appId);
+  if (!el || !result) return;
+
+  const allItems = Object.entries(result.workers || {}).map(([worker, items]) => {
+    const arr = Array.isArray(items) ? items : [items];
+    return arr.map(item => ({ worker, ...item }));
+  }).flat();
+
+  const passed = allItems.filter(r => r.ok || r.ok === undefined).length;
+  const failed = allItems.filter(r => r.ok === false).length;
+
+  const summaryClass = failed === 0 ? 'pass' : 'fail';
+  const summaryIcon  = failed === 0 ? '✅' : '❌';
+
+  el.innerHTML = `
+    <div class="at-summary-bar ${summaryClass}">
+      <div class="at-summary-count">${summaryIcon} ${passed}/${allItems.length}</div>
+      <div class="at-summary-label">tests passed · ${(result.durationMs/1000||0).toFixed(1)}s · ${result.mode || ''}</div>
+    </div>
+    <div class="at-result-section">
+      ${allItems.slice(0, 12).map(item => `
+        <div class="at-result-row">
+          <span class="at-result-icon">${item.ok === false ? '❌' : item.skipped ? '⏭' : '✅'}</span>
+          <span class="at-result-name">${item.screen || item.button || item.form || item.test || item.worker || 'check'}</span>
+          <span class="at-result-note">${item.note || item.error || ''}</span>
+        </div>
+      `).join('')}
+      ${allItems.length > 12 ? `<div style="font-size:11px;color:var(--text-2);padding-top:6px">+${allItems.length-12} more</div>` : ''}
+    </div>
+  `;
+}
+
+// Init when tab is clicked
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.nav-item[data-section="apptests"]').forEach(el => {
+    el.addEventListener('click', () => setTimeout(renderAppTestsSection, 100));
+  });
+});
