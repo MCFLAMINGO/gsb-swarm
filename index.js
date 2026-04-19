@@ -7,6 +7,8 @@ require('dotenv').config();
 const { fork } = require('child_process');
 const path = require('path');
 const express = require('express');
+const { registerResources } = require('./acpResources');
+const { getSkillReport, resetSkill } = require('./skillFeedback');
 
 const workers = [
   { name: 'Token Analyst',      file: 'tokenAnalyst.js' },
@@ -88,6 +90,26 @@ app.get('/', (req, res) => res.json({
 }));
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
+// ── Skill Feedback API ────────────────────────────────────────────────────────
+app.get('/api/skill-report', (req, res) => {
+  const report = getSkillReport();
+  const filtered = req.query.agent
+    ? report.filter(r => r.agentName.toLowerCase().includes(req.query.agent.toLowerCase()))
+    : report;
+  res.json({ ok: true, skills: filtered, generatedAt: Date.now() });
+});
+
+app.post('/api/skill-reset', express.json(), (req, res) => {
+  const { agentName, skillId, secret } = req.body || {};
+  if (secret !== process.env.OPERATOR_SECRET) return res.status(403).json({ error: 'forbidden' });
+  if (!agentName || !skillId) return res.status(400).json({ error: 'agentName + skillId required' });
+  resetSkill(agentName, skillId);
+  res.json({ ok: true, message: `Reset ${agentName}::${skillId}` });
+});
+
+// ── Register ACP Resources after 30s (agents need to be online first) ─────────
+setTimeout(() => { registerResources().catch(e => console.warn('[acpResources]', e.message)); }, 30000);
 
 app.listen(HEALTH_PORT, () => {
   console.log(`\n[SWARM] Health check running on port ${HEALTH_PORT}`);

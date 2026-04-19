@@ -3,6 +3,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { buildAcpAgent, AssetToken } = require('./acp');
+const feedback = require('./skillFeedback');
 const { CHAIN_CONFIG, resolveChain, SUPPORTED_CHAINS } = require('./chains');
 
 const AGENT_NAME = 'GSB Token Analyst';
@@ -265,11 +266,27 @@ async function start() {
           if (contractAddress) check.address = contractAddress;
 
           const jobChain = check.chain || 'base';
+          const t0 = Date.now();
+          const parsed2 = parseJobRequirement(rawContent);
+          const skillId = parsed2.skillId || 'analyze_token';
           const report = await analyzeToken(check.address, jobChain);
           await session.submit(JSON.stringify(report, null, 2));
+          feedback.recordOutcome(AGENT_NAME, skillId, true, {
+            durationMs:  Date.now() - t0,
+            jobId,
+            clientAddr:  entry.event.clientAddress || null,
+          });
           console.log(`[${AGENT_NAME}] Job ${jobId} submitted.`);
         } catch (err) {
           console.error(`[${AGENT_NAME}] Job ${jobId} job.funded error:`, err.message);
+          const parsed2 = parseJobRequirement(entry.event?.requirement || '');
+          feedback.recordOutcome(AGENT_NAME, parsed2.skillId || 'analyze_token', false, {
+            jobId,
+            error:      err.message,
+            retryHint:  err.message.includes('liquidity') ? 'Token may have no liquidity pool — check GeckoTerminal first' :
+                        err.message.includes('rate') ? 'API rate limit — add delay or switch RPC' :
+                        err.message.includes('address') ? 'Invalid contract address format' : null,
+          });
           try { await session.reject(`Delivery error: ${err.message}`); } catch (_) {}
           handledJobs.delete(jobId);
         }
