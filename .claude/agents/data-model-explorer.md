@@ -1,6 +1,6 @@
 ---
 name: data-model-explorer
-description: "Discovers tables, schemas, and columns in a Snowflake warehouse. Use proactively for ANY data question, metric lookup, or analytical task before writing queries."
+description: 'Discovers tables, schemas, and columns in a Snowflake warehouse. Use proactively for ANY data question, metric lookup, or analytical task before writing queries.'
 tools: Read, Write, Bash, Glob, Grep
 model: opus
 ---

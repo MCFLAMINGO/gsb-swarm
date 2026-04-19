@@ -232,6 +232,7 @@ async function handleStart(chatId, userId) {
     `/buy [token] [amount] — Get swap link\n` +
     `/dca [token] [amount] [freq] — Auto-buy on schedule\n` +
     `/alert [token] [price] — Price alert\n` +
+    `/wallet — Connect your wallet\n` +
     `/help — This menu\n\n` +
     `_Examples:_\n` +
     `/analyze FETCHR\n` +
@@ -240,6 +241,7 @@ async function handleStart(chatId, userId) {
     `/alert FETCHR 0.000002\n\n` +
     `Fees support $GSB buybacks. Trade smart. 🚀`;
   const miniAppUrl = 'https://gsb-swarm-production.up.railway.app/miniapp/';
+  const wcUrl = `https://gsb-swarm-production.up.railway.app/miniapp-wc/?userId=${userId}&returnUrl=${encodeURIComponent('https://t.me/gsb_swap_bot')}`;
   await tgRequest('sendMessage', {
     chat_id: chatId,
     text: msg,
@@ -247,9 +249,24 @@ async function handleStart(chatId, userId) {
     reply_markup: {
       inline_keyboard: [[
         { text: '⚡ Open GSB Swap App', web_app: { url: miniAppUrl } },
+        { text: '🔗 Connect Wallet', url: wcUrl },
       ], [
         { text: '📊 Trending', callback_data: 'trending' },
         { text: '💹 Analyze', callback_data: 'analyze_help' },
+      ]]
+    }
+  });
+}
+
+async function handleWallet(chatId, userId) {
+  const wcUrl = `https://gsb-swarm-production.up.railway.app/miniapp-wc/?userId=${userId}&returnUrl=${encodeURIComponent('https://t.me/gsb_swap_bot')}`;
+  await tgRequest('sendMessage', {
+    chat_id: chatId,
+    text: `🔗 *Connect Your Wallet*\n\nTap the button below to link your wallet to your GSB account. Non-custodial — your keys never leave your wallet.`,
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [[
+        { text: '🔗 Connect Wallet', url: wcUrl }
       ]]
     }
   });

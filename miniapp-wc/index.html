@@ -317,7 +317,6 @@
       document.getElementById('wallet-btns').style.display = 'none';
       loadWCSdk(async () => {
         try {
-          // window.WC = { EthereumProvider } set by local wc-bundle.js
           const EthereumProvider =
             window.WC?.EthereumProvider
             || window['@walletconnect/ethereum-provider']?.EthereumProvider
@@ -339,6 +338,8 @@
               icons: ['https://gsb-swarm-production.up.railway.app/favicon.ico'] },
           });
           hideStatus();
+
+          // Wire events BEFORE calling enable() so display_uri fires immediately
           wcProvider.on('display_uri', uri => showQR(uri));
           wcProvider.on('connect', async () => {
             document.getElementById('wc-section').style.display = 'none';
@@ -356,7 +357,30 @@
             if (document.getElementById('success-card').style.display === 'flex') return;
             cancelWC(); showError('WalletConnect session ended.');
           });
-          await wcProvider.enable();
+
+          // enable() is intentionally NOT awaited — display_uri fires during it
+          // and we show the QR immediately without waiting for enable() to resolve
+          wcProvider.enable().catch(err => {
+            // Only show error if QR was never displayed (true failure)
+            if (document.getElementById('wc-section').style.display !== 'flex') {
+              hideStatus();
+              document.getElementById('wallet-btns').style.display = 'block';
+              setDisabled(false);
+              showError('WalletConnect error: ' + (err.message || err));
+            }
+          });
+
+          // Timeout: if no QR after 12s, show error
+          setTimeout(() => {
+            if (document.getElementById('wc-section').style.display !== 'flex'
+                && document.getElementById('success-card').style.display !== 'flex') {
+              hideStatus();
+              document.getElementById('wallet-btns').style.display = 'block';
+              setDisabled(false);
+              showError('WalletConnect timed out. Check your connection and try again.');
+            }
+          }, 12000);
+
         } catch(err) {
           hideStatus();
           document.getElementById('wallet-btns').style.display = 'block';
