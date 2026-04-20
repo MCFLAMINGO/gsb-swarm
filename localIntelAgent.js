@@ -113,6 +113,33 @@ router.get('/zones', (req, res) => {
   res.json({ ok: true, ...zones });
 });
 
+// ── POST /api/local-intel/claim — forward to worker on port 3003 ────────────
+router.post('/claim', express.json(), async (req, res) => {
+  try {
+    const body = JSON.stringify(req.body || {});
+    const response = await fetch('http://localhost:3003/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (e) {
+    res.status(503).json({ ok: false, error: 'Local Intel Worker unavailable: ' + e.message });
+  }
+});
+
+// ── GET /api/local-intel/osm-queue — proxy to worker ─────────────────────────
+router.get('/osm-queue', async (req, res) => {
+  try {
+    const response = await fetch('http://localhost:3003/osm-queue');
+    const data = await response.json();
+    res.json(data);
+  } catch (e) {
+    res.status(503).json({ ok: false, error: 'Local Intel Worker unavailable: ' + e.message });
+  }
+});
+
 // ── GET /api/local-intel/stats — coverage stats ───────────────────────────────
 router.get('/stats', (req, res) => {
   const data = loadData();

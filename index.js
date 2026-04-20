@@ -16,6 +16,7 @@ const workers = [
   { name: 'Wallet Profiler',    file: 'walletProfiler.js' },
   { name: 'Alpha Scanner',      file: 'alphaScanner.js' },
   { name: 'Thread Writer',      file: 'threadWriter.js' },
+  { name: 'Local Intel',        file: 'localIntelWorker.js' },
   ...(process.env.FINANCIAL_ANALYST_ENTITY_ID
     ? [{ name: 'Financial Analyst', file: 'financialAnalyst.js' }]
     : []),

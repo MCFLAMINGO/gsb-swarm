@@ -1,5 +1,24 @@
 [
   {
+    "name": "MCFLAMINGO",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.1892917,
+    "lon": -81.3815318,
+    "address": "880 A1A N Suite 12",
+    "city": "Ponte Vedra Beach",
+    "phone": "(904) 584-6665",
+    "website": "https://mcflamingo.com",
+    "hours": "Mo-Sa 11:00-20:00; Su 11:00-18:00",
+    "confidence": 100,
+    "sources": [
+      "owner_verified",
+      "google_maps"
+    ],
+    "claimed": true,
+    "notes": "Owner-verified listing \u2014 MCFL Restaurant Holdings LLC / MCFLAMINGO. Coords confirmed from Google Maps place ID."
+  },
+  {
     "name": "Six Mile Landing Boat Ramp",
     "category": "slipway",
     "zip": "32082",
