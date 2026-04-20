@@ -488,4 +488,23 @@ router.get('/zip-queue', (req, res) => {
   }
 });
 
+// ── GET /api/local-intel/budget-status ────────────────────────────────────────────────
+// Proxies from zipCoordinatorWorker (port 3006) and normalises to snake_case
+router.get('/budget-status', async (req, res) => {
+  try {
+    const r = await fetch('http://localhost:3006/budget-status', { signal: AbortSignal.timeout(3000) });
+    if (!r.ok) throw new Error(`zip-coordinator HTTP ${r.status}`);
+    const d = await r.json();
+    res.json({
+      concurrent_agents: d.concurrentAgents ?? null,
+      gate_status:       d.gateStatus       ?? 'normal',
+      revenue_7d:        d.revenue7d        ?? 0,
+      generatedAt:       d.generatedAt,
+    });
+  } catch (e) {
+    // Return safe defaults so the dashboard doesn’t break
+    res.json({ concurrent_agents: null, gate_status: 'normal', revenue_7d: 0, error: e.message });
+  }
+});
+
 module.exports = router;
