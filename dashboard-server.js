@@ -4761,6 +4761,35 @@ app.post('/api/run-app-test', requireOperator, async (req, res) => {
 });
 
 // ── Catch-all → index.html ────────────────────────────────────────────────────
+// ── Proxy /api/local-intel/* and /.well-known/* to internal health server (3001) ──
+// These routes live on the internal Express app (port 3001) but Railway's
+// public domain points here (8080). Proxy them through so the Next.js
+// dashboard and external agents can reach them.
+function proxyToInternal(req, res) {
+  const options = {
+    hostname: '127.0.0.1',
+    port: 3001,
+    path: req.url,
+    method: req.method,
+    headers: { ...req.headers, host: '127.0.0.1:3001' },
+  };
+  const proxy = http.request(options, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    proxyRes.pipe(res, { end: true });
+  });
+  proxy.on('error', (err) => {
+    console.error('[proxy] internal error:', err.message);
+    res.status(502).json({ error: 'Internal service unavailable', detail: err.message });
+  });
+  if (req.body && req.method !== 'GET') {
+    proxy.write(JSON.stringify(req.body));
+  }
+  proxy.end();
+}
+
+app.use('/api/local-intel', proxyToInternal);
+app.use('/.well-known', proxyToInternal);
+
 app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dashboard-ui', 'index.html'));
 });
