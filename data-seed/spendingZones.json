@@ -1,0 +1,35 @@
+{
+  "generated": "2026-04-20",
+  "source": "US Census Bureau ACS 2022",
+  "county_total": {
+    "establishments": 8295,
+    "employees": 77518,
+    "annual_payroll_thousands": 3759773
+  },
+  "zips": {
+    "32081": {
+      "population": 24368,
+      "median_household_income": 129875,
+      "median_home_value": 518000,
+      "median_gross_rent": 3501,
+      "owner_occupied_units": 7122,
+      "renter_occupied_units": 1128,
+      "establishments_total": null,
+      "employees_total": null,
+      "annual_payroll_thousands": null,
+      "ownership_rate_pct": 86.3
+    },
+    "32082": {
+      "population": 28697,
+      "median_household_income": 121484,
+      "median_home_value": 676300,
+      "median_gross_rent": 1739,
+      "owner_occupied_units": 10035,
+      "renter_occupied_units": 2125,
+      "establishments_total": null,
+      "employees_total": null,
+      "annual_payroll_thousands": null,
+      "ownership_rate_pct": 82.5
+    }
+  }
+}

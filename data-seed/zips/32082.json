@@ -1,0 +1,915 @@
+[
+  {
+    "name": "MCFLAMINGO",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.1892917,
+    "lon": -81.3815318,
+    "address": "880 A1A N Suite 12",
+    "city": "Ponte Vedra Beach",
+    "phone": "(904) 584-6665",
+    "website": "https://mcflamingo.com",
+    "hours": "Mo-Sa 11:00-20:00; Su 11:00-18:00",
+    "confidence": 100,
+    "sources": [
+      "owner_verified",
+      "google_maps"
+    ],
+    "claimed": true,
+    "notes": "Owner-verified listing — MCFL Restaurant Holdings LLC / MCFLAMINGO. Coords confirmed from Google Maps place ID."
+  },
+  {
+    "name": "Phyllis Frankel Realty Group",
+    "category": "estate_agent",
+    "zip": "32082",
+    "lat": 30.198197,
+    "lon": -81.381405,
+    "address": "830-13 A1A N",
+    "phone": "+1-904-273-0125",
+    "website": "https://www.frankelrealtygroup.com/",
+    "hours": "Mo-Sa 09:00-18:00",
+    "confidence": 100,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "McDonald's",
+    "category": "fast_food",
+    "zip": "32082",
+    "lat": 30.192292,
+    "lon": -81.380857,
+    "address": "100 Ponte Vedra boulevard",
+    "phone": "+1 904-273-7490",
+    "website": "https://www.mcdonalds.com/us/en-us/location/12869.html",
+    "hours": "06:00-22:00",
+    "confidence": 100,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Publix",
+    "category": "supermarket",
+    "zip": "32082",
+    "lat": 30.150684,
+    "lon": -81.375527,
+    "address": "3777 Palm Valley Road",
+    "phone": "+1 904-273-6565",
+    "website": "https://www.publix.com/locations/1028",
+    "hours": "Mo-Su 07:00-22:00",
+    "confidence": 100,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "RW Wealth",
+    "category": "finance",
+    "zip": "32082",
+    "lat": 30.2002169,
+    "lon": -81.3806867,
+    "address": "818 FL A1A",
+    "city": "Ponte Vedra Beach",
+    "phone": "+1-904-280-0771",
+    "website": "https://rwwealth.com/",
+    "hours": "Mo-Fr 08:30-18:00; Sa 08:30-13:30",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 5880853617,
+    "osm_type": "node",
+    "confidence": 95
+  },
+  {
+    "name": "Carla Shoes & Accessories",
+    "category": "clothes",
+    "zip": "32082",
+    "lat": 30.204753,
+    "lon": -81.3817817,
+    "address": "310 Front Street",
+    "city": "Ponte Vedra Beach",
+    "phone": "+1-904-543-1566",
+    "website": "https://carlashoes.com",
+    "hours": "Mo-Sa 10:00-18:00",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 11156005975,
+    "osm_type": "node",
+    "confidence": 95
+  },
+  {
+    "name": "Barbara Jean's On The Water - Southern Restaurant",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.174701,
+    "lon": -81.401344,
+    "address": "15 S Roscoe Blvd",
+    "phone": "+1-904-280-7522",
+    "website": "https://barbarajeansonthewater.com/",
+    "hours": "",
+    "confidence": 90,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Valley Smoke Restaurant - Barbecue Restaurant",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.175297,
+    "lon": -81.401181,
+    "address": "11 S Roscoe Blvd",
+    "phone": "+1-904-285-3235",
+    "website": "https://www.valleysmoke.com/",
+    "hours": "",
+    "confidence": 90,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "LuLu's Waterfront Grille",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.2104614,
+    "lon": -81.4097968,
+    "address": "301 Roscoe Blvd N",
+    "city": "Ponte Vedra Beach",
+    "phone": "+1-904-285-0139",
+    "website": "https://luluswaterfrontgrille.com/",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 7176682902,
+    "osm_type": "node",
+    "confidence": 85
+  },
+  {
+    "name": "Palm Valley Fish Camp",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.2102397,
+    "lon": -81.4096577,
+    "address": "299 Roscoe Blvd N",
+    "city": "Ponte Vedra Beach",
+    "phone": "+1-904-285-3200",
+    "website": "https://palmvalleyfishcamp.com/",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 7176682914,
+    "osm_type": "node",
+    "confidence": 85
+  },
+  {
+    "name": "Lord of Life Lutheran Church - Lutheran church",
+    "category": "place_of_worship",
+    "zip": "32082",
+    "lat": 30.2083596,
+    "lon": -81.4068939,
+    "address": "276 Roscoe Blvd N",
+    "city": "Ponte Vedra Beach",
+    "phone": "+1-904-285-5347",
+    "website": "https://www.lordoflifepvb.org/events___photos",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 7199199461,
+    "osm_type": "node",
+    "confidence": 85
+  },
+  {
+    "name": "Ponte Vedra Movers",
+    "category": "retail",
+    "zip": "32082",
+    "lat": 30.1593308,
+    "lon": -81.3658243,
+    "address": "4265 Mickler Road",
+    "city": "Ponte Vedra Beach",
+    "phone": "+1-904-285-9940",
+    "website": "https://pontevedramovers.com",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 9718295756,
+    "osm_type": "node",
+    "confidence": 85
+  },
+  {
+    "name": "Ace Hardware",
+    "category": "retail",
+    "zip": "32082",
+    "lat": 30.1913791,
+    "lon": -81.3808459,
+    "address": "870 A1a North",
+    "city": "Ponte Vedra Beach",
+    "phone": "+1 904-285-8101",
+    "website": "",
+    "hours": "Mo-Sa 07:30-19:00; Su 07:30-18:00",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 627613146,
+    "osm_type": "way",
+    "confidence": 85
+  },
+  {
+    "name": "Beach Diner",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.189104,
+    "lon": -81.38092,
+    "address": "# 2",
+    "phone": "",
+    "website": "",
+    "hours": "06:00-14:30",
+    "confidence": 80,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Palm Valley Outdoors Bar & Grill",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.133472,
+    "lon": -81.385307,
+    "address": "377 S Roscoe Blvd #2",
+    "phone": "+1-904-834-7183",
+    "website": "",
+    "hours": "",
+    "confidence": 80,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Saint Johns County Fire & Rescue Station #1",
+    "category": "fire_station",
+    "zip": "32082",
+    "lat": 30.17738,
+    "lon": -81.398962,
+    "address": "130 Canal Boulevard",
+    "phone": "+1 904-285-6555",
+    "website": "",
+    "hours": "",
+    "confidence": 80,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Saint Johns County Sheriff's Office",
+    "category": "police",
+    "zip": "32082",
+    "lat": 30.160843,
+    "lon": -81.362625,
+    "address": "1108 A1A N",
+    "phone": "+1-904-824-8304",
+    "website": "",
+    "hours": "",
+    "confidence": 80,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Chase",
+    "category": "bank",
+    "zip": "32082",
+    "lat": 30.2050616,
+    "lon": -81.3820977,
+    "address": "Front Street",
+    "city": "Ponte Vedra Beach",
+    "phone": "+1 904-686-3982",
+    "website": "https://locator.chase.com/fl/ponte-vedra-beach/260-front-st",
+    "hours": "Mo-Fr 09:00-17:00; Sa-Su closed",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 6264980405,
+    "osm_type": "node",
+    "confidence": 95
+  },
+  {
+    "name": "Beach Shutters and Blinds",
+    "category": "retail",
+    "zip": "32082",
+    "lat": 30.2152742,
+    "lon": -81.3749616,
+    "address": "North Sea Lake Lane",
+    "city": "Ponte Vedra Beach",
+    "phone": "+1-904-808-2556",
+    "website": "https://beachshuttersandblinds.com/",
+    "hours": "Mo-Fr 09:00-17:00",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 9579966908,
+    "osm_type": "node",
+    "confidence": 95
+  },
+  {
+    "name": "Nineteen",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.198841,
+    "lon": -81.395122,
+    "address": "110 Championship Way",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 70,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Palmer Catholic Academy",
+    "category": "school",
+    "zip": "32082",
+    "lat": 30.179139,
+    "lon": -81.388154,
+    "address": "4889 Palm Valley Road",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 70,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Ponte Vedra United Methodist Church",
+    "category": "place_of_worship",
+    "zip": "32082",
+    "lat": 30.1666263,
+    "lon": -81.3970083,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "+1-904-280-5141",
+    "website": "https://www.ponte-vedra-umc.org/",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 7199236521,
+    "osm_type": "node",
+    "confidence": 65
+  },
+  {
+    "name": "Redeemer Church",
+    "category": "place_of_worship",
+    "zip": "32082",
+    "lat": 30.1536294,
+    "lon": -81.3930459,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "+1-904-285-8009",
+    "website": "https://www.redeemerpv.com/",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 7199236556,
+    "osm_type": "node",
+    "confidence": 65
+  },
+  {
+    "name": "First Baptist Church of Ponte Vedra",
+    "category": "place_of_worship",
+    "zip": "32082",
+    "lat": 30.2149012,
+    "lon": -81.3794081,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "+1-904-285-7344",
+    "website": "http://www.1stpvb.org/",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 7199236697,
+    "osm_type": "node",
+    "confidence": 65
+  },
+  {
+    "name": "Family Bible Church",
+    "category": "place_of_worship",
+    "zip": "32082",
+    "lat": 30.1758071,
+    "lon": -81.3882364,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "+1-904-280-5694",
+    "website": "https://www.familybiblepvb.com/",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 771194322,
+    "osm_type": "way",
+    "confidence": 65
+  },
+  {
+    "name": "Anastasia Club",
+    "category": "social_centre",
+    "zip": "32082",
+    "lat": 30.082484,
+    "lon": -81.394117,
+    "address": "",
+    "phone": "",
+    "website": "https://www.delwebb.com/homes/florida/northeast-florida/ponte-vedra/del-webb-ponte-vedra-100237",
+    "hours": "",
+    "confidence": 60,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Anastasia Club",
+    "category": "social_centre",
+    "zip": "32082",
+    "lat": 30.08238,
+    "lon": -81.394032,
+    "address": "",
+    "phone": "",
+    "website": "https://www.delwebb.com/homes/florida/northeast-florida/ponte-vedra/del-webb-ponte-vedra-100237",
+    "hours": "",
+    "confidence": 60,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Ponte Vedra Presbyterian Church",
+    "category": "place_of_worship",
+    "zip": "32082",
+    "lat": 30.1679381,
+    "lon": -81.3872017,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "+1-904-285-8225",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 7199236677,
+    "osm_type": "node",
+    "confidence": 55
+  },
+  {
+    "name": "Walgreens",
+    "category": "chemist",
+    "zip": "32082",
+    "lat": 30.1931361,
+    "lon": -81.3810515,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "https://www.walgreens.com/locator/walgreens-860+a1a+n-ponte+vedra-fl-32082/id=4657",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 769502495,
+    "osm_type": "way",
+    "confidence": 55
+  },
+  {
+    "name": "Six Mile Landing Boat Ramp",
+    "category": "slipway",
+    "zip": "32082",
+    "lat": 30.110058,
+    "lon": -81.345155,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Sawgrass Player Club Villas Pool",
+    "category": "swimming_pool",
+    "zip": "32082",
+    "lat": 30.202401,
+    "lon": -81.390198,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 574809653,
+    "osm_type": "node",
+    "confidence": 45
+  },
+  {
+    "name": "Seaside Sign",
+    "category": "other",
+    "zip": "32082",
+    "lat": 30.165039,
+    "lon": -81.3656185,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 5882219590,
+    "osm_type": "node",
+    "confidence": 45
+  },
+  {
+    "name": "Metro Diner",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.2041873,
+    "lon": -81.3813776,
+    "address": "Front Street",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 6262063915,
+    "osm_type": "node",
+    "confidence": 65
+  },
+  {
+    "name": "Trasca & Co Eatery",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.2053445,
+    "lon": -81.383263,
+    "address": "Tourside Drive",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 6264980401,
+    "osm_type": "node",
+    "confidence": 65
+  },
+  {
+    "name": "Chico's",
+    "category": "clothes",
+    "zip": "32082",
+    "lat": 30.2051896,
+    "lon": -81.3831337,
+    "address": "Tourside Drive",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 6264980402,
+    "osm_type": "node",
+    "confidence": 65
+  },
+  {
+    "name": "Christy's Dream Ice Cream",
+    "category": "ice_cream",
+    "zip": "32082",
+    "lat": 30.2052814,
+    "lon": -81.3832088,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 6264980403,
+    "osm_type": "node",
+    "confidence": 45
+  },
+  {
+    "name": "Peterbrooke Chocolatier",
+    "category": "retail",
+    "zip": "32082",
+    "lat": 30.2049175,
+    "lon": -81.3822769,
+    "address": "Village Main Street",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 6264980404,
+    "osm_type": "node",
+    "confidence": 65
+  },
+  {
+    "name": "Mulligans Pub",
+    "category": "pub",
+    "zip": "32082",
+    "lat": 30.2054742,
+    "lon": -81.3836653,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 6264980406,
+    "osm_type": "node",
+    "confidence": 45
+  },
+  {
+    "name": "Cafe on the Green",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.2030698,
+    "lon": -81.3854639,
+    "address": "Vicar's Woods Road",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 6264980468,
+    "osm_type": "node",
+    "confidence": 65
+  },
+  {
+    "name": "Starbucks",
+    "category": "cafe",
+    "zip": "32082",
+    "lat": 30.203179,
+    "lon": -81.3856583,
+    "address": "Vicar's Woods Road",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 6264980469,
+    "osm_type": "node",
+    "confidence": 65
+  },
+  {
+    "name": "Beth El - Reform synagogue",
+    "category": "place_of_worship",
+    "zip": "32082",
+    "lat": 30.2095233,
+    "lon": -81.4070355,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 7199236493,
+    "osm_type": "node",
+    "confidence": 45
+  },
+  {
+    "name": "Ponte Vedra Ballet",
+    "category": "office",
+    "zip": "32082",
+    "lat": 30.1890952,
+    "lon": -81.3804885,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 7908084094,
+    "osm_type": "node",
+    "confidence": 45
+  },
+  {
+    "name": "V pizza",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.1775476,
+    "lon": -81.3978599,
+    "address": "Canal Boulevard",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 8761543718,
+    "osm_type": "node",
+    "confidence": 65
+  },
+  {
+    "name": "Cultural Center at Ponte Vedra Beach",
+    "category": "retail",
+    "zip": "32082",
+    "lat": 30.2138614,
+    "lon": -81.3796796,
+    "address": "Executive Way",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 362672956,
+    "osm_type": "way",
+    "confidence": 65
+  },
+  {
+    "name": "United States Post Office",
+    "category": "post_office",
+    "zip": "32082",
+    "lat": 30.1948366,
+    "lon": -81.3825208,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 610263514,
+    "osm_type": "way",
+    "confidence": 45
+  },
+  {
+    "name": "Caffe Andiamo",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.2047138,
+    "lon": -81.3825887,
+    "address": "Village Main Street",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 668688250,
+    "osm_type": "way",
+    "confidence": 65
+  },
+  {
+    "name": "Wells Fargo",
+    "category": "bank",
+    "zip": "32082",
+    "lat": 30.206261,
+    "lon": -81.3831187,
+    "address": "Sawgrass Village Drive",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 668689350,
+    "osm_type": "way",
+    "confidence": 65
+  },
+  {
+    "name": "Nona Blue Modern Tavern",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.2047984,
+    "lon": -81.3813241,
+    "address": "Front Street",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 668689351,
+    "osm_type": "way",
+    "confidence": 65
+  },
+  {
+    "name": "Aqua Grill",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.2037277,
+    "lon": -81.3813434,
+    "address": "Front Street",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 668689355,
+    "osm_type": "way",
+    "confidence": 65
+  },
+  {
+    "name": "ABC Fine Wines & Spirits",
+    "category": "alcohol",
+    "zip": "32082",
+    "lat": 30.2045186,
+    "lon": -81.3829414,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 668689356,
+    "osm_type": "way",
+    "confidence": 45
+  },
+  {
+    "name": "Palm Valley Baptist Church",
+    "category": "place_of_worship",
+    "zip": "32082",
+    "lat": 30.1792181,
+    "lon": -81.3896071,
+    "address": "",
+    "city": "Ponte Vedra Beach",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 771194323,
+    "osm_type": "way",
+    "confidence": 45
+  }
+]

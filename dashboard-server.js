@@ -4777,6 +4777,62 @@ app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dashboard-ui', 'index.html'));
 });
 
+// ── LocalIntel Volume Seed ───────────────────────────────────────────────────
+// Railway mounts the volume at /app/data — this SHADOWS the git-bundled data/
+// directory. On first boot the volume is empty. We keep baseline seed files in
+// data-seed/ (a separate directory, never mounted) and copy them into the
+// volume on first boot. A sentinel file prevents re-seeding on subsequent boots.
+(function seedLocalIntelVolume() {
+  const SEED_DIR = path.join(__dirname, 'data-seed');
+  const DATA_DIR = path.join(__dirname, 'data');
+
+  // Ensure all subdirectories exist on the volume
+  const ENSURE_DIRS = [
+    path.join(DATA_DIR, 'zips'),
+    path.join(DATA_DIR, 'bedrock'),
+    path.join(DATA_DIR, 'ocean_floor'),
+    path.join(DATA_DIR, 'surface_current'),
+    path.join(DATA_DIR, 'wave_surface'),
+    path.join(DATA_DIR, 'agentMemory'),
+  ];
+  ENSURE_DIRS.forEach(d => { try { fs.mkdirSync(d, { recursive: true }); } catch(e) {} });
+
+  const SEED_SENTINEL = path.join(DATA_DIR, '.seeded');
+  if (fs.existsSync(SEED_SENTINEL)) {
+    console.log('[volume-seed] Volume already seeded — skipping.');
+    return;
+  }
+
+  if (!fs.existsSync(SEED_DIR)) {
+    console.warn('[volume-seed] No data-seed/ directory found — skipping seed.');
+    return;
+  }
+
+  // Recursively copy all files from data-seed/ → data/ (only if missing)
+  function copyIfMissing(srcDir, dstDir) {
+    const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(srcDir, entry.name);
+      const dstPath = path.join(dstDir, entry.name);
+      if (entry.isDirectory()) {
+        fs.mkdirSync(dstPath, { recursive: true });
+        copyIfMissing(srcPath, dstPath);
+      } else if (!fs.existsSync(dstPath)) {
+        fs.copyFileSync(srcPath, dstPath);
+        console.log(`[volume-seed] Seeded ${entry.name}`);
+      }
+    }
+  }
+
+  try {
+    copyIfMissing(SEED_DIR, DATA_DIR);
+    fs.writeFileSync(SEED_SENTINEL, JSON.stringify({ seededAt: new Date().toISOString(), version: 1 }));
+    console.log('[volume-seed] ✓ Volume seeded from data-seed/. Sentinel written.');
+  } catch (e) {
+    console.error('[volume-seed] Seed failed:', e.message);
+  }
+})();
+
 // ── LocalIntel Worker Launcher ───────────────────────────────────────────────
 // Fork all LocalIntel autonomous workers from here (dashboard-server.js is the
 // Railway entry point — index.js is never started on Railway).
