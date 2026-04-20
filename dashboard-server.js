@@ -445,6 +445,40 @@ app.get('/.well-known/mcp/server-card.json', (req, res) => {
   });
 });
 
+// ── Root /mcp — Smithery gateway probes base-host/mcp, not the full path we gave it
+// GET: discovery/server-info | POST: proxy to internal MCP server on 3004
+app.get('/mcp', async (req, res) => {
+  try {
+    const response = await fetch('http://localhost:3004/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+    });
+    const data = await response.json();
+    res.json({ jsonrpc: '2.0', id: null, result: { protocolVersion: '2024-11-05', serverInfo: { name: 'localintel', version: '1.0.0' }, capabilities: { tools: {} }, tools: data?.result?.tools || [] } });
+  } catch (e) {
+    res.json({ jsonrpc: '2.0', id: null, result: { protocolVersion: '2024-11-05', serverInfo: { name: 'localintel', version: '1.0.0' }, capabilities: { tools: {} } } });
+  }
+});
+
+app.post('/mcp', express.json(), async (req, res) => {
+  try {
+    const body = req.body || {};
+    if (body.method && body.method.startsWith('notifications/') && body.id === undefined) {
+      return res.status(204).end();
+    }
+    const response = await fetch('http://localhost:3004/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (e) {
+    res.status(503).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'MCP unavailable: ' + e.message } });
+  }
+});
+
 app.get('/acp', (req, res) => {
   res.json({
     protocol: 'acp',
