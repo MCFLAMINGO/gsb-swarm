@@ -33,6 +33,7 @@ const PORT         = parseInt(process.env.LOCAL_INTEL_MCP_PORT || '3004');
 // ── Tidal tools ──────────────────────────────────────────────────────────────
 const { handleTide, handleSignal, handleBedrock, handleForAgent } = require('./localIntelTidalTools');
 const { wrapMCPHandler } = require('./workers/mcpMiddleware');
+const { getStaleness, stalenessBlock, zipFreshnessBlock } = require('./workers/stalenessUtils');
 
 const TOOL_COSTS = {
   local_intel_context:   0.02,
@@ -258,6 +259,7 @@ function toolContext({ zip, lat, lon, radius_miles = 1.0 }) {
     center: { lat: centerLat, lon: centerLon },
     total_businesses: zoneBusinesses.length,
     context_block: lines.join('\n'),
+    data_freshness: zipFreshnessBlock(zoneBusinesses),
   };
 }
 
@@ -298,8 +300,11 @@ function toolSearch({ zip, query, category, group, limit = 20 }) {
       hours: b.hours || '',
       confidence: b.confidence,
       claimed: b.claimed || false,
+      possibly_closed: b.possibly_closed || false,
+      staleness: stalenessBlock(b),
     })),
     context_block: results.map(b => fmtBusiness(b)).join('\n'),
+    data_freshness: zipFreshnessBlock(results),
   };
 }
 
@@ -340,8 +345,11 @@ function toolNearby({ lat, lon, radius_miles = 0.5, category, group, limit = 15 
       hours: b.hours || '',
       confidence: b.confidence,
       claimed: b.claimed || false,
+      possibly_closed: b.possibly_closed || false,
+      staleness: stalenessBlock(b),
     })),
     context_block: results.map(b => fmtBusiness(b, refLat, refLon)).join('\n'),
+    data_freshness: zipFreshnessBlock(results),
   };
 }
 
@@ -401,9 +409,12 @@ function toolCorridor({ street, zip, limit = 20 }) {
       hours: b.hours || '',
       confidence: b.confidence,
       claimed: b.claimed || false,
+      possibly_closed: b.possibly_closed || false,
+      staleness: stalenessBlock(b),
     })),
     context_block: `CORRIDOR: ${street}${zip ? ` (${zip})` : ''}\n` +
       results.map(b => fmtBusiness(b)).join('\n'),
+    data_freshness: zipFreshnessBlock(results),
   };
 }
 
@@ -436,11 +447,14 @@ function toolChanges({ zip, limit = 20 }) {
       claimed: b.claimed || false,
       confidence: b.confidence,
       sources: b.sources || [],
+      possibly_closed: b.possibly_closed || false,
+      staleness: stalenessBlock(b),
     })),
     context_block: `RECENT CHANGES / VERIFIED LISTINGS:\n` +
       results.map(b =>
         `  ${b.name} [${b.category}] ${b.zip}${b.addedAt ? ` · added:${b.addedAt.slice(0,10)}` : ''}${b.claimed ? ' · owner_verified' : ''}`
       ).join('\n'),
+    data_freshness: zipFreshnessBlock(results),
   };
 }
 
@@ -464,6 +478,7 @@ function toolStats() {
   const totalQueries = ledger.length;
   const totalRevenue = ledger.reduce((s, e) => s + (e.cost || 0), 0);
 
+  const freshness = zipFreshnessBlock(data);
   return {
     total_businesses: data.length,
     owner_verified: ownerVerified,
@@ -474,15 +489,16 @@ function toolStats() {
     total_queries: totalQueries,
     total_revenue_pathusd: parseFloat(totalRevenue.toFixed(4)),
     sources: ['OSM', 'Census ACS 2022', 'owner_verified'],
-    last_sync: '2026-04-20',
+    data_freshness: freshness,
     context_block: [
       `LOCALINTEL DATASET STATS`,
       `Businesses: ${data.length} | Owner-verified: ${ownerVerified} | Avg confidence: ${data.length ? Math.round(totalConf/data.length) : 0}`,
+      `Freshness grade: ${freshness.grade} | FRESH:${freshness.tier_distribution.FRESH||0} WARM:${freshness.tier_distribution.WARM||0} STALE:${freshness.tier_distribution.STALE||0} COLD:${freshness.tier_distribution.COLD||0}`,
+      `Possibly closed flags: ${freshness.possibly_closed_count}`,
       `Zips: ${Object.entries(byZip).map(([z,c]) => `${z}:${c}`).join(', ')}`,
       `Categories: ${Object.entries(byGroup).map(([g,c]) => `${g}:${c}`).join(', ')}`,
       `Total queries served: ${totalQueries} | Revenue: $${totalRevenue.toFixed(4)} pathUSD`,
       `Sources: OSM · Census ACS 2022 · owner_verified`,
-      `Last sync: 2026-04-20`,
     ].join('\n'),
   };
 }

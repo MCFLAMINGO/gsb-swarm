@@ -30,6 +30,9 @@ const ZIPS_DIR    = path.join(DATA_DIR, 'zips');
 const ENRICH_LOG  = path.join(DATA_DIR, 'enrichmentLog.json');
 const SOURCE_LOG  = path.join(DATA_DIR, 'sourceLog.json');
 
+// Import staleness utilities from shared module (no side effects)
+const { getStaleness, stalenessBlock, STALENESS_TIERS } = require('./stalenessUtils');
+
 // Foursquare free tier — 1000 calls/day. Set FSQ_API_KEY in Railway env.
 const FSQ_KEY = process.env.FSQ_API_KEY || null;
 
@@ -304,8 +307,31 @@ async function enrichBusiness(biz) {
     logSource(biz.zip, 'own_website', 'ok', `${biz.name} → ${biz.scraped_url || biz.website}`);
   }
 
+  // ── Closure detection ──────────────────────────────────────────────────────
+  // Flag possibly_closed if Nominatim returns no result AND domain probe fails
+  // after a previous successful enrichment. Don't flag brand-new records.
+  const wasEnrichedBefore = !!(biz.last_enriched || biz.enriched_at);
+  if (wasEnrichedBefore && !changed) {
+    // Both sources came back empty on a previously-known business — soft flag
+    const nowTs = new Date().toISOString();
+    if (!biz.possibly_closed) {
+      biz.possibly_closed      = true;
+      biz.possibly_closed_at   = nowTs;
+      biz.possibly_closed_why  = 'Nominatim + domain probe returned no data on re-enrichment';
+      console.log(`[EnrichmentAgent] ⚠️ Closure flag set: ${biz.name} (${biz.zip})`);
+      changed = true; // write the flag back to file
+    }
+  } else if (changed && biz.possibly_closed) {
+    // Data came back — clear the closure flag
+    biz.possibly_closed     = false;
+    biz.possibly_closed_at  = null;
+    biz.possibly_closed_why = null;
+  }
+
   if (changed) {
-    biz.enriched_at = new Date().toISOString();
+    biz.last_enriched = new Date().toISOString();
+    // Keep enriched_at for backward compat but last_enriched is canonical
+    biz.enriched_at = biz.last_enriched;
     biz.enrichment_sources = [
       (!biz.phone || !biz.hours) ? 'nominatim'   : null,
       biz.scraped_url            ? 'own_website'  : null,
@@ -567,10 +593,18 @@ async function enrichmentCycle() {
     try { businesses = JSON.parse(fs.readFileSync(path.join(ZIPS_DIR, file))); }
     catch (e) { continue; }
 
-    const candidates = businesses.filter(b =>
-      b.confidence < 85 &&
-      !(b.enriched_at && new Date(b.enriched_at).getTime() > oneDayAgo)
-    );
+    // Candidates: needs enrichment OR is STALE/COLD (re-enrichment due)
+    // Never re-run within 24h regardless of tier
+    const candidates = businesses
+      .filter(b => {
+        const lastTs = b.last_enriched || b.enriched_at || null;
+        if (lastTs && new Date(lastTs).getTime() > oneDayAgo) return false; // ran recently
+        const s = getStaleness(b);
+        // Include if: never enriched, low confidence, STALE, COLD, or possibly_closed
+        return b.confidence < 85 || s.tier === 'STALE' || s.tier === 'COLD' || b.possibly_closed;
+      })
+      // Sort: COLD (priority 20) first, then STALE (10), then WARM (1), then FRESH (0)
+      .sort((a, b) => getStaleness(b).reEnrichPriority - getStaleness(a).reEnrichPriority);
 
     if (!candidates.length) continue;
     console.log(`[EnrichmentAgent] ${file}: ${candidates.length} candidates`);
@@ -614,18 +648,48 @@ async function enrichmentCycle() {
 const app = express();
 app.use(express.json());
 
-app.get('/health', (req, res) => res.json({
-  worker: 'enrichmentAgent',
-  port: PORT,
-  status: stats.running ? 'enriching' : 'idle',
-  sources: {
-    yelp_public: 'active — HTML parse, no key',
-    foursquare:  FSQ_KEY ? 'active — free tier (1000/day)' : 'inactive — set FSQ_API_KEY in Railway env',
-    nominatim:   'active — always-on fallback',
-    own_website: 'active — phone→411→domain guess→scrape (no key)',  
-  },
-  stats,
-}));
+app.get('/health', (req, res) => {
+  // Compute tier distribution across all zip files
+  const tierCounts = { FRESH: 0, WARM: 0, STALE: 0, COLD: 0, possibly_closed: 0 };
+  let totalBiz = 0;
+  try {
+    if (fs.existsSync(ZIPS_DIR)) {
+      fs.readdirSync(ZIPS_DIR).filter(f => f.endsWith('.json')).forEach(file => {
+        try {
+          const businesses = JSON.parse(fs.readFileSync(path.join(ZIPS_DIR, file)));
+          businesses.forEach(b => {
+            totalBiz++;
+            const s = getStaleness(b);
+            tierCounts[s.tier] = (tierCounts[s.tier] || 0) + 1;
+            if (b.possibly_closed) tierCounts.possibly_closed++;
+          });
+        } catch(e) {}
+      });
+    }
+  } catch(e) {}
+
+  res.json({
+    worker: 'enrichmentAgent',
+    port: PORT,
+    status: stats.running ? 'enriching' : 'idle',
+    sources: {
+      yelp_public: 'disabled — rate limited without key',
+      foursquare:  FSQ_KEY ? 'active — free tier (1000/day)' : 'inactive — set FSQ_API_KEY in Railway env',
+      nominatim:   'active — always-on fallback',
+      own_website: 'active — phone→411→domain guess→scrape (no key)',
+    },
+    freshness: {
+      total_businesses: totalBiz,
+      tiers: tierCounts,
+      grade_key: 'FRESH<7d | WARM 7-30d | STALE 30-90d | COLD 90+d',
+    },
+    staleness_tiers: STALENESS_TIERS.map(t => ({
+      tier: t.tier, maxDays: t.maxDays === Infinity ? '90+' : t.maxDays,
+      confidence_multiplier: t.confidenceMultiplier, grade: t.grade,
+    })),
+    stats,
+  });
+});
 
 app.post('/run', async (req, res) => {
   res.json({ status: 'dispatched' });
@@ -644,3 +708,6 @@ app.listen(PORT, () => {
   enrichmentCycle().catch(err => console.error('[EnrichmentAgent] Init error:', err));
   setInterval(() => enrichmentCycle().catch(err => console.error('[EnrichmentAgent]', err)), CYCLE_MS);
 });
+
+// Re-export staleness utilities so callers can use enrichmentAgent as the single import point
+module.exports = { getStaleness, stalenessBlock, STALENESS_TIERS };
