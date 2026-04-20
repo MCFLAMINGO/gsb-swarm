@@ -213,11 +213,16 @@ router.get('/mcp', async (req, res) => {
 // Full URL: https://gsb-swarm-production.up.railway.app/api/mcp
 router.post('/mcp', express.json(), async (req, res) => {
   try {
-    const body = JSON.stringify(req.body || {});
+    const body = req.body || {};
+    // MCP notifications have no "id" — return 204 immediately, never proxy
+    // (Smithery + other clients send notifications/initialized before tools/list)
+    if (body.method && body.method.startsWith('notifications/') && body.id === undefined) {
+      return res.status(204).end();
+    }
     const response = await fetch('http://localhost:3004/mcp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body,
+      body: JSON.stringify(body),
     });
     const data = await response.json();
     res.status(response.status).json(data);
