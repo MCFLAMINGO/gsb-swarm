@@ -8,6 +8,7 @@ const { fork } = require('child_process');
 const path = require('path');
 const express = require('express');
 const { registerResources } = require('./acpResources');
+const { registerOfferings } = require('./acpOfferings');
 const { getSkillReport, resetSkill } = require('./skillFeedback');
 
 const workers = [
@@ -109,7 +110,10 @@ app.post('/api/skill-reset', express.json(), (req, res) => {
 });
 
 // ── Register ACP Resources after 30s (agents need to be online first) ─────────
+// Register ACP resources (THROW Watcher data feed) after 30s
 setTimeout(() => { registerResources().catch(e => console.warn('[acpResources]', e.message)); }, 30000);
+// Register / refresh all agent offerings + descriptions after 45s
+setTimeout(() => { registerOfferings().catch(e => console.warn('[acpOfferings]', e.message)); }, 45000);
 
 app.listen(HEALTH_PORT, () => {
   console.log(`\n[SWARM] Health check running on port ${HEALTH_PORT}`);
