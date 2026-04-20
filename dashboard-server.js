@@ -392,6 +392,10 @@ const wss    = new WebSocketServer({ server, path: '/ws' });
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
+// ── Local Intel router — mounted directly (index.js not started by Railway) ────
+const localIntelRouter = require('./localIntelAgent');
+app.use('/api/local-intel', localIntelRouter);
+
 // ── ACP compliance endpoints — MUST be before express.static ─────────────────
 // Virtuals probes these to verify agent is hireable on ACP marketplace
 app.get('/.well-known/agent.json', (req, res) => {
@@ -4765,30 +4769,9 @@ app.post('/api/run-app-test', requireOperator, async (req, res) => {
 // These routes live on the internal Express app (port 3001) but Railway's
 // public domain points here (8080). Proxy them through so the Next.js
 // dashboard and external agents can reach them.
-function proxyToInternal(req, res) {
-  const options = {
-    hostname: '127.0.0.1',
-    port: 3001,
-    path: req.url,
-    method: req.method,
-    headers: { ...req.headers, host: '127.0.0.1:3001' },
-  };
-  const proxy = http.request(options, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode, proxyRes.headers);
-    proxyRes.pipe(res, { end: true });
-  });
-  proxy.on('error', (err) => {
-    console.error('[proxy] internal error:', err.message);
-    res.status(502).json({ error: 'Internal service unavailable', detail: err.message });
-  });
-  if (req.body && req.method !== 'GET') {
-    proxy.write(JSON.stringify(req.body));
-  }
-  proxy.end();
-}
-
-app.use('/api/local-intel', proxyToInternal);
-app.use('/.well-known', proxyToInternal);
+// /.well-known/agent.json is handled directly above (line ~401)
+// /api/local-intel is mounted directly above (line ~396)
+// No proxy needed — dashboard-server.js is the Railway entry point
 
 app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dashboard-ui', 'index.html'));
