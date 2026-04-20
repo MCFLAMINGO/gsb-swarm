@@ -11,7 +11,7 @@ Usage:
 
     sig_data = {
         'image_base64': '<base64 PNG string>',
-        'signer_name': 'Erik Peter Osol',
+        'signer_name': 'Erik Osol',
         'date': '04/03/2026',
         'ip_address': '192.168.1.1',
         'timestamp': '2026-04-03T05:00:00Z',
@@ -377,7 +377,7 @@ def generate_audit_trail_page(signature_data_list: List[Dict], output_path: str)
 if __name__ == '__main__':
     # Test typed signature rendering
     print("Testing typed signature render...")
-    b64 = render_typed_signature("Erik Peter Osol")
+    b64 = render_typed_signature("Erik Osol")
     if b64:
         raw = base64.b64decode(b64)
         with open('/tmp/test_typed_sig.png', 'wb') as f:
@@ -388,7 +388,7 @@ if __name__ == '__main__':
     print("\nTesting audit trail...")
     sig_data = {
         'image_base64': b64,
-        'signer_name': 'Erik Peter Osol',
+        'signer_name': 'Erik Osol',
         'date': '04/03/2026',
         'ip_address': '192.168.1.1',
         'timestamp': '2026-04-03T05:00:00Z',

@@ -1982,7 +1982,7 @@ def generate_all_forms(
 if __name__ == "__main__":
     # Quick test with sample data
     test_data = {
-        "full_name": "Erik Peter Osol",
+        "full_name": "Erik Osol",
         "signer2_name": "Lea Blake Osol",
         "home_address": "205 Odoms Mill Blvd",
         "city_state_zip": "Ponte Vedra Beach, FL 32082",
@@ -2029,7 +2029,7 @@ if __name__ == "__main__":
         "signer1_name": "Lea Blake Osol",
         "signer1_ssn": "115-76-6040",
         "signer1_date": "03/05/2026",
-        "signer2_name": "Erik Peter Osol",
+        "signer2_name": "Erik Osol",
         "signer2_ssn": "010-56-1573",
         "signer2_date": "03/05/2026",
 
