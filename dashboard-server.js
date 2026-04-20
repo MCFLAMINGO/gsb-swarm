@@ -4783,12 +4783,17 @@ app.use((req, res) => {
 (function launchLocalIntelWorkers() {
   const { fork } = require('child_process');
   const LOCAL_INTEL_WORKERS = [
-    { name: 'LocalIntel Claim',   file: 'localIntelWorker.js' },
-    { name: 'LocalIntel MCP',     file: 'localIntelMCP.js' },
-    { name: 'Data Ingest',        file: 'dataIngestWorker.js' },
-    { name: 'Zip Coordinator',    file: 'workers/zipCoordinatorWorker.js' },
-    { name: 'Enrichment Agent',   file: 'workers/enrichmentAgent.js' },
-    { name: 'ACP Broadcaster',    file: 'workers/acpBroadcaster.js' },
+    { name: 'LocalIntel Claim',     file: 'localIntelWorker.js' },
+    { name: 'LocalIntel MCP',       file: 'localIntelMCP.js' },
+    { name: 'Data Ingest',          file: 'dataIngestWorker.js' },
+    { name: 'Zip Coordinator',      file: 'workers/zipCoordinatorWorker.js' },
+    { name: 'Enrichment Agent',     file: 'workers/enrichmentAgent.js' },
+    { name: 'ACP Broadcaster',      file: 'workers/acpBroadcaster.js' },
+    // ── Tidal layer workers ──
+    { name: 'Bedrock Worker',       file: 'workers/bedrockWorker.js' },
+    { name: 'Ocean Floor Worker',   file: 'workers/oceanFloorWorker.js' },
+    { name: 'Surface Current',      file: 'workers/surfaceCurrentWorker.js' },
+    { name: 'Wave Surface Worker',  file: 'workers/waveSurfaceWorker.js' },
   ];
 
   function spawnLocalIntelWorker(w) {

@@ -30,13 +30,22 @@ const LEDGER_PATH  = path.join(__dirname, 'data', 'usageLedger.json');
 const PORT         = parseInt(process.env.LOCAL_INTEL_MCP_PORT || '3004');
 
 // ── Cost per tool call (pathUSD) ──────────────────────────────────────────────
+// ── Tidal tools ──────────────────────────────────────────────────────────────
+const { handleTide, handleSignal, handleBedrock, handleForAgent } = require('./localIntelTidalTools');
+const { wrapMCPHandler } = require('./workers/mcpMiddleware');
+
 const TOOL_COSTS = {
-  local_intel_context:  0.02,
-  local_intel_search:   0.01,
-  local_intel_nearby:   0.02,
-  local_intel_zone:     0.01,
-  local_intel_corridor: 0.02,
-  local_intel_changes:  0.01,
+  local_intel_context:   0.02,
+  local_intel_search:    0.01,
+  local_intel_nearby:    0.02,
+  local_intel_zone:      0.01,
+  local_intel_corridor:  0.02,
+  local_intel_changes:   0.01,
+  // Tidal layer tools
+  local_intel_tide:      0.02,
+  local_intel_signal:    0.03,
+  local_intel_bedrock:   0.02,
+  local_intel_for_agent: 0.05,
   local_intel_stats:    0.005,
 };
 
@@ -480,13 +489,18 @@ function toolStats() {
 
 // ── MCP tool registry ─────────────────────────────────────────────────────────
 const TOOLS = {
-  local_intel_context:  { fn: toolContext,  desc: 'Full spatial context block for a zip or lat/lon. Best first call for any location query.' },
-  local_intel_search:   { fn: toolSearch,   desc: 'Search businesses by name, category, or group.' },
-  local_intel_nearby:   { fn: toolNearby,   desc: 'Businesses within radius_miles of a lat/lon point, sorted by distance.' },
-  local_intel_zone:     { fn: toolZone,     desc: 'Spending zone, demographic, and economic data for a zip code.' },
-  local_intel_corridor: { fn: toolCorridor, desc: 'Businesses along a named street corridor (e.g. A1A, Palm Valley Rd).' },
-  local_intel_changes:  { fn: toolChanges,  desc: 'Recently added or owner-verified business listings.' },
-  local_intel_stats:    { fn: toolStats,    desc: 'Dataset coverage stats and usage metrics.' },
+  local_intel_context:   { fn: toolContext,    desc: 'Full spatial context block for a zip or lat/lon. Best first call for any location query.' },
+  local_intel_search:    { fn: toolSearch,     desc: 'Search businesses by name, category, or group.' },
+  local_intel_nearby:    { fn: toolNearby,     desc: 'Businesses within radius_miles of a lat/lon point, sorted by distance.' },
+  local_intel_zone:      { fn: toolZone,       desc: 'Spending zone, demographic, and economic data for a zip code.' },
+  local_intel_corridor:  { fn: toolCorridor,   desc: 'Businesses along a named street corridor (e.g. A1A, Palm Valley Rd).' },
+  local_intel_changes:   { fn: toolChanges,    desc: 'Recently added or owner-verified business listings.' },
+  local_intel_stats:     { fn: toolStats,      desc: 'Dataset coverage stats and usage metrics.' },
+  // ── Tidal layer tools (Layer 0-3 intelligence) ──
+  local_intel_tide:      { fn: handleTide,     desc: 'Tidal reading for a ZIP — temperature, direction, seasonal context. Combines all 4 data layers.' },
+  local_intel_signal:    { fn: handleSignal,   desc: 'Investment + activity signal for a ZIP — composite score from bedrock through wave surface.' },
+  local_intel_bedrock:   { fn: handleBedrock,  desc: 'Infrastructure momentum — permits, road projects, flood zones. Leading indicator (12-36mo ahead).' },
+  local_intel_for_agent: { fn: handleForAgent, desc: 'Premium composite entry point. Declare agent_type + intent, get pre-ranked signals for your use case.' },
 };
 
 // ── MCP manifest (tools/list response) ───────────────────────────────────────
@@ -577,6 +591,61 @@ const MCP_MANIFEST = {
       name: 'local_intel_stats',
       description: 'Dataset coverage stats: total businesses, confidence scores, query volume, revenue earned.',
       inputSchema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'local_intel_tide',
+      description: 'Tidal reading for a ZIP — temperature (0-100), direction (surging/heating/stable/cooling/receding), seasonal context. Synthesizes all 4 data layers. Best for agents deciding WHERE to act next.',
+      inputSchema: {
+        type: 'object',
+        required: ['zip'],
+        properties: {
+          zip:            { type: 'string', description: 'ZIP code to read tidal state for' },
+          include_layers: { type: 'array',  description: 'Layers to include: bedrock, ocean_floor, surface_current, wave_surface (default: all)' },
+          query_context:  { type: 'object', description: 'Optional: { agent_type, agent_id, purpose }' },
+        },
+      },
+    },
+    {
+      name: 'local_intel_signal',
+      description: 'Investment and activity signal for a ZIP. Composite score 0-100 with band (strong_buy/accumulate/hold/reduce/avoid), top reasons, and avoid flags. Best for real estate and financial agents.',
+      inputSchema: {
+        type: 'object',
+        required: ['zip'],
+        properties: {
+          zip:           { type: 'string', description: 'ZIP code' },
+          agent_type:    { type: 'string', description: 'real_estate | financial | ad_placement | logistics | business_owner | civic' },
+          query_context: { type: 'object', description: 'Optional: { agent_id, purpose }' },
+        },
+      },
+    },
+    {
+      name: 'local_intel_bedrock',
+      description: 'Infrastructure momentum score and active leading indicators for a ZIP from Layer 0. Permits, road projects, flood zones, utility extensions. Predicts conditions 12-36 months ahead. \'Let Google pay for the satellites — we sell the weather forecast.\'',
+      inputSchema: {
+        type: 'object',
+        required: ['zip'],
+        properties: {
+          zip:           { type: 'string', description: 'ZIP code' },
+          query_context: { type: 'object', description: 'Optional: { agent_type, agent_id }' },
+        },
+      },
+    },
+    {
+      name: 'local_intel_for_agent',
+      description: 'PREMIUM composite entry point ($0.05). Declare your agent_type and intent, receive pre-ranked top-10 signals assembled from all 4 data layers, personalized for your use case. Includes delta since your last query if agent_id provided. Best first call for any new agent.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          agent_type: { type: 'string', description: 'real_estate | financial | ad_placement | logistics | business_owner | civic' },
+          intent:     { type: 'string', description: 'Plain-language description of what you are trying to decide or do' },
+          zip:        { type: 'string', description: 'Target ZIP code' },
+          lat:        { type: 'number', description: 'Latitude (if no ZIP)' },
+          lon:        { type: 'number', description: 'Longitude (if no ZIP)' },
+          budget:     { type: 'number', description: 'Agent budget in pathUSD (optional, for signal prioritization)' },
+          depth:      { type: 'string', description: 'quick (top 5 signals) | full (top 10 + context blocks)' },
+          agent_id:   { type: 'string', description: 'Your agent UUID for memory + delta computation' },
+        },
+      },
     },
   ],
 };
