@@ -328,7 +328,7 @@ router.get('/coverage-stats', (req, res) => {
     const queue = queueFile && fs.existsSync(queueFile) ? JSON.parse(fs.readFileSync(queueFile)) : [];
 
     const completedZips = Object.entries(cov.completed || {});
-    const totalBusinesses = completedZips.reduce((s, [, v]) => s + (v.businesses || 0), 0);
+    let totalBusinesses = completedZips.reduce((s, [, v]) => s + (v.businesses || 0), 0);
 
     // Average confidence from zip files
     let confSum = 0, confCount = 0;
@@ -339,6 +339,25 @@ router.get('/coverage-stats', (req, res) => {
           bizs.forEach(b => { confSum += (b.confidence || 0); confCount++; });
         } catch(e) {}
       });
+    }
+
+    // ── Fallback: if zip files have 0 businesses, count from localIntel.json ──
+    if (totalBusinesses === 0 || confCount === 0) {
+      try {
+        const flat = JSON.parse(fs.readFileSync(DATA_PATH));
+        if (Array.isArray(flat) && flat.length > 0) {
+          totalBusinesses = flat.length;
+          flat.forEach(b => { confSum += (b.confidence || 0); confCount++; });
+          // Also synthesize completedZips from localIntel.json grouping if cov is empty
+          if (completedZips.length === 0) {
+            const byZip = {};
+            flat.forEach(b => { const z = b.zip || 'unknown'; byZip[z] = (byZip[z] || 0) + 1; });
+            Object.entries(byZip).forEach(([zip, count]) => {
+              completedZips.push([zip, { businesses: count, completedAt: new Date().toISOString(), source: 'localIntel.json' }]);
+            });
+          }
+        }
+      } catch(e) { console.warn('[coverage-stats] localIntel.json fallback failed:', e.message); }
     }
 
     const inProgress = queue.filter(z => z.status === 'inProgress').length;

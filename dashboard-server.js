@@ -4777,6 +4777,39 @@ app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dashboard-ui', 'index.html'));
 });
 
+// ── LocalIntel Worker Launcher ───────────────────────────────────────────────
+// Fork all LocalIntel autonomous workers from here (dashboard-server.js is the
+// Railway entry point — index.js is never started on Railway).
+(function launchLocalIntelWorkers() {
+  const { fork } = require('child_process');
+  const LOCAL_INTEL_WORKERS = [
+    { name: 'LocalIntel Claim',   file: 'localIntelWorker.js' },
+    { name: 'LocalIntel MCP',     file: 'localIntelMCP.js' },
+    { name: 'Data Ingest',        file: 'dataIngestWorker.js' },
+    { name: 'Zip Coordinator',    file: 'workers/zipCoordinatorWorker.js' },
+    { name: 'Enrichment Agent',   file: 'workers/enrichmentAgent.js' },
+    { name: 'ACP Broadcaster',    file: 'workers/acpBroadcaster.js' },
+  ];
+
+  function spawnLocalIntelWorker(w) {
+    const workerPath = path.join(__dirname, w.file);
+    if (!fs.existsSync(workerPath)) {
+      console.warn(`[local-intel-workers] Skipping ${w.name} — file not found: ${workerPath}`);
+      return;
+    }
+    const child = fork(workerPath, [], { silent: false, env: process.env });
+    child.on('error', err => console.error(`[local-intel-workers] ${w.name} error:`, err.message));
+    child.on('exit', (code, signal) => {
+      console.warn(`[local-intel-workers] ${w.name} exited (code=${code}, signal=${signal}) — restarting in 5s`);
+      setTimeout(() => spawnLocalIntelWorker(w), 5000);
+    });
+    console.log(`[local-intel-workers] Started ${w.name} (PID ${child.pid})`);
+  }
+
+  LOCAL_INTEL_WORKERS.forEach(spawnLocalIntelWorker);
+  console.log(`[local-intel-workers] ${LOCAL_INTEL_WORKERS.length} LocalIntel workers launched.`);
+})();
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`[gsb-dashboard] Listening on port ${PORT}`);
