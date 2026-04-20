@@ -129,6 +129,35 @@ router.post('/claim', express.json(), async (req, res) => {
   }
 });
 
+// ── POST /api/mcp — proxy to MCP server on port 3004 ───────────────────────
+// This is the public MCP endpoint agents call from outside Railway.
+// Full URL: https://gsb-swarm-production.up.railway.app/api/mcp
+router.post('/mcp', express.json(), async (req, res) => {
+  try {
+    const body = JSON.stringify(req.body || {});
+    const response = await fetch('http://localhost:3004/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (e) {
+    res.status(503).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'MCP server unavailable: ' + e.message } });
+  }
+});
+
+// ── GET /api/mcp/manifest — MCP tool discovery ────────────────────────────────
+router.get('/mcp/manifest', async (req, res) => {
+  try {
+    const response = await fetch('http://localhost:3004/manifest');
+    const data = await response.json();
+    res.json(data);
+  } catch (e) {
+    res.status(503).json({ ok: false, error: 'MCP server unavailable' });
+  }
+});
+
 // ── GET /api/local-intel/osm-queue — proxy to worker ─────────────────────────
 router.get('/osm-queue', async (req, res) => {
   try {

@@ -1,0 +1,682 @@
+'use strict';
+/**
+ * LocalIntel MCP Server — GSB Swarm
+ *
+ * Implements the Model Context Protocol (MCP) JSON-RPC 2.0 spec.
+ * Agents (Claude, GPT, Cursor, etc.) connect via HTTP POST to /mcp
+ * and call tools to query the SJC business + zone dataset.
+ *
+ * Tools exposed:
+ *   local_intel_context     — spatial context block for a zip or lat/lon
+ *   local_intel_search      — search businesses by name/category/zip
+ *   local_intel_nearby      — businesses within radius of a lat/lon point
+ *   local_intel_zone        — spending zone + demographic data for a zip
+ *   local_intel_corridor    — businesses along a named street corridor
+ *   local_intel_changes     — recently added/claimed/updated listings
+ *   local_intel_stats       — dataset coverage stats
+ *
+ * Billing: each tool call logs to usage_ledger.json for future ACP billing.
+ * Port: 3004 (internal Railway port, proxied via /api/mcp on port 3001)
+ */
+
+const http  = require('http');
+const fs    = require('fs');
+const path  = require('path');
+
+const DATA_PATH    = path.join(__dirname, 'data', 'localIntel.json');
+const ZONES_PATH   = path.join(__dirname, 'data', 'spendingZones.json');
+const LEDGER_PATH  = path.join(__dirname, 'data', 'usageLedger.json');
+const PORT         = parseInt(process.env.LOCAL_INTEL_MCP_PORT || '3004');
+
+// ── Cost per tool call (pathUSD) ──────────────────────────────────────────────
+const TOOL_COSTS = {
+  local_intel_context:  0.02,
+  local_intel_search:   0.01,
+  local_intel_nearby:   0.02,
+  local_intel_zone:     0.01,
+  local_intel_corridor: 0.02,
+  local_intel_changes:  0.01,
+  local_intel_stats:    0.005,
+};
+
+// ── Data loaders ──────────────────────────────────────────────────────────────
+function loadBusinesses() {
+  try { return JSON.parse(fs.readFileSync(DATA_PATH, 'utf8')); } catch { return []; }
+}
+function loadZones() {
+  try { return JSON.parse(fs.readFileSync(ZONES_PATH, 'utf8')); } catch { return {}; }
+}
+function logUsage(tool, caller) {
+  try {
+    const ledger = (() => { try { return JSON.parse(fs.readFileSync(LEDGER_PATH, 'utf8')); } catch { return []; } })();
+    ledger.push({ tool, caller: caller || 'unknown', cost: TOOL_COSTS[tool] || 0, ts: new Date().toISOString() });
+    // Keep last 10k entries
+    if (ledger.length > 10000) ledger.splice(0, ledger.length - 10000);
+    fs.writeFileSync(LEDGER_PATH, JSON.stringify(ledger, null, 2));
+  } catch {}
+}
+
+// ── Haversine distance (miles) ────────────────────────────────────────────────
+function distanceMiles(lat1, lon1, lat2, lon2) {
+  const R = 3958.8;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) *
+            Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// ── Category grouper ──────────────────────────────────────────────────────────
+const CAT_GROUPS = {
+  food:     ['restaurant','fast_food','cafe','bar','pub','ice_cream','alcohol'],
+  retail:   ['supermarket','convenience','clothes','hairdresser','beauty','chemist',
+             'mobile_phone','copyshop','dry_cleaning','nutrition_supplements'],
+  health:   ['dentist','clinic','hospital','doctor','veterinary','fitness_centre',
+             'sports_centre','swimming_pool'],
+  finance:  ['bank','atm','estate_agent','insurance','accountant'],
+  civic:    ['school','place_of_worship','church','library','post_office',
+             'police','fire_station','community_centre','social_centre'],
+  services: ['fuel','car_wash','car_repair','hotel','office','coworking'],
+};
+function getGroup(cat) {
+  for (const [g, cats] of Object.entries(CAT_GROUPS)) {
+    if (cats.includes(cat)) return g;
+  }
+  return 'other';
+}
+
+// ── ZIP centroids ─────────────────────────────────────────────────────────────
+const ZIP_CENTERS = {
+  '32082': { lat: 30.1893, lon: -81.3815, label: 'Ponte Vedra Beach' },
+  '32081': { lat: 30.1100, lon: -81.4175, label: 'Nocatee' },
+};
+
+// ── Compass bearing label ─────────────────────────────────────────────────────
+function bearing(lat1, lon1, lat2, lon2) {
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
+  const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
+            Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon);
+  const brng = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  const dirs = ['N','NE','E','SE','S','SW','W','NW'];
+  return dirs[Math.round(brng / 45) % 8];
+}
+
+// ── Format a business as a compact agent-readable line ────────────────────────
+function fmtBusiness(b, refLat, refLon) {
+  const parts = [`${b.name} [${b.category}]`];
+  if (b.address) parts.push(b.address);
+  if (refLat && refLon && b.lat && b.lon) {
+    const d = distanceMiles(refLat, refLon, b.lat, b.lon);
+    const dir = bearing(refLat, refLon, b.lat, b.lon);
+    parts.push(`${d.toFixed(2)}mi ${dir}`);
+  }
+  if (b.phone) parts.push(`ph:${b.phone}`);
+  if (b.hours) parts.push(`hours:${b.hours}`);
+  if (b.website) parts.push(`web:${b.website}`);
+  const conf = b.confidence >= 90 ? '' : ` | conf:${b.confidence}`;
+  const claimed = b.claimed ? ' | owner_verified' : '';
+  return `  ${parts.join(' · ')}${conf}${claimed}`;
+}
+
+// ── TOOL IMPLEMENTATIONS ──────────────────────────────────────────────────────
+
+/**
+ * local_intel_context
+ * Returns a full spatial context block for a zip code or lat/lon.
+ * This is the primary tool — gives an agent everything it needs in one call.
+ */
+function toolContext({ zip, lat, lon, radius_miles = 1.0 }) {
+  const businesses = loadBusinesses();
+  const zones = loadZones();
+
+  // Resolve center point
+  let centerLat, centerLon, label;
+  if (lat && lon) {
+    centerLat = parseFloat(lat);
+    centerLon = parseFloat(lon);
+    // Find nearest zip
+    const nearestZip = Object.entries(ZIP_CENTERS)
+      .sort((a, b) => distanceMiles(centerLat, centerLon, a[1].lat, a[1].lon) -
+                      distanceMiles(centerLat, centerLon, b[1].lat, b[1].lon))[0];
+    zip = nearestZip[0];
+    label = nearestZip[1].label;
+  } else if (zip && ZIP_CENTERS[zip]) {
+    centerLat = ZIP_CENTERS[zip].lat;
+    centerLon = ZIP_CENTERS[zip].lon;
+    label = ZIP_CENTERS[zip].label;
+  } else {
+    return { error: `ZIP ${zip} not in covered dataset. Covered: ${Object.keys(ZIP_CENTERS).join(', ')}` };
+  }
+
+  // Find anchor (highest confidence business near center)
+  const zoneBusinesses = businesses.filter(b => b.zip === zip && b.lat && b.lon);
+  const anchor = zoneBusinesses
+    .filter(b => b.claimed || b.confidence >= 90)
+    .sort((a, b) => b.confidence - a.confidence)[0] ||
+    zoneBusinesses.sort((a, b) => b.confidence - a.confidence)[0];
+
+  // Bucket by distance rings
+  const rings = [0.25, 0.5, 1.0, radius_miles];
+  const ringLabels = ['0.25mi', '0.5mi', '1.0mi', `${radius_miles}mi`];
+  const bucketed = {};
+  rings.forEach(r => bucketed[r] = []);
+
+  for (const b of zoneBusinesses) {
+    if (b === anchor) continue;
+    const d = distanceMiles(centerLat, centerLon, b.lat, b.lon);
+    if (d > radius_miles) continue;
+    const ring = rings.find(r => d <= r);
+    if (ring) bucketed[ring].push({ ...b, _dist: d });
+  }
+
+  // Zone data
+  const zoneData = zones.zones?.[zip] || {};
+
+  // Build context block
+  const lines = [];
+  lines.push(`LOCATION CONTEXT: ${zip} · ${label}, FL`);
+  lines.push(`CENTER: ${centerLat}, ${centerLon}`);
+  lines.push('');
+
+  if (anchor) {
+    lines.push(`ANCHOR: ${anchor.name} [${anchor.category}] ${anchor.address || ''}`);
+    lines.push(`  → ${distanceMiles(centerLat, centerLon, anchor.lat, anchor.lon).toFixed(2)}mi from center | confidence:${anchor.confidence}${anchor.claimed ? ' | owner_verified' : ''}`);
+    lines.push('');
+  }
+
+  let prevMax = 0;
+  for (let i = 0; i < rings.length; i++) {
+    const r = rings[i];
+    const bucket = bucketed[r];
+    if (!bucket.length) continue;
+    const sorted = bucket.sort((a, b) => a._dist - b._dist);
+    const label2 = prevMax === 0 ? `WITHIN ${ringLabels[i]}` : `${ringLabels[prevMax > 0 ? i-1 : i]}–${ringLabels[i]}`;
+    lines.push(`${label2} (${bucket.length} businesses):`);
+    for (const b of sorted.slice(0, 8)) {
+      lines.push(fmtBusiness(b, centerLat, centerLon));
+    }
+    if (sorted.length > 8) lines.push(`  ... +${sorted.length - 8} more`);
+    lines.push('');
+    prevMax = i;
+  }
+
+  // Zone intelligence
+  if (Object.keys(zoneData).length) {
+    lines.push('ZONE INTELLIGENCE:');
+    if (zoneData.population)       lines.push(`  Pop: ${zoneData.population.toLocaleString()}`);
+    if (zoneData.median_income)    lines.push(`  Med Income: $${zoneData.median_income.toLocaleString()}`);
+    if (zoneData.median_home_value) lines.push(`  Home Value: $${zoneData.median_home_value.toLocaleString()}`);
+    if (zoneData.ownership_rate)   lines.push(`  Ownership: ${zoneData.ownership_rate}%`);
+    if (zoneData.zone_score)       lines.push(`  Zone Score: ${zoneData.zone_score} ${zoneData.zone_label || ''}`);
+    if (zoneData.dominant_spend)   lines.push(`  Dominant spend: ${zoneData.dominant_spend}`);
+    lines.push('');
+  }
+
+  // Category summary
+  const catCounts = {};
+  for (const b of zoneBusinesses) {
+    const g = getGroup(b.category);
+    catCounts[g] = (catCounts[g] || 0) + 1;
+  }
+  lines.push('CATEGORY BREAKDOWN:');
+  for (const [g, count] of Object.entries(catCounts).sort((a,b) => b[1]-a[1])) {
+    lines.push(`  ${g}: ${count}`);
+  }
+  lines.push('');
+  lines.push(`DATASET: ${zoneBusinesses.length} businesses indexed | sources: OSM, owner_verified | last_sync: 2026-04-20`);
+
+  return {
+    zip,
+    label,
+    center: { lat: centerLat, lon: centerLon },
+    total_businesses: zoneBusinesses.length,
+    context_block: lines.join('\n'),
+  };
+}
+
+/**
+ * local_intel_search
+ * Search businesses by name, category, or group within a zip.
+ */
+function toolSearch({ zip, query, category, group, limit = 20 }) {
+  let results = loadBusinesses();
+  if (zip)      results = results.filter(b => b.zip === zip);
+  if (category) results = results.filter(b => b.category === category);
+  if (group)    results = results.filter(b => getGroup(b.category) === group);
+  if (query) {
+    const q = query.toLowerCase();
+    results = results.filter(b =>
+      b.name.toLowerCase().includes(q) ||
+      b.category.toLowerCase().includes(q) ||
+      (b.address || '').toLowerCase().includes(q)
+    );
+  }
+  results.sort((a, b) => b.confidence - a.confidence);
+  const total = results.length;
+  results = results.slice(0, Math.min(limit, 50));
+
+  return {
+    total,
+    returned: results.length,
+    results: results.map(b => ({
+      name: b.name,
+      category: b.category,
+      group: getGroup(b.category),
+      zip: b.zip,
+      address: b.address || '',
+      lat: b.lat,
+      lon: b.lon,
+      phone: b.phone || '',
+      website: b.website || '',
+      hours: b.hours || '',
+      confidence: b.confidence,
+      claimed: b.claimed || false,
+    })),
+    context_block: results.map(b => fmtBusiness(b)).join('\n'),
+  };
+}
+
+/**
+ * local_intel_nearby
+ * Returns businesses within radius_miles of a lat/lon, sorted by distance.
+ * Core tool for "what's near X" agent queries.
+ */
+function toolNearby({ lat, lon, radius_miles = 0.5, category, group, limit = 15 }) {
+  if (!lat || !lon) return { error: 'lat and lon required' };
+  const refLat = parseFloat(lat);
+  const refLon = parseFloat(lon);
+
+  let results = loadBusinesses().filter(b => b.lat && b.lon);
+  if (category) results = results.filter(b => b.category === category);
+  if (group)    results = results.filter(b => getGroup(b.category) === group);
+
+  results = results
+    .map(b => ({ ...b, _dist: distanceMiles(refLat, refLon, b.lat, b.lon) }))
+    .filter(b => b._dist <= parseFloat(radius_miles))
+    .sort((a, b) => a._dist - b._dist)
+    .slice(0, Math.min(limit, 50));
+
+  return {
+    center: { lat: refLat, lon: refLon },
+    radius_miles,
+    total: results.length,
+    results: results.map(b => ({
+      name: b.name,
+      category: b.category,
+      group: getGroup(b.category),
+      address: b.address || '',
+      lat: b.lat,
+      lon: b.lon,
+      distance_miles: parseFloat(b._dist.toFixed(3)),
+      bearing: bearing(refLat, refLon, b.lat, b.lon),
+      phone: b.phone || '',
+      hours: b.hours || '',
+      confidence: b.confidence,
+      claimed: b.claimed || false,
+    })),
+    context_block: results.map(b => fmtBusiness(b, refLat, refLon)).join('\n'),
+  };
+}
+
+/**
+ * local_intel_zone
+ * Returns spending zone + demographic intelligence for a zip.
+ */
+function toolZone({ zip }) {
+  const zones = loadZones();
+  const zoneData = zones.zones?.[zip];
+  if (!zoneData) {
+    return { error: `No zone data for ${zip}. Covered: ${Object.keys(zones.zones || {}).join(', ')}` };
+  }
+  const center = ZIP_CENTERS[zip];
+  const lines = [
+    `ZONE: ${zip} · ${center?.label || zip}, FL`,
+    `Population: ${(zoneData.population || 0).toLocaleString()}`,
+    `Median Household Income: $${(zoneData.median_income || 0).toLocaleString()}`,
+    `Median Home Value: $${(zoneData.median_home_value || 0).toLocaleString()}`,
+    `Median Rent: $${(zoneData.median_rent || 0).toLocaleString()}/mo`,
+    `Homeownership Rate: ${zoneData.ownership_rate || 0}%`,
+    `Zone Score: ${zoneData.zone_score || 'N/A'} · ${zoneData.zone_label || ''}`,
+    `Dominant Spending: ${zoneData.dominant_spend || 'N/A'}`,
+    `County Establishments: ${(zoneData.county_establishments || 0).toLocaleString()}`,
+    `County Employees: ${(zoneData.county_employees || 0).toLocaleString()}`,
+    `County Payroll: $${zoneData.county_payroll_millions || 0}M`,
+  ];
+  return { zip, ...zoneData, context_block: lines.join('\n') };
+}
+
+/**
+ * local_intel_corridor
+ * Returns businesses along a named street corridor.
+ * Useful for "what's on A1A" type queries.
+ */
+function toolCorridor({ street, zip, limit = 20 }) {
+  if (!street) return { error: 'street name required' };
+  const results = loadBusinesses()
+    .filter(b => {
+      if (zip && b.zip !== zip) return false;
+      return (b.address || '').toLowerCase().includes(street.toLowerCase());
+    })
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, Math.min(limit, 50));
+
+  return {
+    corridor: street,
+    zip: zip || 'all',
+    total: results.length,
+    results: results.map(b => ({
+      name: b.name,
+      category: b.category,
+      address: b.address || '',
+      lat: b.lat,
+      lon: b.lon,
+      phone: b.phone || '',
+      hours: b.hours || '',
+      confidence: b.confidence,
+      claimed: b.claimed || false,
+    })),
+    context_block: `CORRIDOR: ${street}${zip ? ` (${zip})` : ''}\n` +
+      results.map(b => fmtBusiness(b)).join('\n'),
+  };
+}
+
+/**
+ * local_intel_changes
+ * Returns recently added or owner-verified listings.
+ * Agents use this to detect new businesses opening.
+ */
+function toolChanges({ zip, limit = 20 }) {
+  let results = loadBusinesses()
+    .filter(b => b.addedAt || b.claimed || (b.sources || []).includes('owner_verified'));
+  if (zip) results = results.filter(b => b.zip === zip);
+  results.sort((a, b) => {
+    const da = a.addedAt ? new Date(a.addedAt) : new Date(0);
+    const db = b.addedAt ? new Date(b.addedAt) : new Date(0);
+    if (b.claimed && !a.claimed) return 1;
+    if (a.claimed && !b.claimed) return -1;
+    return db - da;
+  });
+  results = results.slice(0, Math.min(limit, 50));
+
+  return {
+    total: results.length,
+    results: results.map(b => ({
+      name: b.name,
+      category: b.category,
+      zip: b.zip,
+      address: b.address || '',
+      addedAt: b.addedAt || null,
+      claimed: b.claimed || false,
+      confidence: b.confidence,
+      sources: b.sources || [],
+    })),
+    context_block: `RECENT CHANGES / VERIFIED LISTINGS:\n` +
+      results.map(b =>
+        `  ${b.name} [${b.category}] ${b.zip}${b.addedAt ? ` · added:${b.addedAt.slice(0,10)}` : ''}${b.claimed ? ' · owner_verified' : ''}`
+      ).join('\n'),
+  };
+}
+
+/**
+ * local_intel_stats
+ * Dataset coverage summary — useful for agents evaluating data quality.
+ */
+function toolStats() {
+  const data = loadBusinesses();
+  const ledger = (() => { try { return JSON.parse(fs.readFileSync(LEDGER_PATH, 'utf8')); } catch { return []; } })();
+  const byZip = {}, byGroup = {};
+  let ownerVerified = 0, totalConf = 0;
+
+  for (const b of data) {
+    byZip[b.zip] = (byZip[b.zip] || 0) + 1;
+    byGroup[getGroup(b.category)] = (byGroup[getGroup(b.category)] || 0) + 1;
+    if (b.claimed) ownerVerified++;
+    totalConf += b.confidence || 0;
+  }
+
+  const totalQueries = ledger.length;
+  const totalRevenue = ledger.reduce((s, e) => s + (e.cost || 0), 0);
+
+  return {
+    total_businesses: data.length,
+    owner_verified: ownerVerified,
+    avg_confidence: data.length ? Math.round(totalConf / data.length) : 0,
+    covered_zips: Object.keys(ZIP_CENTERS),
+    by_zip: byZip,
+    by_group: byGroup,
+    total_queries: totalQueries,
+    total_revenue_pathusd: parseFloat(totalRevenue.toFixed(4)),
+    sources: ['OSM', 'Census ACS 2022', 'owner_verified'],
+    last_sync: '2026-04-20',
+    context_block: [
+      `LOCALINTEL DATASET STATS`,
+      `Businesses: ${data.length} | Owner-verified: ${ownerVerified} | Avg confidence: ${data.length ? Math.round(totalConf/data.length) : 0}`,
+      `Zips: ${Object.entries(byZip).map(([z,c]) => `${z}:${c}`).join(', ')}`,
+      `Categories: ${Object.entries(byGroup).map(([g,c]) => `${g}:${c}`).join(', ')}`,
+      `Total queries served: ${totalQueries} | Revenue: $${totalRevenue.toFixed(4)} pathUSD`,
+      `Sources: OSM · Census ACS 2022 · owner_verified`,
+      `Last sync: 2026-04-20`,
+    ].join('\n'),
+  };
+}
+
+// ── MCP tool registry ─────────────────────────────────────────────────────────
+const TOOLS = {
+  local_intel_context:  { fn: toolContext,  desc: 'Full spatial context block for a zip or lat/lon. Best first call for any location query.' },
+  local_intel_search:   { fn: toolSearch,   desc: 'Search businesses by name, category, or group.' },
+  local_intel_nearby:   { fn: toolNearby,   desc: 'Businesses within radius_miles of a lat/lon point, sorted by distance.' },
+  local_intel_zone:     { fn: toolZone,     desc: 'Spending zone, demographic, and economic data for a zip code.' },
+  local_intel_corridor: { fn: toolCorridor, desc: 'Businesses along a named street corridor (e.g. A1A, Palm Valley Rd).' },
+  local_intel_changes:  { fn: toolChanges,  desc: 'Recently added or owner-verified business listings.' },
+  local_intel_stats:    { fn: toolStats,    desc: 'Dataset coverage stats and usage metrics.' },
+};
+
+// ── MCP manifest (tools/list response) ───────────────────────────────────────
+const MCP_MANIFEST = {
+  name: 'localintel',
+  version: '1.0.0',
+  description: 'LocalIntel — agentic business intelligence for St. Johns County FL (32081 + 32082). Spatial context, business search, spending zones, corridor analysis.',
+  tools: [
+    {
+      name: 'local_intel_context',
+      description: 'Full spatial context block for a zip or lat/lon. Returns anchor business, nearby businesses in distance rings, zone intelligence, and category breakdown. Best first call for any location query.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          zip:          { type: 'string', description: 'ZIP code (32081 or 32082)' },
+          lat:          { type: 'number', description: 'Latitude (alternative to zip)' },
+          lon:          { type: 'number', description: 'Longitude (alternative to zip)' },
+          radius_miles: { type: 'number', description: 'Search radius in miles (default 1.0)' },
+        },
+      },
+    },
+    {
+      name: 'local_intel_search',
+      description: 'Search businesses by name, category, or semantic group (food, retail, health, finance, civic, services).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          zip:      { type: 'string', description: 'Filter by ZIP code' },
+          query:    { type: 'string', description: 'Text search on name/category/address' },
+          category: { type: 'string', description: 'Exact OSM category (restaurant, bank, dentist...)' },
+          group:    { type: 'string', description: 'Semantic group: food | retail | health | finance | civic | services' },
+          limit:    { type: 'integer', description: 'Max results (default 20, max 50)' },
+        },
+      },
+    },
+    {
+      name: 'local_intel_nearby',
+      description: 'Find businesses within a radius of any lat/lon point, sorted by distance with compass bearing.',
+      inputSchema: {
+        type: 'object',
+        required: ['lat', 'lon'],
+        properties: {
+          lat:          { type: 'number', description: 'Latitude of center point' },
+          lon:          { type: 'number', description: 'Longitude of center point' },
+          radius_miles: { type: 'number', description: 'Search radius in miles (default 0.5)' },
+          category:     { type: 'string', description: 'Filter by OSM category' },
+          group:        { type: 'string', description: 'Filter by semantic group' },
+          limit:        { type: 'integer', description: 'Max results (default 15)' },
+        },
+      },
+    },
+    {
+      name: 'local_intel_zone',
+      description: 'Spending zone and demographic data for a ZIP code: population, income, home value, rent, ownership rate, zone score.',
+      inputSchema: {
+        type: 'object',
+        required: ['zip'],
+        properties: {
+          zip: { type: 'string', description: 'ZIP code (32081 or 32082)' },
+        },
+      },
+    },
+    {
+      name: 'local_intel_corridor',
+      description: 'Businesses along a named street corridor. Use for queries like "what is on A1A" or "businesses on Palm Valley Road".',
+      inputSchema: {
+        type: 'object',
+        required: ['street'],
+        properties: {
+          street: { type: 'string', description: 'Street name (e.g. "A1A", "Palm Valley", "Crosswater")' },
+          zip:    { type: 'string', description: 'Optional ZIP filter' },
+          limit:  { type: 'integer', description: 'Max results (default 20)' },
+        },
+      },
+    },
+    {
+      name: 'local_intel_changes',
+      description: 'Recently added or owner-verified business listings. Use to detect new openings or data updates.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          zip:   { type: 'string', description: 'Optional ZIP filter' },
+          limit: { type: 'integer', description: 'Max results (default 20)' },
+        },
+      },
+    },
+    {
+      name: 'local_intel_stats',
+      description: 'Dataset coverage stats: total businesses, confidence scores, query volume, revenue earned.',
+      inputSchema: { type: 'object', properties: {} },
+    },
+  ],
+};
+
+// ── JSON-RPC 2.0 handler ──────────────────────────────────────────────────────
+function handleRPC(req) {
+  const { jsonrpc, id, method, params } = req;
+
+  if (jsonrpc !== '2.0') {
+    return { jsonrpc: '2.0', id, error: { code: -32600, message: 'Invalid JSON-RPC version' } };
+  }
+
+  // MCP handshake
+  if (method === 'initialize') {
+    return {
+      jsonrpc: '2.0', id,
+      result: {
+        protocolVersion: '2024-11-05',
+        capabilities: { tools: {} },
+        serverInfo: { name: MCP_MANIFEST.name, version: MCP_MANIFEST.version },
+      },
+    };
+  }
+
+  if (method === 'notifications/initialized') return null; // no response needed
+
+  if (method === 'tools/list') {
+    return { jsonrpc: '2.0', id, result: { tools: MCP_MANIFEST.tools } };
+  }
+
+  if (method === 'tools/call') {
+    const toolName = params?.name;
+    const toolArgs = params?.arguments || {};
+    const caller   = params?._caller || 'unknown';
+
+    if (!TOOLS[toolName]) {
+      return { jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${toolName}` } };
+    }
+
+    try {
+      logUsage(toolName, caller);
+      const result = TOOLS[toolName].fn(toolArgs);
+      return {
+        jsonrpc: '2.0', id,
+        result: {
+          content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }],
+          _meta: { cost_pathusd: TOOL_COSTS[toolName] || 0 },
+        },
+      };
+    } catch (e) {
+      return { jsonrpc: '2.0', id, error: { code: -32603, message: e.message } };
+    }
+  }
+
+  return { jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } };
+}
+
+// ── HTTP server ───────────────────────────────────────────────────────────────
+const server = http.createServer((req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    return res.end();
+  }
+
+  // Health
+  if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200);
+    return res.end(JSON.stringify({ ok: true, server: 'LocalIntel MCP', version: '1.0.0', tools: Object.keys(TOOLS).length }));
+  }
+
+  // MCP manifest (for discovery)
+  if (req.method === 'GET' && req.url === '/manifest') {
+    res.writeHead(200);
+    return res.end(JSON.stringify(MCP_MANIFEST));
+  }
+
+  // JSON-RPC endpoint
+  if (req.method === 'POST' && (req.url === '/' || req.url === '/mcp')) {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      try {
+        const parsed = JSON.parse(body);
+        // Handle batch requests
+        if (Array.isArray(parsed)) {
+          const responses = parsed.map(handleRPC).filter(Boolean);
+          res.writeHead(200);
+          return res.end(JSON.stringify(responses));
+        }
+        const response = handleRPC(parsed);
+        if (response === null) {
+          res.writeHead(204);
+          return res.end();
+        }
+        res.writeHead(200);
+        res.end(JSON.stringify(response));
+      } catch (e) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }));
+      }
+    });
+    return;
+  }
+
+  res.writeHead(404);
+  res.end(JSON.stringify({ error: 'Not found. POST /mcp for JSON-RPC, GET /manifest for tool list.' }));
+});
+
+server.listen(PORT, () => {
+  console.log(`[LocalIntelMCP] MCP server listening on port ${PORT}`);
+  console.log(`[LocalIntelMCP] ${Object.keys(TOOLS).length} tools registered`);
+  console.log(`[LocalIntelMCP] Covered zips: ${Object.keys(ZIP_CENTERS).join(', ')}`);
+});
+
+module.exports = { handleRPC, MCP_MANIFEST };
