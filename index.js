@@ -109,11 +109,57 @@ app.post('/api/skill-reset', express.json(), (req, res) => {
   res.json({ ok: true, message: `Reset ${agentName}::${skillId}` });
 });
 
-// ── Register ACP Resources after 30s (agents need to be online first) ─────────
-// Register ACP resources (THROW Watcher data feed) after 30s
-setTimeout(() => { registerResources().catch(e => console.warn('[acpResources]', e.message)); }, 30000);
-// Register / refresh all agent offerings + descriptions after 45s
-setTimeout(() => { registerOfferings().catch(e => console.warn('[acpOfferings]', e.message)); }, 45000);
+// ── ACP Sync — on-demand endpoint ───────────────────────────────────────────
+// Called by the swarm dashboard "Sync ACP" button.
+// Also runs automatically on the 1st of every month at 06:00 UTC.
+let acpSyncRunning = false;
+
+async function runAcpSync() {
+  if (acpSyncRunning) return { ok: false, error: 'Sync already in progress' };
+  acpSyncRunning = true;
+  const started = Date.now();
+  try {
+    console.log('[acpSync] Starting ACP sync...');
+    await registerResources();
+    await registerOfferings();
+    const elapsed = ((Date.now() - started) / 1000).toFixed(1);
+    console.log(`[acpSync] Done in ${elapsed}s`);
+    return { ok: true, elapsed: `${elapsed}s`, ranAt: new Date().toISOString() };
+  } catch (e) {
+    console.warn('[acpSync] Error:', e.message);
+    return { ok: false, error: e.message };
+  } finally {
+    acpSyncRunning = false;
+  }
+}
+
+app.post('/api/acp-sync', express.json(), async (req, res) => {
+  const { secret } = req.body || {};
+  if (secret !== process.env.OPERATOR_SECRET) return res.status(403).json({ error: 'forbidden' });
+  const result = await runAcpSync();
+  res.status(result.ok ? 200 : 500).json(result);
+});
+
+// ── Monthly cron — 1st of month, 06:00 UTC ───────────────────────────────────
+function scheduleMonthlySync() {
+  function msUntilNextSync() {
+    const now = new Date();
+    const next = new Date(Date.UTC(
+      now.getUTCMonth() === 11 ? now.getUTCFullYear() + 1 : now.getUTCFullYear(),
+      now.getUTCMonth() === 11 ? 0 : now.getUTCMonth() + 1,
+      1, 6, 0, 0, 0
+    ));
+    return next.getTime() - now.getTime();
+  }
+  const ms = msUntilNextSync();
+  const days = (ms / 86400000).toFixed(1);
+  console.log(`[acpSync] Monthly sync scheduled — next run in ${days} days`);
+  setTimeout(() => {
+    runAcpSync().catch(e => console.warn('[acpSync monthly]', e.message));
+    scheduleMonthlySync(); // re-arm for next month
+  }, ms);
+}
+scheduleMonthlySync();
 
 app.listen(HEALTH_PORT, () => {
   console.log(`\n[SWARM] Health check running on port ${HEALTH_PORT}`);
