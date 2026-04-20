@@ -418,6 +418,33 @@ app.get('/.well-known/agent.json', (req, res) => {
   });
 });
 
+// ── MCP Registry server card — lets Smithery + PulseMCP scan without auth issues
+app.get('/.well-known/mcp/server-card.json', (req, res) => {
+  res.json({
+    serverInfo: {
+      name: 'LocalIntel by MCFLAMINGO',
+      version: '1.0.0',
+      description: 'Agentic business intelligence for St. Johns County FL (32081 + 32082). Spatial context, tidal momentum scores, spending zones, corridor analysis, staleness-graded data. $0.01–$0.05/call in pathUSD.'
+    },
+    authentication: { required: false },
+    tools: [
+      { name: 'local_intel_context',   description: 'Full spatial context block for a ZIP or lat/lon. Returns anchor business, nearby businesses in distance rings, zone intelligence, and category breakdown.' },
+      { name: 'local_intel_search',    description: 'Search businesses by name, category, or semantic group (food, retail, health, finance, civic, services).' },
+      { name: 'local_intel_nearby',    description: 'Find businesses within a radius of any lat/lon point, sorted by distance with compass bearing.' },
+      { name: 'local_intel_zone',      description: 'Spending zone and demographic data for a ZIP: population, income, home value, rent, ownership rate, zone score.' },
+      { name: 'local_intel_corridor',  description: 'Businesses along a named street corridor (e.g. A1A, Palm Valley Road).' },
+      { name: 'local_intel_changes',   description: 'Recently added or owner-verified business listings. Detect new openings or data updates.' },
+      { name: 'local_intel_stats',     description: 'Dataset coverage stats: total businesses, confidence scores, query volume, revenue earned.' },
+      { name: 'local_intel_tide',      description: 'Tidal reading for a ZIP — temperature 0-100, direction (surging/heating/stable/cooling/receding), seasonal context. Synthesizes all 4 data layers.' },
+      { name: 'local_intel_signal',    description: 'Investment and activity signal for a ZIP. Composite score 0-100 with band (strong_buy/accumulate/hold/reduce/avoid), top reasons, and avoid flags.' },
+      { name: 'local_intel_bedrock',   description: 'Infrastructure momentum score for a ZIP from permits, road projects, flood zones, utility extensions. Predicts conditions 12-36 months ahead.' },
+      { name: 'local_intel_for_agent', description: 'PREMIUM ($0.05). Declare agent_type and intent, receive pre-ranked top-10 signals from all 4 data layers personalized for your use case.' }
+    ],
+    resources: [],
+    prompts: []
+  });
+});
+
 app.get('/acp', (req, res) => {
   res.json({
     protocol: 'acp',

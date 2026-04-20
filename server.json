@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-16/server.schema.json",
+  "name": "io.github.mcflamingo/local-intel",
+  "description": "LocalIntel — agentic business intelligence for St. Johns County FL (32081 + 32082). Spatial context, tidal momentum scores, spending zones, corridor analysis, and staleness-graded data. 11 tools covering local_intel_context, search, nearby, zone, corridor, changes, stats, tide, signal, bedrock, and the premium local_intel_for_agent composite endpoint. $0.01–$0.05/call in pathUSD via Tempo mainnet.",
+  "status": "active",
+  "repository": {
+    "url": "https://github.com/MCFLAMINGO/gsb-swarm",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://gsb-swarm-production.up.railway.app/api/local-intel/mcp"
+    }
+  ]
+}
