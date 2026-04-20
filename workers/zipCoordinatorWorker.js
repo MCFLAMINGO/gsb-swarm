@@ -255,11 +255,28 @@ async function coordinatorCycle() {
     if (result.success) {
       z.status = 'complete';
       z.completedAt = new Date().toISOString();
+
+      // Read business count from the zip file written by ZipAgent
+      let bizCount = 0;
+      let avgConf = 0;
+      try {
+        const zipFile = path.join(ZIPS_DIR, `${z.zip}.json`);
+        if (fs.existsSync(zipFile)) {
+          const bizs = JSON.parse(fs.readFileSync(zipFile));
+          bizCount = Array.isArray(bizs) ? bizs.length : 0;
+          if (bizCount > 0) {
+            avgConf = Math.round(bizs.reduce((s, b) => s + (b.confidence || 0), 0) / bizCount);
+          }
+        }
+      } catch(e) { /* non-fatal */ }
+
       coverage.completed[z.zip] = {
         name: z.name,
         region: z.region,
         completedAt: z.completedAt,
         duration: result.duration,
+        businesses: bizCount,
+        confidence: avgConf,
       };
     } else {
       z.status = z.attempts >= 3 ? 'failed' : 'pending';

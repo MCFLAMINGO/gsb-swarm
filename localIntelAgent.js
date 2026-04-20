@@ -365,8 +365,26 @@ router.get('/coverage-stats', (req, res) => {
     const failed     = queue.filter(z => z.status === 'failed').length;
 
     // Last 20 completed zips sorted by completedAt desc
+    // Enrich with businesses + confidence from zip files if coordinator didn't capture them
     const recentZips = completedZips
-      .map(([zip, v]) => ({ zip, ...v }))
+      .map(([zip, v]) => {
+        let businesses = v.businesses;
+        let confidence = v.confidence;
+        // If count is missing or zero, try reading the zip file directly
+        if (!businesses) {
+          try {
+            const zipFile = path.join(zipsDir, `${zip}.json`);
+            if (fs.existsSync(zipFile)) {
+              const bizs = JSON.parse(fs.readFileSync(zipFile));
+              if (Array.isArray(bizs) && bizs.length > 0) {
+                businesses = bizs.length;
+                confidence = Math.round(bizs.reduce((s, b) => s + (b.confidence || 0), 0) / bizs.length);
+              }
+            }
+          } catch(e) { /* non-fatal */ }
+        }
+        return { zip, ...v, businesses: businesses || 0, confidence: confidence || 0 };
+      })
       .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))
       .slice(0, 20);
 
