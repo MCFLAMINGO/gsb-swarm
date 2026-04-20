@@ -31,10 +31,25 @@ const router = express.Router();
 const DATA_PATH = path.join(__dirname, 'data', 'localIntel.json');
 const ZONES_PATH = path.join(__dirname, 'data', 'spendingZones.json');
 const LEDGER_PATH = path.join(__dirname, 'data', 'usageLedger.json');
+const ZIPS_DIR_AGENT = path.join(__dirname, 'data', 'zips');
 
 function loadData() {
-  try { return JSON.parse(fs.readFileSync(DATA_PATH, 'utf8')); }
-  catch { return []; }
+  // Merge seed file + all accumulated zip files so tools see the full dataset
+  const seen = new Set();
+  const all  = [];
+  const addBiz = (b) => {
+    const key = `${(b.name||'').toLowerCase()}|${b.zip||''}|${b.lat||''}|${b.lon||''}`;
+    if (!seen.has(key)) { seen.add(key); all.push(b); }
+  };
+  try { JSON.parse(fs.readFileSync(DATA_PATH, 'utf8')).forEach(addBiz); } catch {}
+  try {
+    if (fs.existsSync(ZIPS_DIR_AGENT)) {
+      fs.readdirSync(ZIPS_DIR_AGENT).filter(f => f.endsWith('.json')).forEach(f => {
+        try { JSON.parse(fs.readFileSync(path.join(ZIPS_DIR_AGENT, f), 'utf8')).forEach(addBiz); } catch {}
+      });
+    }
+  } catch {}
+  return all;
 }
 
 function loadZones() {

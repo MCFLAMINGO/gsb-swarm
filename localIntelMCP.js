@@ -24,6 +24,7 @@ const fs    = require('fs');
 const path  = require('path');
 
 const DATA_PATH    = path.join(__dirname, 'data', 'localIntel.json');
+const ZIPS_DIR_MCP = path.join(__dirname, 'data', 'zips');
 const ZONES_PATH   = path.join(__dirname, 'data', 'spendingZones.json');
 const LEDGER_PATH  = path.join(__dirname, 'data', 'usageLedger.json');
 const PORT         = parseInt(process.env.LOCAL_INTEL_MCP_PORT || '3004');
@@ -41,7 +42,22 @@ const TOOL_COSTS = {
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
 function loadBusinesses() {
-  try { return JSON.parse(fs.readFileSync(DATA_PATH, 'utf8')); } catch { return []; }
+  // Merge seed file + all accumulated zip files for the full dataset
+  const seen = new Set();
+  const all  = [];
+  const addBiz = (b) => {
+    const key = `${(b.name||'').toLowerCase()}|${b.zip||''}|${b.lat||''}|${b.lon||''}`;
+    if (!seen.has(key)) { seen.add(key); all.push(b); }
+  };
+  try { JSON.parse(fs.readFileSync(DATA_PATH, 'utf8')).forEach(addBiz); } catch {}
+  try {
+    if (fs.existsSync(ZIPS_DIR_MCP)) {
+      fs.readdirSync(ZIPS_DIR_MCP).filter(f => f.endsWith('.json')).forEach(f => {
+        try { JSON.parse(fs.readFileSync(path.join(ZIPS_DIR_MCP, f), 'utf8')).forEach(addBiz); } catch {}
+      });
+    }
+  } catch {}
+  return all;
 }
 function loadZones() {
   try { return JSON.parse(fs.readFileSync(ZONES_PATH, 'utf8')); } catch { return {}; }
