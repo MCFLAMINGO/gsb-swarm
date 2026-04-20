@@ -6,14 +6,15 @@
  *   1. Updates the agent's description on Virtuals ACP (rich, search-optimised)
  *   2. Upserts offerings — creates missing ones, updates descriptions on existing ones
  *
- * Auth: uses VIRTUALS_PRIVY_TOKEN env var (the privy:token from app.virtuals.io localStorage)
- * Tokens expire every ~1h. For persistent operation, also set VIRTUALS_REFRESH_TOKEN
- * (privy:refresh_token from localStorage) — the script will auto-refresh.
+ * Auth: delegates to acpAuth.js → getValidToken().
+ * acpAuth handles expiry detection, auto-refresh via VIRTUALS_REFRESH_TOKEN (ACP CLI)
+ * and VIRTUALS_PRIVY_REFRESH_TOKEN (Privy web session). No token management here.
  *
  * Why this matters: acp browse uses semantic search on agent + offering descriptions.
  * Rich descriptions = higher ranking = more external agents find and hire you.
  */
 
+const { getValidToken } = require('./acpAuth');
 const ACP = 'https://api.acp.virtuals.io';
 
 // ── Agent catalogue — UUIDs confirmed from API ────────────────────────────────
@@ -373,20 +374,6 @@ const AGENTS = [
   },
 ];
 
-// ── Refresh the Privy token if a refresh token is available ───────────────────
-async function refreshToken(refreshToken) {
-  try {
-    const res = await fetch('https://api.acp.virtuals.io/auth/cli/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data?.data?.token || null;
-  } catch { return null; }
-}
-
 // ── Upsert offerings for one agent ────────────────────────────────────────────
 async function upsertOfferings(agent, token) {
   // Offerings are embedded in agent detail — fetch from there
@@ -475,19 +462,12 @@ async function updateAgentDescription(agent, token) {
 
 // ── Main entry point ───────────────────────────────────────────────────────────
 async function registerOfferings() {
-  let token = process.env.VIRTUALS_PRIVY_TOKEN;
+  const token = await getValidToken();
 
   if (!token) {
-    console.log('[acpOfferings] VIRTUALS_PRIVY_TOKEN not set — skipping offering registration.');
-    console.log('[acpOfferings] Set it in Railway to auto-register offerings on Virtuals ACP.');
+    console.log('[acpOfferings] No valid ACP token — skipping offering registration.');
+    console.log('[acpOfferings] See acpAuth.js instructions above to set VIRTUALS_PRIVY_REFRESH_TOKEN in Railway.');
     return;
-  }
-
-  // Try refresh if available
-  const refreshTok = process.env.VIRTUALS_REFRESH_TOKEN;
-  if (refreshTok) {
-    const newToken = await refreshToken(refreshTok);
-    if (newToken) { token = newToken; console.log('[acpOfferings] Token refreshed.'); }
   }
 
   console.log('[acpOfferings] Registering ACP offerings for all GSB agents...\n');

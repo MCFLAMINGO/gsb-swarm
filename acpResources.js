@@ -14,12 +14,12 @@
  * The CEO agent wallet is used as the resource owner (it's the primary identity).
  * Resources are registered against CEO's ACP agent on Virtuals.
  *
- * Auth: uses VIRTUALS_JWT env var (set this in Railway — obtain from browser
- * session at app.virtuals.io → Network tab → Authorization header).
- * Without this, registration is skipped gracefully (resources still work,
- * just won't appear in ACP browse until you set the token).
+ * Auth: delegates to acpAuth.js → getValidToken().
+ * acpAuth handles expiry detection and auto-refresh. No manual token management needed.
+ * Set VIRTUALS_PRIVY_REFRESH_TOKEN in Railway for zero-downtime token renewal.
  */
 
+const { getValidToken } = require('./acpAuth');
 const ACP_SERVER = 'https://api.acp.virtuals.io';
 
 // Agent ID for CEO on Virtuals (UUID from app.virtuals.io URL)
@@ -87,10 +87,10 @@ const RESOURCES = [
 ];
 
 async function registerResources() {
-  const jwt = process.env.VIRTUALS_JWT;
+  const jwt = await getValidToken();
   if (!jwt) {
-    console.log('[acpResources] VIRTUALS_JWT not set — skipping ACP resource registration.');
-    console.log('[acpResources] Set VIRTUALS_JWT in Railway to auto-register resources on Virtuals marketplace.');
+    console.log('[acpResources] No valid ACP token — skipping ACP resource registration.');
+    console.log('[acpResources] See acpAuth.js instructions to set VIRTUALS_PRIVY_REFRESH_TOKEN in Railway.');
     return;
   }
 
