@@ -172,6 +172,42 @@ router.get('/ingest/log', async (req, res) => {
   }
 });
 
+// ── GET /api/local-intel/mcp — Smithery/scanner discovery ──────────────────
+// Streamable HTTP spec: GET returns server info so scanners don't fall through
+// to the static HTML handler.
+router.get('/mcp', async (req, res) => {
+  try {
+    // Forward to internal MCP server for tools/list so Smithery sees real tools
+    const response = await fetch('http://localhost:3004/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+    });
+    const data = await response.json();
+    // Return as MCP initialize shape with embedded tools for discovery
+    res.json({
+      jsonrpc: '2.0',
+      id: null,
+      result: {
+        protocolVersion: '2024-11-05',
+        serverInfo: { name: 'localintel', version: '1.0.0' },
+        capabilities: { tools: {} },
+        tools: data?.result?.tools || [],
+      },
+    });
+  } catch (e) {
+    res.json({
+      jsonrpc: '2.0',
+      id: null,
+      result: {
+        protocolVersion: '2024-11-05',
+        serverInfo: { name: 'localintel', version: '1.0.0' },
+        capabilities: { tools: {} },
+      },
+    });
+  }
+});
+
 // ── POST /api/mcp — proxy to MCP server on port 3004 ───────────────────────
 // This is the public MCP endpoint agents call from outside Railway.
 // Full URL: https://gsb-swarm-production.up.railway.app/api/mcp
