@@ -82,6 +82,10 @@ const HEALTH_PORT = 3001;
 const raidersRouter = require('./routes/raiders');
 app.use('/api/raiders', raidersRouter);
 
+// Local Intel agent routes
+const localIntelRouter = require('./localIntelAgent');
+app.use('/api/local-intel', localIntelRouter);
+
 app.get('/', (req, res) => res.json({
   status: 'ONLINE',
   swarm: 'GSB Intelligence Swarm',

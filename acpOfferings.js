@@ -370,6 +370,28 @@ const AGENTS = [
         deliverable:   'JSON: agentStatuses, jobsServedToday, activeClients, skillScores, railwayStatus',
         priceType:     'fixed', priceValue: 0.05, slaMinutes: 5, requiredFunds: false, isHidden: false,
       },
+      {
+        name:          'local_intel_query',
+        description:   'Hyperlocal business intelligence for any covered US zip code. ' +
+                       'Returns active businesses with name, category, address, coordinates, phone, website, hours, ' +
+                       'and confidence score. Filter by zip, category group (food/retail/health/finance/civic), or free-text search. ' +
+                       'Also returns spending zone data: population, median income, home values, rent vs own ratios. ' +
+                       'Currently covers 32081 (Nocatee FL) and 32082 (Ponte Vedra Beach FL). ' +
+                       'Data sources: OpenStreetMap, US Census ACS, SJC public records. ' +
+                       'Hire for: local market research, competitor mapping, real estate intelligence, ' +
+                       'chamber of commerce directories, volunteer economy apps, map data feeds.',
+        requirements:  JSON.stringify({ type: 'object', properties: {
+          zip:          { type: 'string', description: 'Zip code to query (32081 or 32082)' },
+          query:        { type: 'string', description: 'Free-text search (name, category, address)' },
+          group:        { type: 'string', enum: ['food','retail','health','finance','civic','services','other'], description: 'Category group filter' },
+          category:     { type: 'string', description: 'Specific OSM category (e.g. restaurant, dentist, bank)' },
+          limit:        { type: 'number', description: 'Max results (default 50, max 200)' },
+          minConfidence:{ type: 'number', description: 'Minimum confidence score 0-100 (default 0)' },
+          includeZones: { type: 'boolean', description: 'Include spending zone data in response (default true)' },
+        }}),
+        deliverable:   'JSON: { total, results: [{name, category, zip, lat, lon, address, phone, website, hours, confidence, sources}], zones: {population, medianIncome, homeValue, rentVsOwn} }',
+        priceType:     'fixed', priceValue: 0.05, slaMinutes: 5, requiredFunds: false, isHidden: false,
+      },
     ],
   },
 ];
