@@ -30,6 +30,7 @@ const router = express.Router();
 // In production this would be a DB — for now it's the JSON file written by the pull script
 const DATA_PATH = path.join(__dirname, 'data', 'localIntel.json');
 const ZONES_PATH = path.join(__dirname, 'data', 'spendingZones.json');
+const LEDGER_PATH = path.join(__dirname, 'data', 'usageLedger.json');
 
 function loadData() {
   try { return JSON.parse(fs.readFileSync(DATA_PATH, 'utf8')); }
@@ -222,6 +223,217 @@ router.get('/stats', (req, res) => {
     pendingSources: ['FL Sunbiz','SJC BTR','SJC Permits'],
     lastSync: '2026-04-20',
   });
+});
+
+// ── GET /api/local-intel/agent-card ────────────────────────────────────────────────
+const AGENT_CARD = {
+  schema_version: 'v1',
+  name: 'LocalIntel Data Services',
+  description: 'Hyperlocal business intelligence for AI agents. ZIP-level business data covering Florida and expanding across the Sunbelt. Phone, hours, foot traffic proxy, categories, confidence scores. Pay-per-query via pathUSD.',
+  url: 'https://gsb-swarm-production.up.railway.app',
+  mcp_endpoint: 'https://gsb-swarm-production.up.railway.app/api/local-intel/mcp',
+  a2a_endpoint: 'https://gsb-swarm-production.up.railway.app/api/local-intel/mcp',
+  skills: ['nearby_businesses', 'corridor_data', 'zip_stats', 'zone_context', 'business_search', 'change_detection'],
+  pricing: { per_call: '$0.01-0.05', currency: 'pathUSD', subscription: '$49-499/month' },
+  coverage: { current: 'Florida SJC zips + expanding', target: 'Florida 983 zips, then full Sunbelt' },
+  contact: 'localintel@mcflamingo.com',
+  provider: 'LocalIntel Data Services / MCFL Restaurant Holdings LLC',
+};
+
+router.get('/agent-card', (req, res) => {
+  res.json(AGENT_CARD);
+});
+
+// ── GET /api/local-intel/revenue-summary ──────────────────────────────────────────────
+router.get('/revenue-summary', (req, res) => {
+  let ledger = [];
+  try {
+    if (fs.existsSync(LEDGER_PATH)) {
+      ledger = JSON.parse(fs.readFileSync(LEDGER_PATH, 'utf8'));
+    }
+  } catch (e) {
+    // Return zeros on parse error
+  }
+
+  const now = Date.now();
+  const startOfToday   = new Date(); startOfToday.setUTCHours(0,0,0,0);
+  const sevenDaysAgo   = now - 7  * 24 * 60 * 60 * 1000;
+  const thirtyDaysAgo  = now - 30 * 24 * 60 * 60 * 1000;
+
+  function summarise(entries) {
+    return {
+      calls: entries.length,
+      revenue_pathusd: parseFloat(entries.reduce((s, e) => s + (e.amount || 0), 0).toFixed(6)),
+    };
+  }
+
+  const todayEntries  = ledger.filter(e => e.timestamp && new Date(e.timestamp).getTime() >= startOfToday.getTime());
+  const weekEntries   = ledger.filter(e => e.timestamp && new Date(e.timestamp).getTime() >= sevenDaysAgo);
+  const monthEntries  = ledger.filter(e => e.timestamp && new Date(e.timestamp).getTime() >= thirtyDaysAgo);
+
+  // Top tools
+  const toolMap = {};
+  for (const e of ledger) {
+    const key = e.tool || 'unknown';
+    if (!toolMap[key]) toolMap[key] = { tool: key, calls: 0, revenue: 0 };
+    toolMap[key].calls += 1;
+    toolMap[key].revenue += (e.amount || 0);
+  }
+  const topTools = Object.values(toolMap)
+    .sort((a, b) => b.calls - a.calls)
+    .slice(0, 10)
+    .map(t => ({ ...t, revenue: parseFloat(t.revenue.toFixed(6)) }));
+
+  // Top callers
+  const callerMap = {};
+  for (const e of ledger) {
+    const key = e.caller || 'unknown';
+    if (!callerMap[key]) callerMap[key] = { caller: key, calls: 0, revenue: 0 };
+    callerMap[key].calls += 1;
+    callerMap[key].revenue += (e.amount || 0);
+  }
+  const topCallers = Object.values(callerMap)
+    .sort((a, b) => b.calls - a.calls)
+    .slice(0, 10)
+    .map(c => ({ ...c, revenue: parseFloat(c.revenue.toFixed(6)) }));
+
+  // Last call
+  const sorted = [...ledger].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  const lastCall = sorted.length ? sorted[0].timestamp : null;
+
+  res.json({
+    today:      summarise(todayEntries),
+    week:       summarise(weekEntries),
+    month:      summarise(monthEntries),
+    allTime:    summarise(ledger),
+    topTools,
+    topCallers,
+    lastCall,
+    generatedAt: new Date().toISOString(),
+  });
+});
+
+// ── Dashboard data proxy routes ──────────────────────────────────────────────
+// These aggregate data files so the Vercel dashboard can poll one origin.
+
+const DATA_DIR_AGENT = path.join(__dirname, 'data');
+
+router.get('/coverage-stats', (req, res) => {
+  try {
+    const covFile   = path.join(DATA_DIR_AGENT, 'zipCoverage.json');
+    const queueFile = path.join(DATA_DIR_AGENT, 'zipQueue.json');
+    const zipsDir   = path.join(DATA_DIR_AGENT, 'zips');
+
+    const cov   = covFile   && fs.existsSync(covFile)   ? JSON.parse(fs.readFileSync(covFile))   : { completed: {} };
+    const queue = queueFile && fs.existsSync(queueFile) ? JSON.parse(fs.readFileSync(queueFile)) : [];
+
+    const completedZips = Object.entries(cov.completed || {});
+    const totalBusinesses = completedZips.reduce((s, [, v]) => s + (v.businesses || 0), 0);
+
+    // Average confidence from zip files
+    let confSum = 0, confCount = 0;
+    if (fs.existsSync(zipsDir)) {
+      fs.readdirSync(zipsDir).filter(f => f.endsWith('.json')).forEach(f => {
+        try {
+          const bizs = JSON.parse(fs.readFileSync(path.join(zipsDir, f)));
+          bizs.forEach(b => { confSum += (b.confidence || 0); confCount++; });
+        } catch(e) {}
+      });
+    }
+
+    const inProgress = queue.filter(z => z.status === 'inProgress').length;
+    const pending    = queue.filter(z => z.status === 'pending').length;
+    const failed     = queue.filter(z => z.status === 'failed').length;
+
+    // Last 20 completed zips sorted by completedAt desc
+    const recentZips = completedZips
+      .map(([zip, v]) => ({ zip, ...v }))
+      .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))
+      .slice(0, 20);
+
+    res.json({
+      zipsCompleted:    completedZips.length,
+      zipsTotal:        983,
+      totalBusinesses,
+      avgConfidence:    confCount ? Math.round(confSum / confCount) : 0,
+      activeAgents:     inProgress,
+      pendingZips:      pending,
+      failedZips:       failed,
+      recentZips,
+      lastRun:          cov.lastRun || null,
+      generatedAt:      new Date().toISOString(),
+    });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/source-log', (req, res) => {
+  try {
+    const file = path.join(DATA_DIR_AGENT, 'sourceLog.json');
+    const data = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : {};
+    // Flatten to per-source latest status across all zips
+    const sources = {};
+    Object.values(data).forEach(zipSources => {
+      Object.entries(zipSources).forEach(([source, entry]) => {
+        if (!sources[source] || new Date(entry.checked_at) > new Date(sources[source].checked_at)) {
+          sources[source] = entry;
+        }
+      });
+    });
+    res.json({ sources, raw: data, generatedAt: new Date().toISOString() });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/enrichment-log', (req, res) => {
+  try {
+    const file = path.join(DATA_DIR_AGENT, 'enrichmentLog.json');
+    const log  = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : [];
+    const today = new Date(); today.setUTCHours(0,0,0,0);
+    const enrichedToday = log.filter(e => e.enrichedAt && new Date(e.enrichedAt) >= today).length;
+    const recent = [...log].sort((a,b) => new Date(b.enrichedAt) - new Date(a.enrichedAt)).slice(0, 20);
+    res.json({ enrichedToday, recent, total: log.length, generatedAt: new Date().toISOString() });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/broadcast-log', (req, res) => {
+  try {
+    const file = path.join(DATA_DIR_AGENT, 'broadcastLog.json');
+    const log  = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : [];
+    const recent = [...log].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 10);
+    // Last successful hit per registry
+    const lastByRegistry = {};
+    log.forEach(e => {
+      if (e.status === 'ok' && (!lastByRegistry[e.registry] || new Date(e.timestamp) > new Date(lastByRegistry[e.registry]))) {
+        lastByRegistry[e.registry] = e.timestamp;
+      }
+    });
+    res.json({ recent, lastByRegistry, total: log.length, generatedAt: new Date().toISOString() });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/zip-queue', (req, res) => {
+  try {
+    const file = path.join(DATA_DIR_AGENT, 'zipQueue.json');
+    const queue = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : [];
+    res.json({
+      total:      queue.length,
+      pending:    queue.filter(z => z.status === 'pending').length,
+      inProgress: queue.filter(z => z.status === 'inProgress').length,
+      complete:   queue.filter(z => z.status === 'complete').length,
+      failed:     queue.filter(z => z.status === 'failed').length,
+      active:     queue.filter(z => z.status === 'inProgress'),
+      generatedAt: new Date().toISOString(),
+    });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 module.exports = router;

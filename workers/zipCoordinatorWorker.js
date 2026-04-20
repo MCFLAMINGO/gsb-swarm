@@ -20,6 +20,7 @@ const DATA_DIR = path.join(__dirname, '../data');
 const ZIPS_DIR = path.join(DATA_DIR, 'zips');
 const COVERAGE_FILE = path.join(DATA_DIR, 'zipCoverage.json');
 const QUEUE_FILE = path.join(DATA_DIR, 'zipQueue.json');
+const LEDGER_FILE = path.join(DATA_DIR, 'usageLedger.json');
 
 // Florida ZIP codes with approximate population priority scores
 // Sorted: metro/suburban first, rural last
@@ -77,6 +78,51 @@ const SUNBELT_REGIONS = [
   { state: 'AZ', metros: ['Phoenix', 'Scottsdale', 'Tucson'] },
 ];
 
+// ── Budget Gate ──────────────────────────────────────────────────────────────
+
+let revenue7d = 0;
+let gateStatus = 'zero_revenue';
+
+function checkBudgetGate() {
+  if (!fs.existsSync(LEDGER_FILE)) {
+    CONCURRENT_AGENTS = 2;
+    revenue7d = 0;
+    gateStatus = 'no_ledger';
+    console.log('[ZipCoordinator] Budget gate: no ledger found — defaulting to 2 agents (conservative start)');
+    return;
+  }
+
+  let ledger = [];
+  try {
+    ledger = JSON.parse(fs.readFileSync(LEDGER_FILE, 'utf8'));
+  } catch (e) {
+    CONCURRENT_AGENTS = 2;
+    revenue7d = 0;
+    gateStatus = 'ledger_parse_error';
+    console.log('[ZipCoordinator] Budget gate: ledger parse error — defaulting to 2 agents');
+    return;
+  }
+
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  revenue7d = ledger
+    .filter(entry => entry.timestamp && new Date(entry.timestamp).getTime() >= sevenDaysAgo)
+    .reduce((sum, entry) => sum + (entry.amount || 0), 0);
+
+  if (revenue7d === 0) {
+    CONCURRENT_AGENTS = 2;
+    gateStatus = 'zero_revenue';
+    console.log('[ZipCoordinator] Budget gate: zero revenue — throttling to 2 agents, enrichment-only mode');
+  } else if (revenue7d < 5) {
+    CONCURRENT_AGENTS = 5;
+    gateStatus = 'low_revenue';
+    console.log(`[ZipCoordinator] Budget gate: revenue7d=$${revenue7d.toFixed(4)} — setting 5 agents`);
+  } else {
+    CONCURRENT_AGENTS = 10;
+    gateStatus = 'full';
+    console.log(`[ZipCoordinator] Budget gate: revenue7d=$${revenue7d.toFixed(4)} — setting 10 agents`);
+  }
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 function loadCoverage() {
@@ -106,7 +152,7 @@ function saveQueue(queue) {
 
 // ── Coordinator Loop ──────────────────────────────────────────────────────────
 
-const CONCURRENT_AGENTS = 10; // Railway has limits — start conservative, scale up
+let CONCURRENT_AGENTS = 2; // Controlled by checkBudgetGate() — starts conservative
 let activeAgents = {};
 let isRunning = false;
 
@@ -156,6 +202,8 @@ async function runZipAgent(zipEntry) {
 async function coordinatorCycle() {
   if (isRunning) return;
   isRunning = true;
+
+  checkBudgetGate();
 
   const coverage = loadCoverage();
   const queue = loadQueue();
@@ -279,6 +327,16 @@ app.get('/coverage', (req, res) => {
 
 app.get('/queue', (req, res) => {
   res.json(loadQueue());
+});
+
+app.get('/budget-status', (req, res) => {
+  res.json({
+    worker: 'zipCoordinator',
+    concurrentAgents: CONCURRENT_AGENTS,
+    revenue7d,
+    gateStatus,
+    generatedAt: new Date().toISOString(),
+  });
 });
 
 // ── Auto-start loop ───────────────────────────────────────────────────────────

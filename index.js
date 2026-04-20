@@ -21,6 +21,7 @@ const workers = [
   { name: 'Data Ingest',        file: 'dataIngestWorker.js' },
   { name: 'Zip Coordinator',    file: 'workers/zipCoordinatorWorker.js' },
   { name: 'Enrichment Agent',   file: 'workers/enrichmentAgent.js' },
+  { name: 'ACP Broadcaster',    file: 'workers/acpBroadcaster.js' },
   ...(process.env.FINANCIAL_ANALYST_ENTITY_ID
     ? [{ name: 'Financial Analyst', file: 'financialAnalyst.js' }]
     : []),
@@ -169,6 +170,25 @@ function scheduleMonthlySync() {
   }, ms);
 }
 scheduleMonthlySync();
+
+// ── Agent Card / Well-Known ──────────────────────────────────────────────────
+const AGENT_CARD = {
+  schema_version: 'v1',
+  name: 'LocalIntel Data Services',
+  description: 'Hyperlocal business intelligence for AI agents. ZIP-level business data covering Florida and expanding across the Sunbelt. Phone, hours, foot traffic proxy, categories, confidence scores. Pay-per-query via pathUSD.',
+  url: 'https://gsb-swarm-production.up.railway.app',
+  mcp_endpoint: 'https://gsb-swarm-production.up.railway.app/api/local-intel/mcp',
+  a2a_endpoint: 'https://gsb-swarm-production.up.railway.app/api/local-intel/mcp',
+  skills: ['nearby_businesses', 'corridor_data', 'zip_stats', 'zone_context', 'business_search', 'change_detection'],
+  pricing: { per_call: '$0.01-0.05', currency: 'pathUSD', subscription: '$49-499/month' },
+  coverage: { current: 'Florida SJC zips + expanding', target: 'Florida 983 zips, then full Sunbelt' },
+  contact: 'localintel@mcflamingo.com',
+  provider: 'LocalIntel Data Services / MCFL Restaurant Holdings LLC',
+};
+
+app.get('/.well-known/agent.json', (req, res) => {
+  res.json(AGENT_CARD);
+});
 
 app.listen(HEALTH_PORT, () => {
   console.log(`\n[SWARM] Health check running on port ${HEALTH_PORT}`);
