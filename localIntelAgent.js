@@ -129,6 +129,33 @@ router.post('/claim', express.json(), async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/ingest — proxy to DataIngestWorker on port 3005 ──────
+router.post('/ingest', express.json({ limit: '50mb' }), async (req, res) => {
+  try {
+    const body = JSON.stringify(req.body || {});
+    const response = await fetch('http://localhost:3005/ingest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (e) {
+    res.status(503).json({ ok: false, error: 'DataIngestWorker unavailable: ' + e.message });
+  }
+});
+
+// ── GET /api/local-intel/ingest/log — proxy to DataIngestWorker log ────────────
+router.get('/ingest/log', async (req, res) => {
+  try {
+    const response = await fetch('http://localhost:3005/ingest/log');
+    const data = await response.json();
+    res.json(data);
+  } catch (e) {
+    res.status(503).json({ ok: false, error: 'DataIngestWorker unavailable: ' + e.message });
+  }
+});
+
 // ── POST /api/mcp — proxy to MCP server on port 3004 ───────────────────────
 // This is the public MCP endpoint agents call from outside Railway.
 // Full URL: https://gsb-swarm-production.up.railway.app/api/mcp

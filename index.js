@@ -18,6 +18,7 @@ const workers = [
   { name: 'Thread Writer',      file: 'threadWriter.js' },
   { name: 'Local Intel',        file: 'localIntelWorker.js' },
   { name: 'Local Intel MCP',    file: 'localIntelMCP.js' },
+  { name: 'Data Ingest',        file: 'dataIngestWorker.js' },
   ...(process.env.FINANCIAL_ANALYST_ENTITY_ID
     ? [{ name: 'Financial Analyst', file: 'financialAnalyst.js' }]
     : []),
