@@ -277,45 +277,13 @@ async function nominatimExtratags(name, lat, lon) {
 async function enrichBusiness(biz) {
   let changed = false;
 
-  // ── Source 1: Yelp public parse ──────────────────────────────
-  const yelpResult = await yelpPublicSearch(biz.name, biz.lat, biz.lon);
+  // ── Source 1: Yelp — DISABLED (no key, rate-limited) ────────────────────
+  // Re-enable when FSQ_API_KEY or Yelp Fusion key is added to Railway env.
 
-  if (yelpResult.blocked) {
-    // Yelp is rate limiting — log and move straight to fallbacks
-    logSource(biz.zip, 'yelp_public', 'rate_limited', yelpResult.reason);
-  } else if (yelpResult.data) {
-    const y = yelpResult.data;
-    logSource(biz.zip, 'yelp_public', 'ok', `${biz.name} — ${y.review_count} reviews`);
-    if (!biz.phone   && y.phone)              { biz.phone = y.phone; changed = true; }
-    if (!biz.website && y.website)            { biz.website = y.website; changed = true; }
-    if (!biz.hours   && y.hours)              { biz.hours = y.hours; changed = true; }
-    if (!biz.rating  && y.rating)             { biz.rating = y.rating; changed = true; }
-    if (y.review_count)                       { biz.review_count = y.review_count; changed = true; }
-    if (y.foot_traffic_proxy)                 { biz.foot_traffic_proxy = y.foot_traffic_proxy; changed = true; }
-    if (!biz.yelp_url && y.yelp_url)          { biz.yelp_url = y.yelp_url; changed = true; }
-    if (changed) biz.confidence = Math.min(90, (biz.confidence || 50) + 12);
-  } else {
-    logSource(biz.zip, 'yelp_public', 'no_match', biz.name);
-  }
+  // ── Source 2: Foursquare — DISABLED (no key) ────────────────────────
+  // Re-enable when FSQ_API_KEY is added to Railway env.
 
-  await sleep(800);
-
-  // ── Source 2: Foursquare free tier ──────────────────────────
   const needsMore = !biz.phone || !biz.hours || !biz.website;
-  if (needsMore && FSQ_KEY) {
-    const fsq = await foursquareSearch(biz.name, biz.lat, biz.lon);
-    if (fsq) {
-      logSource(biz.zip, 'foursquare', 'ok', biz.name);
-      if (!biz.phone   && fsq.phone)   { biz.phone = fsq.phone; changed = true; }
-      if (!biz.website && fsq.website) { biz.website = fsq.website; changed = true; }
-      if (!biz.hours   && fsq.hours)   { biz.hours = fsq.hours; changed = true; }
-      if (!biz.rating  && fsq.rating)  { biz.rating = fsq.rating; changed = true; }
-      if (changed) biz.confidence = Math.min(88, (biz.confidence || 50) + 8);
-    } else {
-      logSource(biz.zip, 'foursquare', 'no_match', biz.name);
-    }
-    await sleep(300);
-  }
 
   // ── Source 3: Nominatim extratags (always run as final fallback) ──
   if (!biz.phone || !biz.hours) {
@@ -339,10 +307,10 @@ async function enrichBusiness(biz) {
   if (changed) {
     biz.enriched_at = new Date().toISOString();
     biz.enrichment_sources = [
-      yelpResult.data    ? 'yelp_public' : null,
-      FSQ_KEY            ? 'foursquare'  : null,
-      'nominatim',
-    ].filter(Boolean).join('+');
+      (!biz.phone || !biz.hours) ? 'nominatim'   : null,
+      biz.scraped_url            ? 'own_website'  : null,
+      biz.phone                  ? '411'          : null,
+    ].filter(Boolean).join('+') || 'nominatim';
   }
 
   return { biz, changed };
@@ -526,7 +494,8 @@ async function source4WebsiteScrape(biz) {
   let changed = false;
 
   // Step 1: reverse phone lookup → confirm + get website hint
-  if (biz.phone && !biz.website) {
+  // Runs if phone is known; if no phone, skip straight to domain guess
+  if (biz.phone) {
     const lookup = await reverseLookup411(biz.phone);
     if (lookup) {
       if (!biz.website && lookup.website) { biz.website = lookup.website; changed = true; }
@@ -535,7 +504,8 @@ async function source4WebsiteScrape(biz) {
     await sleep(600);
   }
 
-  // Step 2: domain guess if still no website
+  // Step 2: domain guess — runs for EVERY business regardless of phone
+  // Uses name + existing website hint (if any) to find the real URL
   const resolvedUrl = await guessDomain(biz.name, biz.website);
   if (resolvedUrl && !biz.website) {
     biz.website = resolvedUrl;
