@@ -19,6 +19,8 @@ const workers = [
   { name: 'Local Intel',        file: 'localIntelWorker.js' },
   { name: 'Local Intel MCP',    file: 'localIntelMCP.js' },
   { name: 'Data Ingest',        file: 'dataIngestWorker.js' },
+  { name: 'Zip Coordinator',    file: 'workers/zipCoordinatorWorker.js' },
+  { name: 'Enrichment Agent',   file: 'workers/enrichmentAgent.js' },
   ...(process.env.FINANCIAL_ANALYST_ENTITY_ID
     ? [{ name: 'Financial Analyst', file: 'financialAnalyst.js' }]
     : []),

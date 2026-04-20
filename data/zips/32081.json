@@ -1,0 +1,1275 @@
+[
+  {
+    "name": "Publix",
+    "category": "supermarket",
+    "zip": "32081",
+    "lat": 30.110537,
+    "lon": -81.41951,
+    "address": "120 Marketside Avenue",
+    "phone": "+1 904-825-0263",
+    "website": "https://www.publix.com/locations/1243",
+    "hours": "Mo-Su 07:00-22:00",
+    "confidence": 100,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Dunkin'",
+    "category": "fast_food",
+    "zip": "32081",
+    "lat": 30.108403,
+    "lon": -81.415485,
+    "address": "641 Crosswater Parkway",
+    "phone": "+1 904-373-0426",
+    "website": "https://locations.dunkindonuts.com/en/fl/ponte-vedra-beach/641-crosswater-pkwy/354697",
+    "hours": "Mo-Su 05:00-21:00",
+    "confidence": 100,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Greenwise Market",
+    "category": "supermarket",
+    "zip": "32081",
+    "lat": 30.110241,
+    "lon": -81.415316,
+    "address": "250 Pine Lake Drive",
+    "phone": "+1 904-826-3356",
+    "website": "https://www.publix.com/locations/1701",
+    "hours": "Mo-Su 08:00-08:00",
+    "confidence": 100,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Ecowise Cleaners",
+    "category": "dry_cleaning",
+    "zip": "32081",
+    "lat": 30.109838,
+    "lon": -81.415243,
+    "address": "250 Pine Lake Drive",
+    "phone": "+1-904-302-6000",
+    "website": "https://ecowisecleaners.com",
+    "hours": "Mo-Fr 07:00-18:30; Sa 09:00 - 14:00",
+    "confidence": 100,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Sol Renewed Health",
+    "category": "clinic",
+    "zip": "32081",
+    "lat": 30.109645,
+    "lon": -81.421463,
+    "address": "380 Town Plaza Avenue",
+    "phone": "+1-904-621-2348",
+    "website": "https://solrenewed.com/",
+    "hours": "Mo-Th 9:00-17:00",
+    "confidence": 100,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Wendy's",
+    "category": "fast_food",
+    "zip": "32081",
+    "lat": 30.109752,
+    "lon": -81.417231,
+    "address": "153 Capital Green",
+    "phone": "+1 904-567-3157",
+    "website": "https://locations.wendys.com/united-states/fl/ponte-vedra/153-capital-green",
+    "hours": "06:30-22:00",
+    "confidence": 100,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Saint John Paul II Catholic Church",
+    "category": "place_of_worship",
+    "zip": "32081",
+    "lat": 30.123026,
+    "lon": -81.435076,
+    "address": "127 Stonemason Way",
+    "phone": "+1-904-330-0153",
+    "website": "https://stjp2.net/",
+    "hours": "Mo-Fr 09:00-16:00, 09:00-18:00; Su 08:30-23:30",
+    "confidence": 100,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Panera Bread",
+    "category": "fast_food",
+    "zip": "32081",
+    "lat": 30.111425,
+    "lon": -81.41776,
+    "address": "35 Capital Green Drive",
+    "phone": "+1 904-686-3031",
+    "website": "https://locations.panerabread.com/fl/ponte-vedra/35-capital-green-drive.html",
+    "hours": "Mo-Sa 06:00-21:00; Su 07:00-21:00",
+    "confidence": 100,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Starbucks",
+    "category": "cafe",
+    "zip": "32081",
+    "lat": 30.110139,
+    "lon": -81.417387,
+    "address": "41 Settlement Drive",
+    "phone": "+1 904-460-3685",
+    "website": "https://www.starbucks.com/store-locator/store/1018312/nocatee-parkway-crosswater-p-41-settlement-dr-ponte-vedra-beach-fl-320810947-us",
+    "hours": "",
+    "confidence": 90,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Orangetheory Fitness",
+    "category": "fitness_centre",
+    "zip": "32081",
+    "lat": 30.109717,
+    "lon": -81.418091,
+    "address": "152 Capital Green Drive",
+    "phone": "+1 904-900-7644",
+    "website": "",
+    "hours": "",
+    "confidence": 80,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Ponte Vedra High School",
+    "category": "school",
+    "zip": "32081",
+    "lat": 30.114914,
+    "lon": -81.394701,
+    "address": "460 Davis Park Road",
+    "phone": "",
+    "website": "https://www-pvhs.stjohns.k12.fl.us/",
+    "hours": "",
+    "confidence": 80,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Chase",
+    "category": "bank",
+    "zip": "32081",
+    "lat": 30.109316,
+    "lon": -81.417147,
+    "address": "",
+    "phone": "+1 904-686-3000",
+    "website": "https://locator.chase.com/fl/ponte-vedra/187-capital-green-dr",
+    "hours": "Mo-Fr 09:00-17:00; Sa-Su closed",
+    "confidence": 80,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Palm Valley Outdoors Bar & Grill",
+    "category": "restaurant",
+    "zip": "32081",
+    "lat": 30.1334718,
+    "lon": -81.3853075,
+    "address": "377 S Roscoe Blvd #2",
+    "city": "Nocatee",
+    "phone": "+1-904-834-7183",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 7176682410,
+    "osm_type": "node",
+    "confidence": 75
+  },
+  {
+    "name": "Aqua Premier, Irrigation, Gutters & Drainage",
+    "category": "retail",
+    "zip": "32081",
+    "lat": 30.1250266,
+    "lon": -81.4008152,
+    "address": "2400 Palm Valley Road",
+    "city": "Nocatee",
+    "phone": "",
+    "website": "",
+    "hours": "Mo-Th 08:00-17:00; Fr 08:00-16:00",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 13362182180,
+    "osm_type": "node",
+    "confidence": 75
+  },
+  {
+    "name": "Gate Express Carwash",
+    "category": "car_wash",
+    "zip": "32081",
+    "lat": 30.123709,
+    "lon": -81.397397,
+    "address": "2545 Palm Valley Rd",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 70,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Ponte Vedra United Methodist Church",
+    "category": "place_of_worship",
+    "zip": "32081",
+    "lat": 30.166626,
+    "lon": -81.397008,
+    "address": "",
+    "phone": "+1-904-280-5141",
+    "website": "https://www.ponte-vedra-umc.org/",
+    "hours": "",
+    "confidence": 70,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Redeemer Church",
+    "category": "place_of_worship",
+    "zip": "32081",
+    "lat": 30.153629,
+    "lon": -81.393046,
+    "address": "",
+    "phone": "+1-904-285-8009",
+    "website": "https://www.redeemerpv.com/",
+    "hours": "",
+    "confidence": 70,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Tijuana Flats",
+    "category": "restaurant",
+    "zip": "32081",
+    "lat": 30.110222,
+    "lon": -81.417428,
+    "address": "41 Settlement Drive",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 70,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "St. Johns Smile Co.",
+    "category": "dentist",
+    "zip": "32081",
+    "lat": 30.11213,
+    "lon": -81.422474,
+    "address": "40 Tavernier Drive",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 70,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Shell",
+    "category": "fuel",
+    "zip": "32081",
+    "lat": 30.110903,
+    "lon": -81.417564,
+    "address": "40 Settlement Drive",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 70,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Crosswater Community Church",
+    "category": "church",
+    "zip": "32081",
+    "lat": 30.121562,
+    "lon": -81.396727,
+    "address": "211 Davis Park Road",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 70,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Palm Valley Academy",
+    "category": "school",
+    "zip": "32081",
+    "lat": 30.120555,
+    "lon": -81.407632,
+    "address": "700 Bobcat Lane",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 70,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Crosswater Dental Care",
+    "category": "dentist",
+    "zip": "32081",
+    "lat": 30.107557,
+    "lon": -81.415361,
+    "address": "685 Crosswater Parkway",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 70,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Forever Vets Animal Hospital",
+    "category": "veterinary",
+    "zip": "32081",
+    "lat": 30.107695,
+    "lon": -81.414642,
+    "address": "80 Pine Lake Drive",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 70,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Family Bible Church",
+    "category": "place_of_worship",
+    "zip": "32081",
+    "lat": 30.175807,
+    "lon": -81.388236,
+    "address": "",
+    "phone": "+1-904-280-5694",
+    "website": "https://www.familybiblepvb.com/",
+    "hours": "",
+    "confidence": 70,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Ponte Vedra Presbyterian Church",
+    "category": "place_of_worship",
+    "zip": "32081",
+    "lat": 30.167938,
+    "lon": -81.387202,
+    "address": "",
+    "phone": "+1-904-285-8225",
+    "website": "",
+    "hours": "",
+    "confidence": 60,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Chase",
+    "category": "atm",
+    "zip": "32081",
+    "lat": 30.194007,
+    "lon": -81.380889,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "24/7",
+    "confidence": 60,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Bronx House Pizza",
+    "category": "restaurant",
+    "zip": "32081",
+    "lat": 30.108241,
+    "lon": -81.415455,
+    "address": "",
+    "phone": "",
+    "website": "https://www.bronxhousepizza.com/",
+    "hours": "",
+    "confidence": 60,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Verizon",
+    "category": "mobile_phone",
+    "zip": "32081",
+    "lat": 30.108129,
+    "lon": -81.415436,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "Mo-Sa 09:00-19:00",
+    "confidence": 60,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "M Shack",
+    "category": "fast_food",
+    "zip": "32081",
+    "lat": 30.108026,
+    "lon": -81.415423,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "Mo-Th,Su 11:00-20:00; Fr-Sa 11:00-21:00",
+    "confidence": 60,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Supercuts",
+    "category": "hairdresser",
+    "zip": "32081",
+    "lat": 30.108305,
+    "lon": -81.415462,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "Mo-Fr 09:00-19:00; Sa 09:00-18:00; Su 10:00-17:00",
+    "confidence": 60,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Jersey Mike's Subs",
+    "category": "fast_food",
+    "zip": "32081",
+    "lat": 30.10973,
+    "lon": -81.418016,
+    "address": "",
+    "phone": "",
+    "website": "https://www.jerseymikes.com/13148/ponte-vedra-beach-fl",
+    "hours": "",
+    "confidence": 60,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Baptist HealthPlace at Nocatee",
+    "category": "clinic",
+    "zip": "32081",
+    "lat": 30.112757,
+    "lon": -81.429209,
+    "address": "",
+    "phone": "",
+    "website": "https://news.nocatee.com/ymca-opening-october-2020-in-nocatee",
+    "hours": "",
+    "confidence": 60,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "CVS Pharmacy",
+    "category": "chemist",
+    "zip": "32081",
+    "lat": 30.108397,
+    "lon": -81.416913,
+    "address": "",
+    "phone": "",
+    "website": "https://www.cvs.com/store-locator/ponte-vedra-beach-fl-pharmacies/630-crosswater-pkwy-ponte-vedra-beach-fl-32081/storeid=11469",
+    "hours": "",
+    "confidence": 60,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Walgreens",
+    "category": "chemist",
+    "zip": "32081",
+    "lat": 30.193136,
+    "lon": -81.381051,
+    "address": "",
+    "phone": "",
+    "website": "https://www.walgreens.com/locator/walgreens-860+a1a+n-ponte+vedra-fl-32082/id=4657",
+    "hours": "",
+    "confidence": 60,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Anastasia Club",
+    "category": "social_centre",
+    "zip": "32081",
+    "lat": 30.0824837,
+    "lon": -81.3941167,
+    "address": "",
+    "city": "Nocatee",
+    "phone": "",
+    "website": "https://www.delwebb.com/homes/florida/northeast-florida/ponte-vedra/del-webb-ponte-vedra-100237",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 4723443952,
+    "osm_type": "node",
+    "confidence": 55
+  },
+  {
+    "name": "Coastal Wine Market",
+    "category": "retail",
+    "zip": "32081",
+    "lat": 30.1083526,
+    "lon": -81.4154752,
+    "address": "",
+    "city": "Nocatee",
+    "phone": "",
+    "website": "",
+    "hours": "Tu-Th 16:00-21:00; Fr-Sa 16:00-22:00",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 11709456680,
+    "osm_type": "node",
+    "confidence": 55
+  },
+  {
+    "name": "Publix Liquors",
+    "category": "alcohol",
+    "zip": "32081",
+    "lat": 30.110983,
+    "lon": -81.419467,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Dick's Wings & Grill",
+    "category": "restaurant",
+    "zip": "32081",
+    "lat": 30.11129,
+    "lon": -81.419545,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Gate Gas Statation",
+    "category": "fuel",
+    "zip": "32081",
+    "lat": 30.123205,
+    "lon": -81.39801,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Crosswater Community Church",
+    "category": "place_of_worship",
+    "zip": "32081",
+    "lat": 30.121549,
+    "lon": -81.396721,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "South Kitchen & Spirits",
+    "category": "restaurant",
+    "zip": "32081",
+    "lat": 30.108861,
+    "lon": -81.414841,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "The Loop",
+    "category": "restaurant",
+    "zip": "32081",
+    "lat": 30.111613,
+    "lon": -81.418896,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "The UPS Store",
+    "category": "copyshop",
+    "zip": "32081",
+    "lat": 30.11165,
+    "lon": -81.418648,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Trompe L’oeil Luxury Hair Salon",
+    "category": "hairdresser",
+    "zip": "32081",
+    "lat": 30.111636,
+    "lon": -81.418799,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "GNC",
+    "category": "nutrition_supplements",
+    "zip": "32081",
+    "lat": 30.109701,
+    "lon": -81.418194,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Lululemon",
+    "category": "clothes",
+    "zip": "32081",
+    "lat": 30.109679,
+    "lon": -81.418314,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "AT&T",
+    "category": "mobile_phone",
+    "zip": "32081",
+    "lat": 30.109662,
+    "lon": -81.418406,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Timoti's Seafood Shak",
+    "category": "restaurant",
+    "zip": "32081",
+    "lat": 30.109616,
+    "lon": -81.418657,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "RE/MAX",
+    "category": "estate_agent",
+    "zip": "32081",
+    "lat": 30.110121,
+    "lon": -81.419275,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Hair Cuttery",
+    "category": "hairdresser",
+    "zip": "32081",
+    "lat": 30.111034,
+    "lon": -81.419477,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Crosswater Animal Hospital",
+    "category": "veterinary",
+    "zip": "32081",
+    "lat": 30.111086,
+    "lon": -81.419489,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "YoBe",
+    "category": "ice_cream",
+    "zip": "32081",
+    "lat": 30.111343,
+    "lon": -81.419557,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Luxury Nail Spa",
+    "category": "beauty",
+    "zip": "32081",
+    "lat": 30.111404,
+    "lon": -81.419571,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Cedars Cleaners",
+    "category": "dry_cleaning",
+    "zip": "32081",
+    "lat": 30.111483,
+    "lon": -81.419728,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Palm Leaf Dental",
+    "category": "dentist",
+    "zip": "32081",
+    "lat": 30.111549,
+    "lon": -81.419606,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "V pizza",
+    "category": "restaurant",
+    "zip": "32081",
+    "lat": 30.177548,
+    "lon": -81.39786,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "YMCA",
+    "category": "sports_centre",
+    "zip": "32081",
+    "lat": 30.112995,
+    "lon": -81.429523,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Treylor Park",
+    "category": "restaurant",
+    "zip": "32081",
+    "lat": 30.110021,
+    "lon": -81.419232,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Burn Boot Camp",
+    "category": "fitness_centre",
+    "zip": "32081",
+    "lat": 30.108681,
+    "lon": -81.414812,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Ponte Vedra High School",
+    "category": "school",
+    "zip": "32081",
+    "lat": 30.112458,
+    "lon": -81.394505,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Daily's",
+    "category": "convenience",
+    "zip": "32081",
+    "lat": 30.111126,
+    "lon": -81.417654,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Vystar Credit Union",
+    "category": "bank",
+    "zip": "32081",
+    "lat": 30.112246,
+    "lon": -81.41901,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Crosswater Hall",
+    "category": "community_centre",
+    "zip": "32081",
+    "lat": 30.1033,
+    "lon": -81.415157,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Nocatee Fitness Club",
+    "category": "sports_centre",
+    "zip": "32081",
+    "lat": 30.103178,
+    "lon": -81.415542,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Rocky's Pizza",
+    "category": "fast_food",
+    "zip": "32081",
+    "lat": 30.1035,
+    "lon": -81.416542,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Family Lagoon Pool",
+    "category": "swimming_pool",
+    "zip": "32081",
+    "lat": 30.103735,
+    "lon": -81.415835,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "United States Post Office",
+    "category": "post_office",
+    "zip": "32081",
+    "lat": 30.194837,
+    "lon": -81.382521,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Seaside Pool",
+    "category": "swimming_pool",
+    "zip": "32081",
+    "lat": 30.164465,
+    "lon": -81.366334,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Wells Fargo",
+    "category": "bank",
+    "zip": "32081",
+    "lat": 30.150441,
+    "lon": -81.376621,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Palm Valley Baptist Church",
+    "category": "place_of_worship",
+    "zip": "32081",
+    "lat": 30.179218,
+    "lon": -81.389607,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Shell",
+    "category": "fuel",
+    "zip": "32081",
+    "lat": 30.110923,
+    "lon": -81.417659,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Watson Realty Corp",
+    "category": "estate_agent",
+    "zip": "32081",
+    "lat": 30.10904,
+    "lon": -81.418344,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "CareSpot Urgent Care",
+    "category": "clinic",
+    "zip": "32081",
+    "lat": 30.108681,
+    "lon": -81.415556,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Tifton Cove Community Pool",
+    "category": "sports_centre",
+    "zip": "32081",
+    "lat": 30.197607,
+    "lon": -81.370891,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Blue Water Bar & Grill",
+    "category": "restaurant",
+    "zip": "32081",
+    "lat": 30.100403,
+    "lon": -81.416122,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Spray Playground",
+    "category": "water_park",
+    "zip": "32081",
+    "lat": 30.100032,
+    "lon": -81.415762,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Spray Waterpark",
+    "category": "water_park",
+    "zip": "32081",
+    "lat": 30.100063,
+    "lon": -81.415684,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Nocatee Swim Club",
+    "category": "swimming_pool",
+    "zip": "32081",
+    "lat": 30.101851,
+    "lon": -81.415564,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Amazing Explorers Academy",
+    "category": "school",
+    "zip": "32081",
+    "lat": 30.112149,
+    "lon": -81.422037,
+    "address": "",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "confidence": 50,
+    "sources": [
+      "OSM"
+    ]
+  },
+  {
+    "name": "Bicycle's Etc.",
+    "category": "retail",
+    "zip": "32081",
+    "lat": 30.1096591,
+    "lon": -81.4184556,
+    "address": "",
+    "city": "Nocatee",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 7738431638,
+    "osm_type": "node",
+    "confidence": 45
+  },
+  {
+    "name": "Woof Gang Bakery & Grooming",
+    "category": "retail",
+    "zip": "32081",
+    "lat": 30.1096467,
+    "lon": -81.4185213,
+    "address": "",
+    "city": "Nocatee",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 7738431639,
+    "osm_type": "node",
+    "confidence": 45
+  },
+  {
+    "name": "Saint Johns Eye Associates",
+    "category": "clinic",
+    "zip": "32081",
+    "lat": 30.1114809,
+    "lon": -81.4195903,
+    "address": "",
+    "city": "Nocatee",
+    "phone": "",
+    "website": "",
+    "hours": "",
+    "claimed": false,
+    "sources": [
+      "OSM"
+    ],
+    "osm_id": 7738431668,
+    "osm_type": "node",
+    "confidence": 45
+  }
+]
