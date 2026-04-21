@@ -23,6 +23,20 @@
 const express = require('express');
 const path    = require('path');
 const fs      = require('fs');
+const { paymentMiddleware } = require('x402-express');
+
+// ── x402 payment config ───────────────────────────────────────────────
+// TREASURY receives USDC on Base mainnet.
+// Agents without a Base wallet still use the Tempo/pathUSD endpoint (/api/local-intel/mcp).
+// This x402 gate is ADDITIVE — a second payment rail, not a replacement.
+const X402_TREASURY = process.env.X402_TREASURY || '0x774f484192Cf3F4fB9716Af2e15f44371fD32FEA';
+const x402Middleware = paymentMiddleware(
+  X402_TREASURY,
+  {
+    'POST /api/local-intel/mcp/x402':         { price: '$0.01', network: 'base', config: { description: 'LocalIntel MCP — standard tool call' } },
+    'POST /api/local-intel/mcp/x402/premium': { price: '$0.05', network: 'base', config: { description: 'LocalIntel MCP — local_intel_for_agent premium composite' } },
+  }
+);
 
 const router = express.Router();
 
@@ -228,6 +242,48 @@ router.post('/mcp', express.json(), async (req, res) => {
     res.status(response.status).json(data);
   } catch (e) {
     res.status(503).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'MCP server unavailable: ' + e.message } });
+  }
+});
+
+// ── x402 MCP endpoints — Base/USDC payment rail (additive alongside pathUSD) ──
+// Standard: $0.01 USDC on Base  |  Premium (local_intel_for_agent): $0.05 USDC
+// Agents without Base wallets continue using /api/local-intel/mcp (Tempo/pathUSD)
+router.use(x402Middleware);
+
+router.post('/mcp/x402', express.json(), async (req, res) => {
+  try {
+    const body = req.body || {};
+    if (body.method && body.method.startsWith('notifications/') && body.id === undefined) {
+      return res.status(204).end();
+    }
+    const response = await fetch('http://localhost:3004/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (e) {
+    res.status(503).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'MCP unavailable: ' + e.message } });
+  }
+});
+
+router.post('/mcp/x402/premium', express.json(), async (req, res) => {
+  try {
+    const body = req.body || {};
+    // Force premium tool so agents can't use the $0.05 endpoint for cheap calls
+    if (body.method === 'tools/call' && body.params?.name !== 'local_intel_for_agent') {
+      return res.status(400).json({ jsonrpc: '2.0', id: body.id || null, error: { code: -32600, message: 'Premium endpoint is for local_intel_for_agent only' } });
+    }
+    const response = await fetch('http://localhost:3004/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (e) {
+    res.status(503).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'MCP unavailable: ' + e.message } });
   }
 });
 

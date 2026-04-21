@@ -424,7 +424,7 @@ app.get('/.well-known/mcp/server-card.json', (req, res) => {
     serverInfo: {
       name: 'LocalIntel by MCFLAMINGO',
       version: '1.0.0',
-      description: 'Agentic business intelligence for St. Johns County FL (32081 + 32082). Spatial context, tidal momentum scores, spending zones, corridor analysis, staleness-graded data. $0.01–$0.05/call in pathUSD.'
+      description: 'Agentic business intelligence for St. Johns County FL (32081 + 32082). Spatial context, tidal momentum scores, spending zones, corridor analysis, staleness-graded data. Two payment rails: $0.01–$0.05/call USDC on Base (x402) or pathUSD on Tempo mainnet.'
     },
     authentication: { required: false },
     tools: [
