@@ -17,7 +17,38 @@ const http   = require('http');
 const path   = require('path');
 const fs     = require('fs');
 
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const DATA_DIR  = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const ZIPS_DIR  = path.join(DATA_DIR, 'zips');  // flat-array format, matches zipAgent + MCP
+
+// Infer OSM-style category from business name when schema.org type is generic 'LocalBusiness'
+function inferCategoryFromName(name) {
+  const n = (name || '').toLowerCase();
+  if (/dental|dentist|dds|dmg|smile|orthodont|endodont|periodon|oral surgeon/.test(n)) return 'dentist';
+  if (/pharmacy|drug store|rx |apothecary/.test(n))                                  return 'chemist';
+  if (/pizza|sushi|grill|restaurant|bistro|diner|kitchen|steakhouse|seafood|barbecue|bbq|taco|burger|eatery|tavern|grille|cantina|trattoria|chophouse/.test(n)) return 'restaurant';
+  if (/\bbar\b|pub |brewery|taproom|cocktail|lounge/.test(n))                       return 'bar';
+  if (/\bcoffee\b|espresso|roastery/.test(n))                                       return 'cafe';
+  if (/hotel|inn |\bresort\b|\blodge\b|marriott|hilton|hyatt|westin|sheraton/.test(n)) return 'hotel';
+  if (/fitness|crossfit|yoga|pilates|hiit|boot.?camp|orangetheory|anytime fitness|planet fitness/.test(n)) return 'fitness_centre';
+  if (/massage|medspa|med spa|aesthetics|wellness center/.test(n))                  return 'beauty';
+  if (/hair salon|hair studio|barber|nail |lash |blow dry/.test(n))                 return 'hairdresser';
+  if (/realt|real estate|properties|homes |remax|keller williams|coldwell|century 21|compass realty|exp realty|berkshire/.test(n)) return 'estate_agent';
+  if (/mortgage|wealth management|financial advisor|investment advisor|insurance|allstate|state farm|nationwide|farmers ins/.test(n)) return 'finance';
+  if (/\bbank\b|credit union|fcu|federal savings|suntrust|truist|regions|ameris|hancock/.test(n)) return 'bank';
+  if (/attorney|law firm|\blegal\b|litigation|\bllp\b|\bpa\b| esq/.test(n))       return 'legal';
+  if (/urgent care|walk.?in|\bclinic\b|physician|\bmd\b|\bdo\b|medical group|health center|cardio|ortho|derma|pediatric|ob.gyn/.test(n)) return 'clinic';
+  if (/veterinar|animal hospital|\bvet\b|pet clinic/.test(n))                       return 'veterinary';
+  if (/child care|childcare|daycare|day care|preschool|montessori|learning center/.test(n)) return 'childcare';
+  if (/landscap|lawn care|lawn service|tree service|irrigation/.test(n))            return 'landscaping';
+  if (/plumb/.test(n))                                                               return 'plumber';
+  if (/electri/.test(n))                                                             return 'electrician';
+  if (/contractor|construction|builder|renovate|remodel/.test(n))                   return 'contractor';
+  if (/auto repair|tire |car wash|mechanic|oil change|transmiss/.test(n))           return 'car_repair';
+  if (/self.?storage|storage unit/.test(n))                                         return 'storage';
+  if (/dry.?clean|laundry/.test(n))                                                 return 'dry_cleaning';
+  if (/\bchurch\b|lutheran|baptist|presbyterian|methodist|catholic|episcopal|worship/.test(n)) return 'place_of_worship';
+  return null; // keep as LocalBusiness if unknown
+}
 const DELAY_MS = 1500;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -111,7 +142,7 @@ function parseYPResults(html, category) {
             address:  [addr.streetAddress, addr.addressLocality, addr.addressRegion, addr.postalCode]
                         .filter(Boolean).join(', ') || null,
             zip:      addr.postalCode || null,
-            category: item['@type'] || category,
+            category: (item['@type'] === 'LocalBusiness' ? (inferCategoryFromName(item.name) || 'LocalBusiness') : item['@type']) || category,
             hours:    item.openingHours ? (Array.isArray(item.openingHours) ? item.openingHours.join(', ') : item.openingHours) : null,
             source:   'yellowpages',
           });
@@ -156,17 +187,21 @@ function inferZip(address) {
   return m ? m[1] : null;
 }
 
-// Merge YP business into ZIP data file
+// Merge YP business into ZIP data file — flat array in data/zips/{zip}.json (matches zipAgent + MCP)
 function mergeIntoZipFile(zipCode, biz) {
-  const filePath = path.join(DATA_DIR, `${zipCode}.json`);
-  let data = { businesses: [] };
+  if (!zipCode || !/^\d{5}$/.test(zipCode)) return 'skipped'; // guard malformed ZIPs
+  if (!fs.existsSync(ZIPS_DIR)) fs.mkdirSync(ZIPS_DIR, { recursive: true });
+  const filePath = path.join(ZIPS_DIR, `${zipCode}.json`);
+  let data = [];
   if (fs.existsSync(filePath)) {
-    try { data = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
+    try {
+      const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      data = Array.isArray(raw) ? raw : (raw.businesses || []);
+    } catch (_) {}
   }
-  if (!data.businesses) data.businesses = [];
 
   const nameLower = biz.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const existing = data.businesses.find(b => {
+  const existing = data.find(b => {
     const bLower = (b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     return bLower === nameLower || bLower.includes(nameLower) || nameLower.includes(bLower);
   });
@@ -186,7 +221,7 @@ function mergeIntoZipFile(zipCode, biz) {
     }
     return changed ? 'enriched' : 'skipped';
   } else {
-    data.businesses.push({
+    data.push({
       name:         biz.name,
       phone:        biz.phone || null,
       website:      biz.website || null,
