@@ -4834,7 +4834,40 @@ app.post('/api/run-app-test', requireOperator, async (req, res) => {
 // /api/local-intel is mounted directly above (line ~396)
 // No proxy needed — dashboard-server.js is the Railway entry point
 
-app.use((req, res) => {
+app.use((req, res, next) => {
+  // ── MCP catch-all: Smithery/scanner sends POST with JSON-RPC to root or unknown paths
+  // Detect by Content-Type + Accept header — route to internal MCP server, not HTML
+  const acceptsEventStream = (req.headers['accept'] || '').includes('text/event-stream');
+  const acceptsJson        = (req.headers['accept'] || '').includes('application/json');
+  const isJsonBody         = (req.headers['content-type'] || '').includes('application/json');
+  const isPost             = req.method === 'POST';
+  const isGet              = req.method === 'GET';
+
+  if (isPost && isJsonBody && (acceptsEventStream || acceptsJson)) {
+    // Looks like an MCP probe — proxy to internal MCP server
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const parsed = JSON.parse(body || '{}');
+        if (parsed.method && parsed.method.startsWith('notifications/') && parsed.id === undefined) {
+          return res.status(204).end();
+        }
+        const response = await fetch('http://localhost:3004/mcp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(parsed),
+        });
+        const data = await response.json();
+        return res.status(response.status).json(data);
+      } catch (e) {
+        return res.status(503).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'MCP unavailable: ' + e.message } });
+      }
+    });
+    return;
+  }
+
+  // Normal browser request — serve dashboard
   res.sendFile(path.join(__dirname, 'dashboard-ui', 'index.html'));
 });
 
