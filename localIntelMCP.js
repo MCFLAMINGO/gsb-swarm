@@ -327,13 +327,13 @@ function toolSearch({ zip, query, category, group, limit = 20 }) {
   if (query) {
     const raw   = query.toLowerCase().trim();
     const q     = normalizeQuery(raw);  // alias + de-plural
-    const STOP  = new Set(['for','the','and','near','in','at','of','a','an','show','me','find','get','list','all','any','some','what','where','who','how','is','are','there']);
+    const STOP  = new Set(['for','the','and','near','in','at','of','a','an','show','me','find','get','list','all','any','some','what','where','who','how','is','are','there','best','top','good','great','closest','nearby','around','here','places','spots','shops','open','now','today','local']);
     // Generate word variants: original + de-pluraled + alias-resolved
     const wordVariants = (w) => {
       const variants = new Set([w]);
       if (QUERY_ALIASES[w]) variants.add(QUERY_ALIASES[w]);
-      if (w.endsWith('s') && w.length > 3) variants.add(w.slice(0, -1));
-      if (w.endsWith('es') && w.length > 4) variants.add(w.slice(0, -2));
+      if (w.length >= 5 && w.endsWith('s')) variants.add(w.slice(0, -1));
+      if (w.length >= 6 && w.endsWith('es')) variants.add(w.slice(0, -2));
       return [...variants];
     };
     const words = raw.split(/\s+/)
