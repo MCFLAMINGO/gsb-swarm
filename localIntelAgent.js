@@ -272,9 +272,8 @@ router.post('/mcp', express.json(), async (req, res) => {
 // ── x402 MCP endpoints — Base/USDC payment rail (additive alongside pathUSD) ──
 // Standard: $0.01 USDC on Base  |  Premium (local_intel_for_agent): $0.05 USDC
 // Agents without Base wallets continue using /api/local-intel/mcp (Tempo/pathUSD)
-router.use(x402Middleware);
-
-router.post('/mcp/x402', express.json(), async (req, res) => {
+// x402Middleware is scoped ONLY to these two routes — does NOT touch /mcp
+router.post('/mcp/x402', x402Middleware, express.json(), async (req, res) => {
   try {
     const body = req.body || {};
     if (body.method && body.method.startsWith('notifications/') && body.id === undefined) {
@@ -292,7 +291,7 @@ router.post('/mcp/x402', express.json(), async (req, res) => {
   }
 });
 
-router.post('/mcp/x402/premium', express.json(), async (req, res) => {
+router.post('/mcp/x402/premium', x402Middleware, express.json(), async (req, res) => {
   try {
     const body = req.body || {};
     // Force premium tool so agents can't use the $0.05 endpoint for cheap calls
