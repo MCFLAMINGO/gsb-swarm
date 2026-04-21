@@ -232,6 +232,11 @@ async function main() {
     results.push(result);
     const icon = result.status === 'PASS' ? '✅' : result.status === 'SKIP' ? '⏭️ ' : '❌';
     console.log(`${icon} ${result.status}${result.paid ? ' · paid' : ''}${result.error ? ' · ' + result.error : ''}`);
+    // Wait for Base to confirm the settlement tx before next agent
+    // Treasury wallet nonce must advance before submitting next transferWithAuthorization
+    if (result.paid) {
+      await new Promise(r => setTimeout(r, 10000)); // ~5 Base blocks — wait for settlement confirm
+    }
   }
 
   // Post-check: TREASURY balance after
