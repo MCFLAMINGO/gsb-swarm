@@ -302,8 +302,34 @@ const QUERY_ALIASES = {
   // Finance / Services
   'banks': 'bank', 'atms': 'atm',
   'realtors': 'estate_agent', 'realtor': 'estate_agent', 'real estate': 'estate_agent',
+  'real estate agents': 'estate_agent', 'real estate agent': 'estate_agent',
+  'mortgage': 'finance', 'mortgage lenders': 'finance', 'lenders': 'finance',
   'lawyers': 'legal', 'attorney': 'legal', 'attorneys': 'legal',
   'hotels': 'hotel', 'motels': 'hotel',
+  // Home services
+  'plumber': 'plumber', 'plumbers': 'plumber',
+  'electrician': 'electrician', 'electricians': 'electrician',
+  'landscaper': 'landscaping', 'landscapers': 'landscaping', 'lawn care': 'landscaping',
+  'mover': 'moving', 'movers': 'moving', 'moving company': 'moving', 'moving companies': 'moving',
+  'storage': 'storage', 'storage units': 'storage', 'self storage': 'storage',
+  'home inspector': 'inspector', 'home inspectors': 'inspector', 'inspector': 'inspector',
+  'pool': 'swimming_pool', 'pool company': 'swimming_pool', 'pool companies': 'swimming_pool',
+  'roofer': 'roofing', 'roofers': 'roofing', 'roofing': 'roofing',
+  // Health & wellness
+  'chiropractor': 'chiropractor', 'chiropractors': 'chiropractor', 'chiro': 'chiropractor',
+  'yoga': 'yoga', 'yoga studio': 'yoga', 'yoga studios': 'yoga',
+  'massage': 'massage_therapist', 'massage therapy': 'massage_therapist', 'massage therapist': 'massage_therapist',
+  'pediatrician': 'clinic', 'pediatricians': 'clinic', 'kids doctor': 'clinic', 'childrens doctor': 'clinic',
+  'urgent care': 'clinic', 'walk in clinic': 'clinic', 'walk-in': 'clinic',
+  // Family
+  'daycare': 'childcare', 'daycares': 'childcare', 'day care': 'childcare',
+  'preschool': 'childcare', 'preschools': 'childcare',
+  'childcare': 'childcare',
+  // Pets
+  'dog grooming': 'pet_grooming', 'grooming': 'pet_grooming', 'pet groomer': 'pet_grooming',
+  'dog groomer': 'pet_grooming',
+  // Auto
+  'car wash': 'car_wash', 'car washes': 'car_wash', 'auto wash': 'car_wash',
 };
 
 function normalizeQuery(raw) {
@@ -341,16 +367,25 @@ function resolveZip(query) {
   return CITY_TO_ZIP[city] || null;
 }
 
+function extractZipFromQuery(query) {
+  if (!query) return null;
+  const m = query.match(/\b(\d{5})\b/);
+  return m ? m[1] : null;
+}
+
 function toolSearch({ zip, query, category, group, limit = 20 }) {
   let results = loadBusinesses();
-  // Auto-resolve city name to ZIP if no explicit zip param
-  const resolvedZip = zip || resolveZip(query);
+  // Resolve ZIP: explicit param > numeric in query string > city name in query
+  const resolvedZip = zip || extractZipFromQuery(query) || resolveZip(query);
   if (resolvedZip) results = results.filter(b => b.zip === resolvedZip);
   if (category) results = results.filter(b => b.category === category);
   if (group)    results = results.filter(b => getGroup(b.category) === group);
   if (query) {
-    // Strip city/location phrase before tokenizing so city name doesn't score against addresses
-    const strippedQuery = query.replace(/(?:in|near|at)\s+[a-z\s.]+$/i, '').trim();
+    // Strip ZIP and city/location phrase before tokenizing so they don't score against addresses
+    const strippedQuery = query
+      .replace(/\b\d{5}\b/g, '')                       // remove ZIP digits
+      .replace(/(?:in|near|at)\s+[a-z\s.]+$/i, '')    // remove "in ponte vedra" etc
+      .trim();
     const raw   = (strippedQuery || query).toLowerCase().trim();
     const q     = normalizeQuery(raw);  // alias + de-plural
     const STOP  = new Set(['for','the','and','near','in','at','of','a','an','show','me','find','get','list','all','any','some','what','where','who','how','is','are','there','best','top','good','great','closest','nearby','around','here','places','spots','shops','open','now','today','local','services','service','things','stuff','options']);
