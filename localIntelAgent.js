@@ -30,11 +30,13 @@ const { paymentMiddleware } = require('x402-express');
 // Agents without a Base wallet still use the Tempo/pathUSD endpoint (/api/local-intel/mcp).
 // This x402 gate is ADDITIVE — a second payment rail, not a replacement.
 const X402_TREASURY = process.env.X402_TREASURY || '0x774f484192Cf3F4fB9716Af2e15f44371fD32FEA';
+// NOTE: Route keys must be router-relative paths (req.path inside mounted router),
+// not the full /api/local-intel/* paths. The middleware uses req.path for matching.
 const x402Middleware = paymentMiddleware(
   X402_TREASURY,
   {
-    'POST /api/local-intel/mcp/x402':         { price: '$0.01', network: 'base', config: { description: 'LocalIntel MCP — standard tool call' } },
-    'POST /api/local-intel/mcp/x402/premium': { price: '$0.05', network: 'base', config: { description: 'LocalIntel MCP — local_intel_for_agent premium composite' } },
+    'POST /mcp/x402':         { price: '$0.01', network: 'base', config: { description: 'LocalIntel MCP — standard tool call' } },
+    'POST /mcp/x402/premium': { price: '$0.05', network: 'base', config: { description: 'LocalIntel MCP — local_intel_for_agent premium composite' } },
   }
 );
 

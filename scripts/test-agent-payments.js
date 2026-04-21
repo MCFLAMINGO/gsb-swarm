@@ -32,44 +32,53 @@ const BASE_URL = process.env.MCP_BASE_URL || 'https://gsb-swarm-production.up.ra
 const X402_ENDPOINT = `${BASE_URL}/api/local-intel/mcp/x402`;
 const TREASURY = '0x774f484192Cf3F4fB9716Af2e15f44371fD32FEA';
 
+// ── Note on ACP wallet addresses ──────────────────────────────────────────────
+// The ACP agent wallet addresses (0xb165a3b0... etc.) are ACP-platform custodied.
+// Their EVM private keys are managed by the ACP SDK, not exposed in Railway.
+// For payment signing we use EVM wallets we DO hold keys for:
+//   PLAYER (0x592b...)  = $9 USDC on Base — represents buyer/agent side
+//   EXECUTOR (0xca55...) = $15 USDC on Base — represents orchestrator
+// Each "agent" call is labeled with its ACP identity but signs from PLAYER.
+// Future: ACP SDK natively supports x402 calls — wallet=self, sign=ACP.
+
 // ── Agent definitions ──────────────────────────────────────────────────────────
 const AGENTS = [
   {
-    name:     'GSB CEO (1332)',
-    pkEnv:    'CEO_SIGNER_PK',
-    address:  '0xb165a3b019eb1922f5dcda97b83be75484b30d27',
+    name:     'GSB CEO (1332) — Realtor vertical',
+    pkEnv:    'THROW_PLAYER_PK',           // PLAYER wallet — $9 USDC on Base
+    address:  '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d',
     vertical: 'local_intel_realtor',
     query:    'What is the owner-occupancy rate and home value median?',
     zip:      '32082',
   },
   {
-    name:     'GSB Wallet Profiler (1334)',
-    pkEnv:    'WALLET_PROFILER_SIGNER_PK',
-    address:  '0xeb6447a8b44837458f391e2bac39990daf6bd522',
+    name:     'GSB Wallet Profiler (1334) — Healthcare vertical',
+    pkEnv:    'THROW_PLAYER_PK',
+    address:  '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d',
     vertical: 'local_intel_healthcare',
     query:    'What is the senior population percentage that drives home health demand?',
     zip:      '32082',
   },
   {
-    name:     'GSB Alpha Scanner (1335)',
-    pkEnv:    'ALPHA_SCANNER_SIGNER_PK',
-    address:  '0x9d23bf7e4084e278a06c85e299a8ed5db3d663b5',
+    name:     'GSB Alpha Scanner (1335) — Construction vertical',
+    pkEnv:    'THROW_PLAYER_PK',
+    address:  '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d',
     vertical: 'local_intel_construction',
     query:    'What new construction or development projects are active in this ZIP?',
     zip:      '32082',
   },
   {
-    name:     'GSB Token Analyst (1333)',
-    pkEnv:    'TOKEN_ANALYST_SIGNER_PK',
-    address:  '0x489a9d6c79957906540491a493a7a4d13ad0701a',
+    name:     'GSB Token Analyst (1333) — Restaurant vertical',
+    pkEnv:    'THROW_PLAYER_PK',
+    address:  '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d',
     vertical: 'local_intel_restaurant',
     query:    'What restaurants are in Ponte Vedra Beach?',
     zip:      '32082',
   },
   {
-    name:     'GSB Thread Writer (1336)',
-    pkEnv:    'THREAD_WRITER_SIGNER_PK',
-    address:  '0x2c281b4ba71e79dd91e3a9d78ed5348bc5774df9',
+    name:     'GSB Thread Writer (1336) — Retail vertical',
+    pkEnv:    'THROW_PLAYER_PK',
+    address:  '0x592b6eEbd4C99b49Cf23f722E4F62FAEf4cD044d',
     vertical: 'local_intel_retail',
     query:    'What retail categories are undersupplied for the income level here?',
     zip:      '32082',
