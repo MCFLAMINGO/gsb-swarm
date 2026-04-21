@@ -31,7 +31,7 @@ const PORT         = parseInt(process.env.LOCAL_INTEL_MCP_PORT || '3004');
 
 // ── Cost per tool call (pathUSD) ──────────────────────────────────────────────
 // ── Tidal tools ──────────────────────────────────────────────────────────────
-const { handleTide, handleSignal, handleBedrock, handleForAgent } = require('./localIntelTidalTools');
+const { handleTide, handleSignal, handleBedrock, handleForAgent, handleAsk } = require('./localIntelTidalTools');
 const { handleVerticalQuery } = require('./workers/verticalAgentWorker');
 
 // ── Oracle handler ─────────────────────────────────────────────────────────────
@@ -66,6 +66,7 @@ const TOOL_COSTS = {
   local_intel_retail:       0.02,
   local_intel_construction: 0.02,
   local_intel_restaurant:   0.02,
+  local_intel_ask:          0.05,
   local_intel_stats:    0.005,
 };
 
@@ -699,6 +700,7 @@ const TOOLS = {
   local_intel_retail:       { fn: (p) => handleVerticalQuery('retail',       p.query, p.zip), desc: 'Retail market intelligence: store categories, spending capture, consumer profile, undersupplied niches.' },
   local_intel_construction: { fn: (p) => handleVerticalQuery('construction', p.query, p.zip), desc: 'Construction and home services intelligence: active permits, contractor density, population growth driving demand.' },
   local_intel_restaurant:   { fn: (p) => handleVerticalQuery('restaurant',   p.query, p.zip), desc: 'Restaurant market intelligence: saturation scores, price-tier gaps, capture rate, corridor analysis, tidal momentum.' },
+  local_intel_ask:          { fn: handleAsk, desc: 'Composite NL query layer — ask any plain-English question about a ZIP and get a synthesized, sourced answer. Routes internally to zone, oracle, search, bedrock, signal, tide, corridor, changes, and nearby tools. Single entry point for humans and LLMs.' },
 };
 
 // ── MCP manifest (tools/list response) ───────────────────────────────────────
@@ -899,6 +901,19 @@ const MCP_MANIFEST = {
       inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question about restaurant market' }, zip: { type: 'string', description: 'ZIP code to analyze' } }, required: ['query', 'zip'] },
       annotations: { readOnly: true },
     },
+    {
+      name: 'local_intel_ask',
+      description: 'Composite NL query layer. Ask any plain-English question about a ZIP — demographics, market opportunity, restaurant gaps, retail saturation, construction activity, investment signals, healthcare, corridor analysis, recent changes, nearby businesses. Routes internally to the right tools and returns a synthesized, sourced answer with confidence score. Best single entry point for humans and LLMs.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          question: { type: 'string', description: 'Plain English question, e.g. "What restaurant categories are missing in 32082?"' },
+          zip: { type: 'string', description: 'ZIP code (optional — will be extracted from question if present, defaults to 32082)' },
+        },
+        required: ['question'],
+      },
+      annotations: { readOnly: true },
+    },
   ],
 };
 
@@ -1079,4 +1094,5 @@ server.listen(PORT, () => {
   console.log(`[LocalIntelMCP] Covered zips: ${Object.keys(ZIP_CENTERS).join(', ')}`);
 });
 
-module.exports = { handleRPC, MCP_MANIFEST };
+// _tools: lazy export consumed by callTool() in localIntelTidalTools.js
+module.exports = { handleRPC, MCP_MANIFEST, _tools: TOOLS };

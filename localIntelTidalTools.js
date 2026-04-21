@@ -703,4 +703,384 @@ function handleForAgent(params) {
   }
 }
 
-module.exports = { handleTide, handleSignal, handleBedrock, handleForAgent };
+// ── ─────────────────────────────────────────────────────────────────────────
+// HANDLER 5: handleAsk
+// ── ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * local_intel_ask — Natural language composite query.
+ *
+ * The front door for humans and LLMs alike.
+ * Takes any plain-English question, routes internally across all data layers,
+ * synthesizes a single sourced answer with confidence score.
+ *
+ * Input:  { question, zip? }
+ * Output: { answer, sources, confidence, zip, intent, tools_used, data }
+ */
+
+// Intent classification — maps question patterns to which tools to invoke
+const ASK_ROUTES = [
+  // Demographics / income / population
+  {
+    patterns: [/income|household|median|wealth|affluent|hhi|earning|salary/i,
+               /owner.occup|homeowner|renter|rent|home value|property value/i,
+               /population|resident|demographic|age|senior|family|household size/i,
+               /education|college|bachelor|spending profile|consumer profile/i],
+    tools: ['zone'],
+    label: 'demographics',
+  },
+  // Market gaps / opportunity / saturation
+  {
+    patterns: [/gap|undersupplied|missing|unmet|need|opportunity|room for/i,
+               /saturat|oversupplied|too many|enough/i,
+               /should i open|viable|worth opening|good location/i,
+               /capture rate|demand|supply/i],
+    tools: ['oracle', 'zone'],
+    label: 'market_opportunity',
+  },
+  // Construction / permits / infrastructure
+  {
+    patterns: [/permit|construction|build|develop|infrastructure|road|highway/i,
+               /housing start|new home|subdivision|project|zoning/i,
+               /roofing|hvac|electrician|plumber|landscap|contractor/i,
+               /pool|remodel|renovation|addition/i],
+    tools: ['bedrock', 'search'],
+    label: 'construction',
+  },
+  // Investment / momentum / signals
+  {
+    patterns: [/invest|signal|momentum|score|trajectory|trend|grow/i,
+               /appreciation|value increas|hot market|up.and.coming/i,
+               /tidal|temperature|market.*direct/i],
+    tools: ['signal', 'tide', 'bedrock'],
+    label: 'investment_signal',
+  },
+  // Corridor / street specific
+  {
+    patterns: [/a1a|a-1-a|alternate a1a|palm valley|us.1|us 1|state road/i,
+               /corridor|along|on the road|street|boulevard|avenue/i],
+    tools: ['corridor', 'search'],
+    label: 'corridor',
+  },
+  // Recent changes / new businesses
+  {
+    patterns: [/new|recent|just opened|opening|added|latest|this (month|year|week)/i,
+               /what.*changed|what.*new|who.*moved/i],
+    tools: ['changes', 'search'],
+    label: 'recent_changes',
+  },
+  // Healthcare
+  {
+    patterns: [/dentist|doctor|physician|clinic|hospital|pharmacy|health|medical/i,
+               /optom|vision|physical.therap|urgent.care|mental.health|counseling/i,
+               /rehab|wellness|fitness|gym|senior.*care|home.*health/i],
+    tools: ['search', 'zone'],
+    label: 'healthcare',
+  },
+  // Food / restaurants
+  {
+    patterns: [/restaurant|cafe|bar|dining|food|pizza|sushi|burger|breakfast|lunch|dinner/i,
+               /fast.casual|fine.dining|upscale|coffee|brewery|wine bar/i],
+    tools: ['search', 'oracle'],
+    label: 'food_beverage',
+  },
+  // Retail
+  {
+    patterns: [/retail|store|shop|grocery|supermarket|clothing|apparel|boutique/i,
+               /hardware|home.improve|pet|florist|gift|book|specialty/i],
+    tools: ['search', 'zone'],
+    label: 'retail',
+  },
+  // Nearby / radius
+  {
+    patterns: [/nearby|near me|within.*miles|radius|close to|around here/i,
+               /walking distance|drive from|minutes from/i],
+    tools: ['nearby', 'search'],
+    label: 'nearby',
+  },
+];
+
+// Extract ZIP from natural language
+function extractZip(question) {
+  const m = question.match(/\b(3[0-9]{4})\b/);
+  return m ? m[1] : null;
+}
+
+// Extract street name from question
+function extractStreetFromQ(question) {
+  const m = question.match(/\bA1A\b|\bA-1-A\b|Alternate A1A/i);
+  if (m) return 'A1A';
+  const s = question.match(/along\s+([A-Z][a-zA-Z\s]{2,20}(?:Rd|Ave|Blvd|Dr|Ln|St|Way)?)/i);
+  return s ? s[1].trim() : 'A1A';
+}
+
+// Classify intent from question
+function classifyIntent(question) {
+  for (const route of ASK_ROUTES) {
+    if (route.patterns.some(p => p.test(question))) {
+      return route;
+    }
+  }
+  // Default: general search
+  return { tools: ['search', 'zone'], label: 'general' };
+}
+
+// Load MCP tool handlers lazily (avoid circular require at module init)
+function getMCPTools() {
+  const mcp = require('./localIntelMCP');
+  return mcp._tools || null;
+}
+
+// Call a tool by name using localIntelMCP's internal tool map
+function callTool(toolName, params) {
+  try {
+    const tools = require('./localIntelMCP')._tools;
+    if (!tools || !tools[toolName]) return null;
+    const result = tools[toolName].fn(params);
+    if (typeof result === 'string') {
+      try { return JSON.parse(result); } catch { return { raw: result }; }
+    }
+    return result;
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+// Synthesize a human-readable answer from multi-tool results
+function synthesize(question, intent, zip, results) {
+  const parts = [];
+  const sources = [];
+  let confidence = 0;
+  let dataPoints = 0;
+
+  // Zone / demographics
+  if (results.zone && !results.zone.error) {
+    const z = results.zone;
+    const income = z.median_income || z.demographics?.median_household_income;
+    const homeVal = z.median_home_value || z.demographics?.median_home_value;
+    const pop = z.population || z.demographics?.population;
+    const ownership = z.ownership_rate;
+    if (income)    { parts.push(`Median household income: $${income.toLocaleString()}`); dataPoints++; }
+    if (homeVal)   { parts.push(`Median home value: $${homeVal.toLocaleString()}`); dataPoints++; }
+    if (pop)       { parts.push(`Population: ${pop.toLocaleString()}`); dataPoints++; }
+    if (ownership) { parts.push(`Homeownership rate: ${ownership}%`); dataPoints++; }
+    const label = z.zone_label || z.dominant_spend;
+    if (label) { parts.push(`Zone profile: ${label}`); dataPoints++; }
+    sources.push({ tool: 'local_intel_zone', layer: 'Census ACS + spending model', zip });
+    confidence = Math.max(confidence, 80);
+  }
+
+  // Oracle / market gaps
+  if (results.oracle && !results.oracle.error) {
+    const o = typeof results.oracle === 'string' ? JSON.parse(results.oracle) : results.oracle;
+    if (o.oracle_narrative) { parts.push(o.oracle_narrative); dataPoints++; }
+    if (o.restaurant_capacity) {
+      const rc = o.restaurant_capacity;
+      parts.push(`Restaurant market: ${rc.saturation_status} · ${rc.restaurant_count} restaurants · ${rc.capture_rate_pct}% capture rate`);
+      dataPoints++;
+    }
+    if (o.market_gaps?.top_gap) {
+      parts.push(`Top gap: ${o.market_gaps.top_gap.description}`);
+      dataPoints++;
+    }
+    if (o.growth_trajectory) {
+      parts.push(`Growth trajectory: ${o.growth_trajectory.label} (${o.growth_trajectory.confidence} confidence)`);
+      dataPoints++;
+    }
+    sources.push({ tool: 'local_intel_oracle', layer: 'LocalIntel Oracle — market intelligence', zip });
+    confidence = Math.max(confidence, 85);
+  }
+
+  // Bedrock / permits / infrastructure
+  if (results.bedrock && !results.bedrock.error) {
+    const b = results.bedrock;
+    if (b.infrastructure_momentum_score !== undefined) {
+      parts.push(`Infrastructure momentum score: ${b.infrastructure_momentum_score}/100`);
+      dataPoints++;
+    }
+    const permits = b.infrastructure_signals?.building_permits?.total_permit_valuation_usd;
+    if (permits) { parts.push(`Active permit value: $${(permits/1e6).toFixed(1)}M`); dataPoints++; }
+    const roads = b.infrastructure_signals?.road_projects?.active_road_projects_count;
+    if (roads) { parts.push(`Active road projects: ${roads}`); dataPoints++; }
+    sources.push({ tool: 'local_intel_bedrock', layer: 'ArcGIS permits + FDOT road data', zip });
+    confidence = Math.max(confidence, 70);
+  }
+
+  // Signal / investment
+  if (results.signal && !results.signal.error) {
+    const s = results.signal;
+    const sb = s.signal_block || s;
+    if (sb.score !== undefined) {
+      parts.push(`Investment signal score: ${sb.score}/100 · ${sb.direction || ''} · ${sb.top_signal || ''}`);
+      dataPoints++;
+    }
+    sources.push({ tool: 'local_intel_signal', layer: 'Composite signal model', zip });
+    confidence = Math.max(confidence, 75);
+  }
+
+  // Tide
+  if (results.tide && !results.tide.error) {
+    const t = results.tide;
+    if (t.temperature !== undefined) {
+      parts.push(`Market temperature: ${t.temperature}/100 · ${t.tidal_state || ''} · ${t.current_direction || ''}`);
+      dataPoints++;
+    }
+    sources.push({ tool: 'local_intel_tide', layer: 'Tidal momentum model', zip });
+    confidence = Math.max(confidence, 70);
+  }
+
+  // Search results
+  if (results.search && !results.search.error && results.search.total > 0) {
+    const sr = results.search;
+    const top = (sr.results || []).slice(0, 5);
+    parts.push(`Found ${sr.total} matching businesses in ${zip}:`);
+    top.forEach(b => {
+      const line = `  • ${b.name} [${b.category}]${b.address ? ' · ' + b.address : ''}${b.phone ? ' · ' + b.phone : ''}`;
+      parts.push(line);
+    });
+    if (sr.total > 5) parts.push(`  … and ${sr.total - 5} more.`);
+    sources.push({ tool: 'local_intel_search', layer: `${sr.total} live businesses (OSM + YP + owner-verified)`, zip });
+    confidence = Math.max(confidence, sr.total >= 5 ? 85 : 60);
+    dataPoints++;
+  }
+
+  // Corridor results
+  if (results.corridor && !results.corridor.error && (results.corridor.results || []).length > 0) {
+    const cr = results.corridor;
+    parts.push(`${cr.corridor} corridor: ${cr.total} businesses`);
+    (cr.results || []).slice(0, 5).forEach(b => {
+      parts.push(`  • ${b.name} [${b.category}]${b.address ? ' · ' + b.address : ''}`);
+    });
+    sources.push({ tool: 'local_intel_corridor', layer: 'Corridor analysis', zip });
+    confidence = Math.max(confidence, 80);
+    dataPoints++;
+  }
+
+  // Changes
+  if (results.changes && !results.changes.error && (results.changes.results || []).length > 0) {
+    const ch = results.changes;
+    parts.push(`${ch.results.length} recent additions in ${zip}:`);
+    ch.results.slice(0, 5).forEach(b => {
+      parts.push(`  • ${b.name} [${b.category}] — added ${b.staleness?.age_days != null ? b.staleness.age_days + 'd ago' : 'recently'}`);
+    });
+    sources.push({ tool: 'local_intel_changes', layer: 'Recent additions + owner-verified', zip });
+    confidence = Math.max(confidence, 75);
+    dataPoints++;
+  }
+
+  // Nearby
+  if (results.nearby && !results.nearby.error && (results.nearby.results || []).length > 0) {
+    const nr = results.nearby;
+    parts.push(`Nearby businesses (${nr.radius_miles || 1}mi radius):`);
+    (nr.results || []).slice(0, 5).forEach(b => {
+      parts.push(`  • ${b.name} [${b.category}]${b.distance_miles != null ? ' · ' + b.distance_miles.toFixed(2) + 'mi' : ''}`);
+    });
+    sources.push({ tool: 'local_intel_nearby', layer: 'Spatial proximity model', zip });
+    confidence = Math.max(confidence, 75);
+    dataPoints++;
+  }
+
+  // Nothing found
+  if (parts.length === 0) {
+    return {
+      answer: `No data found for "${question}" in ${zip}. Try a different ZIP or category.`,
+      sources: [],
+      confidence: 0,
+      data_points: 0,
+    };
+  }
+
+  // Scale confidence by data density
+  if (dataPoints >= 5) confidence = Math.min(100, confidence + 10);
+  if (dataPoints <= 1) confidence = Math.max(0, confidence - 20);
+
+  return {
+    answer: parts.join('\n'),
+    sources,
+    confidence,
+    data_points: dataPoints,
+  };
+}
+
+function handleAsk(params) {
+  const question = (params.question || params.query || params.q || '').trim();
+  if (!question) return { error: 'question required — e.g. { question: "What restaurants are in 32082?" }' };
+
+  // Resolve ZIP: explicit param > extracted from question > default
+  const zip = String(params.zip || extractZip(question) || '32082').replace(/\D/g, '').slice(0, 5) || '32082';
+  const center = ZIP_CENTERS[zip] || ZIP_CENTERS['32082'];
+
+  // Classify intent
+  const intent = classifyIntent(question);
+  const toolsToRun = intent.tools;
+
+  // Run each tool
+  const results = {};
+  const toolsUsed = [];
+
+  for (const tool of toolsToRun) {
+    try {
+      switch (tool) {
+        case 'zone':
+          results.zone = callTool('local_intel_zone', { zip });
+          toolsUsed.push('local_intel_zone');
+          break;
+        case 'oracle':
+          results.oracle = callTool('local_intel_oracle', { zip });
+          toolsUsed.push('local_intel_oracle');
+          break;
+        case 'search':
+          results.search = callTool('local_intel_search', { query: question, zip, limit: 10 });
+          toolsUsed.push('local_intel_search');
+          break;
+        case 'bedrock':
+          results.bedrock = handleBedrock({ zip });
+          toolsUsed.push('local_intel_bedrock');
+          break;
+        case 'signal':
+          results.signal = handleSignal({ zip });
+          toolsUsed.push('local_intel_signal');
+          break;
+        case 'tide':
+          results.tide = handleTide({ zip });
+          toolsUsed.push('local_intel_tide');
+          break;
+        case 'corridor':
+          results.corridor = callTool('local_intel_corridor', { street: extractStreetFromQ(question), zip });
+          toolsUsed.push('local_intel_corridor');
+          break;
+        case 'changes':
+          results.changes = callTool('local_intel_changes', { zip, limit: 10 });
+          toolsUsed.push('local_intel_changes');
+          break;
+        case 'nearby':
+          results.nearby = callTool('local_intel_nearby', {
+            lat: center.lat, lon: center.lon, radius_miles: 1.5, limit: 10,
+          });
+          toolsUsed.push('local_intel_nearby');
+          break;
+      }
+    } catch (e) {
+      results[tool] = { error: e.message };
+    }
+  }
+
+  // Synthesize answer
+  const synthesis = synthesize(question, intent.label, zip, results);
+
+  return {
+    question,
+    zip,
+    zip_label: center?.label || zip,
+    intent:    intent.label,
+    tools_used: toolsUsed,
+    answer:    synthesis.answer,
+    confidence: synthesis.confidence,
+    data_points: synthesis.data_points,
+    sources:   synthesis.sources,
+    data:      results,
+    ts: new Date().toISOString(),
+  };
+}
+
+module.exports = { handleTide, handleSignal, handleBedrock, handleForAgent, handleAsk };
