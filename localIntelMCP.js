@@ -106,11 +106,21 @@ function loadBusinesses() {
 function loadZones() {
   try { return JSON.parse(fs.readFileSync(ZONES_PATH, 'utf8')); } catch { return {}; }
 }
-function logUsage(tool, caller) {
+function logUsage(tool, caller, meta) {
   try {
     const ledger = (() => { try { return JSON.parse(fs.readFileSync(LEDGER_PATH, 'utf8')); } catch { return []; } })();
-    ledger.push({ tool, caller: caller || 'unknown', cost: TOOL_COSTS[tool] || 0, ts: new Date().toISOString() });
-    // Keep last 10k entries
+    const entry = {
+      tool,
+      caller:  caller || 'unknown',
+      entry:   meta?.entry   || 'free',
+      cost:    TOOL_COSTS[tool] || 0,
+      paid:    false,
+      ts:      new Date().toISOString(),
+    };
+    if (meta?.zip)     entry.zip     = meta.zip;
+    if (meta?.intent)  entry.intent  = meta.intent;
+    if (meta?.latency) entry.latency = meta.latency;
+    ledger.push(entry);
     if (ledger.length > 10000) ledger.splice(0, ledger.length - 10000);
     fs.writeFileSync(LEDGER_PATH, JSON.stringify(ledger, null, 2));
   } catch {}
@@ -1016,13 +1026,22 @@ function handleRPC(req) {
     }
 
     try {
-      logUsage(toolName, caller);
+      const t0 = Date.now();
       const result = TOOLS[toolName].fn(toolArgs);
+      const latency = Date.now() - t0;
+      // Extract zip + intent for observability (present on local_intel_ask results)
+      const parsed = (typeof result === 'object' && result !== null) ? result : {};
+      logUsage(toolName, caller, {
+        entry:   params?._entry || 'free',
+        zip:     toolArgs?.zip || parsed?.zip || null,
+        intent:  parsed?.intent || null,
+        latency,
+      });
       return {
         jsonrpc: '2.0', id,
         result: {
           content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }],
-          _meta: { cost_pathusd: TOOL_COSTS[toolName] || 0 },
+          _meta: { cost_pathusd: TOOL_COSTS[toolName] || 0, latency_ms: latency },
         },
       };
     } catch (e) {

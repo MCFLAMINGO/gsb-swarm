@@ -366,6 +366,24 @@ router.get('/mcp', async (req, res) => {
   }
 });
 
+// ── Caller source detection ───────────────────────────────────────────────────
+function detectSource(req) {
+  const ua = (req.headers['user-agent'] || '').toLowerCase();
+  const xc = (req.headers['x-caller'] || req.headers['x-agent-id'] || '').toLowerCase();
+  if (xc) return xc;
+  if (ua.includes('smithery'))   return 'smithery';
+  if (ua.includes('claude'))     return 'claude';
+  if (ua.includes('cursor'))     return 'cursor';
+  if (ua.includes('copilot'))    return 'copilot';
+  if (ua.includes('openai') || ua.includes('gpt')) return 'openai';
+  if (ua.includes('perplexity')) return 'perplexity';
+  if (ua.includes('python'))     return 'python-client';
+  if (ua.includes('node') || ua.includes('undici')) return 'node-client';
+  if (ua.includes('postman'))    return 'postman';
+  if (ua)                        return ua.split('/')[0].slice(0, 32);
+  return 'unknown';
+}
+
 // ── POST /api/mcp — proxy to MCP server on port 3004 ───────────────────────
 // This is the public MCP endpoint agents call from outside Railway.
 // Full URL: https://gsb-swarm-production.up.railway.app/api/mcp
@@ -376,6 +394,11 @@ router.post('/mcp', express.json(), async (req, res) => {
     // (Smithery + other clients send notifications/initialized before tools/list)
     if (body.method && body.method.startsWith('notifications/') && body.id === undefined) {
       return res.status(204).end();
+    }
+    // Inject caller source into params so MCP server can log it
+    if (body.method === 'tools/call' && body.params) {
+      body.params._caller = detectSource(req);
+      body.params._entry  = 'free';
     }
     const response = await fetch('http://localhost:3004/mcp', {
       method: 'POST',
@@ -399,6 +422,10 @@ router.post('/mcp/x402', x402Middleware, express.json(), async (req, res) => {
     if (body.method && body.method.startsWith('notifications/') && body.id === undefined) {
       return res.status(204).end();
     }
+    if (body.method === 'tools/call' && body.params) {
+      body.params._caller = detectSource(req);
+      body.params._entry  = 'x402';
+    }
     const response = await fetch('http://localhost:3004/mcp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -417,6 +444,10 @@ router.post('/mcp/x402/premium', x402Middleware, express.json(), async (req, res
     // Force premium tool so agents can't use the $0.05 endpoint for cheap calls
     if (body.method === 'tools/call' && body.params?.name !== 'local_intel_for_agent') {
       return res.status(400).json({ jsonrpc: '2.0', id: body.id || null, error: { code: -32600, message: 'Premium endpoint is for local_intel_for_agent only' } });
+    }
+    if (body.method === 'tools/call' && body.params) {
+      body.params._caller = detectSource(req);
+      body.params._entry  = 'x402-premium';
     }
     const response = await fetch('http://localhost:3004/mcp', {
       method: 'POST',
@@ -570,6 +601,34 @@ router.get('/revenue-summary', (req, res) => {
 
 // ── Dashboard data proxy routes ──────────────────────────────────────────────
 // These aggregate data files so the Vercel dashboard can poll one origin.
+
+// ── GET /api/local-intel/call-log — last N calls with full trace ───────────────
+router.get('/call-log', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+  let ledger = [];
+  try {
+    if (fs.existsSync(LEDGER_PATH)) {
+      ledger = JSON.parse(fs.readFileSync(LEDGER_PATH, 'utf8'));
+    }
+  } catch {}
+
+  const sorted = [...ledger]
+    .sort((a, b) => new Date(b.ts || b.timestamp || 0) - new Date(a.ts || a.timestamp || 0))
+    .slice(0, limit)
+    .map(e => ({
+      ts:      e.ts || e.timestamp || null,
+      tool:    e.tool    || 'unknown',
+      caller:  e.caller  || 'unknown',
+      entry:   e.entry   || 'free',
+      zip:     e.zip     || null,
+      intent:  e.intent  || null,
+      latency: e.latency || null,
+      cost:    e.cost    || 0,
+      paid:    e.paid    || false,
+    }));
+
+  res.json({ count: sorted.length, calls: sorted, generatedAt: new Date().toISOString() });
+});
 
 const DATA_DIR_AGENT = path.join(__dirname, 'data');
 
