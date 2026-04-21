@@ -207,7 +207,11 @@ router.get('/.well-known/mcp/server-card.json', (req, res) => {
       { name: 'local_intel_oracle',    description: 'Pre-baked economic oracle for a ZIP. Returns restaurant saturation (is there room for another?), price-tier gap analysis (what menu price is missing?), growth trajectory (growing/empty-nest/stable), and 3 pre-formed questions with answers baked in. Time-series trend tracking across 6h cycles.', inputSchema: { type: 'object', required: ['zip'], properties: { zip: { type: 'string', description: 'ZIP code', examples: ['32081', '32082'] } } } },
     ],
     resources: [],
-    prompts: [],
+    prompts: [
+      { name: 'restaurant_viability', description: 'Analyze whether a ZIP code can support another restaurant. Returns saturation status, demand capture rate, price-tier gaps, and a plain-English recommendation.', arguments: [{ name: 'zip', description: 'ZIP code to analyze (e.g. 32081, 32082)', required: true }] },
+      { name: 'investment_signal',    description: 'Get the investment signal score and growth trajectory for a ZIP. Returns composite score 0-100, band (strong_buy to avoid), top reasons, and infrastructure momentum.', arguments: [{ name: 'zip', description: 'ZIP code to score (e.g. 32081, 32082)', required: true }] },
+      { name: 'missing_category',    description: 'Identify which business category or price tier is most undersupplied in a ZIP relative to its income and population. Returns top gap with supporting data.', arguments: [{ name: 'zip', description: 'ZIP code to analyze (e.g. 32081, 32082)', required: true }] },
+    ],
     configSchema: { type: 'object', properties: {}, required: [] },
   });
 });
