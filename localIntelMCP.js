@@ -319,15 +319,41 @@ function normalizeQuery(raw) {
   return q;
 }
 
+// City-name → ZIP resolution (backend mirror of frontend parseQuery)
+const CITY_TO_ZIP = {
+  'nocatee': '32081',
+  'ponte vedra': '32082', 'ponte vedra beach': '32082', 'pvb': '32082',
+  'st johns': '32092', 'saint johns': '32092',
+  'st augustine': '32084', 'saint augustine': '32084',
+  'st augustine beach': '32080', 'saint augustine beach': '32080',
+  'palm valley': '32082',
+  'jacksonville': '32202',
+  'jax': '32202',
+};
+
+function resolveZip(query) {
+  if (!query) return null;
+  const q = query.toLowerCase().trim();
+  // Strip "in <city>" or "near <city>" patterns
+  const m = q.match(/(?:in|near|at)\s+([a-z\s.]+?)(?:\s*$|\s+\d)/);
+  if (!m) return null;
+  const city = m[1].trim().replace(/\.$/, '');
+  return CITY_TO_ZIP[city] || null;
+}
+
 function toolSearch({ zip, query, category, group, limit = 20 }) {
   let results = loadBusinesses();
-  if (zip)      results = results.filter(b => b.zip === zip);
+  // Auto-resolve city name to ZIP if no explicit zip param
+  const resolvedZip = zip || resolveZip(query);
+  if (resolvedZip) results = results.filter(b => b.zip === resolvedZip);
   if (category) results = results.filter(b => b.category === category);
   if (group)    results = results.filter(b => getGroup(b.category) === group);
   if (query) {
-    const raw   = query.toLowerCase().trim();
+    // Strip city/location phrase before tokenizing so city name doesn't score against addresses
+    const strippedQuery = query.replace(/(?:in|near|at)\s+[a-z\s.]+$/i, '').trim();
+    const raw   = (strippedQuery || query).toLowerCase().trim();
     const q     = normalizeQuery(raw);  // alias + de-plural
-    const STOP  = new Set(['for','the','and','near','in','at','of','a','an','show','me','find','get','list','all','any','some','what','where','who','how','is','are','there','best','top','good','great','closest','nearby','around','here','places','spots','shops','open','now','today','local']);
+    const STOP  = new Set(['for','the','and','near','in','at','of','a','an','show','me','find','get','list','all','any','some','what','where','who','how','is','are','there','best','top','good','great','closest','nearby','around','here','places','spots','shops','open','now','today','local','services','service','things','stuff','options']);
     // Generate word variants: original + de-pluraled + alias-resolved
     const wordVariants = (w) => {
       const variants = new Set([w]);
