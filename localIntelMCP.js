@@ -280,29 +280,95 @@ function toolContext({ zip, lat, lon, radius_miles = 1.0 }) {
  * local_intel_search
  * Search businesses by name, category, or group within a zip.
  */
+// ── Query normalizer — handles plurals, aliases, common shorthand ─────────────
+const QUERY_ALIASES = {
+  // Food
+  'restaurants': 'restaurant', 'dining': 'restaurant', 'food': 'restaurant',
+  'eats': 'restaurant', 'eateries': 'restaurant', 'eatery': 'restaurant',
+  'cafes': 'cafe', 'coffee': 'cafe', 'coffee shop': 'cafe', 'coffee shops': 'cafe',
+  'bars': 'bar', 'pubs': 'bar', 'pub': 'bar',
+  'fast food': 'fast_food', 'fastfood': 'fast_food',
+  'pizza': 'restaurant', 'sushi': 'restaurant', 'tacos': 'restaurant',
+  // Health
+  'dentists': 'dentist', 'doctors': 'clinic', 'doctor': 'clinic',
+  'clinics': 'clinic', 'medical': 'clinic', 'vet': 'veterinary', 'vets': 'veterinary',
+  'gym': 'fitness_centre', 'gyms': 'fitness_centre', 'fitness': 'fitness_centre',
+  // Retail
+  'grocery': 'supermarket', 'groceries': 'supermarket', 'supermarkets': 'supermarket',
+  'convenience stores': 'convenience', 'gas': 'fuel', 'gas station': 'fuel', 'gas stations': 'fuel',
+  'pharmacy': 'chemist', 'pharmacies': 'chemist', 'drug store': 'chemist',
+  'salons': 'hairdresser', 'salon': 'hairdresser', 'hair': 'hairdresser',
+  'beauty': 'hairdresser', 'nail': 'hairdresser',
+  // Finance / Services
+  'banks': 'bank', 'atms': 'atm',
+  'realtors': 'estate_agent', 'realtor': 'estate_agent', 'real estate': 'estate_agent',
+  'lawyers': 'legal', 'attorney': 'legal', 'attorneys': 'legal',
+  'hotels': 'hotel', 'motels': 'hotel',
+};
+
+function normalizeQuery(raw) {
+  const q = raw.toLowerCase().trim();
+  // Direct alias match
+  if (QUERY_ALIASES[q]) return QUERY_ALIASES[q];
+  // Strip trailing 's' for simple plurals (restaurants→restaurant, dentists→dentist)
+  if (q.endsWith('s') && q.length > 4 && QUERY_ALIASES[q.slice(0, -1)] === undefined) {
+    const singular = q.slice(0, -1);
+    if (QUERY_ALIASES[singular]) return QUERY_ALIASES[singular];
+    return singular; // return de-pluralized for substring matching
+  }
+  return q;
+}
+
 function toolSearch({ zip, query, category, group, limit = 20 }) {
   let results = loadBusinesses();
   if (zip)      results = results.filter(b => b.zip === zip);
   if (category) results = results.filter(b => b.category === category);
   if (group)    results = results.filter(b => getGroup(b.category) === group);
   if (query) {
-    const q     = query.toLowerCase();
-    const words = q.split(/\s+/).filter(w => w.length > 2 && !['for','the','and','near','in','at','of'].includes(w));
+    const raw   = query.toLowerCase().trim();
+    const q     = normalizeQuery(raw);  // alias + de-plural
+    const STOP  = new Set(['for','the','and','near','in','at','of','a','an','show','me','find','get','list','all','any','some','what','where','who','how','is','are','there']);
+    // Generate word variants: original + de-pluraled + alias-resolved
+    const wordVariants = (w) => {
+      const variants = new Set([w]);
+      if (QUERY_ALIASES[w]) variants.add(QUERY_ALIASES[w]);
+      if (w.endsWith('s') && w.length > 3) variants.add(w.slice(0, -1));
+      if (w.endsWith('es') && w.length > 4) variants.add(w.slice(0, -2));
+      return [...variants];
+    };
+    const words = raw.split(/\s+/)
+      .filter(w => w.length > 2 && !STOP.has(w))
+      .flatMap(wordVariants);
 
-    // Score each business — exact substring wins, word-overlap is fuzzy fallback
+    // Score each business — normalized query + word-level fuzzy
     const scored = results.map(b => {
-      const name = b.name.toLowerCase();
+      const name = (b.name     || '').toLowerCase();
       const cat  = (b.category || '').toLowerCase();
       const addr = (b.address  || '').toLowerCase();
+      const grp  = getGroup(b.category).toLowerCase();
       let score  = 0;
-      if (name.includes(q))    score += 100;  // exact full match
-      if (cat.includes(q))     score += 60;
-      if (addr.includes(q))    score += 40;
+
+      // Exact normalized match
+      if (name.includes(q))    score += 100;
+      if (cat  === q)          score += 90;   // exact category hit
+      if (cat.includes(q))     score += 70;
+      if (grp  === q)          score += 50;   // group-level match ("food", "health")
+      if (addr.includes(q))    score += 30;
+
+      // Also check against original raw query
+      if (raw !== q) {
+        if (name.includes(raw)) score += 80;
+        if (cat.includes(raw))  score += 60;
+      }
+
       // Word-level overlap
       for (const w of words) {
         if (name.includes(w))  score += 20;
-        if (cat.includes(w))   score += 10;
+        if (cat.includes(w))   score += 15;
+        if (grp.includes(w))   score += 10;
+        if (addr.includes(w))  score += 5;
       }
+
       return { b, score };
     }).filter(({ score }) => score > 0);
 
