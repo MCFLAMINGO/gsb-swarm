@@ -223,7 +223,28 @@ async function coordinatorCycle() {
     .sort((a, b) => b.priority - a.priority);
 
   if (pending.length === 0) {
-    console.log('[ZipCoordinator] All ZIPs complete or exhausted. Coverage cycle done.');
+    // Check if all ZIPs are complete (not just exhausted/failed)
+    const allComplete = queue.every(z => z.status === 'complete' || z.status === 'failed');
+    if (allComplete) {
+      const lastRun = coverage.lastRun ? new Date(coverage.lastRun).getTime() : 0;
+      const hoursSinceRun = (Date.now() - lastRun) / (1000 * 60 * 60);
+      const REFRESH_HOURS = 6; // Re-enrich every 6 hours to keep feed live
+      if (hoursSinceRun >= REFRESH_HOURS) {
+        console.log(`[ZipCoordinator] Full cycle complete — resetting all ZIPs for re-enrichment (${hoursSinceRun.toFixed(1)}h since last run)`);
+        queue.forEach(z => {
+          z.status = 'pending';
+          z.attempts = 0;
+          z.startedAt = null;
+        });
+        coverage.lastRun = new Date().toISOString();
+        saveCoverage(coverage);
+        saveQueue(queue);
+        isRunning = false;
+        return; // next cycle will pick up the reset queue
+      } else {
+        console.log(`[ZipCoordinator] Coverage cycle complete. Next re-enrichment in ${(REFRESH_HOURS - hoursSinceRun).toFixed(1)}h`);
+      }
+    }
     coverage.lastRun = new Date().toISOString();
     saveCoverage(coverage);
     saveQueue(queue);
