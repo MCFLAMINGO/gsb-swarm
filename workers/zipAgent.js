@@ -27,13 +27,15 @@ const https = require('https');
 const http  = require('http');
 
 // ── Bulk source imports (non-fatal if unavailable) ────────────────────────────
-let bulkScrapeYellowPages, bulkImportChamber, bulkScrapeZipBBB;
+let bulkScrapeYellowPages, bulkImportChamber, bulkScrapeZipBBB, discoverAndImportChamber;
 try { ({ bulkScrapeYellowPages } = require('./yellowPagesScraper')); } catch(e) { console.warn('[ZipAgent] YP scraper unavailable:', e.message); }
 try { ({ bulkImport: bulkImportChamber } = require('./chamberScraper'));  } catch(e) { console.warn('[ZipAgent] Chamber scraper unavailable:', e.message); }
 try { ({ bulkScrapeZip: bulkScrapeZipBBB } = require('./bbbScraper'));    } catch(e) { console.warn('[ZipAgent] BBB scraper unavailable:', e.message); }
+try { ({ discoverAndImport: discoverAndImportChamber } = require('./chamberDiscovery')); } catch(e) { console.warn('[ZipAgent] Chamber discovery unavailable:', e.message); }
 
 // ZIP → YP city slug (for passing a focused city to YP bulk scrape)
 const ZIP_TO_YP_CITY = {
+  // SJC
   '32081': 'nocatee-fl',
   '32082': 'ponte-vedra-beach-fl',
   '32092': 'saint-augustine-fl',
@@ -45,6 +47,10 @@ const ZIP_TO_YP_CITY = {
   '32003': 'fleming-island-fl',
   '32068': 'middleburg-fl',
   '32259': 'fruit-cove-fl',
+  '32080': 'saint-augustine-beach-fl',
+  '32033': 'elkton-fl',
+  '32004': 'saint-augustine-fl',
+  // Jacksonville metro
   '32207': 'jacksonville-fl',
   '32205': 'jacksonville-fl',
   '32246': 'jacksonville-fl',
@@ -56,6 +62,41 @@ const ZIP_TO_YP_CITY = {
   '32257': 'jacksonville-fl',
   '32258': 'jacksonville-fl',
   '32225': 'jacksonville-fl',
+  // Tampa metro
+  '33629': 'tampa-fl',
+  '33618': 'tampa-fl',
+  '33647': 'tampa-fl',
+  '33626': 'tampa-fl',
+  '34202': 'bradenton-fl',
+  // Orlando metro
+  '32828': 'orlando-fl',
+  '32836': 'orlando-fl',
+  '34786': 'windermere-fl',
+  '32771': 'sanford-fl',
+  '34711': 'clermont-fl',
+  // South Florida
+  '33458': 'jupiter-fl',
+  '33496': 'boca-raton-fl',
+  '33433': 'boca-raton-fl',
+  '33076': 'parkland-fl',
+  '33326': 'weston-fl',
+};
+
+// ZIP → city name (for chamber discovery)
+const ZIP_TO_CITY = {
+  '32081': 'Nocatee', '32082': 'Ponte Vedra Beach', '32084': 'Saint Augustine',
+  '32086': 'Saint Augustine', '32092': 'Saint Augustine', '32095': 'Saint Johns',
+  '32080': 'Saint Augustine Beach', '32033': 'Elkton', '32068': 'Middleburg',
+  '32259': 'Fruit Cove', '32207': 'Jacksonville', '32205': 'Jacksonville',
+  '32246': 'Jacksonville', '32223': 'Jacksonville', '32244': 'Jacksonville',
+  '32210': 'Jacksonville', '32218': 'Jacksonville', '32256': 'Jacksonville',
+  '32258': 'Jacksonville', '32225': 'Jacksonville',
+  '33629': 'Tampa', '33618': 'Tampa', '33647': 'Tampa', '33626': 'Tampa',
+  '34202': 'Bradenton',
+  '32828': 'Orlando', '32836': 'Orlando', '34786': 'Windermere',
+  '32771': 'Sanford', '34711': 'Clermont',
+  '33458': 'Jupiter', '33496': 'Boca Raton', '33433': 'Boca Raton',
+  '33076': 'Parkland', '33326': 'Weston',
 };
 
 // ── Args ──────────────────────────────────────────────────────────────────────
@@ -426,6 +467,25 @@ async function run() {
     } catch(e) {
       log(`Source 6 failed (Chamber): ${e.message}`);
       logSource('sjc_chamber', 'error', e.message);
+    }
+  }
+
+  await sleep(1000);
+
+  // ── Source 8: Chamber Discovery (non-SJC ZIPs) ───────────────────────
+  // Auto-discovers the local chamber of commerce URL for any city and
+  // pulls members — GrowthZone/Chambermaster/generic HTML all supported.
+  if (discoverAndImportChamber && !SJC_ZIPS.has(ZIP)) {
+    const city = ZIP_TO_CITY[ZIP] || NAME;
+    log(`Source 8: Chamber Discovery — ${city}`);
+    try {
+      const cdStats = await discoverAndImportChamber({ zip: ZIP, city, state: 'FL', lat: LAT, lon: LON });
+      log(`Source 8 done — added:${cdStats.added} enriched:${cdStats.enriched} (${cdStats.chamber || cdStats.reason || 'n/a'})`);
+      logSource('chamber_discovery', cdStats.added + cdStats.enriched > 0 ? 'ok' : 'unavailable',
+        cdStats.chamber ? `added:${cdStats.added} enriched:${cdStats.enriched} via ${cdStats.chamber}` : cdStats.reason || 'no data');
+    } catch(e) {
+      log(`Source 8 failed (ChamberDiscovery): ${e.message}`);
+      logSource('chamber_discovery', 'error', e.message);
     }
   }
 
