@@ -186,6 +186,30 @@ router.get('/ingest/log', async (req, res) => {
   }
 });
 
+// ── Server-card at the MCP path — Smithery fetches .well-known relative to the URL given
+// If URL given is /api/local-intel/mcp, they fetch /api/local-intel/.well-known/mcp/server-card.json
+router.get('/.well-known/mcp/server-card.json', (req, res) => {
+  res.json({
+    serverInfo: { name: 'LocalIntel by MCFLAMINGO', version: '1.0.0', description: 'Agentic business intelligence for St. Johns County FL. 11 MCP tools. $0.01–$0.05/call.' },
+    authentication: { required: false },
+    tools: [
+      { name: 'local_intel_context',   description: 'Full spatial context block for a ZIP or lat/lon.' },
+      { name: 'local_intel_search',    description: 'Search businesses by name, category, or semantic group.' },
+      { name: 'local_intel_nearby',    description: 'Find businesses within a radius of any lat/lon point.' },
+      { name: 'local_intel_zone',      description: 'Spending zone and demographic data for a ZIP.' },
+      { name: 'local_intel_corridor',  description: 'Businesses along a named street corridor.' },
+      { name: 'local_intel_changes',   description: 'Recently added or updated business listings.' },
+      { name: 'local_intel_stats',     description: 'Dataset coverage stats and query volume.' },
+      { name: 'local_intel_tide',      description: 'Tidal momentum reading for a ZIP.' },
+      { name: 'local_intel_signal',    description: 'Investment signal score 0-100 for a ZIP.' },
+      { name: 'local_intel_bedrock',   description: 'Infrastructure momentum from permits and road data.' },
+      { name: 'local_intel_for_agent', description: 'PREMIUM. Pre-ranked composite signals for agent type + intent.' },
+    ],
+    resources: [],
+    prompts: [],
+  });
+});
+
 // ── GET /api/local-intel/mcp — Smithery/scanner discovery ──────────────────
 // Streamable HTTP spec: GET returns server info so scanners don't fall through
 // to the static HTML handler.
