@@ -396,6 +396,9 @@ app.use(express.json({ limit: '2mb' }));
 const localIntelRouter = require('./localIntelAgent');
 app.use('/api/local-intel', localIntelRouter);
 
+const { router: chamberRouter } = require('./workers/chamberScraper');
+app.use('/api/chamber', chamberRouter);
+
 // ── ACP compliance endpoints — MUST be before express.static ─────────────────
 // Virtuals probes these to verify agent is hireable on ACP marketplace
 app.get('/.well-known/agent.json', (req, res) => {

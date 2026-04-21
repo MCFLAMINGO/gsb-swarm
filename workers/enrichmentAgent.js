@@ -23,6 +23,7 @@ const fs      = require('fs');
 const path    = require('path');
 const https   = require('https');
 const http    = require('http');
+const { enrichFromChamber } = require('./chamberScraper');
 
 const PORT        = 3007;
 const DATA_DIR    = path.join(__dirname, '../data');
@@ -305,6 +306,40 @@ async function enrichBusiness(biz) {
   if (s4Changed) {
     changed = true;
     logSource(biz.zip, 'own_website', 'ok', `${biz.name} → ${biz.scraped_url || biz.website}`);
+  }
+
+
+  // ── Source 6: SJC Chamber of Commerce directory ──────────────────────────
+  // 841 member businesses with verified phones, hours, websites.
+  // Only runs if still missing phone after all other sources.
+  if (!biz.phone || !biz.hours) {
+    try {
+      const chamber = await enrichFromChamber(biz.name);
+      if (chamber) {
+        if (!biz.phone   && chamber.phone)   { biz.phone   = chamber.phone;   changed = true; }
+        if (!biz.website && chamber.website) { biz.website = chamber.website; changed = true; }
+        if (!biz.hours   && chamber.hours)   { biz.hours   = chamber.hours;   changed = true; }
+        if (!biz.address && chamber.address) { biz.address = chamber.address; changed = true; }
+        if (changed) {
+          biz.chamber_member = true;
+          biz.confidence = Math.min(92, (biz.confidence || 60) + 10);
+          logSource(biz.zip, 'sjc_chamber', 'ok', biz.name);
+          console.log(`[EnrichmentAgent] 🏛️ Chamber enriched: ${biz.name} → phone=${chamber.phone}`);
+        }
+      }
+    } catch (e) {
+      // Chamber scraper errors are non-fatal
+    }
+  }
+
+  // ── Source 5: Public directory waterfall (YellowPages → Whitepages → BBB) ──
+  // Only runs if still missing phone after Sources 1–4
+  if (!biz.phone) {
+    const s5Changed = await source5DirectoryWaterfall(biz);
+    if (s5Changed) {
+      changed = true;
+      logSource(biz.zip, biz.phone_source || 'directory', 'ok', biz.name);
+    }
   }
 
   // ── Closure detection ──────────────────────────────────────────────────────
@@ -711,3 +746,120 @@ app.listen(PORT, () => {
 
 // Re-export staleness utilities so callers can use enrichmentAgent as the single import point
 module.exports = { getStaleness, stalenessBlock, STALENESS_TIERS };
+
+// ── Source 5: Public directory phone waterfall ────────────────────────────────
+// Tries YellowPages → Whitepages → BBB in order. Stops at first phone hit.
+// No API key required — all public HTML. Polite delays between requests.
+
+const PHONE_RE = /\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}/g;
+
+function extractPhone(html) {
+  // Prefer structured data first
+  try {
+    const ldMatch = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi) || [];
+    for (const block of ldMatch) {
+      const inner = block.replace(/<[^>]+>/g, '');
+      const parsed = JSON.parse(inner);
+      const objs = Array.isArray(parsed) ? parsed : [parsed];
+      for (const obj of objs) {
+        if (obj.telephone) return obj.telephone;
+        if (obj.contactPoint?.telephone) return obj.contactPoint.telephone;
+      }
+    }
+  } catch (_) {}
+  // Fallback: first phone pattern found
+  const matches = html.match(PHONE_RE);
+  return matches ? matches[0] : null;
+}
+
+async function directoryYellowPages(name, city = 'Ponte Vedra Beach', state = 'FL') {
+  try {
+    const q = encodeURIComponent(`${name} ${city} ${state}`);
+    const { status, body } = await fetchRaw(
+      `https://www.yellowpages.com/search?search_terms=${q}&geo_location_terms=${encodeURIComponent(`${city}, ${state}`)}`,
+      { 'User-Agent': 'Mozilla/5.0 (compatible; LocalIntelBot/1.0)' },
+      10000
+    );
+    if (status !== 200) return null;
+    // Find first result phone
+    const phone = extractPhone(body);
+    // Also try to find a website link for the first result
+    const websiteMatch = body.match(/class="[^"]*track-visit-website[^"]*"[^>]*href="([^"]+)"/i);
+    const website = websiteMatch ? websiteMatch[1] : null;
+    return phone ? { phone, website, source: 'yellowpages' } : null;
+  } catch (_) { return null; }
+}
+
+async function directoryWhitepages(name, city = 'Ponte Vedra Beach', state = 'FL') {
+  try {
+    const q = encodeURIComponent(name);
+    const { status, body } = await fetchRaw(
+      `https://www.whitepages.com/business/${q}/${city.toLowerCase().replace(/\s+/g,'-')}-${state.toLowerCase()}`,
+      { 'User-Agent': 'Mozilla/5.0 (compatible; LocalIntelBot/1.0)' },
+      10000
+    );
+    if (status !== 200) return null;
+    const phone = extractPhone(body);
+    return phone ? { phone, source: 'whitepages' } : null;
+  } catch (_) { return null; }
+}
+
+async function directoryBBB(name, city = 'Ponte Vedra Beach') {
+  try {
+    const q = encodeURIComponent(`${name} ${city}`);
+    const { status, body } = await fetchRaw(
+      `https://www.bbb.org/search?find_text=${q}&find_loc=Ponte+Vedra+Beach%2C+FL`,
+      { 'User-Agent': 'Mozilla/5.0 (compatible; LocalIntelBot/1.0)' },
+      10000
+    );
+    if (status !== 200) return null;
+    const phone = extractPhone(body);
+    return phone ? { phone, source: 'bbb' } : null;
+  } catch (_) { return null; }
+}
+
+// Main waterfall: YellowPages → Whitepages → BBB
+async function source5DirectoryWaterfall(biz) {
+  if (biz.phone) return false; // already have phone — skip
+  const name = biz.name;
+  let changed = false;
+
+  // YellowPages first — best coverage for local FL businesses
+  await sleep(800);
+  const yp = await directoryYellowPages(name);
+  if (yp) {
+    biz.phone = yp.phone;
+    if (!biz.website && yp.website) biz.website = yp.website;
+    biz.phone_source = yp.source;
+    changed = true;
+  }
+
+  if (!changed) {
+    // Whitepages
+    await sleep(800);
+    const wp = await directoryWhitepages(name);
+    if (wp) {
+      biz.phone = wp.phone;
+      biz.phone_source = wp.source;
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    // BBB last
+    await sleep(800);
+    const bbb = await directoryBBB(name);
+    if (bbb) {
+      biz.phone = bbb.phone;
+      biz.phone_source = bbb.source;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    biz.confidence = Math.min(88, (biz.confidence || 50) + 8);
+    console.log(`[EnrichmentAgent] 📞 Phone found via ${biz.phone_source}: ${biz.name} → ${biz.phone}`);
+  }
+
+  return changed;
+}
