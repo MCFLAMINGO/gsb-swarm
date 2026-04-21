@@ -43,13 +43,14 @@ const VERTICALS = {
     defaultZips: ['32082', '32081', '32084', '32086', '32092', '32080'],
     // Maps keyword patterns → MCP tool + param extraction
     toolRoutes: [
-      { pattern: /neighborhood|undervalued|market trend|inventory|school|flood|infrastructure/i, tool: 'local_intel_oracle',    params: (zip) => ({ zip }) },
-      { pattern: /business|restaurant|dental|retail|commercial|service|office/i,                 tool: 'local_intel_search',    params: (zip, q) => ({ query: q, zip }) },
-      { pattern: /corridor|A1A|street|road|highway/i,                                            tool: 'local_intel_corridor',  params: (zip, q) => ({ street: extractStreet(q), zip }) },
-      { pattern: /permit|construction|build|develop|zoning/i,                                    tool: 'local_intel_bedrock',   params: (zip) => ({ zip }) },
-      { pattern: /income|demographic|household|population|wealth|affluent/i,                     tool: 'local_intel_zone',      params: (zip) => ({ zip }) },
-      { pattern: /investment|signal|score|momentum|opportunity/i,                                tool: 'local_intel_signal',    params: (zip) => ({ zip }) },
-      { pattern: /nearby|radius|distance|close|around/i,                                         tool: 'local_intel_nearby',    params: (zip) => ({ lat: ZIP_CENTERS[zip]?.lat, lon: ZIP_CENTERS[zip]?.lon, radius_miles: 2 }) },
+      // Zone first — catches owner-occ, home value, income, growth trajectory before falling to search
+      { pattern: /income|household|median|owner.occup|home value|median home|HHI|affluent|wealth|demographic|population|growth.trajec|growth.state|consumer profile|spending profile/i, tool: 'local_intel_zone',      params: (zip) => ({ zip }) },
+      { pattern: /neighborhood|undervalued|market trend|inventory|school|flood|infrastructure|saturation|gap|opportunity/i,                                                             tool: 'local_intel_oracle',    params: (zip) => ({ zip }) },
+      { pattern: /permit|construction|build|develop|zoning/i,                                                                                                                           tool: 'local_intel_bedrock',   params: (zip) => ({ zip }) },
+      { pattern: /investment|signal|score|momentum/i,                                                                                                                                   tool: 'local_intel_signal',    params: (zip) => ({ zip }) },
+      { pattern: /corridor|A1A|street|road|highway/i,                                                                                                                                   tool: 'local_intel_corridor',  params: (zip, q) => ({ street: extractStreet(q), zip }) },
+      { pattern: /nearby|radius|distance|close|around/i,                                                                                                                                tool: 'local_intel_nearby',    params: (zip) => ({ lat: ZIP_CENTERS[zip]?.lat, lon: ZIP_CENTERS[zip]?.lon, radius_miles: 2 }) },
+      { pattern: /business|restaurant|dental|retail|commercial|service|office|contractor|realtor|agent/i,                                                                               tool: 'local_intel_search',    params: (zip, q) => ({ query: q, zip }) },
     ],
     // Prompts focused on what LocalIntel can actually answer
     mcpPrompts: [
@@ -80,10 +81,12 @@ const VERTICALS = {
     name: 'Healthcare',
     defaultZips: ['32082', '32081', '32084', '32086', '32092', '32080'],
     toolRoutes: [
-      { pattern: /patient|clinic|hospital|doctor|physician|dental|pharmacy|health/i,  tool: 'local_intel_search',  params: (zip, q) => ({ query: extractCategory(q, 'healthcare'), zip }) },
-      { pattern: /demographic|age|senior|population|income/i,                          tool: 'local_intel_zone',    params: (zip) => ({ zip }) },
-      { pattern: /competitor|nearby|radius/i,                                           tool: 'local_intel_nearby',  params: (zip) => ({ lat: ZIP_CENTERS[zip]?.lat, lon: ZIP_CENTERS[zip]?.lon, radius_miles: 3 }) },
-      { pattern: /gap|undersupplied|need|opportunity/i,                                 tool: 'local_intel_oracle',  params: (zip) => ({ zip }) },
+      // Zone/demographic questions FIRST — must not fall through to search
+      { pattern: /income|household|median|affluent|consumer profile|spending profile|demographic|age|senior|population|growth trend|growth rate|growth trajectory|owner.occup|home value|median home|HHI/i, tool: 'local_intel_zone',    params: (zip) => ({ zip }) },
+      { pattern: /gap|undersupplied|need|opportunity|unmet|missing/i,                                                                                                                                       tool: 'local_intel_oracle',  params: (zip) => ({ zip }) },
+      { pattern: /new.*added|recently.*added|new.*opening|recently.*open|new.*business/i,                                                                                                                   tool: 'local_intel_changes', params: (zip) => ({ zip }) },
+      { pattern: /nearby|radius|within.*miles|3 miles|close to/i,                                                                                                                                           tool: 'local_intel_nearby',  params: (zip) => ({ lat: ZIP_CENTERS[zip]?.lat, lon: ZIP_CENTERS[zip]?.lon, radius_miles: 3 }) },
+      { pattern: /patient|clinic|hospital|doctor|physician|dental|pharmacy|health|optom|vision|physical.therap|urgent.care|walk.in|mental.health|counseling|rehab/i,                                       tool: 'local_intel_search',  params: (zip, q) => ({ query: extractCategory(q, 'healthcare'), zip }) },
     ],
     mcpPrompts: [
       { q: 'What dentists operate in this ZIP?', zip: '32082' },
