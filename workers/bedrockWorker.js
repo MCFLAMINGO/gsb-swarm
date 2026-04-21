@@ -99,18 +99,9 @@ async function fetchPermits(zipEntry) {
     records = await safeFetch(primaryUrl);
     console.log(`[bedrockWorker] Permits for ${zip}: ${records.length} records`);
   } catch (err) {
-    logError(`permits-primary-${zip}`, err);
-    // Try fallback (SJC Building Inspections generic endpoint)
-    try {
-      const fallbackUrl =
-        `https://www.sjcfl.us/BuildingInspections/api/permits?zip=${zip}&format=json&limit=500`;
-      records = await safeFetch(fallbackUrl);
-      console.log(`[bedrockWorker] Permits fallback for ${zip}: ${records.length} records`);
-    } catch (err2) {
-      logError(`permits-fallback-${zip}`, err2);
-      console.log(`[bedrockWorker] Permits unavailable for ${zip} — using zeros`);
-      return { new_construction_count: 0, renovation_count: 0, utility_extensions: 0, zoning_changes: 0 };
-    }
+    // Primary endpoint (data.sjcfl.us) is currently offline — skip silently
+    console.log(`[bedrockWorker] Permits unavailable for ${zip} — using zeros`);
+    return { new_construction_count: 0, renovation_count: 0, utility_extensions: 0, zoning_changes: 0 };
   }
 
   let new_construction_count = 0;
@@ -182,7 +173,7 @@ async function fetchFloodZone(zipEntry) {
     JSON.stringify({ xmin: bb.xmin, ymin: bb.ymin, xmax: bb.xmax, ymax: bb.ymax, spatialReference: { wkid: 4326 } })
   );
   const url =
-    `https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer/28/query` +
+    `https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query` +
     `?geometry=${geometry}` +
     `&geometryType=esriGeometryEnvelope` +
     `&spatialRel=esriSpatialRelIntersects` +
