@@ -730,25 +730,38 @@ function handleRPC(req) {
   }
 
   if (method === 'resources/list') {
-    return {
-      jsonrpc: '2.0', id,
-      result: {
-        resources: [
-          {
-            uri: 'localintel://coverage/32081',
-            name: 'ZIP 32081 Coverage Report',
-            description: 'Live business dataset coverage stats for Ponte Vedra Beach / Nocatee (32081).',
-            mimeType: 'application/json',
-          },
-          {
-            uri: 'localintel://coverage/32082',
-            name: 'ZIP 32082 Coverage Report',
-            description: 'Live business dataset coverage stats for Ponte Vedra Beach South (32082).',
-            mimeType: 'application/json',
-          },
-        ],
-      },
+    // Dynamically build resource list from whatever ZIPs are in the live dataset
+    const allData = loadData();
+    const zipCounts = {};
+    for (const biz of allData) {
+      if (biz.zip) zipCounts[biz.zip] = (zipCounts[biz.zip] || 0) + 1;
+    }
+    const ZIP_LABELS = {
+      '32081': 'Ponte Vedra Beach / Nocatee',
+      '32082': 'Ponte Vedra Beach South',
+      '32092': 'St. Johns / World Golf Village',
+      '32095': 'Ponte Vedra / Palm Valley',
+      '32259': 'Fruit Cove / Julington Creek',
+      '32256': 'Tinseltown / Baymeadows',
+      '32257': 'Mandarin South',
+      '32258': 'Mandarin North',
+      '32065': 'Orange Park',
+      '32073': 'Orange Park West',
     };
+    const resources = Object.entries(zipCounts).sort().map(([zip, count]) => ({
+      uri: \`localintel://coverage/\${zip}\`,
+      name: \`ZIP \${zip} Coverage Report\`,
+      description: \`\${ZIP_LABELS[zip] || 'St. Johns County'} (\${zip}) — \${count} businesses in live dataset.\`,
+      mimeType: 'application/json',
+    }));
+    // Add a system-wide summary resource
+    resources.unshift({
+      uri: 'localintel://coverage/all',
+      name: 'Full Coverage Summary',
+      description: \`All \${Object.keys(zipCounts).length} ZIPs in LocalIntel — \${allData.length} total businesses.\`,
+      mimeType: 'application/json',
+    });
+    return { jsonrpc: '2.0', id, result: { resources } };
   }
 
 
