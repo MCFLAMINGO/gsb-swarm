@@ -208,6 +208,7 @@ router.get('/.well-known/mcp/server-card.json', (req, res) => {
     ],
     resources: [],
     prompts: [],
+    configSchema: { type: 'object', properties: {}, required: [] },
   });
 });
 

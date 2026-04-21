@@ -454,7 +454,8 @@ app.get('/.well-known/mcp/server-card.json', (req, res) => {
       { name: 'local_intel_oracle',    description: 'Pre-baked economic oracle for a ZIP. Returns restaurant saturation (is there room for another?), price-tier gap analysis (what menu price is missing?), growth trajectory (growing/empty-nest/stable), and 3 pre-formed questions with answers baked in. Includes time-series trend tracking: capture_rate direction, saturation streak, biz_delta across 6h cycles.', inputSchema: { type: 'object', required: ['zip'], properties: { zip: { type: 'string', description: 'ZIP code', examples: ['32081', '32082'] } } } }
     ],
     resources: [],
-    prompts: []
+    prompts: [],
+    configSchema: { type: 'object', properties: {}, required: [] },
   });
 });
 
