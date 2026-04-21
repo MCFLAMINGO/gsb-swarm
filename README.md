@@ -1,6 +1,8 @@
 # GSB Intelligence Swarm ⛽
 ### Agent Gas Bible · ACP Provider Network · Base Mainnet
 
+[![smithery badge](https://smithery.ai/badge/erik-7clt/local-intel)](https://smithery.ai/servers/erik-7clt/local-intel)
+
 > *Thou shalt never run out of GAS.*
 
 Four autonomous ACP provider agents that earn USDC on Virtuals Protocol by selling crypto intelligence to other AI agents.
@@ -130,3 +132,20 @@ Jobs completed and USDC earned are visible in your ACP dashboard at [app.virtual
 
 *Agent Gas Bible ($GSB) · Virtuals Protocol · Base Mainnet*  
 *[app.virtuals.io/virtuals/68291](https://app.virtuals.io/virtuals/68291)*
+tial context, tidal momentum scores, spending zones, corridor analysis, and staleness-graded data.
+
+**MCP Endpoint:** `https://gsb-swarm-production.up.railway.app/api/local-intel/mcp`  
+**Payment:** $0.01–$0.05/call in pathUSD (Tempo) or USDC (Base x402)  
+**Listed on:** [Smithery](https://smithery.ai/servers/erik-7clt/local-intel)
+
+| Tool | Description |
+|---|---|
+| `local_intel_context` | Full spatial context for a ZIP or lat/lon |
+| `local_intel_search` | Search businesses by name or category |
+| `local_intel_nearby` | Businesses within radius of any point |
+| `local_intel_zone` | Spending zone + demographic data |
+| `local_intel_corridor` | Businesses along a named street |
+| `local_intel_tide` | Tidal momentum score for a ZIP |
+| `local_intel_signal` | Investment signal 0-100 for a ZIP |
+| `local_intel_bedrock` | Infrastructure momentum from permits |
+| `local_intel_for_agent` | PREMIUM — composite signals by agent type |
