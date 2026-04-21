@@ -1,0 +1,485 @@
+[
+  {
+    "zip": "32259",
+    "city": "Saint Johns (Fruit Cove / Julington Creek)",
+    "county": "St Johns County",
+    "population": 75016,
+    "median_hhi": 149213,
+    "growth_trend": "fast",
+    "growth_pct_2020_2023": 12.4,
+    "primary_industries": [
+      "retail",
+      "healthcare",
+      "professional services",
+      "financial services"
+    ],
+    "business_density_score": 9,
+    "composite_score": 90.13,
+    "priority_rank": 1,
+    "why_valuable": "Highest median HHI on the entire First Coast ($149K). Durbin Pavilion anchors 1.3M SF of commercial space; UF Health and Baptist both expanding here. Population surged 68% 2010-2023. High-value platform for business intel targeting affluent suburban consumers. 26% of households earn $200K+."
+  },
+  {
+    "zip": "32095",
+    "city": "Saint Augustine (Twin Creeks / Palencia / World Golf Village North)",
+    "county": "St Johns County",
+    "population": 21399,
+    "median_hhi": 136038,
+    "growth_trend": "explosive",
+    "growth_pct_2020_2023": 89.2,
+    "primary_industries": [
+      "construction",
+      "professional services",
+      "retail",
+      "healthcare"
+    ],
+    "business_density_score": 7,
+    "composite_score": 85.93,
+    "priority_rank": 2,
+    "why_valuable": "Fastest-growing ZIP in St Johns County (+89% pop since 2018), HHI $136K. BeachWalk/Twin Creeks development adding 3M SF commercial entitlements. New master-planned communities (Beachwalk, Seabrook) driving young high-income household formation. Virtually untapped by business intel platforms."
+  },
+  {
+    "zip": "32250",
+    "city": "Jacksonville Beach",
+    "county": "Duval County",
+    "population": 30080,
+    "median_hhi": 117724,
+    "growth_trend": "growing",
+    "growth_pct_2020_2023": 8.9,
+    "primary_industries": [
+      "restaurants",
+      "hospitality",
+      "retail",
+      "healthcare",
+      "professional services"
+    ],
+    "business_density_score": 8,
+    "composite_score": 65.81,
+    "priority_rank": 3,
+    "why_valuable": "Top-3 highest-income ZIP in Duval County ($117K HHI, avg $169K). Dense Beach Blvd/3rd St commercial corridor. 26% of households earn $200K+. Forecasted 9-16% pop growth 2020-2030. Strong restaurant, retail, and professional services market with affluent permanent and seasonal residents."
+  },
+  {
+    "zip": "32258",
+    "city": "Jacksonville (Bartram Park / Bartram Trail)",
+    "county": "Duval County",
+    "population": 40545,
+    "median_hhi": 102204,
+    "growth_trend": "fast",
+    "growth_pct_2020_2023": 26.7,
+    "primary_industries": [
+      "healthcare",
+      "professional services",
+      "retail",
+      "finance"
+    ],
+    "business_density_score": 8,
+    "composite_score": 65.51,
+    "priority_rank": 4,
+    "why_valuable": "Bartram Park is one of Jacksonville's fastest-growing suburban corridors. 126K SF Bartram Office Park dense with medical/professional tenants. Massive new UF Health hospital and mixed-use development underway. $100K+ HHI, 27% pop growth 2020-2023, young family demographic bordering St Johns County territory."
+  },
+  {
+    "zip": "32226",
+    "city": "Jacksonville (North Jacksonville / Heckscher Drive)",
+    "county": "Duval County",
+    "population": 21256,
+    "median_hhi": 110179,
+    "growth_trend": "fast",
+    "growth_pct_2020_2023": 24.3,
+    "primary_industries": [
+      "industrial/logistics",
+      "professional services",
+      "construction",
+      "retail"
+    ],
+    "business_density_score": 6,
+    "composite_score": 64.26,
+    "priority_rank": 5,
+    "why_valuable": "Fastest income growth in Duval County (+52% since 2011, now $110K HHI). Forecasted 26-33% population growth by 2030. Port-adjacent industrial/logistics hub with 418 business establishments and $470M annual payroll. New residential communities attracting management-class professionals."
+  },
+  {
+    "zip": "32003",
+    "city": "Fleming Island",
+    "county": "Clay County",
+    "population": 30481,
+    "median_hhi": 119046,
+    "growth_trend": "stable",
+    "growth_pct_2020_2023": -0.3,
+    "primary_industries": [
+      "retail",
+      "healthcare",
+      "professional services",
+      "finance",
+      "restaurants"
+    ],
+    "business_density_score": 7,
+    "composite_score": 54.93,
+    "priority_rank": 6,
+    "why_valuable": "Highest-income ZIP in Clay County ($119K HHI), 21% earn $200K+. Fleming Island master-planned community with US-17 commercial corridor, medical offices, strong family demographic. 1.8% unemployment, 87% homeownership. Natural expansion corridor from LocalIntel's SJC coverage."
+  },
+  {
+    "zip": "32034",
+    "city": "Fernandina Beach / Amelia Island",
+    "county": "Nassau County",
+    "population": 35000,
+    "median_hhi": 97756,
+    "growth_trend": "growing",
+    "growth_pct_2020_2023": 9.4,
+    "primary_industries": [
+      "tourism",
+      "hospitality",
+      "retail",
+      "real estate",
+      "healthcare",
+      "restaurants"
+    ],
+    "business_density_score": 7,
+    "composite_score": 53.91,
+    "priority_rank": 7,
+    "why_valuable": "Amelia Island is a premier resort destination. 18.6% of households earn $200K+, avg HHI $135K. Tourism-driven business ecosystem with affluent visitors and growing retiree base. Nassau County grew 12.3% 2020-2023 (one of FL's fastest-growing counties). Strong B2C and hospitality intel market."
+  },
+  {
+    "zip": "32065",
+    "city": "Orange Park / Oakleaf Plantation",
+    "county": "Clay County",
+    "population": 70000,
+    "median_hhi": 97455,
+    "growth_trend": "growing",
+    "growth_pct_2020_2023": 7.7,
+    "primary_industries": [
+      "retail",
+      "healthcare",
+      "restaurants",
+      "professional services",
+      "construction"
+    ],
+    "business_density_score": 7,
+    "composite_score": 53.77,
+    "priority_rank": 8,
+    "why_valuable": "Largest ZIP in Clay County by population. Oakleaf Plantation CDP ($110K HHI) is a fast-growing master-planned community. Dense Blanding Blvd commercial corridor with retail and healthcare concentration. Young median age (35) signals sustained multi-year growth. 2.48% annual growth rate."
+  },
+  {
+    "zip": "32097",
+    "city": "Yulee",
+    "county": "Nassau County",
+    "population": 25000,
+    "median_hhi": 89270,
+    "growth_trend": "fast",
+    "growth_pct_2020_2023": 13.6,
+    "primary_industries": [
+      "retail",
+      "construction",
+      "professional services",
+      "residential services"
+    ],
+    "business_density_score": 5,
+    "composite_score": 51.92,
+    "priority_rank": 9,
+    "why_valuable": "Fastest-growing area in Nassau County driven by domestic migration from Jacksonville metro. Yulee CDP grew 23.5% 2010-2020 and accelerating. New commercial development along US-17 corridor following residential growth surge. Lower current business density but trajectory is strongly upward \u2014 high-value early-mover opportunity."
+  },
+  {
+    "zip": "32266",
+    "city": "Neptune Beach",
+    "county": "Duval County",
+    "population": 7199,
+    "median_hhi": 111025,
+    "growth_trend": "stable",
+    "growth_pct_2020_2023": 0.0,
+    "primary_industries": [
+      "restaurants",
+      "specialty retail",
+      "professional services"
+    ],
+    "business_density_score": 7,
+    "composite_score": 51.16,
+    "priority_rank": 10,
+    "why_valuable": "High-affluence beach community ($111K HHI, avg $155K, per-cap $72K). 20% of households earn $200K+. Small but dense Atlantic Blvd commercial strip with boutique retail and dining. Premium clientele; 60% hold bachelor's degree or higher. Natural pairing with Jacksonville Beach (32250) coverage."
+  },
+  {
+    "zip": "32246",
+    "city": "Jacksonville (Southside / St Johns Town Center)",
+    "county": "Duval County",
+    "population": 60443,
+    "median_hhi": 80963,
+    "growth_trend": "growing",
+    "growth_pct_2020_2023": 6.0,
+    "primary_industries": [
+      "retail",
+      "finance",
+      "professional services",
+      "tech",
+      "restaurants"
+    ],
+    "business_density_score": 9,
+    "composite_score": 51.01,
+    "priority_rank": 11,
+    "why_valuable": "Home to St Johns Town Center \u2014 Jacksonville's premier retail destination (Nordstrom, Apple, high-end dining). One of the highest business densities in Duval County. Dense Butler Blvd/Baymeadows office corridor. Exceptional B2B intel value despite mid-tier residential HHI."
+  },
+  {
+    "zip": "32256",
+    "city": "Jacksonville (Baymeadows / Southside)",
+    "county": "Duval County",
+    "population": 55510,
+    "median_hhi": 73570,
+    "growth_trend": "growing",
+    "growth_pct_2020_2023": 8.8,
+    "primary_industries": [
+      "technology",
+      "financial services",
+      "healthcare",
+      "professional services",
+      "retail"
+    ],
+    "business_density_score": 9,
+    "composite_score": 47.53,
+    "priority_rank": 12,
+    "why_valuable": "Core Southside office market: major tech employers (CSX Technology), Fidelity, major healthcare systems. Highest B2B business density in Jacksonville. Growing international workforce (South American, South Asian diaspora). B2B intel demand is exceptional even with moderate residential HHI."
+  },
+  {
+    "zip": "32223",
+    "city": "Jacksonville (Mandarin)",
+    "county": "Duval County",
+    "population": 26079,
+    "median_hhi": 95347,
+    "growth_trend": "stable",
+    "growth_pct_2020_2023": 1.9,
+    "primary_industries": [
+      "retail",
+      "professional services",
+      "healthcare",
+      "restaurants",
+      "finance"
+    ],
+    "business_density_score": 8,
+    "composite_score": 46.28,
+    "priority_rank": 13,
+    "why_valuable": "Mandarin is Jacksonville's wealthiest established neighborhood. 36% of households earn $150K+. Dense commercial corridor on San Jose Blvd with high business churn in retail, medical, and professional services. Natural adjacency to LocalIntel's existing SJC coverage territory."
+  },
+  {
+    "zip": "32221",
+    "city": "Jacksonville (Westside / Cecil Commerce Center)",
+    "county": "Duval County",
+    "population": 31234,
+    "median_hhi": 82969,
+    "growth_trend": "growing",
+    "growth_pct_2020_2023": 8.5,
+    "primary_industries": [
+      "logistics",
+      "warehousing",
+      "retail",
+      "construction",
+      "manufacturing"
+    ],
+    "business_density_score": 6,
+    "composite_score": 44.46,
+    "priority_rank": 14,
+    "why_valuable": "Cecil Commerce Center is a major industrial/logistics hub with Amazon, Boeing, and military facilities. Growing residential base; forecasted 9-14.5% population growth. Rising HHI driven by blue-collar to management-class transition. Growing B2B commercial services demand."
+  },
+  {
+    "zip": "32225",
+    "city": "Jacksonville (Arlington North / Regency area)",
+    "county": "Duval County",
+    "population": 54591,
+    "median_hhi": 90559,
+    "growth_trend": "stable",
+    "growth_pct_2020_2023": 5.0,
+    "primary_industries": [
+      "retail",
+      "healthcare",
+      "restaurants",
+      "financial services"
+    ],
+    "business_density_score": 7,
+    "composite_score": 41.53,
+    "priority_rank": 15,
+    "why_valuable": "4th highest HHI in Duval ($90K). Large dense suburban corridor; Regency Square retail, major hospital cluster (Baptist/UF Health campus). 11% earn $200K+. Strong consumer retail and healthcare business intelligence opportunity."
+  },
+  {
+    "zip": "32218",
+    "city": "Jacksonville (Northside / River City Marketplace)",
+    "county": "Duval County",
+    "population": 71066,
+    "median_hhi": 69638,
+    "growth_trend": "growing",
+    "growth_pct_2020_2023": 8.5,
+    "primary_industries": [
+      "retail",
+      "logistics",
+      "healthcare",
+      "restaurants",
+      "construction"
+    ],
+    "business_density_score": 7,
+    "composite_score": 40.68,
+    "priority_rank": 16,
+    "why_valuable": "Largest ZIP by population in Duval County (71K). River City Marketplace is a major regional retail hub. Northside booming per ICI Homes 2025. 8.5% pop growth. High business activity drives strong need for local commercial intelligence."
+  },
+  {
+    "zip": "32068",
+    "city": "Middleburg",
+    "county": "Clay County",
+    "population": 32000,
+    "median_hhi": 84431,
+    "growth_trend": "growing",
+    "growth_pct_2020_2023": 6.7,
+    "primary_industries": [
+      "residential services",
+      "retail",
+      "construction"
+    ],
+    "business_density_score": 4,
+    "composite_score": 40.14,
+    "priority_rank": 17,
+    "why_valuable": "Exurban growth corridor in Clay County. Moderately rising income. Lower commercial density than Fleming Island or Oakleaf. Best pursued after core Clay County ZIPs are established."
+  },
+  {
+    "zip": "32224",
+    "city": "Jacksonville (Beach Boulevard corridor / Southside East)",
+    "county": "Duval County",
+    "population": 42252,
+    "median_hhi": 80774,
+    "growth_trend": "stable",
+    "growth_pct_2020_2023": 5.6,
+    "primary_industries": [
+      "healthcare",
+      "professional services",
+      "retail",
+      "education",
+      "finance"
+    ],
+    "business_density_score": 7,
+    "composite_score": 36.92,
+    "priority_rank": 18,
+    "why_valuable": "Large affluent ZIP bordering Ponte Vedra. 16% earn $200K+, 914 business establishments, $425K median home value. Contains UNF campus driving young professional and healthcare services density. Close adjacency to LocalIntel's existing SJC Ponte Vedra territory (32082)."
+  },
+  {
+    "zip": "32233",
+    "city": "Atlantic Beach",
+    "county": "Duval County",
+    "population": 24111,
+    "median_hhi": 81586,
+    "growth_trend": "stable",
+    "growth_pct_2020_2023": 0.5,
+    "primary_industries": [
+      "restaurants",
+      "retail",
+      "professional services",
+      "healthcare"
+    ],
+    "business_density_score": 6,
+    "composite_score": 34.81,
+    "priority_rank": 19,
+    "why_valuable": "Established beach community with rising affluence, 14% of households earn $200K+. Dense Town Center commercial corridor on Atlantic Blvd/Mayport Rd. $614K median home value (data USA). Stable but highly engaged consumer and professional market."
+  },
+  {
+    "zip": "32257",
+    "city": "Jacksonville (Mandarin South / San Jose)",
+    "county": "Duval County",
+    "population": 41791,
+    "median_hhi": 75780,
+    "growth_trend": "stable",
+    "growth_pct_2020_2023": 4.5,
+    "primary_industries": [
+      "retail",
+      "healthcare",
+      "professional services",
+      "restaurants"
+    ],
+    "business_density_score": 7,
+    "composite_score": 34.57,
+    "priority_rank": 20,
+    "why_valuable": "Large population base adjacent to Mandarin (32223). Well-established San Jose Blvd commercial corridor. 12% earn $200K+. Good supporting market for LocalIntel coverage expansion building off the adjacent Mandarin presence."
+  },
+  {
+    "zip": "32073",
+    "city": "Orange Park (Town Core)",
+    "county": "Clay County",
+    "population": 32000,
+    "median_hhi": 76139,
+    "growth_trend": "stable",
+    "growth_pct_2020_2023": 5.2,
+    "primary_industries": [
+      "retail",
+      "healthcare",
+      "restaurants",
+      "professional services"
+    ],
+    "business_density_score": 6,
+    "composite_score": 32.24,
+    "priority_rank": 21,
+    "why_valuable": "Orange Park town center anchor. Orange Park Medical Center is a major regional hospital. Commercial activity concentrated on US-17 and College Drive corridors. Hub for surrounding Clay County residential communities."
+  },
+  {
+    "zip": "32217",
+    "city": "Jacksonville (Ortega / Yacht Club / Avondale South)",
+    "county": "Duval County",
+    "population": 20543,
+    "median_hhi": 73832,
+    "growth_trend": "stable",
+    "growth_pct_2020_2023": 3.5,
+    "primary_industries": [
+      "professional services",
+      "restaurants",
+      "retail",
+      "healthcare",
+      "real estate"
+    ],
+    "business_density_score": 6,
+    "composite_score": 31.16,
+    "priority_rank": 22,
+    "why_valuable": "Ortega and San Jose areas contain some of Jacksonville's most prestigious historic estates. 12% earn $200K+; average HHI ($104K) significantly exceeds median due to wealth concentration. Boutique professional and hospitality business cluster along San Jose Blvd."
+  },
+  {
+    "zip": "32207",
+    "city": "Jacksonville (San Marco / Southside Central)",
+    "county": "Duval County",
+    "population": 35320,
+    "median_hhi": 65234,
+    "growth_trend": "stable",
+    "growth_pct_2020_2023": 3.0,
+    "primary_industries": [
+      "restaurants",
+      "professional services",
+      "retail",
+      "real estate",
+      "healthcare"
+    ],
+    "business_density_score": 7,
+    "composite_score": 29.61,
+    "priority_rank": 23,
+    "why_valuable": "San Marco is Jacksonville's most walkable urban neighborhood with boutique retail, dining, and professional cluster. High-education population (58% bachelor's+). Below-average HHI masked by dense mix of renters and younger professionals; business owner clientele is wealthy. Gateway to Riverside/Avondale corridor."
+  },
+  {
+    "zip": "32033",
+    "city": "Elkton",
+    "county": "St Johns County",
+    "population": 4789,
+    "median_hhi": 83901,
+    "growth_trend": "stable",
+    "growth_pct_2020_2023": 5.1,
+    "primary_industries": [
+      "agriculture",
+      "residential services",
+      "construction"
+    ],
+    "business_density_score": 3,
+    "composite_score": 28.39,
+    "priority_rank": 24,
+    "why_valuable": "Rural exurb of St Johns County. Rising income trend (from $58K in 2011 to $84K in 2023) but low population and business density limit near-term value. Best as long-term fill-in coverage."
+  },
+  {
+    "zip": "32145",
+    "city": "Hastings",
+    "county": "St Johns County",
+    "population": 5759,
+    "median_hhi": 66075,
+    "growth_trend": "stable",
+    "growth_pct_2020_2023": 10.7,
+    "primary_industries": [
+      "agriculture",
+      "retail services"
+    ],
+    "business_density_score": 2,
+    "composite_score": 17.51,
+    "priority_rank": 25,
+    "why_valuable": "Lowest-income ZIP in St Johns County. Agricultural community with minimal commercial base. Poor fit for a platform targeting high-income suburban markets. Low priority."
+  }
+]
