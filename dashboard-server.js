@@ -405,6 +405,9 @@ app.use('/api/yellowpages', ypRouter);
 const { router: bbbRouter } = require('./workers/bbbScraper');
 app.use('/api/bbb', bbbRouter);
 
+const { router: btrRouter } = require('./workers/btrWorker');
+app.use('/api/btr', btrRouter);
+
 // ── ACP compliance endpoints — MUST be before express.static ─────────────────
 // Virtuals probes these to verify agent is hireable on ACP marketplace
 app.get('/.well-known/agent.json', (req, res) => {
@@ -4954,6 +4957,7 @@ app.use((req, res, next) => {
     { name: 'Ocean Floor Worker',   file: 'workers/oceanFloorWorker.js' },
     { name: 'Surface Current',      file: 'workers/surfaceCurrentWorker.js' },
     { name: 'Wave Surface Worker',  file: 'workers/waveSurfaceWorker.js' },
+    { name: 'BTR Worker',           file: 'workers/btrWorker.js' },
   ];
 
   function spawnLocalIntelWorker(w) {
