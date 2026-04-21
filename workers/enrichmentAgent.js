@@ -314,7 +314,7 @@ async function enrichBusiness(biz) {
   // Only runs if still missing phone after all other sources.
   if (!biz.phone || !biz.hours) {
     try {
-      const chamber = await enrichFromChamber(biz.name);
+      const chamber = await enrichFromChamber(biz.name, biz.zip);
       if (chamber) {
         if (!biz.phone   && chamber.phone)   { biz.phone   = chamber.phone;   changed = true; }
         if (!biz.website && chamber.website) { biz.website = chamber.website; changed = true; }

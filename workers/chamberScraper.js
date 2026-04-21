@@ -305,10 +305,16 @@ async function bulkImport() {
 }
 
 // ── ENRICHMENT: look up a single business by name in Chamber directory ───────
-async function enrichFromChamber(bizName) {
+// Checks the correct chamber for the business's ZIP, falls back to SJC.
+async function enrichFromChamber(bizName, zip) {
   try {
+    const chambers = zip ? getChambersForZip(zip) : [];
+    const chamberUrl = chambers.length
+      ? chambers[0].url.replace('/FindStartsWith?term=%23%21', '')
+      : BASE_URL;
+
     const q = encodeURIComponent(bizName);
-    const url = `${BASE_URL}/member-directory/FindStartsWith?term=${q}`;
+    const url = `${chamberUrl}/member-directory/FindStartsWith?term=${q}`;
     const { status, body } = await fetchRaw(url);
     if (status !== 200) return null;
 
