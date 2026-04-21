@@ -224,20 +224,21 @@
     "last_enriched": "2026-04-21T06:02:35.213Z"
   },
   {
-    "name": "Mcflamingo",
-    "phone": "(904) 834-2331",
-    "website": "https://www.yellowpages.com/ponte-vedra-beach-fl/mip/mcflamingo-555557191",
-    "address": "880 A1a N Ste 12, Ponte Vedra Beach, FL, 32082",
+    "name": "MCFLAMINGO",
+    "phone": "(904) 584-6665",
+    "website": "https://mcflamingo.com",
+    "address": "880 A1A N Suite 12, Ponte Vedra Beach, FL, 32082",
     "hours": "Mo-Sa 11:00-20:00, Su 11:00-18:00",
-    "category": "LocalBusiness",
+    "category": "restaurant",
     "zip": "32082",
-    "lat": null,
-    "lon": null,
-    "confidence": 72,
-    "source": "yellowpages",
-    "yp_source": true,
+    "lat": 30.2395,
+    "lon": -81.3893,
+    "confidence": 95,
+    "source": "owner-verified",
+    "yp_source": false,
     "added_at": "2026-04-21T06:02:35.213Z",
-    "last_enriched": "2026-04-21T06:02:35.213Z"
+    "last_enriched": "2026-04-21T12:51:40.116Z",
+    "group": "food"
   },
   {
     "name": "Tony's Pizza",

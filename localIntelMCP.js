@@ -66,11 +66,25 @@ const TOOL_COSTS = {
 // ── Data loaders ──────────────────────────────────────────────────────────────
 function loadBusinesses() {
   // Merge seed file + all accumulated zip files for the full dataset
-  const seen = new Set();
-  const all  = [];
+  const seen  = new Map(); // key -> index in all[]
+  const all   = [];
   const addBiz = (b) => {
-    const key = `${(b.name||'').toLowerCase()}|${b.zip||''}|${b.lat||''}|${b.lon||''}`;
-    if (!seen.has(key)) { seen.add(key); all.push(b); }
+    const name = (b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const zip  = b.zip || '';
+    // Primary key: normalized name + zip (catches same biz from OSM vs YP)
+    // Secondary: if lat/lon present use them to further disambiguate chains
+    const addrNorm = (b.address || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+    const key = `${name}|${zip}|${addrNorm}`;
+    if (seen.has(key)) {
+      // Keep higher-confidence record
+      const existingIdx = seen.get(key);
+      if ((b.confidence || 0) > (all[existingIdx].confidence || 0)) {
+        all[existingIdx] = b;
+      }
+    } else {
+      seen.set(key, all.length);
+      all.push(b);
+    }
   };
   try { JSON.parse(fs.readFileSync(DATA_PATH, 'utf8')).forEach(addBiz); } catch {}
   try {
