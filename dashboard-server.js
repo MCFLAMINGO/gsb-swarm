@@ -402,6 +402,9 @@ app.use('/api/chamber', chamberRouter);
 const { router: ypRouter } = require('./workers/yellowPagesScraper');
 app.use('/api/yellowpages', ypRouter);
 
+const { router: bbbRouter } = require('./workers/bbbScraper');
+app.use('/api/bbb', bbbRouter);
+
 // ── ACP compliance endpoints — MUST be before express.static ─────────────────
 // Virtuals probes these to verify agent is hireable on ACP marketplace
 app.get('/.well-known/agent.json', (req, res) => {

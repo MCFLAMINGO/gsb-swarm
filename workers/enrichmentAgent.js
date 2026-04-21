@@ -24,6 +24,8 @@ const path    = require('path');
 const https   = require('https');
 const http    = require('http');
 const { enrichFromChamber } = require('./chamberScraper');
+let enrichFromBBB;
+try { ({ enrichFromBBB } = require('./bbbScraper')); } catch(e) { console.warn('[EnrichmentAgent] BBB scraper unavailable:', e.message); }
 
 const PORT        = 3007;
 const DATA_DIR    = path.join(__dirname, '../data');
@@ -846,14 +848,25 @@ async function source5DirectoryWaterfall(biz) {
   }
 
   if (!changed) {
-    // BBB last
+    // BBB last — use dedicated module if available, inline fallback otherwise
     await sleep(800);
-    const bbb = await directoryBBB(name);
-    if (bbb) {
-      biz.phone = bbb.phone;
-      biz.phone_source = bbb.source;
-      changed = true;
-    }
+    try {
+      const city = biz.zip ? ({
+        '32081':'Nocatee','32082':'Ponte Vedra Beach','32092':'Saint Johns',
+        '32084':'Saint Augustine','32086':'Saint Augustine','32095':'Ponte Vedra',
+      }[biz.zip] || 'Ponte Vedra Beach') : 'Ponte Vedra Beach';
+      const bbbResult = enrichFromBBB
+        ? await enrichFromBBB(name, city)
+        : await directoryBBB(name, city);
+      if (bbbResult?.phone) {
+        biz.phone = bbbResult.phone;
+        if (!biz.address && bbbResult.address) biz.address = bbbResult.address;
+        if (!biz.website && bbbResult.website) biz.website = bbbResult.website;
+        biz.phone_source = 'bbb';
+        biz.bbb_verified = true;
+        changed = true;
+      }
+    } catch(_) {}
   }
 
   if (changed) {

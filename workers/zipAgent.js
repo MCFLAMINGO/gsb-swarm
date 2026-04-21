@@ -12,6 +12,9 @@
  *   2. SJC ArcGIS Hub — permit/BTR data (if zip is in SJC)
  *   3. FL Sunbiz — registered businesses (public records, best-effort)
  *   4. Nominatim reverse geocode — address enrichment
+ *   5. YellowPages — bulk business discovery by ZIP city (phone, website, address)
+ *   6. SJC Chamber of Commerce — member directory bulk import (verified businesses)
+ *   7. BBB — accredited business discovery (phone, address, category)
  *
  * Writes: data/zips/{zip}.json
  * Logs:   data/sourceLog.json  (per-zip availability log)
@@ -22,6 +25,38 @@ const fs   = require('fs');
 const path = require('path');
 const https = require('https');
 const http  = require('http');
+
+// ── Bulk source imports (non-fatal if unavailable) ────────────────────────────
+let bulkScrapeYellowPages, bulkImportChamber, bulkScrapeZipBBB;
+try { ({ bulkScrapeYellowPages } = require('./yellowPagesScraper')); } catch(e) { console.warn('[ZipAgent] YP scraper unavailable:', e.message); }
+try { ({ bulkImport: bulkImportChamber } = require('./chamberScraper'));  } catch(e) { console.warn('[ZipAgent] Chamber scraper unavailable:', e.message); }
+try { ({ bulkScrapeZip: bulkScrapeZipBBB } = require('./bbbScraper'));    } catch(e) { console.warn('[ZipAgent] BBB scraper unavailable:', e.message); }
+
+// ZIP → YP city slug (for passing a focused city to YP bulk scrape)
+const ZIP_TO_YP_CITY = {
+  '32081': 'nocatee-fl',
+  '32082': 'ponte-vedra-beach-fl',
+  '32092': 'saint-augustine-fl',
+  '32095': 'saint-augustine-fl',
+  '32084': 'saint-augustine-fl',
+  '32086': 'saint-augustine-fl',
+  '32065': 'orange-park-fl',
+  '32073': 'orange-park-fl',
+  '32003': 'fleming-island-fl',
+  '32068': 'middleburg-fl',
+  '32259': 'fruit-cove-fl',
+  '32207': 'jacksonville-fl',
+  '32205': 'jacksonville-fl',
+  '32246': 'jacksonville-fl',
+  '32223': 'jacksonville-fl',
+  '32244': 'jacksonville-fl',
+  '32210': 'jacksonville-fl',
+  '32218': 'jacksonville-fl',
+  '32256': 'jacksonville-fl',
+  '32257': 'jacksonville-fl',
+  '32258': 'jacksonville-fl',
+  '32225': 'jacksonville-fl',
+};
 
 // ── Args ──────────────────────────────────────────────────────────────────────
 
@@ -354,8 +389,65 @@ async function run() {
   // Address enrichment
   const enriched = await enrichAddresses(osmResults);
 
-  // Merge and write
-  const final = mergeBusinesses(existing, enriched);
+  // Merge OSM pass first
+  const afterOSM = mergeBusinesses(existing, enriched);
+  fs.writeFileSync(ZIP_FILE, JSON.stringify(afterOSM, null, 2));
+  log(`After OSM pass: ${afterOSM.length} businesses`);
+
+  // ── Source 5: YellowPages bulk ────────────────────────────────────────
+  // Runs per-city-slug so it only pulls businesses relevant to this ZIP
+  if (bulkScrapeYellowPages) {
+    const ypCity = ZIP_TO_YP_CITY[ZIP];
+    if (ypCity) {
+      log(`Source 5: YellowPages bulk — city: ${ypCity}`);
+      try {
+        const ypStats = await bulkScrapeYellowPages({ cities: [ypCity] });
+        log(`Source 5 done — YP added:${ypStats.added} enriched:${ypStats.enriched}`);
+        logSource('yellowpages', 'ok', `added:${ypStats.added} enriched:${ypStats.enriched}`);
+      } catch(e) {
+        log(`Source 5 failed (YP): ${e.message}`);
+        logSource('yellowpages', 'error', e.message);
+      }
+    } else {
+      log(`Source 5: YP — no city slug for ${ZIP}, skipping`);
+    }
+  }
+
+  await sleep(1000);
+
+  // ── Source 6: SJC Chamber of Commerce bulk ────────────────────────────
+  // Only relevant for SJC ZIPs — chamber covers 841 verified member businesses
+  if (bulkImportChamber && SJC_ZIPS.has(ZIP)) {
+    log(`Source 6: SJC Chamber bulk import`);
+    try {
+      const chamberStats = await bulkImportChamber();
+      log(`Source 6 done — Chamber added:${chamberStats?.added || 0} enriched:${chamberStats?.enriched || 0}`);
+      logSource('sjc_chamber', 'ok', `added:${chamberStats?.added || 0}`);
+    } catch(e) {
+      log(`Source 6 failed (Chamber): ${e.message}`);
+      logSource('sjc_chamber', 'error', e.message);
+    }
+  }
+
+  await sleep(1000);
+
+  // ── Source 7: BBB accredited business discovery ──────────────────────────
+  // Pulls accredited businesses per ZIP — verified phone, address, category
+  if (bulkScrapeZipBBB) {
+    log(`Source 7: BBB bulk scrape — ${ZIP}`);
+    try {
+      const bbbStats = await bulkScrapeZipBBB(ZIP);
+      log(`Source 7 done — BBB added:${bbbStats.added} enriched:${bbbStats.enriched}`);
+      logSource('bbb', 'ok', `added:${bbbStats.added} enriched:${bbbStats.enriched}`);
+    } catch(e) {
+      log(`Source 7 failed (BBB): ${e.message}`);
+      logSource('bbb', 'error', e.message);
+    }
+  }
+
+  // Re-read final state (all sources wrote directly to zip file)
+  let final = afterOSM;
+  try { final = JSON.parse(fs.readFileSync(ZIP_FILE, 'utf8')); } catch(_) {}
   log(`Final: ${final.length} businesses`);
   fs.writeFileSync(ZIP_FILE, JSON.stringify(final, null, 2));
   log(`Written → data/zips/${ZIP}.json`);
