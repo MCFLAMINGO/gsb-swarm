@@ -67,14 +67,49 @@ const FL_ZIPS_PRIORITY = [
   { zip: '33433', region: 'SFL', priority: 81, lat: 26.3512, lon: -80.1648, name: 'Boca Raton' },
   { zip: '33076', region: 'SFL', priority: 79, lat: 26.3612, lon: -80.2648, name: 'Parkland' },
   { zip: '33326', region: 'SFL', priority: 77, lat: 26.1312, lon: -80.3648, name: 'Weston' },
+  // Alabama Gulf Coast
+  { zip: '36695', region: 'MOB', priority: 76, lat: 30.6354, lon: -88.1581, name: 'Mobile West' },
+  { zip: '36608', region: 'MOB', priority: 74, lat: 30.6887, lon: -88.1462, name: 'Mobile Midtown' },
+  { zip: '36609', region: 'MOB', priority: 72, lat: 30.6624, lon: -88.1741, name: 'Mobile W' },
+  { zip: '36526', region: 'MOB', priority: 70, lat: 30.6021, lon: -87.9168, name: 'Daphne' },
+  { zip: '36532', region: 'MOB', priority: 68, lat: 30.5077, lon: -87.8928, name: 'Fairhope' },
+  { zip: '36542', region: 'MOB', priority: 65, lat: 30.2593, lon: -87.7008, name: 'Gulf Shores' },
+  { zip: '36561', region: 'MOB', priority: 63, lat: 30.2961, lon: -87.6003, name: 'Orange Beach' },
+  // Georgia — Savannah metro (Gulf Coast adjacent, high growth)
+  { zip: '31405', region: 'SAV', priority: 78, lat: 32.0468, lon: -81.1276, name: 'Savannah Midtown' },
+  { zip: '31406', region: 'SAV', priority: 76, lat: 31.9938, lon: -81.0996, name: 'Savannah South' },
+  { zip: '31419', region: 'SAV', priority: 74, lat: 31.9488, lon: -81.1876, name: 'Savannah SW' },
+  { zip: '31407', region: 'SAV', priority: 72, lat: 32.1288, lon: -81.2176, name: 'Port Wentworth' },
+  { zip: '31322', region: 'SAV', priority: 70, lat: 32.0788, lon: -81.2576, name: 'Pooler' },
+  { zip: '31326', region: 'SAV', priority: 68, lat: 32.1488, lon: -81.0476, name: 'Rincon' },
+  // Georgia — Atlanta suburbs (high-income sunbelt targets)
+  { zip: '30097', region: 'ATL', priority: 82, lat: 34.0488, lon: -84.1576, name: 'Johns Creek' },
+  { zip: '30022', region: 'ATL', priority: 80, lat: 34.0188, lon: -84.2176, name: 'Alpharetta' },
+  { zip: '30005', region: 'ATL', priority: 78, lat: 34.0688, lon: -84.1976, name: 'Alpharetta N' },
+  { zip: '30024', region: 'ATL', priority: 76, lat: 34.0588, lon: -84.0776, name: 'Suwanee' },
+  { zip: '30068', region: 'ATL', priority: 74, lat: 33.9688, lon: -84.3676, name: 'Marietta E' },
+  { zip: '30062', region: 'ATL', priority: 72, lat: 34.0088, lon: -84.4576, name: 'Marietta W' },
+  { zip: '30009', region: 'ATL', priority: 70, lat: 34.0788, lon: -84.2876, name: 'Alpharetta City' },
+  // Texas Gulf Coast — Houston metro
+  { zip: '77494', region: 'HOU', priority: 84, lat: 29.7388, lon: -95.7648, name: 'Katy' },
+  { zip: '77479', region: 'HOU', priority: 82, lat: 29.5588, lon: -95.6148, name: 'Sugar Land' },
+  { zip: '77459', region: 'HOU', priority: 80, lat: 29.5388, lon: -95.5548, name: 'Missouri City' },
+  { zip: '77584', region: 'HOU', priority: 78, lat: 29.5088, lon: -95.3748, name: 'Pearland' },
+  { zip: '77450', region: 'HOU', priority: 76, lat: 29.7688, lon: -95.7348, name: 'Katy W' },
+  { zip: '77382', region: 'HOU', priority: 74, lat: 30.1688, lon: -95.5048, name: 'The Woodlands' },
+  { zip: '77380', region: 'HOU', priority: 72, lat: 30.1888, lon: -95.4748, name: 'Spring' },
+  { zip: '77573', region: 'HOU', priority: 70, lat: 29.0988, lon: -95.0748, name: 'League City' },
+  // Texas Gulf Coast — Corpus Christi
+  { zip: '78412', region: 'CRP', priority: 65, lat: 27.7088, lon: -97.3948, name: 'Corpus Christi S' },
+  { zip: '78413', region: 'CRP', priority: 63, lat: 27.6788, lon: -97.4148, name: 'Corpus Christi SW' },
+  { zip: '78418', region: 'CRP', priority: 61, lat: 27.6288, lon: -97.2248, name: 'Padre Island' },
 ];
 
-// Sunbelt expansion ZIPs (after FL complete)
+// Sunbelt expansion ZIPs (after AL/GA/TX Gulf Coast seeded above)
 const SUNBELT_REGIONS = [
-  { state: 'GA', metros: ['Atlanta', 'Savannah', 'Augusta'] },
   { state: 'SC', metros: ['Charleston', 'Columbia', 'Myrtle Beach'] },
   { state: 'NC', metros: ['Charlotte', 'Raleigh', 'Wilmington'] },
-  { state: 'TX', metros: ['Dallas', 'Houston', 'Austin', 'San Antonio'] },
+  { state: 'TX', metros: ['Dallas', 'Austin', 'San Antonio'] },
   { state: 'AZ', metros: ['Phoenix', 'Scottsdale', 'Tucson'] },
 ];
 

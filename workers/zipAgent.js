@@ -80,6 +80,42 @@ const ZIP_TO_YP_CITY = {
   '33433': 'boca-raton-fl',
   '33076': 'parkland-fl',
   '33326': 'weston-fl',
+  // Alabama Gulf Coast
+  '36695': 'mobile-al',
+  '36608': 'mobile-al',
+  '36609': 'mobile-al',
+  '36526': 'daphne-al',
+  '36532': 'fairhope-al',
+  '36542': 'gulf-shores-al',
+  '36561': 'orange-beach-al',
+  // Georgia — Savannah metro
+  '31405': 'savannah-ga',
+  '31406': 'savannah-ga',
+  '31419': 'savannah-ga',
+  '31407': 'port-wentworth-ga',
+  '31322': 'pooler-ga',
+  '31326': 'rincon-ga',
+  // Georgia — Atlanta suburbs
+  '30097': 'johns-creek-ga',
+  '30022': 'alpharetta-ga',
+  '30005': 'alpharetta-ga',
+  '30024': 'suwanee-ga',
+  '30068': 'marietta-ga',
+  '30062': 'marietta-ga',
+  '30009': 'alpharetta-ga',
+  // Texas Gulf Coast — Houston metro
+  '77494': 'katy-tx',
+  '77479': 'sugar-land-tx',
+  '77459': 'missouri-city-tx',
+  '77584': 'pearland-tx',
+  '77450': 'katy-tx',
+  '77382': 'the-woodlands-tx',
+  '77380': 'spring-tx',
+  '77573': 'league-city-tx',
+  // Texas Gulf Coast — Corpus Christi
+  '78412': 'corpus-christi-tx',
+  '78413': 'corpus-christi-tx',
+  '78418': 'corpus-christi-tx',
 };
 
 // ZIP → city name (for chamber discovery)
@@ -97,6 +133,22 @@ const ZIP_TO_CITY = {
   '32771': 'Sanford', '34711': 'Clermont',
   '33458': 'Jupiter', '33496': 'Boca Raton', '33433': 'Boca Raton',
   '33076': 'Parkland', '33326': 'Weston',
+  // Alabama Gulf Coast
+  '36695': 'Mobile', '36608': 'Mobile', '36609': 'Mobile',
+  '36526': 'Daphne', '36532': 'Fairhope',
+  '36542': 'Gulf Shores', '36561': 'Orange Beach',
+  // Georgia — Savannah
+  '31405': 'Savannah', '31406': 'Savannah', '31419': 'Savannah',
+  '31407': 'Port Wentworth', '31322': 'Pooler', '31326': 'Rincon',
+  // Georgia — Atlanta suburbs
+  '30097': 'Johns Creek', '30022': 'Alpharetta', '30005': 'Alpharetta',
+  '30024': 'Suwanee', '30068': 'Marietta', '30062': 'Marietta', '30009': 'Alpharetta',
+  // Texas Gulf Coast — Houston
+  '77494': 'Katy', '77479': 'Sugar Land', '77459': 'Missouri City',
+  '77584': 'Pearland', '77450': 'Katy', '77382': 'The Woodlands',
+  '77380': 'Spring', '77573': 'League City',
+  // Texas Gulf Coast — Corpus Christi
+  '78412': 'Corpus Christi', '78413': 'Corpus Christi', '78418': 'Corpus Christi',
 };
 
 // ── Args ──────────────────────────────────────────────────────────────────────

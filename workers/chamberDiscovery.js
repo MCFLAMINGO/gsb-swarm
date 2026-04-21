@@ -88,6 +88,44 @@ const SEED_REGISTRY = {
   '33433': { url: 'https://www.bocaratonchamber.com', cms: 'growthzone', name: 'Greater Boca Raton Chamber' },
   '33076': { url: 'https://www.pembrokepineschamber.org', cms: 'generic', name: 'Chamber South' },
   '33326': { url: 'https://www.westonchamber.com', cms: 'generic', name: 'Weston Chamber of Commerce' },
+  // Alabama Gulf Coast — Mobile Area Chamber
+  '36695': { url: 'https://www.mobilechamber.com', cms: 'generic', name: 'Mobile Area Chamber of Commerce' },
+  '36608': { url: 'https://www.mobilechamber.com', cms: 'generic', name: 'Mobile Area Chamber of Commerce' },
+  '36609': { url: 'https://www.mobilechamber.com', cms: 'generic', name: 'Mobile Area Chamber of Commerce' },
+  // Alabama Gulf Coast — Eastern Shore Chamber
+  '36526': { url: 'https://www.eschamber.com', cms: 'growthzone', name: 'Eastern Shore Chamber of Commerce' },
+  '36532': { url: 'https://www.eschamber.com', cms: 'growthzone', name: 'Eastern Shore Chamber of Commerce' },
+  // Alabama Gulf Coast — Gulf Shores / Orange Beach
+  '36542': { url: 'https://www.gulfshores.com', cms: 'generic', name: 'Gulf Shores & Orange Beach Tourism' },
+  '36561': { url: 'https://www.orangebeach.com', cms: 'generic', name: 'Orange Beach Chamber' },
+  // Georgia — Savannah Area Chamber
+  '31405': { url: 'https://www.savannahchamber.com', cms: 'generic', name: 'Savannah Area Chamber of Commerce' },
+  '31406': { url: 'https://www.savannahchamber.com', cms: 'generic', name: 'Savannah Area Chamber of Commerce' },
+  '31419': { url: 'https://www.savannahchamber.com', cms: 'generic', name: 'Savannah Area Chamber of Commerce' },
+  '31407': { url: 'https://www.savannahchamber.com', cms: 'generic', name: 'Savannah Area Chamber of Commerce' },
+  '31322': { url: 'https://www.poolerchamber.com', cms: 'growthzone', name: 'Pooler Chamber of Commerce' },
+  '31326': { url: 'https://www.savannahchamber.com', cms: 'generic', name: 'Savannah Area Chamber of Commerce' },
+  // Georgia — Atlanta suburbs
+  '30097': { url: 'https://www.johnskreekchamber.com', cms: 'generic', name: 'Johns Creek Chamber of Commerce' },
+  '30022': { url: 'https://www.alpharettachamber.org', cms: 'growthzone', name: 'Greater North Fulton Chamber' },
+  '30005': { url: 'https://www.alpharettachamber.org', cms: 'growthzone', name: 'Greater North Fulton Chamber' },
+  '30009': { url: 'https://www.alpharettachamber.org', cms: 'growthzone', name: 'Greater North Fulton Chamber' },
+  '30024': { url: 'https://www.suwaneechamber.com', cms: 'generic', name: 'Suwanee Business Alliance' },
+  '30068': { url: 'https://www.cobbchamber.org', cms: 'generic', name: 'Cobb Chamber of Commerce' },
+  '30062': { url: 'https://www.cobbchamber.org', cms: 'generic', name: 'Cobb Chamber of Commerce' },
+  // Texas Gulf Coast — Houston metro
+  '77494': { url: 'https://www.katychamber.com', cms: 'growthzone', name: 'Katy Area Chamber of Commerce' },
+  '77450': { url: 'https://www.katychamber.com', cms: 'growthzone', name: 'Katy Area Chamber of Commerce' },
+  '77479': { url: 'https://www.sugarlandtx.gov/chamber', cms: 'generic', name: 'Fort Bend Chamber of Commerce' },
+  '77459': { url: 'https://www.fortbendchamber.com', cms: 'generic', name: 'Fort Bend Chamber of Commerce' },
+  '77584': { url: 'https://www.pearlandtxchamber.com', cms: 'growthzone', name: 'Pearland Chamber of Commerce' },
+  '77382': { url: 'https://www.woodlandschamber.org', cms: 'growthzone', name: 'The Woodlands Chamber' },
+  '77380': { url: 'https://www.woodlandschamber.org', cms: 'growthzone', name: 'The Woodlands Chamber' },
+  '77573': { url: 'https://www.leaguecitychamber.com', cms: 'growthzone', name: 'League City Regional Chamber' },
+  // Texas Gulf Coast — Corpus Christi
+  '78412': { url: 'https://www.corpuschristichamber.org', cms: 'generic', name: 'Corpus Christi Chamber of Commerce' },
+  '78413': { url: 'https://www.corpuschristichamber.org', cms: 'generic', name: 'Corpus Christi Chamber of Commerce' },
+  '78418': { url: 'https://www.corpuschristichamber.org', cms: 'generic', name: 'Corpus Christi Chamber of Commerce' },
 };
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────
