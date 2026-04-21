@@ -399,6 +399,9 @@ app.use('/api/local-intel', localIntelRouter);
 const { router: chamberRouter } = require('./workers/chamberScraper');
 app.use('/api/chamber', chamberRouter);
 
+const { router: ypRouter } = require('./workers/yellowPagesScraper');
+app.use('/api/yellowpages', ypRouter);
+
 // ── ACP compliance endpoints — MUST be before express.static ─────────────────
 // Virtuals probes these to verify agent is hireable on ACP marketplace
 app.get('/.well-known/agent.json', (req, res) => {

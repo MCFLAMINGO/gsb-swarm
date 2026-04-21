@@ -273,14 +273,29 @@ function toolSearch({ zip, query, category, group, limit = 20 }) {
   if (category) results = results.filter(b => b.category === category);
   if (group)    results = results.filter(b => getGroup(b.category) === group);
   if (query) {
-    const q = query.toLowerCase();
-    results = results.filter(b =>
-      b.name.toLowerCase().includes(q) ||
-      b.category.toLowerCase().includes(q) ||
-      (b.address || '').toLowerCase().includes(q)
-    );
+    const q     = query.toLowerCase();
+    const words = q.split(/\s+/).filter(w => w.length > 2 && !['for','the','and','near','in','at','of'].includes(w));
+
+    // Score each business — exact substring wins, word-overlap is fuzzy fallback
+    const scored = results.map(b => {
+      const name = b.name.toLowerCase();
+      const cat  = (b.category || '').toLowerCase();
+      const addr = (b.address  || '').toLowerCase();
+      let score  = 0;
+      if (name.includes(q))    score += 100;  // exact full match
+      if (cat.includes(q))     score += 60;
+      if (addr.includes(q))    score += 40;
+      // Word-level overlap
+      for (const w of words) {
+        if (name.includes(w))  score += 20;
+        if (cat.includes(w))   score += 10;
+      }
+      return { b, score };
+    }).filter(({ score }) => score > 0);
+
+    results = scored.sort((a, z) => z.score - a.score).map(({ b }) => b);
   }
-  results.sort((a, b) => b.confidence - a.confidence);
+  if (!query) results.sort((a, b) => b.confidence - a.confidence);
   const total = results.length;
   results = results.slice(0, Math.min(limit, 50));
 
