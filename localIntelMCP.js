@@ -32,6 +32,7 @@ const PORT         = parseInt(process.env.LOCAL_INTEL_MCP_PORT || '3004');
 // ── Cost per tool call (pathUSD) ──────────────────────────────────────────────
 // ── Tidal tools ──────────────────────────────────────────────────────────────
 const { handleTide, handleSignal, handleBedrock, handleForAgent } = require('./localIntelTidalTools');
+const { handleVerticalQuery } = require('./workers/verticalAgentWorker');
 
 // ── Oracle handler ─────────────────────────────────────────────────────────────
 function handleOracle(params) {
@@ -60,6 +61,11 @@ const TOOL_COSTS = {
   local_intel_bedrock:   0.02,
   local_intel_for_agent: 0.05,
   local_intel_oracle:    0.03,
+  local_intel_realtor:      0.02,
+  local_intel_healthcare:   0.02,
+  local_intel_retail:       0.02,
+  local_intel_construction: 0.02,
+  local_intel_restaurant:   0.02,
   local_intel_stats:    0.005,
 };
 
@@ -687,6 +693,12 @@ const TOOLS = {
   local_intel_bedrock:   { fn: handleBedrock,  desc: 'Infrastructure momentum — permits, road projects, flood zones. Leading indicator (12-36mo ahead).' },
   local_intel_for_agent: { fn: handleForAgent, desc: 'Premium composite entry point. Declare agent_type + intent, get pre-ranked signals for your use case.' },
   local_intel_oracle:    { fn: handleOracle,   desc: 'Pre-baked economic narrative for a ZIP: restaurant saturation, price-tier gaps, growth trajectory, and the 3 questions you should be asking with answers.' },
+  // ── Vertical agents (trained on 100 industry prompts each) ─────────────────────────
+  local_intel_realtor:      { fn: (p) => handleVerticalQuery('realtor',      p.query, p.zip), desc: 'Real estate intelligence for a ZIP: demographics, commercial gaps, flood risk, infrastructure, market signals. Trained for buyer briefs and investment analysis.' },
+  local_intel_healthcare:   { fn: (p) => handleVerticalQuery('healthcare',   p.query, p.zip), desc: 'Healthcare market intelligence: provider density, demographics, patient demand gaps, senior population signals.' },
+  local_intel_retail:       { fn: (p) => handleVerticalQuery('retail',       p.query, p.zip), desc: 'Retail market intelligence: store categories, spending capture, consumer profile, undersupplied niches.' },
+  local_intel_construction: { fn: (p) => handleVerticalQuery('construction', p.query, p.zip), desc: 'Construction and home services intelligence: active permits, contractor density, population growth driving demand.' },
+  local_intel_restaurant:   { fn: (p) => handleVerticalQuery('restaurant',   p.query, p.zip), desc: 'Restaurant market intelligence: saturation scores, price-tier gaps, capture rate, corridor analysis, tidal momentum.' },
 };
 
 // ── MCP manifest (tools/list response) ───────────────────────────────────────
@@ -854,6 +866,37 @@ const MCP_MANIFEST = {
         },
         required: ['zip'],
       },
+      annotations: { readOnly: true },
+    },
+    // ── Vertical agents ───────────────────────────────────────────
+    {
+      name: 'local_intel_realtor',
+      description: 'Real estate intelligence for a ZIP. Ask natural-language questions: demographics, commercial gaps, flood risk, school proximity, infrastructure signals, market saturation. Returns structured data with confidence score. Trained on 100 realtor use-case prompts.',
+      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question (e.g. "What is the flood risk for this ZIP?", "What commercial gaps exist?")' }, zip: { type: 'string', description: 'ZIP code to analyze' } }, required: ['query', 'zip'] },
+      annotations: { readOnly: true },
+    },
+    {
+      name: 'local_intel_healthcare',
+      description: 'Healthcare market intelligence for a ZIP. Ask about provider density, patient demographics, demand gaps, senior population. Returns structured data with confidence score. Trained on 100 healthcare business prompts.',
+      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question about healthcare market' }, zip: { type: 'string', description: 'ZIP code to analyze' } }, required: ['query', 'zip'] },
+      annotations: { readOnly: true },
+    },
+    {
+      name: 'local_intel_retail',
+      description: 'Retail market intelligence for a ZIP. Ask about store categories, spending capture rates, consumer profile, undersupplied niches. Returns structured data with confidence score. Trained on 100 retail business prompts.',
+      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question about retail market' }, zip: { type: 'string', description: 'ZIP code to analyze' } }, required: ['query', 'zip'] },
+      annotations: { readOnly: true },
+    },
+    {
+      name: 'local_intel_construction',
+      description: 'Construction and home services market intelligence for a ZIP. Ask about contractor density, active permits, housing starts, population growth driving demand. Returns structured data with confidence score. Trained on 100 construction business prompts.',
+      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question about construction market' }, zip: { type: 'string', description: 'ZIP code to analyze' } }, required: ['query', 'zip'] },
+      annotations: { readOnly: true },
+    },
+    {
+      name: 'local_intel_restaurant',
+      description: 'Restaurant and food service market intelligence for a ZIP. Ask about saturation scores, price-tier gaps, capture rates, corridor analysis, tidal momentum. Returns structured data with confidence score. Trained on 100 restaurant business prompts.',
+      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question about restaurant market' }, zip: { type: 'string', description: 'ZIP code to analyze' } }, required: ['query', 'zip'] },
       annotations: { readOnly: true },
     },
   ],

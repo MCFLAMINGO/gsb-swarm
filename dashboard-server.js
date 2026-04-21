@@ -4962,6 +4962,7 @@ app.use((req, res, next) => {
     { name: 'Surface Current',      file: 'workers/surfaceCurrentWorker.js' },
     { name: 'Wave Surface Worker',  file: 'workers/waveSurfaceWorker.js' },
     { name: 'BTR Worker',           file: 'workers/btrWorker.js' },
+    { name: 'Vertical Agent',        file: 'workers/verticalAgentWorker.js' },
   ];
 
   function spawnLocalIntelWorker(w) {
