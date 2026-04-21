@@ -683,4 +683,24 @@ router.get('/oracle', (req, res) => {
   }
 });
 
+// ── GET /api/local-intel/oracle/history?zip=XXXXX ─────────────────────────────
+// Returns full time-series array for a ZIP (up to 180 snapshots)
+// Optional ?limit=N to get last N entries
+router.get('/oracle/history', (req, res) => {
+  try {
+    const zip = (req.query.zip || '').replace(/\D/g, '').slice(0, 5);
+    const limit = parseInt(req.query.limit || '90', 10);
+    if (!zip) return res.status(400).json({ error: 'zip required' });
+    const histFile = path.join(DATA_DIR_AGENT, 'oracle', 'history', `${zip}.json`);
+    if (!fs.existsSync(histFile)) {
+      return res.status(404).json({ error: `No history for ${zip} yet. Will populate after first oracle cycle.`, cycles: 0, history: [] });
+    }
+    const history = JSON.parse(fs.readFileSync(histFile, 'utf8'));
+    const slice = Array.isArray(history) ? history.slice(-limit) : [];
+    return res.json({ zip, cycles: slice.length, history: slice });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

@@ -19,9 +19,11 @@
 const path = require('path');
 const fs   = require('fs');
 
-const DATA_DIR   = path.join(__dirname, '..', 'data');
-const ORACLE_DIR = path.join(DATA_DIR, 'oracle');
-const INDEX_FILE = path.join(ORACLE_DIR, '_index.json');
+const DATA_DIR    = path.join(__dirname, '..', 'data');
+const ORACLE_DIR  = path.join(DATA_DIR, 'oracle');
+const INDEX_FILE  = path.join(ORACLE_DIR, '_index.json');
+const HISTORY_DIR = path.join(ORACLE_DIR, 'history'); // time-series per ZIP
+const MAX_HISTORY = 180; // keep 90 days @ 2x/day headroom
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -360,9 +362,69 @@ function computeOracle(zip, name) {
 // ── Run & schedule ─────────────────────────────────────────────────────────────
 
 function ensureDirs() {
-  [DATA_DIR, ORACLE_DIR].forEach(d => {
+  [DATA_DIR, ORACLE_DIR, HISTORY_DIR].forEach(d => {
     if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
   });
+}
+
+// ── Time-series append ────────────────────────────────────────────────────────
+// Appends a trimmed snapshot to data/oracle/history/{zip}.json (array, newest last)
+// Keeps MAX_HISTORY entries. Used to compute trend direction on next run.
+function appendHistory(zip, result) {
+  const file = path.join(HISTORY_DIR, `${zip}.json`);
+  let history = [];
+  try { history = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+  if (!Array.isArray(history)) history = [];
+
+  // Snapshot — only what we need to detect trends (keep it small)
+  const snap = {
+    t:               result.computed_at,
+    capture_rate:    result.restaurant_capacity.capture_rate_pct,
+    saturation:      result.restaurant_capacity.saturation_status,
+    restaurant_count: result.restaurant_capacity.restaurant_count,
+    total_businesses: result.restaurant_capacity.total_businesses,
+    growth_state:    result.growth_trajectory.state,
+    infra_score:     result.growth_trajectory.infrastructure_momentum,
+    top_gap:         result.market_gaps.top_gap?.tier || null,
+    owner_occ_pct:   result.growth_trajectory.owner_occupied_pct,
+    school_count:    result.market_gaps.school_count,
+  };
+
+  history.push(snap);
+  if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
+  atomicWrite(file, history);
+}
+
+// Compute trend direction comparing last two snapshots
+// Returns { capture_rate: 'up'|'down'|'flat', growth_state: 'improving'|'declining'|'stable', cycles: N }
+function computeTrend(zip) {
+  const file = path.join(HISTORY_DIR, `${zip}.json`);
+  let history = [];
+  try { history = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+  if (!Array.isArray(history) || history.length < 2) return { cycles: history.length, capture_rate: 'new', growth_state: 'new' };
+
+  const prev = history[history.length - 2];
+  const curr = history[history.length - 1];
+  const delta = curr.capture_rate - prev.capture_rate;
+
+  // Consecutive saturation status — how many cycles in current state
+  const currentStatus = curr.saturation;
+  let streak = 1;
+  for (let i = history.length - 2; i >= 0; i--) {
+    if (history[i].saturation === currentStatus) streak++;
+    else break;
+  }
+
+  return {
+    cycles:          history.length,
+    capture_rate:    delta > 1 ? 'up' : delta < -1 ? 'down' : 'flat',
+    capture_delta:   parseFloat(delta.toFixed(2)),
+    growth_state:    curr.growth_state === prev.growth_state ? 'stable' : 'shifted',
+    saturation_streak: streak,  // how many consecutive cycles in same saturation state
+    biz_delta:       curr.total_businesses - prev.total_businesses,
+    restaurant_delta: curr.restaurant_count - prev.restaurant_count,
+    infra_delta:     curr.infra_score - prev.infra_score,
+  };
 }
 
 function atomicWrite(file, data) {
@@ -410,6 +472,14 @@ async function runOracle() {
   for (const zip of allZips) {
     try {
       const result = computeOracle(zip, nameMap[zip]);
+
+      // Append to time-series BEFORE writing current (so computeTrend reads previous run)
+      const trend = computeTrend(zip);
+      appendHistory(zip, result);
+
+      // Attach trend to the result file so API callers get it inline
+      result.trend = trend;
+
       atomicWrite(path.join(ORACLE_DIR, `${zip}.json`), result);
       index.zips[zip] = {
         name:               result.name,
@@ -419,8 +489,13 @@ async function runOracle() {
         consumer_profile:   result.demographics.consumer_profile,
         top_gap:            result.market_gaps.top_gap?.tier || null,
         computed_at:        result.computed_at,
+        // trend summary in index for signal layer to use without extra fetch
+        trend_capture:      trend?.capture_rate || 'new',
+        trend_streak:       trend?.saturation_streak || 1,
+        trend_biz_delta:    trend?.biz_delta || 0,
+        trend_cycles:       trend?.cycles || 1,
       };
-      console.log(`[oracleWorker] ${zip} (${result.name}): ${result.restaurant_capacity.saturation_status}, ${result.growth_trajectory.state}, gap: ${result.market_gaps.top_gap?.tier || 'none'}`);
+      console.log(`[oracleWorker] ${zip} (${result.name}): ${result.restaurant_capacity.saturation_status}, ${result.growth_trajectory.state}, gap: ${result.market_gaps.top_gap?.tier || 'none'}, trend: ${trend?.capture_rate || 'new'} (${trend?.saturation_streak || 1} cycles)`);
     } catch (err) {
       console.error(`[oracleWorker] Error on ${zip}:`, err.message);
     }
