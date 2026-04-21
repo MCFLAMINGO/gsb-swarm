@@ -24,12 +24,36 @@ const express = require('express');
 const path    = require('path');
 const fs      = require('fs');
 const { paymentMiddleware } = require('x402-express');
+const { createPublicClient, createWalletClient, http, getAddress } = require('viem');
+const { base } = require('viem/chains');
+const { privateKeyToAccount } = require('viem/accounts');
+const { exact } = require('x402/schemes');
+const { decodePayment } = require('x402/schemes');
 
 // ── x402 payment config ───────────────────────────────────────────────
 // TREASURY receives USDC on Base mainnet.
 // Agents without a Base wallet still use the Tempo/pathUSD endpoint (/api/local-intel/mcp).
 // This x402 gate is ADDITIVE — a second payment rail, not a replacement.
 const X402_TREASURY = process.env.X402_TREASURY || '0x774f484192Cf3F4fB9716Af2e15f44371fD32FEA';
+
+// ── Self-hosted facilitator (avoids x402.org/facilitator which is testnet-only) ──
+// Uses exact.evm.verify (local EIP-3009 sig check) + exact.evm.settle (on-chain USDC transfer).
+// TREASURY_PK must be set in Railway to submit settlement txs.
+const _treasuryRaw = process.env.THROW_TREASURY_PK || '';
+const TREASURY_PK  = _treasuryRaw.startsWith('0x') ? _treasuryRaw : (_treasuryRaw ? '0x' + _treasuryRaw : null);
+
+const basePublicClient = createPublicClient({ chain: base, transport: http() });
+const baseTreasuryWallet = TREASURY_PK
+  ? createWalletClient({ account: privateKeyToAccount(TREASURY_PK), chain: base, transport: http() })
+  : null;
+
+// Self-facilitator: verify + settle EIP-3009 payments directly on Base
+const selfFacilitator = {
+  // x402-express calls {url}/verify and {url}/settle — we mount these as routes below
+  // and pass the URL to paymentMiddleware
+  url: 'http://localhost:3001/api/local-intel/x402-facilitator',
+};
+
 // NOTE: Route keys must be router-relative paths (req.path inside mounted router),
 // not the full /api/local-intel/* paths. The middleware uses req.path for matching.
 const x402Middleware = paymentMiddleware(
@@ -37,7 +61,8 @@ const x402Middleware = paymentMiddleware(
   {
     'POST /mcp/x402':         { price: '$0.01', network: 'base', config: { description: 'LocalIntel MCP — standard tool call' } },
     'POST /mcp/x402/premium': { price: '$0.05', network: 'base', config: { description: 'LocalIntel MCP — local_intel_for_agent premium composite' } },
-  }
+  },
+  selfFacilitator
 );
 
 const router = express.Router();
@@ -709,6 +734,53 @@ router.get('/oracle/history', (req, res) => {
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ── Self-hosted x402 facilitator endpoints ───────────────────────────────────
+// Called by x402-express paymentMiddleware when verifying / settling payments.
+// Avoids dependency on x402.org/facilitator (testnet-only for Base mainnet).
+// Mounted at /api/local-intel/x402-facilitator/verify and /settle
+
+router.post('/x402-facilitator/verify', express.json(), async (req, res) => {
+  try {
+    const { paymentPayload, paymentRequirements } = req.body;
+    if (!paymentPayload || !paymentRequirements) {
+      return res.status(400).json({ isValid: false, invalidReason: 'missing_parameters', error: 'Missing paymentPayload or paymentRequirements' });
+    }
+    // Local EIP-3009 signature verification — no external service needed
+    const result = await exact.evm.verify(basePublicClient, paymentPayload, paymentRequirements);
+    res.json(result);
+  } catch (e) {
+    console.error('[x402-facilitator] verify error:', e.message);
+    res.status(500).json({ isValid: false, invalidReason: 'unexpected_error', error: e.message });
+  }
+});
+
+router.post('/x402-facilitator/settle', express.json(), async (req, res) => {
+  try {
+    const { paymentPayload, paymentRequirements } = req.body;
+    if (!paymentPayload || !paymentRequirements) {
+      return res.status(400).json({ success: false, error: 'Missing paymentPayload or paymentRequirements' });
+    }
+    if (!baseTreasuryWallet) {
+      return res.status(503).json({ success: false, error: 'THROW_TREASURY_PK not configured — cannot settle' });
+    }
+    // On-chain USDC transferWithAuthorization — executes the actual payment
+    const result = await exact.evm.settle(baseTreasuryWallet, paymentPayload, paymentRequirements);
+    res.json(result);
+  } catch (e) {
+    console.error('[x402-facilitator] settle error:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// /supported — tells paymentMiddleware what schemes/networks this facilitator handles
+router.get('/x402-facilitator/supported', (req, res) => {
+  res.json({
+    kinds: [
+      { scheme: 'exact', network: 'base' },
+    ],
+  });
 });
 
 module.exports = router;
