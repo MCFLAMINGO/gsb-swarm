@@ -32,6 +32,18 @@ const PORT         = parseInt(process.env.LOCAL_INTEL_MCP_PORT || '3004');
 // ── Cost per tool call (pathUSD) ──────────────────────────────────────────────
 // ── Tidal tools ──────────────────────────────────────────────────────────────
 const { handleTide, handleSignal, handleBedrock, handleForAgent } = require('./localIntelTidalTools');
+
+// ── Oracle handler ─────────────────────────────────────────────────────────────
+function handleOracle(params) {
+  const zip = (params.zip || '').replace(/\D/g, '').slice(0, 5);
+  if (!zip) return { error: 'zip required' };
+  const oracleDir = path.join(__dirname, 'data', 'oracle');
+  const file = path.join(oracleDir, `${zip}.json`);
+  if (!require('fs').existsSync(file)) {
+    return { error: `Oracle not yet computed for ${zip}. The oracle worker runs every 6h — try again shortly.` };
+  }
+  return require('fs').readFileSync(file, 'utf8');
+}
 const { wrapMCPHandler } = require('./workers/mcpMiddleware');
 const { getStaleness, stalenessBlock, zipFreshnessBlock } = require('./workers/stalenessUtils');
 
@@ -47,6 +59,7 @@ const TOOL_COSTS = {
   local_intel_signal:    0.03,
   local_intel_bedrock:   0.02,
   local_intel_for_agent: 0.05,
+  local_intel_oracle:    0.03,
   local_intel_stats:    0.005,
 };
 
@@ -532,6 +545,7 @@ const TOOLS = {
   local_intel_signal:    { fn: handleSignal,   desc: 'Investment + activity signal for a ZIP — composite score from bedrock through wave surface.' },
   local_intel_bedrock:   { fn: handleBedrock,  desc: 'Infrastructure momentum — permits, road projects, flood zones. Leading indicator (12-36mo ahead).' },
   local_intel_for_agent: { fn: handleForAgent, desc: 'Premium composite entry point. Declare agent_type + intent, get pre-ranked signals for your use case.' },
+  local_intel_oracle:    { fn: handleOracle,   desc: 'Pre-baked economic narrative for a ZIP: restaurant saturation, price-tier gaps, growth trajectory, and the 3 questions you should be asking with answers.' },
 };
 
 // ── MCP manifest (tools/list response) ───────────────────────────────────────
@@ -686,6 +700,18 @@ const MCP_MANIFEST = {
           depth:      { type: 'string', description: 'quick (top 5 signals) | full (top 10 + context blocks)' },
           agent_id:   { type: 'string', description: 'Your agent UUID for memory + delta computation' },
         },
+      },
+      annotations: { readOnly: true },
+    },
+    {
+      name: 'local_intel_oracle',
+      description: 'Pre-baked economic oracle for a ZIP. Returns: restaurant saturation (is there room for another?), price-tier gap analysis (what menu price is missing?), growth trajectory (growing/empty-nest/stable), and 3 pre-formed questions with answers baked in. No LLM needed — answers derived from population, income, business density, school count, and infrastructure signals.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          zip: { type: 'string', description: 'ZIP code to analyze (e.g. 32081)' },
+        },
+        required: ['zip'],
       },
       annotations: { readOnly: true },
     },

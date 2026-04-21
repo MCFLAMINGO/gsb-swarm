@@ -4947,6 +4947,7 @@ app.use((req, res, next) => {
     { name: 'ACP Broadcaster',      file: 'workers/acpBroadcaster.js' },
     // ── Tidal layer workers ──
     { name: 'Bedrock Worker',       file: 'workers/bedrockWorker.js' },
+    { name: 'Oracle Worker',        file: 'workers/oracleWorker.js' },
     { name: 'Ocean Floor Worker',   file: 'workers/oceanFloorWorker.js' },
     { name: 'Surface Current',      file: 'workers/surfaceCurrentWorker.js' },
     { name: 'Wave Surface Worker',  file: 'workers/waveSurfaceWorker.js' },

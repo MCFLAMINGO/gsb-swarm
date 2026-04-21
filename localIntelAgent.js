@@ -656,4 +656,31 @@ router.get('/budget-status', async (req, res) => {
   }
 });
 
+// ── GET /api/local-intel/oracle?zip=XXXXX ───────────────────────────────────
+// Returns pre-baked economic narrative for a ZIP: restaurant capacity, market gaps, growth
+router.get('/oracle', (req, res) => {
+  try {
+    const zip = (req.query.zip || '').replace(/\D/g, '').slice(0, 5);
+    const oracleDir = path.join(DATA_DIR_AGENT, 'oracle');
+
+    if (zip) {
+      // Single ZIP
+      const file = path.join(oracleDir, `${zip}.json`);
+      if (!fs.existsSync(file)) {
+        return res.status(404).json({ error: `No oracle data for ${zip}. Oracle worker may still be computing.` });
+      }
+      return res.json(JSON.parse(fs.readFileSync(file, 'utf8')));
+    }
+
+    // No ZIP specified — return index
+    const indexFile = path.join(oracleDir, '_index.json');
+    if (!fs.existsSync(indexFile)) {
+      return res.status(404).json({ error: 'Oracle index not ready yet. Check back in 60 seconds.' });
+    }
+    res.json(JSON.parse(fs.readFileSync(indexFile, 'utf8')));
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

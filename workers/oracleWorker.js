@@ -1,0 +1,438 @@
+'use strict';
+/**
+ * oracleWorker.js — LocalIntel Oracle Layer
+ *
+ * Synthesizes all tidal layers + business data into pre-baked economic
+ * narratives. Answers the question before the user knows to ask it.
+ *
+ * Computes per ZIP:
+ *   - restaurant_capacity   : is there room for another? based on pop + income + calorie math
+ *   - market_gaps           : what price tier / category is undersupplied?
+ *   - growth_trajectory     : growing, stable, or emptying? (school + ownership signals)
+ *   - top_questions         : 3 pre-formed questions with answers baked in
+ *   - oracle_narrative      : one-paragraph plain-English brief
+ *
+ * Writes: data/oracle/{zip}.json + data/oracle/_index.json
+ * Schedule: runs on start, then every 6 hours
+ */
+
+const path = require('path');
+const fs   = require('fs');
+
+const DATA_DIR   = path.join(__dirname, '..', 'data');
+const ORACLE_DIR = path.join(DATA_DIR, 'oracle');
+const INDEX_FILE = path.join(ORACLE_DIR, '_index.json');
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+// Average US restaurant serves ~100-150 covers/day, ~350 meals/day
+// FDA daily caloric rec: 2000 cal. Average restaurant meal: ~850 cal.
+// So each person eats out ~0.4x per day on average in US.
+// In affluent suburbs (income >$100k): ~0.6x per day.
+const MEALS_OUT_PER_DAY_BASE    = 0.40; // US average
+const MEALS_OUT_PER_DAY_AFFLUENT = 0.62; // income >$100k
+const AVG_RESTAURANT_COVERS_DAY  = 280; // covers/day avg full-service restaurant
+const AVG_FASTFOOD_COVERS_DAY    = 520; // covers/day fast food
+
+// Menu price tiers (avg check per person)
+const PRICE_TIERS = [
+  { label: 'budget',    min: 0,   max: 12,  description: 'Under $12 — fast casual / counter service' },
+  { label: 'midrange',  min: 12,  max: 25,  description: '$12–$25 — casual dining' },
+  { label: 'upscale',   min: 25,  max: 60,  description: '$25–$60 — full service, bar' },
+  { label: 'fine',      min: 60,  max: 999, description: '$60+ — fine dining / tasting menu' },
+];
+
+// Income → expected price tier demand distribution
+// e.g. at $130k HHI: 15% budget, 45% midrange, 30% upscale, 10% fine
+function priceTierDemand(medianHHI) {
+  if (medianHHI >= 150_000) return { budget: 0.10, midrange: 0.35, upscale: 0.40, fine: 0.15 };
+  if (medianHHI >= 100_000) return { budget: 0.15, midrange: 0.45, upscale: 0.30, fine: 0.10 };
+  if (medianHHI >= 65_000)  return { budget: 0.25, midrange: 0.50, upscale: 0.20, fine: 0.05 };
+  return                           { budget: 0.45, midrange: 0.40, upscale: 0.13, fine: 0.02 };
+}
+
+// Category → price tier mapping from OSM/data categories
+const CATEGORY_TIER = {
+  'fast_food':    'budget',
+  'cafe':         'budget',
+  'food_court':   'budget',
+  'restaurant':   'midrange',  // default — refined below by name signals
+  'bar':          'midrange',
+  'pub':          'midrange',
+  'steakhouse':   'upscale',
+  'seafood':      'upscale',
+  'sushi':        'upscale',
+  'fine_dining':  'fine',
+};
+
+// Growth signals: what ownership rate + school count implies
+function growthTrajectory({ ownerPct, schoolCount, medianHomeValue, population }) {
+  // Owner-occupied >80% + schools present = family formation zone (growing)
+  // Owner-occupied >80% + no schools + high home value = empty nest transition
+  // Renter-heavy + low home value = transient / working class
+  if (ownerPct >= 80 && schoolCount >= 2 && population > 10_000) {
+    return { state: 'growing', label: 'Active Family Formation', confidence: 'high' };
+  }
+  if (ownerPct >= 75 && schoolCount <= 1 && medianHomeValue > 500_000) {
+    return { state: 'transitioning', label: 'Empty Nest Transition', confidence: 'medium' };
+  }
+  if (ownerPct >= 70 && schoolCount >= 1) {
+    return { state: 'stable', label: 'Established Suburban', confidence: 'medium' };
+  }
+  if (ownerPct < 50) {
+    return { state: 'transient', label: 'High Renter Turnover', confidence: 'medium' };
+  }
+  return { state: 'stable', label: 'Stable Mixed', confidence: 'low' };
+}
+
+// ── Data readers ──────────────────────────────────────────────────────────────
+
+function readJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
+function loadBusinesses(zip) {
+  // Try per-ZIP file first, fall back to main index
+  const zipFile = path.join(DATA_DIR, 'zips', `${zip}.json`);
+  if (fs.existsSync(zipFile)) {
+    const d = readJson(zipFile);
+    return Array.isArray(d) ? d : (d?.businesses || []);
+  }
+  // Fall back to scanning localIntel.json
+  const main = path.join(DATA_DIR, 'localIntel.json');
+  if (fs.existsSync(main)) {
+    const all = readJson(main);
+    const arr = Array.isArray(all) ? all : (all?.businesses || []);
+    return arr.filter(b => b.zip === zip || b.zip === String(zip));
+  }
+  return [];
+}
+
+function loadSpendingZone(zip) {
+  const zones = readJson(path.join(DATA_DIR, 'spendingZones.json'));
+  return zones?.zips?.[zip] || zones?.zips?.[String(zip)] || null;
+}
+
+function loadBedrock(zip) {
+  return readJson(path.join(DATA_DIR, 'bedrock', `${zip}.json`));
+}
+
+function loadOceanFloor(zip) {
+  return readJson(path.join(DATA_DIR, 'ocean_floor', `${zip}.json`));
+}
+
+// ── Core oracle computation ───────────────────────────────────────────────────
+
+function computeOracle(zip, name) {
+  const businesses = loadBusinesses(zip);
+  const zone       = loadSpendingZone(zip);
+  const bedrock    = loadBedrock(zip);
+  const ocean      = loadOceanFloor(zip);
+
+  // ── Demographics ──────────────────────────────────────────────────────────
+  const population   = zone?.population              || ocean?.population           || 0;
+  const medianHHI    = zone?.median_household_income || ocean?.median_household_income || 0;
+  const medianHome   = zone?.median_home_value       || ocean?.median_home_value     || 0;
+  const ownerOccPct  = zone?.ownership_rate_pct      || ocean?.owner_pct             || 60;
+  const ownerUnits   = zone?.owner_occupied_units    || 0;
+  const renterUnits  = zone?.renter_occupied_units   || 0;
+  const totalHH      = ownerUnits + renterUnits || Math.round(population / 2.5);
+
+  // ── Business inventory ────────────────────────────────────────────────────
+  const foodBiz = businesses.filter(b => {
+    const cat = (b.category || '').toLowerCase();
+    return cat.includes('restaurant') || cat.includes('food') ||
+           cat.includes('cafe') || cat.includes('fast_food') ||
+           cat.includes('bar') || cat.includes('pub') ||
+           cat.includes('bakery') || cat.includes('pizza') ||
+           cat.includes('sushi') || cat.includes('diner');
+  });
+
+  const totalBiz       = businesses.length;
+  const restaurantCount = foodBiz.length;
+
+  // Categorize by tier
+  const tierCounts = { budget: 0, midrange: 0, upscale: 0, fine: 0, unknown: 0 };
+  for (const b of foodBiz) {
+    const cat = (b.category || '').toLowerCase();
+    const tier = CATEGORY_TIER[cat] || 'unknown';
+    tierCounts[tier]++;
+  }
+
+  // Count schools
+  const schoolCount = businesses.filter(b => {
+    const cat = (b.category || '').toLowerCase();
+    return cat.includes('school') || cat.includes('college') ||
+           cat.includes('university') || cat.includes('academy') ||
+           cat.includes('kindergarten');
+  }).length;
+
+  // ── Restaurant capacity model ─────────────────────────────────────────────
+  const isAffluent = medianHHI >= 100_000;
+  const mealsOutPerDay = isAffluent ? MEALS_OUT_PER_DAY_AFFLUENT : MEALS_OUT_PER_DAY_BASE;
+  const totalMealsOutPerDay = population * mealsOutPerDay;
+
+  // Weighted avg covers/day (mix of fast food and sit-down)
+  const fastFoodShare = (tierCounts.budget / Math.max(1, restaurantCount));
+  const avgCoversPerRestaurant = Math.round(
+    fastFoodShare * AVG_FASTFOOD_COVERS_DAY +
+    (1 - fastFoodShare) * AVG_RESTAURANT_COVERS_DAY
+  );
+
+  const marketCapacityMeals = restaurantCount * avgCoversPerRestaurant;
+  const captureRate = totalMealsOutPerDay > 0
+    ? Math.round((marketCapacityMeals / totalMealsOutPerDay) * 100)
+    : 0;
+
+  // Saturation: >100% = oversupplied, <60% = room for more, 60-100% = balanced
+  let restaurantSaturation;
+  if (captureRate >= 120)     restaurantSaturation = 'oversaturated';
+  else if (captureRate >= 90) restaurantSaturation = 'balanced';
+  else if (captureRate >= 60) restaurantSaturation = 'room_for_niche';
+  else                        restaurantSaturation = 'undersupplied';
+
+  const restaurantsToSupport = population > 0
+    ? Math.round(totalMealsOutPerDay / avgCoversPerRestaurant)
+    : 0;
+
+  const gapCount = Math.max(0, restaurantsToSupport - restaurantCount);
+
+  // ── Price tier gap analysis ───────────────────────────────────────────────
+  const demandDist = priceTierDemand(medianHHI);
+  const tierGaps = [];
+
+  for (const [tier, demandPct] of Object.entries(demandDist)) {
+    const expectedCount = Math.round(restaurantsToSupport * demandPct);
+    const actualCount   = tierCounts[tier] || 0;
+    const gap           = expectedCount - actualCount;
+    const tierInfo      = PRICE_TIERS.find(t => t.label === tier);
+    tierGaps.push({
+      tier,
+      demand_pct:      Math.round(demandPct * 100),
+      expected_count:  expectedCount,
+      actual_count:    actualCount,
+      gap,
+      status:          gap > 0 ? 'undersupplied' : gap < -2 ? 'oversupplied' : 'balanced',
+      description:     tierInfo?.description || tier,
+    });
+  }
+
+  tierGaps.sort((a, b) => b.gap - a.gap); // biggest gap first
+
+  // ── Growth trajectory ─────────────────────────────────────────────────────
+  const growth = growthTrajectory({ ownerPct: ownerOccPct, schoolCount, medianHomeValue: medianHome, population });
+
+  // ── Infrastructure momentum ───────────────────────────────────────────────
+  const infraScore = bedrock?.infrastructure_momentum_score || 0;
+  const activeRoad = bedrock?.inputs?.active_road_projects  || 0;
+  const newConst   = bedrock?.inputs?.new_construction_count || 0;
+  const floodPct   = bedrock?.inputs?.flood_zone_pct        || 0;
+
+  // ── Top 3 pre-formed questions with answers ───────────────────────────────
+  const questions = [];
+
+  // Q1: Restaurant opportunity
+  if (restaurantCount > 0) {
+    const biggestGap = tierGaps[0];
+    questions.push({
+      question: `Is there room for another restaurant in ${name || zip}?`,
+      answer: restaurantSaturation === 'oversaturated'
+        ? `Probably not — ${restaurantCount} restaurants already serve ~${captureRate}% of the estimated daily meal demand for ${population.toLocaleString()} residents. The market looks saturated. If you open, differentiate hard.`
+        : restaurantSaturation === 'room_for_niche'
+        ? `Yes, but only for the right concept. The market is ${captureRate}% covered — room exists for a ${biggestGap.tier} option (${biggestGap.description}). There are ${biggestGap.actual_count} now vs. ${biggestGap.expected_count} expected at this income level.`
+        : `Yes — ${name || zip} is undersupplied. ${restaurantCount} restaurants cover only ~${captureRate}% of daily meal demand. Biggest gap: ${biggestGap.tier} dining (${biggestGap.description}).`,
+      signal_strength: restaurantSaturation === 'undersupplied' ? 'strong' : 'moderate',
+      category: 'restaurant_gap',
+    });
+  }
+
+  // Q2: Growth or decline
+  questions.push({
+    question: `Is ${name || zip} growing, stable, or becoming empty nest?`,
+    answer: growth.state === 'growing'
+      ? `Growing. ${ownerOccPct}% owner-occupied with ${schoolCount} school${schoolCount !== 1 ? 's' : ''} nearby signals active family formation. New businesses targeting families, children's services, and convenience will have a natural customer base being built for them.`
+      : growth.state === 'transitioning'
+      ? `Transitioning to empty nest. ${ownerOccPct}% owner-occupied but only ${schoolCount} school nearby, with median home value $${medianHome.toLocaleString()}. Residents are aging in place. Think healthcare, leisure, higher-end casual dining over family chains.`
+      : growth.state === 'transient'
+      ? `High renter turnover — ${100 - ownerOccPct}% renter-occupied. Customer acquisition cost is higher here; businesses that capture the local market fast win.`
+      : `Stable established suburb. Predictable demand, lower risk, but also slower upside. Proven concepts outperform experimental ones here.`,
+    signal_strength: growth.confidence,
+    category: 'growth_trajectory',
+  });
+
+  // Q3: Where is construction happening / what can it support?
+  if (infraScore > 0 || newConst > 0 || activeRoad > 0) {
+    questions.push({
+      question: `Where is building happening and what does that support?`,
+      answer: `Infrastructure momentum score: ${infraScore}/100. ${newConst > 0 ? `${newConst} new construction permits. ` : ''}${activeRoad > 0 ? `${activeRoad} active road projects. ` : ''}${floodPct > 30 ? `${floodPct}% flood zone — limits buildable area. ` : ''}At median income $${medianHHI.toLocaleString()}, new households moving in can support ${demandDist.midrange > 0.4 ? 'midrange dining, boutique fitness, and professional services' : 'budget retail and convenience services'}.`,
+      signal_strength: infraScore >= 50 ? 'strong' : 'moderate',
+      category: 'infrastructure_demand',
+    });
+  } else {
+    // Q3 fallback: caloric/category gap
+    const caloricGap = tierGaps.find(t => t.gap > 0);
+    questions.push({
+      question: `What category is most missing in ${name || zip}?`,
+      answer: caloricGap
+        ? `${caloricGap.tier.charAt(0).toUpperCase() + caloricGap.tier.slice(1)} dining is the biggest gap — income distribution suggests ${caloricGap.demand_pct}% of meals should be in that tier, but only ${caloricGap.actual_count} of the expected ${caloricGap.expected_count} spots exist. ${caloricGap.description}.`
+        : `The food category mix looks balanced for income level. Gaps exist in non-food: ${totalBiz < 50 ? 'professional services, healthcare, and retail are all thin' : 'niche specialty retail and experiential venues'}.`,
+      signal_strength: 'moderate',
+      category: 'category_gap',
+    });
+  }
+
+  // ── Oracle narrative (one paragraph) ─────────────────────────────────────
+  const dominantGap = tierGaps[0];
+  const narrative = [
+    `${name || zip} (pop. ${population.toLocaleString()}, median HHI $${medianHHI.toLocaleString()}) is ${growth.label.toLowerCase()}.`,
+    restaurantCount > 0
+      ? `With ${restaurantCount} food businesses serving an estimated ${totalMealsOutPerDay.toFixed(0)} meals/day demand, the market is ${restaurantSaturation.replace(/_/g,' ')} (${captureRate}% capture rate).`
+      : `The food sector has minimal coverage — significant white space.`,
+    dominantGap && dominantGap.gap > 0
+      ? `Biggest price-tier gap: ${dominantGap.tier} dining — ${dominantGap.actual_count} exist vs. ${dominantGap.expected_count} expected at this income level.`
+      : '',
+    growth.state === 'growing'
+      ? `Owner-occupied rate of ${ownerOccPct}% with ${schoolCount} school${schoolCount !== 1 ? 's' : ''} signals household formation — demand is being built.`
+      : growth.state === 'transitioning'
+      ? `Aging-in-place dynamics mean the customer profile is shifting toward healthcare and leisure over family services.`
+      : '',
+    infraScore >= 40
+      ? `Infrastructure momentum of ${infraScore}/100 indicates active development — new rooftops coming.`
+      : '',
+  ].filter(Boolean).join(' ');
+
+  // ── Assemble output ───────────────────────────────────────────────────────
+  return {
+    zip,
+    name:    name || zip,
+    computed_at: new Date().toISOString(),
+
+    demographics: {
+      population,
+      median_household_income: medianHHI,
+      median_home_value:       medianHome,
+      owner_occupied_pct:      ownerOccPct,
+      total_households:        totalHH,
+      consumer_profile:        isAffluent ? 'affluent_established' : 'mixed',
+    },
+
+    restaurant_capacity: {
+      restaurant_count:          restaurantCount,
+      total_businesses:          totalBiz,
+      estimated_daily_meal_demand: Math.round(totalMealsOutPerDay),
+      market_capacity_meals_day:   marketCapacityMeals,
+      capture_rate_pct:            captureRate,
+      saturation_status:           restaurantSaturation,
+      restaurants_market_can_support: restaurantsToSupport,
+      gap_count:                   gapCount,
+      tier_breakdown:              tierCounts,
+      meals_out_per_person_per_day: mealsOutPerDay,
+    },
+
+    market_gaps: {
+      price_tier_gaps: tierGaps,
+      school_count:    schoolCount,
+      top_gap:         dominantGap || null,
+    },
+
+    growth_trajectory: {
+      ...growth,
+      school_count:      schoolCount,
+      owner_occupied_pct: ownerOccPct,
+      infrastructure_momentum: infraScore,
+      active_construction: newConst,
+      active_road_projects: activeRoad,
+      flood_zone_pct: floodPct,
+    },
+
+    top_questions: questions,
+    oracle_narrative: narrative,
+
+    data_sources: {
+      businesses_indexed: totalBiz,
+      has_spending_zone:  !!zone,
+      has_bedrock:        !!bedrock,
+      has_ocean_floor:    !!ocean,
+    },
+  };
+}
+
+// ── Run & schedule ─────────────────────────────────────────────────────────────
+
+function ensureDirs() {
+  [DATA_DIR, ORACLE_DIR].forEach(d => {
+    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+  });
+}
+
+function atomicWrite(file, data) {
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, file);
+}
+
+async function runOracle() {
+  ensureDirs();
+  console.log('[oracleWorker] Starting oracle computation...');
+
+  // Discover all ZIPs from business data
+  const zones = (() => {
+    try { return JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'spendingZones.json'), 'utf8')); } catch { return {}; }
+  })();
+  const zoneZips = Object.keys(zones?.zips || {});
+
+  // Also discover from zips/ directory
+  const zipDir = path.join(DATA_DIR, 'zips');
+  const fileZips = fs.existsSync(zipDir)
+    ? fs.readdirSync(zipDir).filter(f => f.endsWith('.json')).map(f => f.replace('.json',''))
+    : [];
+
+  // Merge and dedupe
+  const allZips = [...new Set([...zoneZips, ...fileZips])];
+
+  // Add known ZIPs even without zone data
+  const KNOWN_ZIPS = [
+    { zip: '32081', name: 'Nocatee' },
+    { zip: '32082', name: 'Ponte Vedra Beach' },
+    { zip: '32092', name: 'World Golf Village' },
+    { zip: '32084', name: 'St. Augustine' },
+    { zip: '32086', name: 'St. Augustine South' },
+    { zip: '32095', name: 'Palm Valley' },
+  ];
+  for (const k of KNOWN_ZIPS) {
+    if (!allZips.includes(k.zip)) allZips.push(k.zip);
+  }
+
+  const nameMap = Object.fromEntries(KNOWN_ZIPS.map(z => [z.zip, z.name]));
+
+  const index = { generated_at: new Date().toISOString(), zips: {} };
+
+  for (const zip of allZips) {
+    try {
+      const result = computeOracle(zip, nameMap[zip]);
+      atomicWrite(path.join(ORACLE_DIR, `${zip}.json`), result);
+      index.zips[zip] = {
+        name:               result.name,
+        saturation_status:  result.restaurant_capacity.saturation_status,
+        capture_rate_pct:   result.restaurant_capacity.capture_rate_pct,
+        growth_state:       result.growth_trajectory.state,
+        consumer_profile:   result.demographics.consumer_profile,
+        top_gap:            result.market_gaps.top_gap?.tier || null,
+        computed_at:        result.computed_at,
+      };
+      console.log(`[oracleWorker] ${zip} (${result.name}): ${result.restaurant_capacity.saturation_status}, ${result.growth_trajectory.state}, gap: ${result.market_gaps.top_gap?.tier || 'none'}`);
+    } catch (err) {
+      console.error(`[oracleWorker] Error on ${zip}:`, err.message);
+    }
+  }
+
+  atomicWrite(INDEX_FILE, index);
+  console.log(`[oracleWorker] Done — ${allZips.length} ZIPs computed.`);
+}
+
+// Run immediately, then every 6 hours
+runOracle().catch(err => console.error('[oracleWorker] Fatal:', err.message));
+setInterval(() => runOracle().catch(err => console.error('[oracleWorker] Scheduled error:', err.message)), 6 * 60 * 60 * 1000);
+
+process.on('uncaughtException',  err => console.error('[oracleWorker] Uncaught:', err.message));
+process.on('unhandledRejection', r   => console.error('[oracleWorker] Rejection:', r));
