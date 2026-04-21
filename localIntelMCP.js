@@ -537,6 +537,7 @@ const MCP_MANIFEST = {
           radius_miles: { type: 'number', description: 'Search radius in miles (default 1.0)' },
         },
       },
+      annotations: { readOnly: true },
     },
     {
       name: 'local_intel_search',
@@ -551,6 +552,7 @@ const MCP_MANIFEST = {
           limit:    { type: 'integer', description: 'Max results (default 20, max 50)' },
         },
       },
+      annotations: { readOnly: true },
     },
     {
       name: 'local_intel_nearby',
@@ -567,6 +569,7 @@ const MCP_MANIFEST = {
           limit:        { type: 'integer', description: 'Max results (default 15)' },
         },
       },
+      annotations: { readOnly: true },
     },
     {
       name: 'local_intel_zone',
@@ -578,6 +581,7 @@ const MCP_MANIFEST = {
           zip: { type: 'string', description: 'ZIP code (32081 or 32082)' },
         },
       },
+      annotations: { readOnly: true },
     },
     {
       name: 'local_intel_corridor',
@@ -591,6 +595,7 @@ const MCP_MANIFEST = {
           limit:  { type: 'integer', description: 'Max results (default 20)' },
         },
       },
+      annotations: { readOnly: true },
     },
     {
       name: 'local_intel_changes',
@@ -602,11 +607,13 @@ const MCP_MANIFEST = {
           limit: { type: 'integer', description: 'Max results (default 20)' },
         },
       },
+      annotations: { readOnly: true },
     },
     {
       name: 'local_intel_stats',
       description: 'Dataset coverage stats: total businesses, confidence scores, query volume, revenue earned.',
       inputSchema: { type: 'object', properties: {} },
+      annotations: { readOnly: true },
     },
     {
       name: 'local_intel_tide',
@@ -620,6 +627,7 @@ const MCP_MANIFEST = {
           query_context:  { type: 'object', description: 'Optional: { agent_type, agent_id, purpose }' },
         },
       },
+      annotations: { readOnly: true },
     },
     {
       name: 'local_intel_signal',
@@ -633,6 +641,7 @@ const MCP_MANIFEST = {
           query_context: { type: 'object', description: 'Optional: { agent_id, purpose }' },
         },
       },
+      annotations: { readOnly: true },
     },
     {
       name: 'local_intel_bedrock',
@@ -645,6 +654,7 @@ const MCP_MANIFEST = {
           query_context: { type: 'object', description: 'Optional: { agent_type, agent_id }' },
         },
       },
+      annotations: { readOnly: true },
     },
     {
       name: 'local_intel_for_agent',
@@ -662,6 +672,7 @@ const MCP_MANIFEST = {
           agent_id:   { type: 'string', description: 'Your agent UUID for memory + delta computation' },
         },
       },
+      annotations: { readOnly: true },
     },
   ],
 };
@@ -680,7 +691,7 @@ function handleRPC(req) {
       jsonrpc: '2.0', id,
       result: {
         protocolVersion: '2024-11-05',
-        capabilities: { tools: {} },
+        capabilities: { tools: {}, prompts: {}, resources: {} },
         serverInfo: { name: MCP_MANIFEST.name, version: MCP_MANIFEST.version },
       },
     };
@@ -691,6 +702,56 @@ function handleRPC(req) {
   if (method === 'tools/list') {
     return { jsonrpc: '2.0', id, result: { tools: MCP_MANIFEST.tools } };
   }
+  if (method === 'prompts/list') {
+    return {
+      jsonrpc: '2.0', id,
+      result: {
+        prompts: [
+          {
+            name: 'local_context_brief',
+            description: 'Get a plain-language business context brief for a ZIP code or location.',
+            arguments: [
+              { name: 'zip', description: 'ZIP code (32081 or 32082)', required: false },
+              { name: 'lat', description: 'Latitude', required: false },
+              { name: 'lon', description: 'Longitude', required: false },
+            ],
+          },
+          {
+            name: 'investment_signal_brief',
+            description: 'Get a plain-language investment signal summary for a ZIP code.',
+            arguments: [
+              { name: 'zip', description: 'ZIP code (32081 or 32082)', required: true },
+              { name: 'agent_type', description: 'real_estate | financial | logistics | civic', required: false },
+            ],
+          },
+        ],
+      },
+    };
+  }
+
+  if (method === 'resources/list') {
+    return {
+      jsonrpc: '2.0', id,
+      result: {
+        resources: [
+          {
+            uri: 'localintel://coverage/32081',
+            name: 'ZIP 32081 Coverage Report',
+            description: 'Live business dataset coverage stats for Ponte Vedra Beach / Nocatee (32081).',
+            mimeType: 'application/json',
+          },
+          {
+            uri: 'localintel://coverage/32082',
+            name: 'ZIP 32082 Coverage Report',
+            description: 'Live business dataset coverage stats for Ponte Vedra Beach South (32082).',
+            mimeType: 'application/json',
+          },
+        ],
+      },
+    };
+  }
+
+
 
   if (method === 'tools/call') {
     const toolName = params?.name;
