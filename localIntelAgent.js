@@ -24,11 +24,10 @@ const express = require('express');
 const path    = require('path');
 const fs      = require('fs');
 const { paymentMiddleware } = require('x402-express');
-const { createPublicClient, createWalletClient, http, getAddress } = require('viem');
+const { createPublicClient, createWalletClient, http, getAddress, publicActions } = require('viem');
 const { base } = require('viem/chains');
 const { privateKeyToAccount } = require('viem/accounts');
 const { exact } = require('x402/schemes');
-const { decodePayment } = require('x402/schemes');
 
 // ── x402 payment config ───────────────────────────────────────────────
 // TREASURY receives USDC on Base mainnet.
@@ -38,13 +37,15 @@ const X402_TREASURY = process.env.X402_TREASURY || '0x774f484192Cf3F4fB9716Af2e1
 
 // ── Self-hosted facilitator (avoids x402.org/facilitator which is testnet-only) ──
 // Uses exact.evm.verify (local EIP-3009 sig check) + exact.evm.settle (on-chain USDC transfer).
-// TREASURY_PK must be set in Railway to submit settlement txs.
+// TREASURY_PK is used to submit the transferWithAuthorization settlement tx.
+// Client is extended with publicActions so exact.evm.settle can call verifyTypedData internally.
 const _treasuryRaw = process.env.THROW_TREASURY_PK || '';
 const TREASURY_PK  = _treasuryRaw.startsWith('0x') ? _treasuryRaw : (_treasuryRaw ? '0x' + _treasuryRaw : null);
 
 const basePublicClient = createPublicClient({ chain: base, transport: http() });
+// Extended wallet = walletClient + publicActions (needed for exact.evm.settle which calls verifyTypedData)
 const baseTreasuryWallet = TREASURY_PK
-  ? createWalletClient({ account: privateKeyToAccount(TREASURY_PK), chain: base, transport: http() })
+  ? createWalletClient({ account: privateKeyToAccount(TREASURY_PK), chain: base, transport: http() }).extend(publicActions)
   : null;
 
 // Self-facilitator: verify + settle EIP-3009 payments directly on Base
