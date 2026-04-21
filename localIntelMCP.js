@@ -764,16 +764,16 @@ function handleRPC(req) {
       '32073': 'Orange Park West',
     };
     const resources = Object.entries(zipCounts).sort().map(([zip, count]) => ({
-      uri: \`localintel://coverage/\${zip}\`,
-      name: \`ZIP \${zip} Coverage Report\`,
-      description: \`\${ZIP_LABELS[zip] || 'St. Johns County'} (\${zip}) — \${count} businesses in live dataset.\`,
+      uri: `localintel://coverage/${zip}`,
+      name: `ZIP ${zip} Coverage Report`,
+      description: `${ZIP_LABELS[zip] || 'St. Johns County'} (${zip}) — ${count} businesses in live dataset.`,
       mimeType: 'application/json',
     }));
     // Add a system-wide summary resource
     resources.unshift({
       uri: 'localintel://coverage/all',
       name: 'Full Coverage Summary',
-      description: \`All \${Object.keys(zipCounts).length} ZIPs in LocalIntel — \${allData.length} total businesses.\`,
+      description: `All ${Object.keys(zipCounts).length} ZIPs in LocalIntel — ${allData.length} total businesses.`,
       mimeType: 'application/json',
     });
     return { jsonrpc: '2.0', id, result: { resources } };
