@@ -4910,36 +4910,34 @@ app.use((req, res, next) => {
   ENSURE_DIRS.forEach(d => { try { fs.mkdirSync(d, { recursive: true }); } catch(e) {} });
 
   const SEED_SENTINEL = path.join(DATA_DIR, '.seeded');
-  if (fs.existsSync(SEED_SENTINEL)) {
-    console.log('[volume-seed] Volume already seeded — skipping.');
-    return;
-  }
+  // Never skip — always sync seed data so updated files (phones, new businesses) land on volume.
 
   if (!fs.existsSync(SEED_DIR)) {
     console.warn('[volume-seed] No data-seed/ directory found — skipping seed.');
     return;
   }
 
-  // Recursively copy all files from data-seed/ → data/ (only if missing)
-  function copyIfMissing(srcDir, dstDir) {
+  // Recursively copy all files from data-seed/ → data/
+  // Always overwrites so updated seed data (new businesses, phone fixes, etc.) lands on the volume.
+  function copyAll(srcDir, dstDir) {
     const entries = fs.readdirSync(srcDir, { withFileTypes: true });
     for (const entry of entries) {
       const srcPath = path.join(srcDir, entry.name);
       const dstPath = path.join(dstDir, entry.name);
       if (entry.isDirectory()) {
         fs.mkdirSync(dstPath, { recursive: true });
-        copyIfMissing(srcPath, dstPath);
-      } else if (!fs.existsSync(dstPath)) {
+        copyAll(srcPath, dstPath);
+      } else {
         fs.copyFileSync(srcPath, dstPath);
-        console.log(`[volume-seed] Seeded ${entry.name}`);
+        console.log(`[volume-seed] Synced ${entry.name}`);
       }
     }
   }
 
   try {
-    copyIfMissing(SEED_DIR, DATA_DIR);
+    copyAll(SEED_DIR, DATA_DIR);
     fs.writeFileSync(SEED_SENTINEL, JSON.stringify({ seededAt: new Date().toISOString(), version: 1 }));
-    console.log('[volume-seed] ✓ Volume seeded from data-seed/. Sentinel written.');
+    console.log('[volume-seed] ✓ Volume synced from data-seed/. Sentinel written.');
   } catch (e) {
     console.error('[volume-seed] Seed failed:', e.message);
   }
