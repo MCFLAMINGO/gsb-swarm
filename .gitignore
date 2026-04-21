@@ -1,0 +1,7 @@
+node_modules/
+data/zips/
+data/*.json
+data/agentMemory/
+data/sourceLog.json
+data/zipCoverage.json
+houston-chamber-import-result.json

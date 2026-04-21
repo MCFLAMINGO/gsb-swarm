@@ -31,7 +31,9 @@
     "confidence": 100,
     "sources": [
       "OSM"
-    ]
+    ],
+    "osm_id": "node/5174470563",
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "McDonald's",
@@ -46,7 +48,9 @@
     "confidence": 100,
     "sources": [
       "OSM"
-    ]
+    ],
+    "osm_id": "way/622461169",
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Publix",
@@ -61,7 +65,9 @@
     "confidence": 100,
     "sources": [
       "OSM"
-    ]
+    ],
+    "osm_id": "way/668688247",
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "RW Wealth",
@@ -114,7 +120,9 @@
     "confidence": 90,
     "sources": [
       "OSM"
-    ]
+    ],
+    "osm_id": "node/7176682433",
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Valley Smoke Restaurant - Barbecue Restaurant",
@@ -129,7 +137,9 @@
     "confidence": 90,
     "sources": [
       "OSM"
-    ]
+    ],
+    "osm_id": "node/7176682476",
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "LuLu's Waterfront Grille",
@@ -148,7 +158,8 @@
     ],
     "osm_id": 7176682902,
     "osm_type": "node",
-    "confidence": 85
+    "confidence": 85,
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Palm Valley Fish Camp",
@@ -167,7 +178,8 @@
     ],
     "osm_id": 7176682914,
     "osm_type": "node",
-    "confidence": 85
+    "confidence": 85,
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Lord of Life Lutheran Church - Lutheran church",
@@ -239,7 +251,9 @@
     "confidence": 80,
     "sources": [
       "OSM"
-    ]
+    ],
+    "osm_id": "node/3752286325",
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Palm Valley Outdoors Bar & Grill",
@@ -303,7 +317,8 @@
     ],
     "osm_id": 6264980405,
     "osm_type": "node",
-    "confidence": 95
+    "confidence": 95,
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Beach Shutters and Blinds",
@@ -334,10 +349,12 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 70,
+    "confidence": 75,
     "sources": [
       "OSM"
-    ]
+    ],
+    "osm_id": "node/9461191717",
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Palmer Catholic Academy",
@@ -429,21 +446,6 @@
     "osm_id": 771194322,
     "osm_type": "way",
     "confidence": 65
-  },
-  {
-    "name": "Anastasia Club",
-    "category": "social_centre",
-    "zip": "32082",
-    "lat": 30.082484,
-    "lon": -81.394117,
-    "address": "",
-    "phone": "",
-    "website": "https://www.delwebb.com/homes/florida/northeast-florida/ponte-vedra/del-webb-ponte-vedra-100237",
-    "hours": "",
-    "confidence": 60,
-    "sources": [
-      "OSM"
-    ]
   },
   {
     "name": "Anastasia Club",
@@ -568,7 +570,8 @@
     ],
     "osm_id": 6262063915,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 75,
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Trasca & Co Eatery",
@@ -587,7 +590,8 @@
     ],
     "osm_id": 6264980401,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 75,
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Chico's",
@@ -606,7 +610,8 @@
     ],
     "osm_id": 6264980402,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 75,
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Christy's Dream Ice Cream",
@@ -682,7 +687,8 @@
     ],
     "osm_id": 6264980468,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 75,
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Starbucks",
@@ -701,7 +707,8 @@
     ],
     "osm_id": 6264980469,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 75,
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Beth El - Reform synagogue",
@@ -758,7 +765,8 @@
     ],
     "osm_id": 8761543718,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 75,
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Cultural Center at Ponte Vedra Beach",
@@ -815,7 +823,8 @@
     ],
     "osm_id": 668688250,
     "osm_type": "way",
-    "confidence": 65
+    "confidence": 75,
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Wells Fargo",
@@ -834,7 +843,8 @@
     ],
     "osm_id": 668689350,
     "osm_type": "way",
-    "confidence": 65
+    "confidence": 75,
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Nona Blue Modern Tavern",
@@ -853,7 +863,8 @@
     ],
     "osm_id": 668689351,
     "osm_type": "way",
-    "confidence": 65
+    "confidence": 75,
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "Aqua Grill",
@@ -872,7 +883,8 @@
     ],
     "osm_id": 668689355,
     "osm_type": "way",
-    "confidence": 65
+    "confidence": 75,
+    "last_updated": "2026-04-21T05:41:30.092Z"
   },
   {
     "name": "ABC Fine Wines & Spirits",
@@ -911,5 +923,221 @@
     "osm_id": 771194323,
     "osm_type": "way",
     "confidence": 45
+  },
+  {
+    "name": "Tony's Pizza",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.2269634,
+    "lon": -81.3890729,
+    "address": "302 Solana Road",
+    "city": "Ponte Vedra Beach",
+    "state": "FL",
+    "phone": null,
+    "website": null,
+    "hours": null,
+    "osm_id": "node/6248296455",
+    "source": "osm",
+    "confidence": 70,
+    "last_updated": "2026-04-21T05:41:06.027Z",
+    "region": "FL"
+  },
+  {
+    "name": "Winn-Dixie",
+    "category": "grocery",
+    "zip": "32082",
+    "lat": 30.2265495,
+    "lon": -81.3889387,
+    "address": "290 Solana Road",
+    "city": "Ponte Vedra Beach",
+    "state": "FL",
+    "phone": "+1 904-543-8668",
+    "website": "https://www.winndixie.com/storedetails/ponte%20vedra%20beach/fl?search=5",
+    "hours": null,
+    "osm_id": "node/6248296457",
+    "source": "osm",
+    "confidence": 70,
+    "last_updated": "2026-04-21T05:41:06.027Z",
+    "region": "FL"
+  },
+  {
+    "name": "Woody's BBQ",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.2266548,
+    "lon": -81.3874366,
+    "address": "226 Solana Road",
+    "city": "Ponte Vedra Beach",
+    "state": "FL",
+    "phone": null,
+    "website": null,
+    "hours": null,
+    "osm_id": "node/6248296464",
+    "source": "osm",
+    "confidence": 70,
+    "last_updated": "2026-04-21T05:41:06.027Z",
+    "region": "FL"
+  },
+  {
+    "name": "Dunkin'",
+    "category": "fast_food",
+    "zip": "32082",
+    "lat": 30.2263843,
+    "lon": -81.3874246,
+    "address": "226 Solana Road",
+    "city": "Ponte Vedra Beach",
+    "state": "FL",
+    "phone": "+1 904-686-1091",
+    "website": "https://locations.dunkindonuts.com/en/fl/ponte-vedra-beach/226-solana-rd/352212",
+    "hours": "05:00-20:00",
+    "osm_id": "node/6248296465",
+    "source": "osm",
+    "confidence": 70,
+    "last_updated": "2026-04-21T05:41:06.027Z",
+    "region": "FL"
+  },
+  {
+    "name": "Don's Barber Shop",
+    "category": "beauty",
+    "zip": "32082",
+    "lat": 30.2265221,
+    "lon": -81.3874336,
+    "address": "La Pasada Circle",
+    "city": "Ponte Vedra Beach",
+    "state": "FL",
+    "phone": null,
+    "website": "https://www.donsbarbershoppvb.net/",
+    "hours": null,
+    "osm_id": "node/6248296466",
+    "source": "osm",
+    "confidence": 70,
+    "last_updated": "2026-04-21T05:41:06.027Z",
+    "region": "FL"
+  },
+  {
+    "name": "Domino's",
+    "category": "fast_food",
+    "zip": "32082",
+    "lat": 30.2258875,
+    "lon": -81.3873583,
+    "address": "236 Solana Road",
+    "city": "Ponte Vedra Beach",
+    "state": "FL",
+    "phone": "+1 904-285-1220",
+    "website": "https://pizza.dominos.com/florida/ponte-vedra-beach/236-solana-rd",
+    "hours": "Mo-Th 10:00-24:00; Fr-Sa 10:00-01:00; Su 10:00-24:00",
+    "osm_id": "node/6248296467",
+    "source": "osm",
+    "confidence": 70,
+    "last_updated": "2026-04-21T05:41:06.027Z",
+    "region": "FL"
+  },
+  {
+    "name": "Subway",
+    "category": "fast_food",
+    "zip": "32082",
+    "lat": 30.2258745,
+    "lon": -81.3880296,
+    "address": "254 Solana Road",
+    "city": "Ponte Vedra Beach",
+    "state": "FL",
+    "phone": "+1 904-834-7942",
+    "website": "https://restaurants.subway.com/united-states/fl/ponte-vedra-beach/254-solana-road",
+    "hours": "11:00-20:00",
+    "osm_id": "node/6248296468",
+    "source": "osm",
+    "confidence": 70,
+    "last_updated": "2026-04-21T05:41:06.027Z",
+    "region": "FL"
+  },
+  {
+    "name": "Two Dudes Seafood Restaurant",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.2258719,
+    "lon": -81.3882644,
+    "address": "La Pasada Circle North",
+    "city": "Ponte Vedra Beach",
+    "state": "FL",
+    "phone": null,
+    "website": null,
+    "hours": null,
+    "osm_id": "node/6248296470",
+    "source": "osm",
+    "confidence": 70,
+    "last_updated": "2026-04-21T05:41:06.027Z",
+    "region": "FL"
+  },
+  {
+    "name": "Tuptim Thai Four",
+    "category": "restaurant",
+    "zip": "32082",
+    "lat": 30.2258927,
+    "lon": -81.387548,
+    "address": "La Pasada Circle",
+    "city": "Ponte Vedra Beach",
+    "state": "FL",
+    "phone": null,
+    "website": null,
+    "hours": null,
+    "osm_id": "node/6248296471",
+    "source": "osm",
+    "confidence": 70,
+    "last_updated": "2026-04-21T05:41:06.027Z",
+    "region": "FL"
+  },
+  {
+    "name": "Sawgrass Marriott Golf Resort & Spa",
+    "category": "hotel",
+    "zip": "32082",
+    "lat": 30.2026864,
+    "lon": -81.3853001,
+    "address": "York Road",
+    "city": "Ponte Vedra Beach",
+    "state": "FL",
+    "phone": null,
+    "website": null,
+    "hours": null,
+    "osm_id": "way/422248516",
+    "source": "osm",
+    "confidence": 70,
+    "last_updated": "2026-04-21T05:41:06.027Z",
+    "region": "FL"
+  },
+  {
+    "name": "Hilton Garden Inn Jacksonville/Ponte Vedra",
+    "category": "hotel",
+    "zip": "32082",
+    "lat": 30.2054524,
+    "lon": -81.3838291,
+    "address": "45 TPC Boulevard",
+    "city": "Ponte Vedra Beach",
+    "state": "FL",
+    "phone": "+1 904-280-1661",
+    "website": "https://www.hilton.com/en/hotels/jaxpvgi-hilton-garden-inn-jacksonville-ponte-vedra-sawgrass/",
+    "hours": null,
+    "osm_id": "way/668688253",
+    "source": "osm",
+    "confidence": 70,
+    "last_updated": "2026-04-21T05:41:06.027Z",
+    "region": "FL"
+  },
+  {
+    "name": "The Lodge and Club",
+    "category": "hotel",
+    "zip": "32082",
+    "lat": 30.2189462,
+    "lon": -81.371897,
+    "address": null,
+    "city": "Ponte Vedra Beach",
+    "state": "FL",
+    "phone": null,
+    "website": null,
+    "hours": null,
+    "osm_id": "way/917426243",
+    "source": "osm",
+    "confidence": 70,
+    "last_updated": "2026-04-21T05:41:06.027Z",
+    "region": "FL"
   }
 ]

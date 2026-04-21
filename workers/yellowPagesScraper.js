@@ -75,7 +75,10 @@ function fetchRaw(url, timeoutMs = 12000) {
       timeout: timeoutMs,
     }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return resolve(fetchRaw(res.headers.location, timeoutMs));
+        // Resolve relative redirects against the original URL
+        let loc = res.headers.location;
+        if (loc.startsWith('/')) loc = `https://www.yellowpages.com${loc}`;
+        return resolve(fetchRaw(loc, timeoutMs));
       }
       let body = '';
       res.on('data', c => { body += c; });
