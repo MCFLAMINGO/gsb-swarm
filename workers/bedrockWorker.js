@@ -6,9 +6,9 @@
  * Monthly + weekly incremental infrastructure signals.
  *
  * Pulls:
- *  - SJC building permits  (Socrata API)
+ *  - SJC building permits  (ArcGIS FeatureServer)
  *  - FDOT road projects     (ArcGIS REST)
- *  - FEMA flood zone data   (NFHL REST)
+ *  - FEMA flood zone data   (NFHL REST, hardcoded fallback)
  *
  * Computes infrastructure_momentum_score 0-100 for each SJC ZIP.
  * Writes data/bedrock/{zip}.json + data/bedrock/_index.json
@@ -36,6 +36,17 @@ const SJC_ZIPS = [
   { zip: '32080', lat: 29.8600, lon: -81.2700, name: 'St. Augustine Beach' },
 ];
 
+// ── Known flood zone percentages (FEMA NFHL fallback) ─────────────────────────
+// Values: estimated % of ZIP land area in high-risk zones (A/AE/VE).
+const FEMA_FLOOD_FALLBACK = {
+  '32081': 65,  // Nocatee — extensive wetlands + tidal
+  '32082':  8,  // Ponte Vedra Beach — mostly X zone
+  '32084': 15,  // St. Augustine
+  '32086': 12,  // St. Augustine South
+  '32092': 10,  // World Golf Village
+  '32080': 20,  // St. Augustine Beach
+};
+
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
 function ensureDirs() {
@@ -51,29 +62,29 @@ function atomicWrite(filePath, data) {
 }
 
 function logError(context, err) {
-  console.log(`[bedrockWorker] ERROR [${context}]:`, err.message || err);
+  console.error(`[bedrockWorker] ERROR [${context}]:`, err.message || err);
   let errors = [];
   try { errors = JSON.parse(fs.readFileSync(ERRORS_FILE, 'utf8')); } catch (_) {}
   errors.push({ ts: new Date().toISOString(), context, message: err.message || String(err) });
-  // Keep last 200 errors
   if (errors.length > 200) errors = errors.slice(-200);
   try { atomicWrite(ERRORS_FILE, errors); } catch (_) {}
 }
 
 async function safeFetch(url, opts = {}) {
+  const timeoutMs = opts._timeout || 20_000;
+  delete opts._timeout;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20_000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, { ...opts, signal: controller.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
     return await res.json();
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timer);
   }
 }
 
 // ── Bounding box helper (degrees) ─────────────────────────────────────────────
-// ~±0.07° ≈ ~5 miles each side — generous enough for ZIP centroid
 function bbox(lat, lon, deg = 0.07) {
   return {
     xmin: lon - deg, ymin: lat - deg,
@@ -84,23 +95,26 @@ function bbox(lat, lon, deg = 0.07) {
 // ── Data fetchers ─────────────────────────────────────────────────────────────
 
 /**
- * Fetch building permits from SJC Socrata API.
- * Returns { new_construction_count, renovation_count, utility_extensions, zoning_changes }
+ * Fetch building permits from SJC ArcGIS FeatureServer.
+ * Replaces dead Socrata endpoint (data.sjcfl.us — connection refused).
  */
 async function fetchPermits(zipEntry) {
   const { zip } = zipEntry;
-  // Primary endpoint — Socrata dataset nj4f-u3vi
-  const primaryUrl =
-    `https://data.sjcfl.us/resource/nj4f-u3vi.json` +
-    `?zip_code=${zip}&$limit=1000&$select=permit_type,work_type,issued_date`;
+  // SJC ArcGIS permits layer — publicly accessible, no key required
+  const url =
+    `https://services1.arcgis.com/AVP60cs0Q9PEA8rH/arcgis/rest/services/Building_Permits/FeatureServer/0/query` +
+    `?where=${encodeURIComponent(`ZIP_CODE='${zip}'`)}` +
+    `&outFields=PERMIT_TYPE,WORK_TYPE,ISSUED_DATE` +
+    `&returnGeometry=false` +
+    `&f=json` +
+    `&resultRecordCount=1000`;
 
-  let records = [];
+  let features = [];
   try {
-    records = await safeFetch(primaryUrl);
-    console.log(`[bedrockWorker] Permits for ${zip}: ${records.length} records`);
+    const data = await safeFetch(url, { _timeout: 15_000 });
+    features = data.features || [];
   } catch (err) {
-    // Primary endpoint (data.sjcfl.us) is currently offline — skip silently
-    console.log(`[bedrockWorker] Permits unavailable for ${zip} — using zeros`);
+    logError(`permits-${zip}`, err);
     return { new_construction_count: 0, renovation_count: 0, utility_extensions: 0, zoning_changes: 0 };
   }
 
@@ -109,8 +123,9 @@ async function fetchPermits(zipEntry) {
   let utility_extensions     = 0;
   let zoning_changes         = 0;
 
-  for (const r of records) {
-    const type = ((r.permit_type || r.work_type || '')).toLowerCase();
+  for (const f of features) {
+    const attrs = f.attributes || {};
+    const type = ((attrs.PERMIT_TYPE || attrs.WORK_TYPE || '')).toLowerCase();
     if (/new.*(construction|building|residential|commercial)/.test(type)) new_construction_count++;
     else if (/renov|remodel|addition|alter/.test(type)) renovation_count++;
     else if (/utilit|sewer|water.*(main|ext)|electric.*ext/.test(type)) utility_extensions++;
@@ -141,9 +156,8 @@ async function fetchFdotProjects(zipEntry) {
     `&resultRecordCount=200`;
 
   try {
-    const data = await safeFetch(url);
+    const data = await safeFetch(url, { _timeout: 10_000 });
     const features = data.features || [];
-    console.log(`[bedrockWorker] FDOT features for ${zip}: ${features.length}`);
 
     let active_road_projects = 0;
     let planned_projects     = 0;
@@ -157,14 +171,14 @@ async function fetchFdotProjects(zipEntry) {
     return { active_road_projects, planned_projects };
   } catch (err) {
     logError(`fdot-${zip}`, err);
-    console.log(`[bedrockWorker] FDOT unavailable for ${zip} — using zeros`);
     return { active_road_projects: 0, planned_projects: 0 };
   }
 }
 
 /**
  * Fetch FEMA NFHL flood zone data for a ZIP centroid.
- * Returns { flood_zone_pct }  (0–100: % of queried features in high-risk zones AE/A/VE)
+ * Returns { flood_zone_pct }
+ * Falls back to FEMA_FLOOD_FALLBACK table on timeout or error.
  */
 async function fetchFloodZone(zipEntry) {
   const { zip, lat, lon } = zipEntry;
@@ -183,11 +197,14 @@ async function fetchFloodZone(zipEntry) {
     `&resultRecordCount=500`;
 
   try {
-    const data = await safeFetch(url);
+    const data = await safeFetch(url, { _timeout: 8_000 });
     const features = data.features || [];
-    console.log(`[bedrockWorker] FEMA features for ${zip}: ${features.length}`);
 
-    if (features.length === 0) return { flood_zone_pct: 0, raw_zone_counts: {} };
+    if (features.length === 0) {
+      // Zero features likely means timeout returned empty — use fallback
+      const fallback = FEMA_FLOOD_FALLBACK[zip] ?? 10;
+      return { flood_zone_pct: fallback, raw_zone_counts: {}, source: 'fallback-empty' };
+    }
 
     const zoneCounts = {};
     for (const f of features) {
@@ -195,17 +212,17 @@ async function fetchFloodZone(zipEntry) {
       zoneCounts[z] = (zoneCounts[z] || 0) + 1;
     }
 
-    // High-risk: zones starting with A or V
     const highRisk = Object.entries(zoneCounts)
       .filter(([z]) => /^[AV]/.test(z))
       .reduce((s, [, c]) => s + c, 0);
 
     const flood_zone_pct = Math.round((highRisk / features.length) * 100);
-    return { flood_zone_pct, raw_zone_counts: zoneCounts };
+    return { flood_zone_pct, raw_zone_counts: zoneCounts, source: 'live' };
   } catch (err) {
-    logError(`fema-${zip}`, err);
-    console.log(`[bedrockWorker] FEMA unavailable for ${zip} — assuming 10% flood zone`);
-    return { flood_zone_pct: 10, raw_zone_counts: {} };
+    // Timeout or 504 — use hardcoded fallback
+    const fallback = FEMA_FLOOD_FALLBACK[zip] ?? 10;
+    logError(`fema-${zip}`, { message: `${err.message} — using fallback ${fallback}%` });
+    return { flood_zone_pct: fallback, raw_zone_counts: {}, source: 'fallback-error' };
   }
 }
 
@@ -217,12 +234,7 @@ function computeScore({ new_construction_count, renovation_count, utility_extens
   const road_investment_score       = Math.min(25, active_road_projects * 8 + planned_projects * 3);
   const utility_score               = Math.min(15, utility_extensions * 5);
   const zoning_score                = Math.min(10, zoning_changes * 3);
-
-  // natural_resource_penalty: 0-25 deducted for flood risk.
-  // flood_zone_pct 0  → no penalty (stable/improving)
-  // flood_zone_pct 50 → -12.5
-  // flood_zone_pct 100 → -25
-  const natural_resource_penalty = Math.min(25, flood_zone_pct * 0.25);
+  const natural_resource_penalty    = Math.min(25, flood_zone_pct * 0.25);
 
   const raw = construction_activity_score + road_investment_score + utility_score + zoning_score - natural_resource_penalty;
   const infrastructure_momentum_score = Math.max(0, Math.min(100, Math.round(raw)));
@@ -243,7 +255,6 @@ function computeScore({ new_construction_count, renovation_count, utility_extens
 
 async function processZip(zipEntry, mode = 'incremental') {
   const { zip, lat, lon, name } = zipEntry;
-  console.log(`[bedrockWorker] Processing ${zip} (${name}) — ${mode}`);
 
   const [permits, fdot, fema] = await Promise.all([
     fetchPermits(zipEntry),
@@ -267,7 +278,6 @@ async function processZip(zipEntry, mode = 'incremental') {
 
   const outPath = path.join(BEDROCK_DIR, `${zip}.json`);
   atomicWrite(outPath, result);
-  console.log(`[bedrockWorker] Wrote ${outPath} — score ${scoring.infrastructure_momentum_score}`);
   return result;
 }
 
@@ -277,18 +287,14 @@ async function runBedrock(mode = 'incremental') {
   console.log(`[bedrockWorker] Starting ${mode} run at ${new Date().toISOString()}`);
   ensureDirs();
 
-  // Determine ZIPs to process.
-  // Try reading zipQueue.json first, fall back to zipCoverage.json, fall back to hardcoded list.
   let targetZips = SJC_ZIPS;
   const queueFile    = path.join(DATA_DIR, 'zipQueue.json');
   const coverageFile = path.join(DATA_DIR, 'zipCoverage.json');
 
   try {
     const queue = JSON.parse(fs.readFileSync(queueFile, 'utf8'));
-    // queue may be array of zip strings or objects
     if (Array.isArray(queue) && queue.length > 0) {
       const queueZips = queue.map(z => typeof z === 'string' ? z : z.zip).filter(Boolean);
-      // Filter to SJC_ZIPS that are in the queue, or use all if queue doesn't overlap
       const filtered = SJC_ZIPS.filter(z => queueZips.includes(z.zip));
       if (filtered.length > 0) targetZips = filtered;
     }
@@ -301,7 +307,7 @@ async function runBedrock(mode = 'incremental') {
       const filtered = SJC_ZIPS.filter(z => coveredZips.includes(z.zip));
       if (filtered.length > 0) targetZips = filtered;
     } catch (_2) {
-      // Use hardcoded SJC_ZIPS (default)
+      // Use hardcoded SJC_ZIPS
     }
   }
 
@@ -311,6 +317,7 @@ async function runBedrock(mode = 'incremental') {
     zips: [],
   };
 
+  const scores = [];
   for (const zipEntry of targetZips) {
     try {
       const result = await processZip(zipEntry, mode);
@@ -320,14 +327,14 @@ async function runBedrock(mode = 'incremental') {
         infrastructure_momentum_score: result.infrastructure_momentum_score,
         updated_at: result.updated_at,
       });
+      scores.push(`${result.zip}=${result.infrastructure_momentum_score}`);
     } catch (err) {
       logError(`processZip-${zipEntry.zip}`, err);
-      console.log(`[bedrockWorker] Skipping ${zipEntry.zip} after error`);
     }
   }
 
   atomicWrite(INDEX_FILE, index);
-  console.log(`[bedrockWorker] ${mode} run complete. Index written to ${INDEX_FILE}`);
+  console.log(`[bedrockWorker] ${mode} run complete — ${scores.join(', ')}`);
 }
 
 // ── Scheduling ────────────────────────────────────────────────────────────────
@@ -339,31 +346,32 @@ const MONTHLY_MS = 30 * 24 * 60 * 60 * 1000;
 
 process.on('uncaughtException', (err) => {
   try { logError('uncaughtException', err); } catch (_) {}
-  console.log('[bedrockWorker] Uncaught exception (recovered):', err.message);
+  console.error('[bedrockWorker] Uncaught exception (recovered):', err.message);
 });
 
 process.on('unhandledRejection', (reason) => {
   try { logError('unhandledRejection', { message: String(reason) }); } catch (_) {}
-  console.log('[bedrockWorker] Unhandled rejection (recovered):', reason);
+  console.error('[bedrockWorker] Unhandled rejection (recovered):', reason);
 });
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 (async () => {
-  // Initial run on start
   await runBedrock('full');
 
-  // Weekly incremental
   setInterval(async () => {
     try { await runBedrock('incremental'); }
     catch (err) { logError('weeklyInterval', err); }
   }, WEEKLY_MS);
 
-  // Monthly full refresh
   setInterval(async () => {
     try { await runBedrock('full'); }
     catch (err) { logError('monthlyInterval', err); }
   }, MONTHLY_MS);
 
-  console.log(`[bedrockWorker] Scheduled: weekly incremental (${WEEKLY_MS}ms) + monthly full (${MONTHLY_MS}ms)`);
+  // Keep-alive: prevents Node from exiting between interval ticks,
+  // which would trigger spawnLocalIntelWorker's auto-restart loop.
+  setInterval(() => {}, 1 << 30);
+
+  console.log(`[bedrockWorker] Scheduled — weekly incremental every ${WEEKLY_MS}ms, monthly full every ${MONTHLY_MS}ms`);
 })();
