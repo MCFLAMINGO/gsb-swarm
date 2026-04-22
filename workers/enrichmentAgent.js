@@ -629,6 +629,11 @@ async function enrichmentCycle() {
     let businesses;
     try { businesses = JSON.parse(fs.readFileSync(path.join(ZIPS_DIR, file))); }
     catch (e) { continue; }
+    // Guard: skip files that aren't business arrays (e.g. OSM single-object files)
+    if (!Array.isArray(businesses)) {
+      console.warn(`[EnrichmentAgent] Skipping ${file} — not an array (type: ${typeof businesses})`);
+      continue;
+    }
 
     // Candidates: needs enrichment OR is STALE/COLD (re-enrichment due)
     // Never re-run within 24h regardless of tier
@@ -737,7 +742,7 @@ app.get('/log', (req, res) => res.json(loadLog().slice(-100)));
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
-const CYCLE_MS = 30 * 60 * 1000; // every 30 minutes
+const CYCLE_MS = 10 * 60 * 1000; // every 10 minutes
 
 app.listen(PORT, () => {
   console.log(`[EnrichmentAgent] Running on port ${PORT}`);
