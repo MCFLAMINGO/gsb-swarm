@@ -1,17 +1,81 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-16/server.schema.json",
   "name": "io.github.mcflamingo/local-intel",
-  "description": "LocalIntel — agentic business intelligence for St. Johns County FL (32081 + 32082). Spatial context, tidal momentum scores, spending zones, corridor analysis, and staleness-graded data. 11 tools covering local_intel_context, search, nearby, zone, corridor, changes, stats, tide, signal, bedrock, and the premium local_intel_for_agent composite endpoint. Two payment rails: $0.01–$0.05/call USDC on Base via x402, or pathUSD on Tempo mainnet.",
+  "description": "LocalIntel — agentic business intelligence for Northeast Florida. 20 tools covering spatial context, business search, spending zones, corridor analysis, tidal momentum scores, sector gap ranking, vertical agents (restaurant/healthcare/retail/construction/realtor), inference cache with scout dispatch, and local_intel_query — a fuzzy intent router that resolves any plain-English market question to the right ZIP, vertical, and tool automatically. 500+ trained prompts across 27 ZIPs. Two payment rails: $0.01–$0.05/call USDC on Base via x402, or pathUSD on Tempo mainnet.",
   "status": "active",
   "repository": {
     "url": "https://github.com/MCFLAMINGO/gsb-swarm",
     "source": "github"
   },
-  "version": "1.0.0",
+  "version": "1.1.0",
   "remotes": [
     {
       "type": "streamable-http",
       "url": "https://gsb-swarm-production.up.railway.app/api/local-intel/mcp"
     }
-  ]
+  ],
+  "configSchema": {
+    "type": "object",
+    "title": "LocalIntel MCP Configuration",
+    "description": "Optional configuration for LocalIntel MCP server. All fields are optional — the server operates in read-only free mode without any keys. Payment rails and enrichment sources require the relevant keys.",
+    "properties": {
+      "MCP_ENDPOINT": {
+        "type": "string",
+        "title": "MCP Endpoint Override",
+        "description": "Override the default MCP endpoint URL. Defaults to https://gsb-swarm-production.up.railway.app/api/local-intel/mcp",
+        "default": "https://gsb-swarm-production.up.railway.app/api/local-intel/mcp"
+      },
+      "X402_ENABLED": {
+        "type": "boolean",
+        "title": "Enable x402 Payment Rail",
+        "description": "Set to true to enable USDC-on-Base micropayments via the x402 paywall at /mcp/x402 ($0.01–$0.05/call). Requires a funded Base wallet on the calling agent.",
+        "default": false
+      },
+      "TEMPO_ENABLED": {
+        "type": "boolean",
+        "title": "Enable Tempo pathUSD Rail",
+        "description": "Set to true to enable pathUSD-on-Tempo micropayments at /mcp/x402/premium. Requires a funded Tempo mainnet wallet on the calling agent.",
+        "default": false
+      },
+      "ENRICHMENT_ENDPOINT": {
+        "type": "string",
+        "title": "Enrichment Agent Endpoint",
+        "description": "Internal endpoint for the scout/enrichment agent. Only needed if running a self-hosted LocalIntel instance. Defaults to http://localhost:3007/run",
+        "default": "http://localhost:3007/run"
+      }
+    },
+    "required": []
+  },
+  "tools": {
+    "count": 20,
+    "pricing": {
+      "free_tier": ["local_intel_context","local_intel_search","local_intel_nearby","local_intel_zone","local_intel_corridor","local_intel_changes","local_intel_stats"],
+      "standard_0_01": ["local_intel_search","local_intel_zone","local_intel_changes","local_intel_stats"],
+      "standard_0_02": ["local_intel_context","local_intel_nearby","local_intel_corridor","local_intel_tide","local_intel_bedrock","local_intel_realtor","local_intel_healthcare","local_intel_retail","local_intel_construction","local_intel_restaurant"],
+      "standard_0_03": ["local_intel_oracle","local_intel_signal","local_intel_sector_gap","local_intel_query"],
+      "premium_0_05": ["local_intel_for_agent","local_intel_ask"]
+    }
+  },
+  "prompts": {
+    "count": 500,
+    "verticals": ["restaurant","healthcare","retail","construction","realtor"],
+    "zips_covered": 27,
+    "evolution": "daily — promptEvolutionWorker rewrites oracle_prompts_v2.json, retires low-signal prompts, and promotes gap-targeted questions"
+  },
+  "data_layer": {
+    "sources": ["Census ACS 5-year 2023","ZBP 2018","CBP 2023","PDB 2024","YellowPages","OSM Nominatim","Chamber of Commerce directories","County appraiser records"],
+    "refresh_schedule": {
+      "oracle": "every 6 hours",
+      "census_layer": "weekly",
+      "enrichment": "every 30 minutes",
+      "prompt_evolution": "daily at 2am",
+      "vertical_agents": "every 6 hours"
+    },
+    "inference_cache": {
+      "ttl_high_confidence": "7 days",
+      "ttl_med_confidence": "3 days",
+      "ttl_low_confidence": "6 hours",
+      "scout_dispatch": "automatic on confidence < 40"
+    }
+  }
 }

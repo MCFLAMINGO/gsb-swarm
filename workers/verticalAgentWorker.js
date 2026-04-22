@@ -25,13 +25,37 @@
 
 const path = require('path');
 const fs   = require('fs');
+const http = require('http');
 
 const DATA_DIR     = path.join(__dirname, '..', 'data');
 const VERTICALS_DIR = path.join(DATA_DIR, 'verticals');
 const GAPS_DIR     = path.join(DATA_DIR, 'gaps');
 const RUNS_DIR     = path.join(DATA_DIR, 'vertical-runs');
 
-const MCP_ENDPOINT = process.env.MCP_ENDPOINT || 'http://localhost:3001/api/local-intel/mcp';
+const MCP_ENDPOINT        = process.env.MCP_ENDPOINT || 'http://localhost:3001/api/local-intel/mcp';
+const ENRICHMENT_ENDPOINT = process.env.ENRICHMENT_ENDPOINT || 'http://localhost:3007/run';
+
+// ── Inference cache ───────────────────────────────────────────────────────────
+const inferenceCache = require('./inferenceCache');
+
+// ── Scout dispatch — triggers enrichmentAgent on cache miss + low confidence ──
+function dispatchScout(zip, vertical, query) {
+  try {
+    const payload = JSON.stringify({ zip, vertical, query, source: 'vertical_agent_miss' });
+    const url     = new URL(ENRICHMENT_ENDPOINT);
+    const req     = http.request({
+      hostname: url.hostname,
+      port:     url.port || 3007,
+      path:     url.pathname,
+      method:   'POST',
+      headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+    }, () => {}); // fire-and-forget
+    req.on('error', () => {}); // swallow — enrichment is best-effort
+    req.write(payload);
+    req.end();
+    console.log(`[verticalAgent] scout dispatched for ${zip}/${vertical}`);
+  } catch (_) {}
+}
 
 // ── Vertical Configs ──────────────────────────────────────────────────────────
 // Each config maps industry intent to MCP tool + how to extract params from prompt
@@ -444,31 +468,55 @@ async function handleVerticalQuery(verticalKey, query, zip) {
   const config = VERTICALS[verticalKey];
   if (!config) return { error: `Unknown vertical: ${verticalKey}` };
 
-  const prompt = { q: query, zip: zip || config.defaultZips[0] };
+  const resolvedZip = zip || config.defaultZips[0];
+
+  // ── 1. Cache check ───────────────────────────────────────────────────────────
+  const cached = inferenceCache.get(query, verticalKey, resolvedZip);
+  if (cached) {
+    return {
+      vertical:         verticalKey,
+      industry:         config.name,
+      query,
+      zip:              resolvedZip,
+      tool_used:        cached.tool,
+      confidence_score: cached.confidence,
+      data:             cached.answer,
+      _cache:           { hit: true, similarity: cached.similarity, expires_at: cached.expires_at },
+    };
+  }
+
+  // ── 2. Run tool ───────────────────────────────────────────────────────────────
+  const prompt = { q: query, zip: resolvedZip };
   const { tool, args } = routePrompt(verticalKey, prompt);
   const result = await callMCP(tool, args);
   const score  = scoreAnswer(tool, result);
 
-  // Log gap if low quality
+  // ── 3. Store in cache (all results, any confidence) ───────────────────────────
+  inferenceCache.set(query, verticalKey, resolvedZip, tool, result, score);
+
+  // ── 4. Low confidence: log gap + dispatch scout ──────────────────────────────
   if (score < 40) {
     const gapFile = path.join(GAPS_DIR, `${verticalKey}.json`);
     let gaps = [];
     try { gaps = JSON.parse(fs.readFileSync(gapFile, 'utf8')); } catch (_) {}
-    const key = `${zip}|${query}`;
+    const key = `${resolvedZip}|${query}`;
     if (!gaps.find(g => `${g.zip}|${g.prompt}` === key)) {
-      gaps.push({ prompt: query, zip, tool, industry: verticalKey, score, ts: new Date().toISOString() });
+      gaps.push({ prompt: query, zip: resolvedZip, tool, industry: verticalKey, score, ts: new Date().toISOString() });
       try { atomicWrite(gapFile, gaps); } catch (_) {}
     }
+    // Fire scout agent — non-blocking
+    dispatchScout(resolvedZip, verticalKey, query);
   }
 
   return {
-    vertical: verticalKey,
-    industry: config.name,
+    vertical:         verticalKey,
+    industry:         config.name,
     query,
-    zip,
-    tool_used: tool,
+    zip:              resolvedZip,
+    tool_used:        tool,
     confidence_score: score,
-    data: result,
+    data:             result,
+    _cache:           { hit: false },
   };
 }
 

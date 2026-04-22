@@ -33,6 +33,74 @@ const PORT         = parseInt(process.env.LOCAL_INTEL_MCP_PORT || '3004');
 // ── Tidal tools ──────────────────────────────────────────────────────────────
 const { handleTide, handleSignal, handleBedrock, handleForAgent, handleAsk } = require('./localIntelTidalTools');
 const { handleVerticalQuery } = require('./workers/verticalAgentWorker');
+const { route }               = require('./workers/intentRouter');
+const inferenceCache          = require('./workers/inferenceCache');
+
+// ── handleQuery — fuzzy intent router entry point ─────────────────────────────
+// Single tool an LLM can call with any plain-English question about any market.
+// Checks inference cache first, routes to correct vertical + ZIP, dispatches
+// scout on low confidence. Multi-ZIP queries return ranked results.
+async function handleQuery(params) {
+  const query = (params.query || params.q || '').trim();
+  if (!query) return { error: 'query required — pass any plain-English question about a local market' };
+
+  const r = route(query);
+
+  // Override ZIP if caller provided one explicitly
+  const zip = (params.zip || r.zip || '').replace(/\D/g, '').slice(0, 5) || r.zip;
+
+  // Cache check
+  if (r.vertical) {
+    const cached = inferenceCache.get(query, r.vertical, zip);
+    if (cached) {
+      return {
+        query,
+        routed_to:        r.tool,
+        vertical:         r.vertical,
+        zip,
+        route_confidence: r.route_confidence,
+        reasoning:        r.reasoning,
+        answer:           cached.answer,
+        confidence_score: cached.confidence,
+        _cache:           { hit: true, similarity: cached.similarity, expires_at: cached.expires_at },
+      };
+    }
+  }
+
+  // Route to vertical handler or ask tool
+  let answer;
+  if (r.vertical) {
+    answer = await handleVerticalQuery(r.vertical, query, zip);
+  } else {
+    answer = handleAsk({ query, zip });
+    if (answer && typeof answer.then === 'function') answer = await answer;
+  }
+
+  // Multi-ZIP: run top additional ZIPs if region query
+  let multiResults = null;
+  if (r.multi_zip && r.zips.length > 1 && r.vertical) {
+    multiResults = await Promise.all(
+      r.zips.slice(1).map(z => handleVerticalQuery(r.vertical, query, z).catch(() => null))
+    );
+    multiResults = multiResults.filter(Boolean);
+  }
+
+  return {
+    query,
+    routed_to:        r.tool,
+    vertical:         r.vertical,
+    zip,
+    zips_evaluated:   r.zips,
+    route_confidence: r.route_confidence,
+    reasoning:        r.reasoning,
+    answer,
+    multi_zip_results: multiResults,
+    _cache:           { hit: false },
+    _llm_hint:        r.route_confidence < 50
+      ? 'Low routing confidence — consider calling local_intel_ask with a more specific ZIP or location name'
+      : `Routed to ${r.tool} with ${r.route_confidence}% confidence. Chain local_intel_sector_gap for gap analysis.`,
+  };
+}
 
 // ── Oracle handler ─────────────────────────────────────────────────────────────
 function handleOracle(params) {
@@ -297,6 +365,7 @@ const TOOL_COSTS = {
   local_intel_construction: 0.02,
   local_intel_restaurant:   0.02,
   local_intel_ask:          0.05,
+  local_intel_query:        0.03,
   local_intel_stats:    0.005,
 };
 
@@ -970,13 +1039,14 @@ const TOOLS = {
   local_intel_construction: { fn: (p) => handleVerticalQuery('construction', p.query, p.zip), desc: 'Construction and home services intelligence: active permits, contractor density, population growth driving demand.' },
   local_intel_restaurant:   { fn: (p) => handleVerticalQuery('restaurant',   p.query, p.zip), desc: 'Restaurant market intelligence: saturation scores, price-tier gaps, capture rate, corridor analysis, tidal momentum.' },
   local_intel_ask:          { fn: handleAsk, desc: 'Composite NL query layer — ask any plain-English question about a ZIP and get a synthesized, sourced answer. Routes internally to zone, oracle, search, bedrock, signal, tide, corridor, changes, and nearby tools. Single entry point for humans and LLMs.' },
+  local_intel_query:        { fn: handleQuery, desc: 'Fuzzy intent router — pass any plain-English question about any local market. Automatically detects ZIP, industry vertical, and best tool. Checks inference cache first (instant return if hit). On cache miss, routes to the correct vertical agent, stores result, and dispatches a scout agent if confidence is low. Handles region queries ("Northeast Florida", "St Johns County") by evaluating top ZIPs in parallel. Best first call for any LLM that does not know the ZIP or industry in advance.' },
 };
 
 // ── MCP manifest (tools/list response) ───────────────────────────────────────
 const MCP_MANIFEST = {
   name: 'localintel',
   version: '1.0.0',
-  description: 'LocalIntel — agentic business intelligence for St. Johns County FL (32081 + 32082). Spatial context, business search, spending zones, corridor analysis.',
+  description: 'LocalIntel — agentic business intelligence for Northeast Florida. 20 tools: spatial context, business search, spending zones, corridor analysis, tidal momentum scores, sector gap ranking, vertical agents (restaurant/healthcare/retail/construction/realtor), inference cache with scout dispatch, and local_intel_query — a fuzzy intent router that resolves any plain-English market question to the right ZIP, vertical, and tool automatically. 500+ trained prompts across 27 ZIPs. Two payment rails: $0.01–$0.05/call USDC on Base via x402, or pathUSD on Tempo mainnet.',
   tools: [
     {
       name: 'local_intel_context',
@@ -1192,6 +1262,19 @@ const MCP_MANIFEST = {
           zip: { type: 'string', description: 'ZIP code (optional — will be extracted from question if present, defaults to 32082)' },
         },
         required: ['question'],
+      },
+      annotations: { readOnly: true },
+    },
+    {
+      name: 'local_intel_query',
+      description: 'Fuzzy intent router — pass any plain-English question about any local market. Automatically detects ZIP, industry vertical, and best tool. Checks inference cache first (instant return on hit). On miss, routes to the correct vertical agent, stores result, and dispatches a scout agent if confidence is low. Handles region queries ("Northeast Florida", "St Johns County") by evaluating top ZIPs in parallel. Best first call for any LLM that does not know the ZIP or vertical in advance.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Any plain-English question about a local market, e.g. "where should I open a clinic in Northeast Florida" or "what food gaps exist in Nocatee"' },
+          zip:   { type: 'string', description: 'Optional ZIP code override. If omitted, ZIP is detected from the query or derived from region signals.' },
+        },
+        required: ['query'],
       },
       annotations: { readOnly: true },
     },
