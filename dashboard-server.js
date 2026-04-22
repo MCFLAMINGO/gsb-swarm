@@ -537,7 +537,7 @@ app.get('/.well-known/mcp/server-card.json', (req, res) => {
     serverInfo: {
       name: 'LocalIntel by MCFLAMINGO',
       version: '1.2.0',
-      description: 'Agentic business intelligence for NE Florida — St. Johns, Duval, Clay, Nassau counties. 30+ covered ZIPs, 33K+ businesses. 19 MCP tools across 5 verticals. Sector gap analysis (local_intel_sector_gap) identifies NAICS whitespace at ZIP level — Census-backed demand estimates with confidence scoring. 500 oracle prompts. Composite NL query via local_intel_ask. Two payment rails: $0.01–$0.05/call USDC on Base (x402) or pathUSD on Tempo mainnet. Free discovery feed: /api/sector-gap/feed'
+      description: 'Agentic business intelligence for NE Florida — St. Johns, Duval, Clay, Nassau counties. 30+ covered ZIPs, 33K+ businesses. 20 MCP tools across 5 verticals. Sector gap analysis (local_intel_sector_gap) identifies NAICS whitespace at ZIP level — Census-backed demand estimates with confidence scoring. 500 oracle prompts. Composite NL query via local_intel_ask. Two payment rails: $0.01–$0.05/call USDC on Base (x402) or pathUSD on Tempo mainnet. Free discovery feed: /api/sector-gap/feed'
     },
     authentication: { required: false },
     tools: [
@@ -560,6 +560,7 @@ app.get('/.well-known/mcp/server-card.json', (req, res) => {
       { name: 'local_intel_retail',    description: 'Retail market intelligence: store categories, spending capture, consumer profile, undersupplied niches.', inputSchema: { type: 'object', required: ['query', 'zip'], properties: { query: { type: 'string', description: 'Natural language question about retail market' }, zip: { type: 'string', description: 'ZIP code' } } } },
       { name: 'local_intel_construction', description: 'Construction and home services intelligence: active permits, contractor density, population growth driving demand.', inputSchema: { type: 'object', required: ['query', 'zip'], properties: { query: { type: 'string', description: 'Natural language question about construction market' }, zip: { type: 'string', description: 'ZIP code' } } } },
       { name: 'local_intel_restaurant', description: 'Restaurant and food service market intelligence: saturation scores, price-tier gaps, capture rates, corridor analysis, tidal momentum. Trained on 100 restaurant prompts.', inputSchema: { type: 'object', required: ['query', 'zip'], properties: { query: { type: 'string', description: 'Natural language question about restaurant market' }, zip: { type: 'string', description: 'ZIP code' } } } },
+      { name: 'local_intel_query', description: 'BEST FIRST CALL FOR UNKNOWN MARKETS. Fuzzy intent router — pass any plain-English question about any local market. Automatically detects ZIP, vertical, and best tool. Checks inference cache first (instant return on hit). On miss, routes to the correct vertical agent and dispatches a scout if confidence is low. Handles region queries ("Northeast Florida", "St Johns County") by evaluating top ZIPs in parallel. Use this when you do not know the ZIP or vertical in advance.', inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string', description: 'Any plain-English market question', examples: ['where should I open a clinic in Northeast Florida', 'what food gaps exist in Nocatee', 'retail whitespace in St Johns County'] }, zip: { type: 'string', description: 'Optional ZIP override — detected from query if omitted' } } } },
     ],
     resources: [],
     prompts: [
@@ -1064,7 +1065,38 @@ app.get('/.well-known/mcp/server-card.json', (req, res) => {
       { name: 're_099_im_a_relocation_specialist_helping', description: "[Realtor] I'm a relocation specialist helping corporate transferees move to Jacksonville — what percentage of my clients should I be steering toward St. Johns County ZIPs versus Duval County based on school quality and commute time?", arguments: [{"name": "zip", "description": "ZIP code to analyze (e.g. 32082, 32081, 32084)", "required": false, "default": "32082"}] },
       { name: 're_100_whats_the_pipeline_of_agerestricted', description: "[Realtor] What's the pipeline of age-restricted (55+) community development in St. Johns County and which ZIPs are seeing the most activity?", arguments: [{"name": "zip", "description": "ZIP code to analyze (e.g. 32082, 32081, 32084)", "required": false, "default": "32082"}] },
     ],
-    configSchema: { type: 'object', properties: {}, required: [] },
+    configSchema: {
+      type: 'object',
+      title: 'LocalIntel MCP Configuration',
+      description: 'No API keys required. Server runs in full read-only mode without any configuration. Payment rails and self-hosted enrichment require the optional fields below.',
+      properties: {
+        MCP_ENDPOINT: {
+          type: 'string',
+          title: 'MCP Endpoint Override',
+          description: 'Override the default MCP endpoint. Defaults to https://gsb-swarm-production.up.railway.app/api/local-intel/mcp',
+          default: 'https://gsb-swarm-production.up.railway.app/api/local-intel/mcp',
+        },
+        X402_ENABLED: {
+          type: 'boolean',
+          title: 'Enable x402 Payment Rail',
+          description: 'Enable USDC-on-Base micropayments via x402 ($0.01–$0.05/call). Requires a funded Base wallet on the calling agent.',
+          default: false,
+        },
+        TEMPO_ENABLED: {
+          type: 'boolean',
+          title: 'Enable Tempo pathUSD Rail',
+          description: 'Enable pathUSD-on-Tempo micropayments at the premium endpoint. Requires a funded Tempo mainnet wallet.',
+          default: false,
+        },
+        ENRICHMENT_ENDPOINT: {
+          type: 'string',
+          title: 'Scout Agent Endpoint',
+          description: 'Enrichment/scout agent endpoint. Only needed for self-hosted deployments. Defaults to http://localhost:3007/run',
+          default: 'http://localhost:3007/run',
+        },
+      },
+      required: [],
+    },
   });
 });
 
