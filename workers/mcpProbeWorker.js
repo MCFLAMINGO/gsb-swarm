@@ -35,56 +35,69 @@ const STAGGER_MS    =  2 * 60 * 1000;  // 2 min startup delay
 const MAX_LOG       = 500;
 const MCP_URL       = 'http://localhost:8080/api/local-intel/mcp';
 
-// ── Personas + their prompt templates ────────────────────────────────────────
+// ── Personas + their actual oracle tool names ────────────────────────────────
+// Tools use real prefixes from the oracle: fb_=restaurant, re_=realtor,
+// cx_=construction, rx_=retail, hc_=healthcare
+// Each persona rotates through 6 tools so we test breadth.
 const PERSONAS = [
   {
     id: 'realtor_rosa',
     role: 'Realtor / Real Estate Investor',
-    tool: 'local_intel_realtor',
-    prompts: [
-      (zip, name) => `What are the best commercial real estate opportunities in ${zip} ${name}? Focus on income demographics and infrastructure momentum.`,
-      (zip, name) => `Is ${zip} ${name} a strong market for a new mixed-use development in the next 24 months?`,
-      (zip, name) => `What is the flood risk profile for ${zip} and how does it affect commercial property values?`,
+    tools: [
+      're_001_whats_the_median_household_income',
+      're_002_is_32082_a_buyers_market',
+      're_006_whats_the_flood_zone_exposure',
+      're_008_whats_the_new_development_pipeline',
+      're_013_whats_the_commercial_vacancy_rate',
+      're_015_what_infrastructure_investments_are_plan',
     ],
   },
   {
     id: 'chef_marco',
     role: 'Restaurant Group Owner',
-    tool: 'local_intel_restaurant',
-    prompts: [
-      (zip, name) => `Is ${zip} ${name} oversaturated with casual dining, or is there a gap for a new concept?`,
-      (zip, name) => `What cuisine types are missing from the ${zip} restaurant market? I'm looking for a whitespace opportunity.`,
-      (zip, name) => `What's the income profile of ${zip} ${name} and will it support a $25 average check restaurant?`,
+    tools: [
+      'fb_001_is_32082_oversaturated_with_casual',
+      'fb_002_what_cuisine_types_are_missing',
+      'fb_004_show_me_the_restaurant_density',
+      'fb_005_whats_the_breakfasttodinner_ratio_of',
+      'fb_009_what_does_the_deliveryversusdinein_split',
+      'fb_010_im_a_franchise_operator_evaluating',
     ],
   },
   {
     id: 'builder_ben',
     role: 'Construction Company',
-    tool: 'local_intel_construction',
-    prompts: [
-      (zip, name) => `What is the new construction activity level in ${zip} ${name}? Are permits trending up or down?`,
-      (zip, name) => `Is there demand for a roofing and exterior contractor expanding into ${zip}?`,
-      (zip, name) => `What infrastructure projects are planned for ${zip} ${name} in the next 12-36 months?`,
+    tools: [
+      'cx_001_whats_the_permit_velocity_in',
+      'cx_002_is_32082_oversaturated_with_general',
+      'cx_004_im_a_roofing_contractor_evaluating',
+      'cx_007_whats_the_luxury_remodel_demand',
+      'cx_009_whats_the_renovationversusnewbuild_split',
+      'cx_016_im_a_commercial_contractor_whats',
     ],
   },
   {
     id: 'retailer_rita',
     role: 'Retail Expansion Analyst',
-    tool: 'local_intel_retail',
-    prompts: [
-      (zip, name) => `What retail categories are undersupplied in ${zip} ${name} given the income and population profile?`,
-      (zip, name) => `Is ${zip} a good market for a specialty outdoor and fitness retail store?`,
-      (zip, name) => `What is the spending capture rate in ${zip} and where are residents going outside the ZIP to shop?`,
+    tools: [
+      'rx_001_is_32082_oversaturated_with_boutique',
+      'rx_002_what_retail_spending_categories_are',
+      'rx_004_whats_the_luxury_retail_gap',
+      'rx_008_is_there_a_specialty_outdoor',
+      'rx_009_what_is_the_consumer_spending',
+      'rx_013_what_retail_categories_are_most',
     ],
   },
   {
     id: 'health_harriet',
     role: 'Healthcare Group',
-    tool: 'local_intel_healthcare',
-    prompts: [
-      (zip, name) => `What healthcare provider gaps exist in ${zip} ${name}? I'm evaluating urgent care and specialty clinic locations.`,
-      (zip, name) => `What is the senior population concentration in ${zip} and what services are underserved?`,
-      (zip, name) => `Is there demand for a pediatric clinic in ${zip} ${name} based on family demographics?`,
+    tools: [
+      'hc_001_is_32082_oversaturated_with_dentists',
+      'hc_002_whats_the_primary_care_physician',
+      'hc_004_what_specialist_gaps_exist_in',
+      'hc_005_is_there_demand_for_a',
+      'hc_007_how_does_the_senior_population',
+      'hc_009_what_does_the_pediatric_care',
     ],
   },
 ];
@@ -192,49 +205,46 @@ function appendLog(entry) {
 
 // ── Run one persona probe cycle ───────────────────────────────────────────────
 async function runPersona(persona, zipPool, cycleIndex) {
-  // Each persona gets 3 different ZIPs rotated by cycle
-  const startIdx = (cycleIndex * 3) % zipPool.length;
-  const zips     = [
-    zipPool[startIdx % zipPool.length],
-    zipPool[(startIdx + 1) % zipPool.length],
-    zipPool[(startIdx + 2) % zipPool.length],
+  // Rotate through both ZIPs and tools each cycle
+  const startIdx  = (cycleIndex * 3) % zipPool.length;
+  const startTool = (cycleIndex * 2) % persona.tools.length;
+
+  const calls = [
+    { zip: zipPool[startIdx % zipPool.length].zip,       tool: persona.tools[startTool % persona.tools.length] },
+    { zip: zipPool[(startIdx+1) % zipPool.length].zip,   tool: persona.tools[(startTool+1) % persona.tools.length] },
+    { zip: zipPool[(startIdx+2) % zipPool.length].zip,   tool: persona.tools[(startTool+2) % persona.tools.length] },
   ];
 
-  for (let i = 0; i < zips.length; i++) {
-    const { zip, name } = zips[i];
-    const promptFn      = persona.prompts[i % persona.prompts.length];
-    const query         = promptFn(zip, name);
-
-    const t0 = Date.now();
-    let entry = {
-      ts:       new Date().toISOString(),
-      persona:  persona.id,
-      role:     persona.role,
-      tool:     persona.tool,
+  for (const { zip, tool } of calls) {
+    const found = zipPool.find(z => z.zip === zip);
+    const name  = found?.name || '';
+    const t0    = Date.now();
+    const entry = {
+      ts:            new Date().toISOString(),
+      persona:       persona.id,
+      role:          persona.role,
+      tool,
       zip,
       name,
-      query,
-      score:    0,
-      reason:   'not_run',
-      latency_ms: 0,
+      score:         0,
+      reason:        'not_run',
+      latency_ms:    0,
       answer_length: 0,
-      error:    null,
+      error:         null,
     };
 
     try {
-      const resp = await callMcp(persona.tool, { query, zip });
-      entry.latency_ms    = Date.now() - t0;
-      const { score, reason } = scoreResponse(resp.body, persona.tool);
-      entry.score         = score;
-      entry.reason        = reason;
-      entry.http_status   = resp.status;
-      // Store first 300 chars of answer for morning review
-      const content = resp.body?.result?.content;
-      const text    = Array.isArray(content) ? content.map(c => c?.text || '').join(' ') : '';
-      entry.answer_snippet = text.slice(0, 300);
+      const resp = await callMcp(tool, { zip });
+      entry.latency_ms  = Date.now() - t0;
+      const { score, reason } = scoreResponse(resp.body, tool);
+      entry.score       = score;
+      entry.reason      = reason;
+      entry.http_status = resp.status;
+      const content     = resp.body?.result?.content;
+      const text        = Array.isArray(content) ? content.map(c => c?.text || '').join(' ') : '';
+      entry.answer_snippet = text.slice(0, 400);
       entry.answer_length  = text.length;
-
-      console.log(`[mcp-probe] ${persona.id} | ${zip} | score:${score} | ${reason} | ${entry.latency_ms}ms`);
+      console.log(`[mcp-probe] ${persona.id} | ${zip} | ${tool} | score:${score} | ${reason} | ${entry.latency_ms}ms`);
     } catch (err) {
       entry.latency_ms = Date.now() - t0;
       entry.error      = err.message;
@@ -244,8 +254,6 @@ async function runPersona(persona, zipPool, cycleIndex) {
     }
 
     appendLog(entry);
-
-    // Small gap between calls — don't hammer
     await new Promise(r => setTimeout(r, 2000));
   }
 }
