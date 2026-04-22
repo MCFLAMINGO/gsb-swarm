@@ -465,12 +465,12 @@ if (require.main === module) {
   } catch (_) {
     console.log('[BTRWorker] Installing Python deps (requests, beautifulsoup4)...');
     try {
-      execSync('pip3 install --quiet requests beautifulsoup4', { stdio: 'inherit' });
+      execSync('pip3 install --quiet --break-system-packages requests beautifulsoup4', { stdio: 'inherit' });
       console.log('[BTRWorker] Python deps installed');
     } catch (e) {
-      console.error('[BTRWorker] pip install failed — BTR disabled:', e.message);
-      // Exit cleanly so dashboard-server doesn't restart-loop us
-      process.exit(0);
+      console.error('[BTRWorker] pip install failed — BTR disabled, worker will idle:', e.message);
+      // Do NOT exit — just let the worker idle so the server stays up
+      return;
     }
   }
   console.log('[BTRWorker] Starting BTR import...');
