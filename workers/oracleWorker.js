@@ -112,7 +112,7 @@ function loadBusinesses(zip) {
 
 function loadSpendingZone(zip) {
   const zones = readJson(path.join(DATA_DIR, 'spendingZones.json'));
-  return zones?.zips?.[zip] || zones?.zips?.[String(zip)] || null;
+  return zones?.zones?.[zip] || zones?.zones?.[String(zip)] || null;
 }
 
 function loadBedrock(zip) {
@@ -130,6 +130,16 @@ function computeOracle(zip, name) {
   const zone       = loadSpendingZone(zip);
   const bedrock    = loadBedrock(zip);
   const ocean      = loadOceanFloor(zip);
+
+  // ── Data quality gate ─────────────────────────────────────────────────────
+  // Reject ZIPs with no demographic data AND insufficient business coverage.
+  // These produce population=0 → 0% capture → false "opportunity high" signals.
+  const hasZoneData  = !!zone;
+  const hasOceanData = !!ocean;
+  const hasDemoData  = hasZoneData || hasOceanData;
+  if (!hasDemoData && businesses.length < 5) {
+    return { skip: true, reason: 'insufficient_data', zip, businesses: businesses.length };
+  }
 
   // ── Demographics ──────────────────────────────────────────────────────────
   const population   = zone?.population              || ocean?.population           || 0;
@@ -441,7 +451,7 @@ async function runOracle() {
   const zones = (() => {
     try { return JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'spendingZones.json'), 'utf8')); } catch { return {}; }
   })();
-  const zoneZips = Object.keys(zones?.zips || {});
+  const zoneZips = Object.keys(zones?.zones || {});
 
   // Also discover from zips/ directory
   const zipDir = path.join(DATA_DIR, 'zips');
@@ -450,7 +460,10 @@ async function runOracle() {
     : [];
 
   // Merge and dedupe
-  const allZips = [...new Set([...zoneZips, ...fileZips])];
+  // NOTE: fileZips intentionally excluded — data/zips/ contains non-SJC ZIPs
+  // (Georgia, etc.) with no demographic data that produce bogus gap signals.
+  // Only zone-backed ZIPs + KNOWN_ZIPS run through the oracle.
+  const allZips = [...new Set([...zoneZips])];
 
   // Add known ZIPs even without zone data
   const KNOWN_ZIPS = [
@@ -472,6 +485,12 @@ async function runOracle() {
   for (const zip of allZips) {
     try {
       const result = computeOracle(zip, nameMap[zip]);
+
+      // Skip ZIPs that failed the data quality gate
+      if (result.skip) {
+        console.log(`[oracleWorker] SKIP ${zip}: ${result.reason} (${result.businesses} businesses, no demo data)`);
+        continue;
+      }
 
       // Append to time-series BEFORE writing current (so computeTrend reads previous run)
       const trend = computeTrend(zip);
