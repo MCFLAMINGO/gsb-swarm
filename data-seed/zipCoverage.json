@@ -1,0 +1,18 @@
+{
+  "completed": {
+    "32082": {
+      "businesses": 557,
+      "confidence": 72,
+      "completedAt": "2026-04-21T00:00:00.000Z",
+      "source": "seed"
+    },
+    "32081": {
+      "businesses": 83,
+      "confidence": 61,
+      "completedAt": "2026-04-21T00:00:00.000Z",
+      "source": "seed"
+    }
+  },
+  "lastRun": "2026-04-21T00:00:00.000Z",
+  "note": "Seed baseline \u2014 workers will overwrite with live data"
+}
