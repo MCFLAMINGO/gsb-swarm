@@ -35,69 +35,69 @@ const STAGGER_MS    =  2 * 60 * 1000;  // 2 min startup delay
 const MAX_LOG       = 500;
 const MCP_URL       = 'http://localhost:8080/api/local-intel/mcp';
 
-// ── Personas + their actual oracle tool names ────────────────────────────────
-// Tools use real prefixes from the oracle: fb_=restaurant, re_=realtor,
-// cx_=construction, rx_=retail, hc_=healthcare
-// Each persona rotates through 6 tools so we test breadth.
+// ── Personas + natural language queries ──────────────────────────────────────
+// All queries go through local_intel_query — the fuzzy intent router.
+// No tool names needed. Query includes ZIP so router resolves it automatically.
+// These are real questions a paying customer would ask.
 const PERSONAS = [
   {
     id: 'realtor_rosa',
     role: 'Realtor / Real Estate Investor',
-    tools: [
-      're_001_whats_the_median_household_income',
-      're_002_is_32082_a_buyers_market',
-      're_006_whats_the_flood_zone_exposure',
-      're_008_whats_the_new_development_pipeline',
-      're_013_whats_the_commercial_vacancy_rate',
-      're_015_what_infrastructure_investments_are_plan',
+    queries: [
+      zip => `What is the median household income in ${zip} and how does it compare to the county average?`,
+      zip => `Is ${zip} a buyer's or seller's market right now?`,
+      zip => `What is the flood zone exposure in ${zip} and how does it affect property values?`,
+      zip => `What new development is in the pipeline for ${zip}?`,
+      zip => `What is the commercial vacancy rate in ${zip}?`,
+      zip => `What infrastructure investments are planned for ${zip} in the next 2 years?`,
     ],
   },
   {
     id: 'chef_marco',
     role: 'Restaurant Group Owner',
-    tools: [
-      'fb_001_is_32082_oversaturated_with_casual',
-      'fb_002_what_cuisine_types_are_missing',
-      'fb_004_show_me_the_restaurant_density',
-      'fb_005_whats_the_breakfasttodinner_ratio_of',
-      'fb_009_what_does_the_deliveryversusdinein_split',
-      'fb_010_im_a_franchise_operator_evaluating',
+    queries: [
+      zip => `Is ${zip} oversaturated with casual dining restaurants?`,
+      zip => `What cuisine types are missing from the ${zip} restaurant market?`,
+      zip => `Show me the restaurant density per capita in ${zip}`,
+      zip => `Is there a breakfast daypart gap in ${zip}?`,
+      zip => `What does the delivery versus dine-in split look like in ${zip}?`,
+      zip => `I'm a franchise operator evaluating ${zip} — how many fast casual concepts are already there?`,
     ],
   },
   {
     id: 'builder_ben',
     role: 'Construction Company',
-    tools: [
-      'cx_001_whats_the_permit_velocity_in',
-      'cx_002_is_32082_oversaturated_with_general',
-      'cx_004_im_a_roofing_contractor_evaluating',
-      'cx_007_whats_the_luxury_remodel_demand',
-      'cx_009_whats_the_renovationversusnewbuild_split',
-      'cx_016_im_a_commercial_contractor_whats',
+    queries: [
+      zip => `What is the permit velocity in ${zip} — how many new residential permits in the last 12 months?`,
+      zip => `Is ${zip} oversaturated with general contractors?`,
+      zip => `Is there demand for a roofing contractor expanding into ${zip}?`,
+      zip => `What is the luxury remodel demand in ${zip}?`,
+      zip => `What is the renovation versus new build split in ${zip}?`,
+      zip => `I'm a commercial contractor — what is the pipeline of commercial projects in ${zip}?`,
     ],
   },
   {
     id: 'retailer_rita',
     role: 'Retail Expansion Analyst',
-    tools: [
-      'rx_001_is_32082_oversaturated_with_boutique',
-      'rx_002_what_retail_spending_categories_are',
-      'rx_004_whats_the_luxury_retail_gap',
-      'rx_008_is_there_a_specialty_outdoor',
-      'rx_009_what_is_the_consumer_spending',
-      'rx_013_what_retail_categories_are_most',
+    queries: [
+      zip => `Is ${zip} oversaturated with boutique clothing stores?`,
+      zip => `What retail spending categories are undersupplied in ${zip}?`,
+      zip => `What is the luxury retail gap in ${zip}?`,
+      zip => `Is there a specialty outdoor and fitness retail opportunity in ${zip}?`,
+      zip => `What is the consumer spending profile in ${zip}?`,
+      zip => `What retail categories are most underrepresented in ${zip} given the income level?`,
     ],
   },
   {
     id: 'health_harriet',
     role: 'Healthcare Group',
-    tools: [
-      'hc_001_is_32082_oversaturated_with_dentists',
-      'hc_002_whats_the_primary_care_physician',
-      'hc_004_what_specialist_gaps_exist_in',
-      'hc_005_is_there_demand_for_a',
-      'hc_007_how_does_the_senior_population',
-      'hc_009_what_does_the_pediatric_care',
+    queries: [
+      zip => `Is ${zip} oversaturated with dentists?`,
+      zip => `What is the primary care physician density in ${zip}?`,
+      zip => `What specialist gaps exist in ${zip}?`,
+      zip => `Is there demand for an urgent care clinic in ${zip}?`,
+      zip => `How does the senior population in ${zip} affect healthcare demand?`,
+      zip => `What does the pediatric care market look like in ${zip}?`,
     ],
   },
 ];
@@ -205,27 +205,28 @@ function appendLog(entry) {
 
 // ── Run one persona probe cycle ───────────────────────────────────────────────
 async function runPersona(persona, zipPool, cycleIndex) {
-  // Rotate through both ZIPs and tools each cycle
-  const startIdx  = (cycleIndex * 3) % zipPool.length;
-  const startTool = (cycleIndex * 2) % persona.tools.length;
+  // Rotate through ZIPs and queries each cycle
+  const startIdx   = (cycleIndex * 3) % zipPool.length;
+  const startQuery = (cycleIndex * 2) % persona.queries.length;
 
   const calls = [
-    { zip: zipPool[startIdx % zipPool.length].zip,       tool: persona.tools[startTool % persona.tools.length] },
-    { zip: zipPool[(startIdx+1) % zipPool.length].zip,   tool: persona.tools[(startTool+1) % persona.tools.length] },
-    { zip: zipPool[(startIdx+2) % zipPool.length].zip,   tool: persona.tools[(startTool+2) % persona.tools.length] },
+    { zipEntry: zipPool[startIdx % zipPool.length],     queryFn: persona.queries[startQuery % persona.queries.length] },
+    { zipEntry: zipPool[(startIdx+1) % zipPool.length], queryFn: persona.queries[(startQuery+1) % persona.queries.length] },
+    { zipEntry: zipPool[(startIdx+2) % zipPool.length], queryFn: persona.queries[(startQuery+2) % persona.queries.length] },
   ];
 
-  for (const { zip, tool } of calls) {
-    const found = zipPool.find(z => z.zip === zip);
-    const name  = found?.name || '';
+  for (const { zipEntry, queryFn } of calls) {
+    const { zip, name } = zipEntry;
+    const query = queryFn(zip);
     const t0    = Date.now();
     const entry = {
       ts:            new Date().toISOString(),
       persona:       persona.id,
       role:          persona.role,
-      tool,
+      tool:          'local_intel_query',
       zip,
       name,
+      query,
       score:         0,
       reason:        'not_run',
       latency_ms:    0,
@@ -234,9 +235,10 @@ async function runPersona(persona, zipPool, cycleIndex) {
     };
 
     try {
-      const resp = await callMcp(tool, { zip });
+      // local_intel_query is the fuzzy intent router — pass plain English, it resolves everything
+      const resp = await callMcp('local_intel_query', { query });
       entry.latency_ms  = Date.now() - t0;
-      const { score, reason } = scoreResponse(resp.body, tool);
+      const { score, reason } = scoreResponse(resp.body, 'local_intel_query');
       entry.score       = score;
       entry.reason      = reason;
       entry.http_status = resp.status;
@@ -244,7 +246,7 @@ async function runPersona(persona, zipPool, cycleIndex) {
       const text        = Array.isArray(content) ? content.map(c => c?.text || '').join(' ') : '';
       entry.answer_snippet = text.slice(0, 400);
       entry.answer_length  = text.length;
-      console.log(`[mcp-probe] ${persona.id} | ${zip} | ${tool} | score:${score} | ${reason} | ${entry.latency_ms}ms`);
+      console.log(`[mcp-probe] ${persona.id} | ${zip} | score:${score} | ${reason} | ${entry.latency_ms}ms | "${query.slice(0,60)}..."`);
     } catch (err) {
       entry.latency_ms = Date.now() - t0;
       entry.error      = err.message;
@@ -254,7 +256,7 @@ async function runPersona(persona, zipPool, cycleIndex) {
     }
 
     appendLog(entry);
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 3000));
   }
 }
 
