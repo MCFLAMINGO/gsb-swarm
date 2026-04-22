@@ -114,7 +114,11 @@ async function fetchPermits(zipEntry) {
     const data = await safeFetch(url, { _timeout: 15_000 });
     features = data.features || [];
   } catch (err) {
-    logError(`permits-${zip}`, err);
+    if (!fetchPermits._warned) fetchPermits._warned = {};
+    if (!fetchPermits._warned[zip]) {
+      console.warn(`[bedrockWorker] Permits unavailable for ${zip} — using zeros (won't repeat)`);
+      fetchPermits._warned[zip] = true;
+    }
     return { new_construction_count: 0, renovation_count: 0, utility_extensions: 0, zoning_changes: 0 };
   }
 
@@ -219,9 +223,13 @@ async function fetchFloodZone(zipEntry) {
     const flood_zone_pct = Math.round((highRisk / features.length) * 100);
     return { flood_zone_pct, raw_zone_counts: zoneCounts, source: 'live' };
   } catch (err) {
-    // Timeout or 504 — use hardcoded fallback
+    // Timeout or network error — use hardcoded fallback silently
     const fallback = FEMA_FLOOD_FALLBACK[zip] ?? 10;
-    logError(`fema-${zip}`, { message: `${err.message} — using fallback ${fallback}%` });
+    if (!fetchFloodZone._warned) fetchFloodZone._warned = {};
+    if (!fetchFloodZone._warned[zip]) {
+      console.warn(`[bedrockWorker] FEMA unavailable for ${zip} — using fallback ${fallback}% (won't repeat)`);
+      fetchFloodZone._warned[zip] = true;
+    }
     return { flood_zone_pct: fallback, raw_zone_counts: {}, source: 'fallback-error' };
   }
 }
