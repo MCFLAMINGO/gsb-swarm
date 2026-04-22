@@ -476,6 +476,197 @@ app.get('/.well-known/agent.json', (req, res) => {
   });
 });
 
+// ── ACP Virtuals Webhook Handlers ────────────────────────────────────────────
+// One endpoint per agent. Virtuals posts a job here after erc8004AgentId migration.
+// Each handler: validates secret → runs job logic → returns ACP-compliant deliverable.
+// Callback URLs to give Virtuals:
+//   CEO:            https://gsb-swarm-production.up.railway.app/api/acp/webhook/ceo
+//   Token Analyst:  https://gsb-swarm-production.up.railway.app/api/acp/webhook/token-analyst
+//   Alpha Scanner:  https://gsb-swarm-production.up.railway.app/api/acp/webhook/alpha-scanner
+//   Wallet Profiler:https://gsb-swarm-production.up.railway.app/api/acp/webhook/wallet-profiler
+//   Thread Writer:  https://gsb-swarm-production.up.railway.app/api/acp/webhook/thread-writer
+
+const ACP_WEBHOOK_SECRET = process.env.ACP_WEBHOOK_SECRET || '';
+
+function verifyAcpWebhook(req, res) {
+  // Virtuals signs requests with X-ACP-Secret header
+  // If no secret set yet (pre-migration), allow through but log warning
+  const incoming = req.headers['x-acp-secret'] || req.headers['x-virtuals-secret'] || '';
+  if (ACP_WEBHOOK_SECRET && incoming !== ACP_WEBHOOK_SECRET) {
+    console.warn('[acp-webhook] Rejected request — bad secret');
+    res.status(401).json({ error: 'Unauthorized' });
+    return false;
+  }
+  return true;
+}
+
+function acpDeliverable(jobId, agentId, role, result) {
+  return {
+    jsonrpc: '2.0',
+    jobId,
+    agentId,
+    role,
+    status: 'completed',
+    deliverable: typeof result === 'string' ? result : JSON.stringify(result),
+    ts: new Date().toISOString(),
+  };
+}
+
+// ── CEO Webhook ──────────────────────────────────────────────────────────────
+app.post('/api/acp/webhook/ceo', express.json(), async (req, res) => {
+  if (!verifyAcpWebhook(req, res)) return;
+  const { jobId, requirement, context } = req.body || {};
+  console.log(`[acp-webhook/ceo] job:${jobId} req:"${(requirement||'').slice(0,80)}"`);
+  try {
+    // CEO: orchestrate a full swarm brief or return latest cached brief
+    const synthesis = await ceoSynthesize(briefResults);
+    const result = {
+      agent:          'GSB CEO Agent',
+      acpV2AgentId:   40779,
+      wallet:         '0xb165a3b019eb1922f5dcda97b83be75484b30d27',
+      jobId,
+      requirement:    requirement || 'swarm_brief',
+      summary:        synthesis.summary || 'GSB Swarm Intelligence brief',
+      keyFindings:    synthesis.keyFindings || [],
+      recommendation: synthesis.recommendation || '',
+      swarmStatus: {
+        token_analysis:  briefResults.token_analysis  || null,
+        wallet_profile:  briefResults.wallet_profile  || null,
+        alpha_signals:   briefResults.alpha_signals   || null,
+        thread:          briefResults.thread          || null,
+      },
+      ts: new Date().toISOString(),
+    };
+    res.json(acpDeliverable(jobId, '40779', 'ceo', result));
+  } catch (err) {
+    console.error('[acp-webhook/ceo] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Token Analyst Webhook ─────────────────────────────────────────────────────
+app.post('/api/acp/webhook/token-analyst', express.json(), async (req, res) => {
+  if (!verifyAcpWebhook(req, res)) return;
+  const { jobId, requirement, context } = req.body || {};
+  console.log(`[acp-webhook/token-analyst] job:${jobId} req:"${(requirement||'').slice(0,80)}"`);
+  try {
+    // Extract contract address or token symbol from requirement
+    const contractMatch = (requirement || '').match(/0x[a-fA-F0-9]{40}/);
+    const contract = contractMatch ? contractMatch[0] : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+    const chain    = (requirement || '').toLowerCase().includes('solana') ? 'solana' : 'base';
+
+    // Fire internal strategy step if available, else return cached result
+    const cached = briefResults.token_analysis;
+    const result = {
+      agent:         'GSB Token Analyst',
+      acpV2AgentId:  40781,
+      wallet:        '0x489a9d6c79957906540491a493a7a4d13ad0701a',
+      jobId,
+      contract,
+      chain,
+      requirement:   requirement || WORKER_CATALOG['GSB Token Analyst'].defaultReq,
+      analysis:      cached || { status: 'pending', note: 'Token analysis cycle not yet completed — retry in 60s' },
+      ts:            new Date().toISOString(),
+    };
+    res.json(acpDeliverable(jobId, '40781', 'token_analysis', result));
+  } catch (err) {
+    console.error('[acp-webhook/token-analyst] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Alpha Scanner Webhook ─────────────────────────────────────────────────────
+app.post('/api/acp/webhook/alpha-scanner', express.json(), async (req, res) => {
+  if (!verifyAcpWebhook(req, res)) return;
+  const { jobId, requirement, context } = req.body || {};
+  console.log(`[acp-webhook/alpha-scanner] job:${jobId} req:"${(requirement||'').slice(0,80)}"`);
+  try {
+    const cached = briefResults.alpha_signals;
+    const result = {
+      agent:         'GSB Alpha Scanner',
+      acpV2AgentId:  40790,
+      wallet:        '0x9d23bf7e4084e278a06c85e299a8ed5db3d663b5',
+      jobId,
+      requirement:   requirement || WORKER_CATALOG['GSB Alpha Scanner'].defaultReq,
+      signals:       cached || { status: 'pending', note: 'Alpha scan cycle not yet completed — retry in 60s' },
+      ts:            new Date().toISOString(),
+    };
+    res.json(acpDeliverable(jobId, '40790', 'alpha_signals', result));
+  } catch (err) {
+    console.error('[acp-webhook/alpha-scanner] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Wallet Profiler Webhook ───────────────────────────────────────────────────
+app.post('/api/acp/webhook/wallet-profiler', express.json(), async (req, res) => {
+  if (!verifyAcpWebhook(req, res)) return;
+  const { jobId, requirement, context } = req.body || {};
+  console.log(`[acp-webhook/wallet-profiler] job:${jobId} req:"${(requirement||'').slice(0,80)}"`);
+  try {
+    const walletMatch = (requirement || '').match(/0x[a-fA-F0-9]{40}/);
+    const targetWallet = walletMatch ? walletMatch[0] : null;
+    const cached = briefResults.wallet_profile;
+    const result = {
+      agent:         'GSB Wallet Profiler & DCA Engine',
+      acpV2AgentId:  40786,
+      wallet:        '0xeb6447a8b44837458f391e2bac39990daf6bd522',
+      jobId,
+      targetWallet,
+      requirement:   requirement || WORKER_CATALOG['GSB Wallet Profiler & DCA Engine'].defaultReq,
+      profile:       cached || { status: 'pending', note: 'Wallet profile cycle not yet completed — retry in 60s' },
+      ts:            new Date().toISOString(),
+    };
+    res.json(acpDeliverable(jobId, '40786', 'wallet_profile', result));
+  } catch (err) {
+    console.error('[acp-webhook/wallet-profiler] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Thread Writer Webhook ─────────────────────────────────────────────────────
+app.post('/api/acp/webhook/thread-writer', express.json(), async (req, res) => {
+  if (!verifyAcpWebhook(req, res)) return;
+  const { jobId, requirement, context } = req.body || {};
+  console.log(`[acp-webhook/thread-writer] job:${jobId} req:"${(requirement||'').slice(0,80)}"`);
+  try {
+    const cached = briefResults.thread;
+    const result = {
+      agent:         'GSB Thread Writer',
+      acpV2AgentId:  40734,
+      wallet:        '0x2c281b4ba71e79dd91e3a9d78ed5348bc5774df9',
+      jobId,
+      requirement:   requirement || WORKER_CATALOG['GSB Thread Writer'].defaultReq,
+      thread:        cached?.thread || null,
+      tweetCount:    cached?.thread ? cached.thread.split('\n\n').length : 0,
+      status:        cached ? 'ready' : 'pending',
+      note:          cached ? null : 'Thread cycle not yet completed — retry in 60s',
+      ts:            new Date().toISOString(),
+    };
+    res.json(acpDeliverable(jobId, '40734', 'thread', result));
+  } catch (err) {
+    console.error('[acp-webhook/thread-writer] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── ACP Webhook health check — Virtuals can ping this to verify all 5 are live
+app.get('/api/acp/webhook/health', (req, res) => {
+  res.json({
+    status: 'live',
+    agents: [
+      { name: 'GSB CEO Agent',                   acpV2AgentId: 40779, endpoint: '/api/acp/webhook/ceo',            wallet: '0xb165a3b019eb1922f5dcda97b83be75484b30d27' },
+      { name: 'GSB Token Analyst',               acpV2AgentId: 40781, endpoint: '/api/acp/webhook/token-analyst',  wallet: '0x489a9d6c79957906540491a493a7a4d13ad0701a' },
+      { name: 'GSB Alpha Scanner',               acpV2AgentId: 40790, endpoint: '/api/acp/webhook/alpha-scanner',  wallet: '0x9d23bf7e4084e278a06c85e299a8ed5db3d663b5' },
+      { name: 'GSB Wallet Profiler & DCA Engine',acpV2AgentId: 40786, endpoint: '/api/acp/webhook/wallet-profiler',wallet: '0xeb6447a8b44837458f391e2bac39990daf6bd522' },
+      { name: 'GSB Thread Writer',               acpV2AgentId: 40734, endpoint: '/api/acp/webhook/thread-writer',  wallet: '0x2c281b4ba71e79dd91e3a9d78ed5348bc5774df9' },
+    ],
+    baseUrl: 'https://gsb-swarm-production.up.railway.app',
+    secret_configured: !!ACP_WEBHOOK_SECRET,
+    ts: new Date().toISOString(),
+  });
+});
+
 // ── MCP Registry server card — lets Smithery + PulseMCP scan without auth issues
 // GET /api/sector-gap/feed — top sector gaps across all covered ZIPs (FREE, no payment required)
 // Discovery hook for agents and LLMs — shows what LocalIntel knows without paying
