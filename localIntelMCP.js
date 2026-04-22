@@ -1049,6 +1049,19 @@ const MCP_MANIFEST = {
   description: 'LocalIntel — agentic business intelligence for Northeast Florida. 20 tools: spatial context, business search, spending zones, corridor analysis, tidal momentum scores, sector gap ranking, vertical agents (restaurant/healthcare/retail/construction/realtor), inference cache with scout dispatch, and local_intel_query — a fuzzy intent router that resolves any plain-English market question to the right ZIP, vertical, and tool automatically. 500+ trained prompts across 27 ZIPs. Two payment rails: $0.01–$0.05/call USDC on Base via x402, or pathUSD on Tempo mainnet.',
   tools: [
     {
+      name: 'local_intel_query',
+      description: 'START HERE. Natural language entry point — send any plain-English question about any Florida market and get a structured answer. Auto-detects ZIP, industry vertical, and routes to the right tool. No tool knowledge required. Examples: "Is 32082 oversaturated with dentists?", "Where should I open a clinic in Northeast Florida?", "What food gaps exist in Nocatee?" Trained on 500+ real market queries across restaurant, healthcare, retail, construction, and real estate verticals.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Any plain-English market question. ZIP can be in the query or passed separately.' },
+          zip:   { type: 'string', description: 'Optional ZIP override. If omitted, ZIP is detected from the query.' },
+        },
+        required: ['query'],
+      },
+      annotations: { readOnly: true },
+    },
+    {
       name: 'local_intel_context',
       description: 'Full spatial context block for a zip or lat/lon. Returns anchor business, nearby businesses in distance rings, zone intelligence, and category breakdown. Best first call for any location query.',
       inputSchema: {
@@ -1267,7 +1280,8 @@ const MCP_MANIFEST = {
     },
     {
       name: 'local_intel_query',
-      description: 'Fuzzy intent router — pass any plain-English question about any local market. Automatically detects ZIP, industry vertical, and best tool. Checks inference cache first (instant return on hit). On miss, routes to the correct vertical agent, stores result, and dispatches a scout agent if confidence is low. Handles region queries ("Northeast Florida", "St Johns County") by evaluating top ZIPs in parallel. Best first call for any LLM that does not know the ZIP or vertical in advance.',
+      description: '[DUPLICATE — see position 1 in tools list. This entry retained for backward compatibility.]',
+      deprecated: true,
       inputSchema: {
         type: 'object',
         properties: {
