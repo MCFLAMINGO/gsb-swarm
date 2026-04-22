@@ -4,7 +4,10 @@
   "description": "GSB Intelligence Swarm - 4 ACP provider agents for Agent Gas Bible",
   "main": "dashboard-server.js",
   "scripts": {
-    "start": "node --experimental-require-module --no-warnings dashboard-server.js"
+    "start": "node --experimental-require-module --no-warnings dashboard-server.js",
+    "test:query": "node scripts/test-inference-query.js",
+    "test:query:local": "MCP_BASE_URL=http://localhost:3001 node scripts/test-inference-query.js",
+    "test:payments": "node scripts/test-agent-payments.js"
   },
   "dependencies": {
     "@aa-sdk/core": "^4.0.0",
