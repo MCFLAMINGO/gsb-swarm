@@ -123,13 +123,18 @@ function loadOceanFloor(zip) {
   return readJson(path.join(DATA_DIR, 'ocean_floor', `${zip}.json`));
 }
 
+function loadCensusLayer(zip) {
+  return readJson(path.join(DATA_DIR, 'census_layer', `${zip}.json`));
+}
+
 // ── Core oracle computation ───────────────────────────────────────────────────
 
 function computeOracle(zip, name) {
-  const businesses = loadBusinesses(zip);
-  const zone       = loadSpendingZone(zip);
-  const bedrock    = loadBedrock(zip);
-  const ocean      = loadOceanFloor(zip);
+  const businesses  = loadBusinesses(zip);
+  const zone        = loadSpendingZone(zip);
+  const bedrock     = loadBedrock(zip);
+  const ocean       = loadOceanFloor(zip);
+  const censusLayer = loadCensusLayer(zip);
 
   // ── Data quality gate ─────────────────────────────────────────────────────
   // Reject ZIPs with no demographic data AND insufficient business coverage.
@@ -389,11 +394,26 @@ function computeOracle(zip, name) {
     oracle_narrative: narrative,
 
     data_sources: {
-      businesses_indexed: totalBiz,
-      has_spending_zone:  !!zone,
-      has_bedrock:        !!bedrock,
-      has_ocean_floor:    !!ocean,
+      businesses_indexed:  totalBiz,
+      has_spending_zone:   !!zone,
+      has_bedrock:         !!bedrock,
+      has_ocean_floor:     !!ocean,
+      has_census_layer:    !!censusLayer,
+      has_zbp:             !!censusLayer?.zbp,
+      has_cbp:             !!censusLayer?.cbp,
     },
+
+    // ── Census economic layer ───────────────────────────────────────────────
+    // Economic fingerprint from ZBP/CBP + data confidence from PDB
+    economic_layer: censusLayer ? {
+      employment_density:    censusLayer.zbp?.employment_density    || 0,
+      total_employees:       censusLayer.zbp?.total_employees       || 0,
+      total_establishments:  censusLayer.zbp?.total_establishments  || 0,
+      dominant_sector:       censusLayer.zbp?.dominant_sector       || null,
+      sector_gaps:           (censusLayer.sector_gaps || []).slice(0, 5),
+      data_confidence:       censusLayer.confidence || null,
+      zbp_vintage:           censusLayer.zbp?.zbp_vintage           || null,
+    } : null,
   };
 }
 

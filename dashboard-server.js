@@ -422,6 +422,25 @@ app.get('/api/evolution/gaps', (req, res) => {
   if (!fs.existsSync(file)) return res.json({ status: 'not_yet_run' });
   res.json(JSON.parse(fs.readFileSync(file, 'utf8')));
 });
+// GET /api/census-layer/:zip  — economic fingerprint + confidence for a ZIP
+// GET /api/census-layer/_confidence — all ZIPs confidence index
+// GET /api/census-layer/_county_sectors — county NAICS breakdown
+app.get('/api/census-layer/:zip', (req, res) => {
+  const file = path.join(__dirname, 'data', 'census_layer', `${req.params.zip}.json`);
+  if (!fs.existsSync(file)) return res.status(404).json({ error: 'Census layer not yet computed for this ZIP.' });
+  res.json(JSON.parse(fs.readFileSync(file, 'utf8')));
+});
+app.get('/api/census-layer/_confidence', (req, res) => {
+  const file = path.join(__dirname, 'data', 'census_layer', '_confidence.json');
+  if (!fs.existsSync(file)) return res.json({ status: 'not_yet_computed' });
+  res.json(JSON.parse(fs.readFileSync(file, 'utf8')));
+});
+app.get('/api/census-layer/_county_sectors', (req, res) => {
+  const file = path.join(__dirname, 'data', 'census_layer', '_county_sectors.json');
+  if (!fs.existsSync(file)) return res.json({ status: 'not_yet_computed' });
+  res.json(JSON.parse(fs.readFileSync(file, 'utf8')));
+});
+
 app.post('/api/evolution/run', async (req, res) => {
   res.json({ status: 'dispatched', message: 'Evolution cycle started — check /api/evolution/report in ~60s.' });
   // Non-blocking — run after response sent
@@ -5506,6 +5525,7 @@ app.use((req, res, next) => {
     { name: 'BTR Worker',           file: 'workers/btrWorker.js' },
     { name: 'Vertical Agent',        file: 'workers/verticalAgentWorker.js' },
     { name: 'Prompt Evolution',       file: 'workers/promptEvolutionWorker.js' },
+    { name: 'Census Layer',            file: 'workers/censusLayerWorker.js'     },
   ];
 
   function spawnLocalIntelWorker(w) {
