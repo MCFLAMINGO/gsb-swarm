@@ -174,7 +174,11 @@ async function fetchFdotProjects(zipEntry) {
 
     return { active_road_projects, planned_projects };
   } catch (err) {
-    logError(`fdot-${zip}`, err);
+    if (!fetchFdot._warned) fetchFdot._warned = {};
+    if (!fetchFdot._warned[zip]) {
+      console.warn(`[bedrockWorker] FDOT unavailable for ${zip} — using zeros (won't repeat)`);
+      fetchFdot._warned[zip] = true;
+    }
     return { active_road_projects: 0, planned_projects: 0 };
   }
 }

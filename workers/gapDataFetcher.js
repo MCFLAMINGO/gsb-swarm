@@ -320,19 +320,19 @@ async function fetchFDOTProjects(zip, county) {
   if (!countyName) return null;
 
   try {
-    // FDOT open data — active construction projects (ArcGIS REST)
-    const url = `https://opendata.fdot.gov/arcgis/rest/services/Projects/Active_Construction_Projects/MapServer/0/query?where=COUNTY_NAME='${countyName}'&outFields=PROJECT_NUMBER,DESCRIPTION,WORK_TYPE,CONTRACT_AMOUNT,BEGIN_DATE,END_DATE&f=json&resultRecordCount=20`;
+    // FDOT GIS — active work program projects (public ArcGIS REST)
+    const url = `https://gis.fdot.gov/arcgis/rest/services/Work_Program_Current/FeatureServer/0/query?where=COUNTY_NAME_TXT='${countyName}'&outFields=PROJ_ID,DESCRIPT,WORK_TYPE_CD,TOT_COST,EST_LET_DT&f=json&resultRecordCount=20`;
     const data = await fetchJson(url);
     const features = data?.features || [];
 
     if (features.length === 0) return null;
 
     const projects = features.map(f => ({
-      id:          f.attributes?.PROJECT_NUMBER || '',
-      description: f.attributes?.DESCRIPTION   || '',
-      work_type:   f.attributes?.WORK_TYPE      || '',
-      amount:      f.attributes?.CONTRACT_AMOUNT || 0,
-      end_date:    f.attributes?.END_DATE        || null,
+      id:          f.attributes?.PROJ_ID      || '',
+      description: f.attributes?.DESCRIPT     || '',
+      work_type:   f.attributes?.WORK_TYPE_CD || '',
+      amount:      f.attributes?.TOT_COST     || 0,
+      end_date:    f.attributes?.EST_LET_DT   || null,
     })).filter(p => p.description);
 
     const roadProjects = projects.filter(p =>

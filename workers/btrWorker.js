@@ -457,7 +457,22 @@ if (require.main === module) {
     .then(() => process.exit(0))
     .catch(e => { console.error(e); process.exit(1); });
 } else {
-  // Forked by dashboard-server — run immediately then every 24h
+  // Forked by dashboard-server — ensure Python deps, then run every 24h
+  const { execSync } = require('child_process');
+  try {
+    execSync('python3 -c "import requests, bs4"', { stdio: 'ignore' });
+    console.log('[BTRWorker] Python deps OK');
+  } catch (_) {
+    console.log('[BTRWorker] Installing Python deps (requests, beautifulsoup4)...');
+    try {
+      execSync('pip3 install --quiet requests beautifulsoup4', { stdio: 'inherit' });
+      console.log('[BTRWorker] Python deps installed');
+    } catch (e) {
+      console.error('[BTRWorker] pip install failed — BTR disabled:', e.message);
+      // Exit cleanly so dashboard-server doesn't restart-loop us
+      process.exit(0);
+    }
+  }
   console.log('[BTRWorker] Starting BTR import...');
   runBTR().catch(e => console.error('[BTRWorker] Initial run error:', e.message));
   setInterval(() => {
