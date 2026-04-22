@@ -769,6 +769,33 @@ router.get('/broadcast-log', (req, res) => {
   }
 });
 
+router.get('/mcp-probe-log', (req, res) => {
+  try {
+    const file = path.join(DATA_DIR_AGENT, 'mcp_probe_log.json');
+    const log  = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : [];
+    // Summary by persona
+    const byPersona = {};
+    for (const e of log) {
+      if (!byPersona[e.persona]) byPersona[e.persona] = { total: 0, totalScore: 0, errors: 0, noData: 0 };
+      byPersona[e.persona].total++;
+      byPersona[e.persona].totalScore += (e.score || 0);
+      if (e.error) byPersona[e.persona].errors++;
+      if (e.reason === 'no_data' || e.reason === 'empty_response') byPersona[e.persona].noData++;
+    }
+    const summary = Object.entries(byPersona).map(([persona, s]) => ({
+      persona,
+      queries:   s.total,
+      avg_score: s.total ? Math.round(s.totalScore / s.total) : 0,
+      errors:    s.errors,
+      no_data:   s.noData,
+    }));
+    const recent = [...log].sort((a,b) => new Date(b.ts) - new Date(a.ts)).slice(0, 50);
+    res.json({ summary, recent, total: log.length, generatedAt: new Date().toISOString() });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/zip-queue', (req, res) => {
   try {
     const file = path.join(DATA_DIR_AGENT, 'zipQueue.json');
