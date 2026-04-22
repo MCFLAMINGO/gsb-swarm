@@ -537,7 +537,7 @@ app.get('/.well-known/mcp/server-card.json', (req, res) => {
     serverInfo: {
       name: 'LocalIntel by MCFLAMINGO',
       version: '1.2.0',
-      description: 'Agentic business intelligence for NE Florida — St. Johns, Duval, Clay, Nassau counties. 30+ covered ZIPs, 33K+ businesses. 20 MCP tools across 5 verticals. Sector gap analysis (local_intel_sector_gap) identifies NAICS whitespace at ZIP level — Census-backed demand estimates with confidence scoring. 500 oracle prompts. Composite NL query via local_intel_ask. Two payment rails: $0.01–$0.05/call USDC on Base (x402) or pathUSD on Tempo mainnet. Free discovery feed: /api/sector-gap/feed'
+      description: 'Agentic local business intelligence for Florida — 983 ZIPs, OSM POI layer, IRS income enrichment, sector gap analysis, and 500 oracle prompts. 20 MCP tools across 5 verticals. LLMs pay $0.01–$0.05/call via USDC on Base (x402) or pathUSD on Tempo mainnet. Free discovery feed: /api/sector-gap/feed. thelocalintel.com'
     },
     authentication: { required: false },
     tools: [
