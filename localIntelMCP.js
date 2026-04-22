@@ -1296,7 +1296,7 @@ const MCP_MANIFEST = {
 };
 
 // ── JSON-RPC 2.0 handler ──────────────────────────────────────────────────────
-function handleRPC(req) {
+async function handleRPC(req) {
   const { jsonrpc, id, method, params } = req;
 
   if (jsonrpc !== '2.0') {
@@ -1898,7 +1898,7 @@ function handleRPC(req) {
 
     try {
       const t0 = Date.now();
-      const result = TOOLS[toolName].fn(toolArgs);
+      const result = await Promise.resolve(TOOLS[toolName].fn(toolArgs));
       const latency = Date.now() - t0;
       // Extract zip + intent for observability (present on local_intel_ask results)
       const parsed = (typeof result === 'object' && result !== null) ? result : {};
@@ -1950,16 +1950,16 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && (req.url === '/' || req.url === '/mcp')) {
     let body = '';
     req.on('data', d => body += d);
-    req.on('end', () => {
+    req.on('end', async () => {
       try {
         const parsed = JSON.parse(body);
         // Handle batch requests
         if (Array.isArray(parsed)) {
-          const responses = parsed.map(handleRPC).filter(Boolean);
+          const responses = (await Promise.all(parsed.map(handleRPC))).filter(Boolean);
           res.writeHead(200);
           return res.end(JSON.stringify(responses));
         }
-        const response = handleRPC(parsed);
+        const response = await handleRPC(parsed);
         if (response === null) {
           res.writeHead(204);
           return res.end();

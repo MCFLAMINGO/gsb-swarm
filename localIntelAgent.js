@@ -641,7 +641,33 @@ router.get('/coverage-stats', (req, res) => {
     const cov   = covFile   && fs.existsSync(covFile)   ? JSON.parse(fs.readFileSync(covFile))   : { completed: {} };
     const queue = queueFile && fs.existsSync(queueFile) ? JSON.parse(fs.readFileSync(queueFile)) : [];
 
-    const completedZips = Object.entries(cov.completed || {});
+    // Build completedZips from actual data/zips/ files — zipCoverage.json may only
+    // have seed entries and won't reflect 3 days of enrichment agent work.
+    let completedZips = Object.entries(cov.completed || {});
+    if (fs.existsSync(zipsDir)) {
+      const zipFiles = fs.readdirSync(zipsDir).filter(f => f.endsWith('.json'));
+      if (zipFiles.length > completedZips.length) {
+        // Rebuild from actual files — these are the ground truth
+        const fromFiles = {};
+        // Carry over any metadata from zipCoverage.json first
+        Object.entries(cov.completed || {}).forEach(([z, v]) => { fromFiles[z] = v; });
+        zipFiles.forEach(f => {
+          const zip = f.replace('.json', '');
+          try {
+            const bizs = JSON.parse(fs.readFileSync(path.join(zipsDir, f)));
+            if (Array.isArray(bizs) && bizs.length > 0) {
+              fromFiles[zip] = Object.assign({}, fromFiles[zip] || {}, {
+                businesses: bizs.length,
+                confidence: Math.round(bizs.reduce((s, b) => s + (b.confidence || 0), 0) / bizs.length),
+                completedAt: fromFiles[zip]?.completedAt || new Date().toISOString(),
+                source: 'zips_dir',
+              });
+            }
+          } catch(e) { /* non-fatal */ }
+        });
+        completedZips = Object.entries(fromFiles);
+      }
+    }
     let totalBusinesses = completedZips.reduce((s, [, v]) => s + (v.businesses || 0), 0);
 
     // Average confidence from zip files
