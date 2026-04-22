@@ -45,6 +45,235 @@ function handleOracle(params) {
   }
   return require('fs').readFileSync(file, 'utf8');
 }
+
+
+function handleSectorGap(params) {
+  const zip = (params.zip || '').replace(/\D/g, '').slice(0, 5);
+  if (!zip) return JSON.stringify({ error: 'zip required' });
+
+  const layerDir   = path.join(__dirname, 'data', 'census_layer');
+  const oracleDir  = path.join(__dirname, 'data', 'oracle');
+  const zonesFile  = path.join(__dirname, 'data', 'spendingZones.json');
+  const layerFile  = path.join(layerDir, zip + '.json');
+  const fsLib      = require('fs');
+
+  if (!fsLib.existsSync(layerFile)) {
+    return JSON.stringify({
+      error: 'Census layer not yet computed for ' + zip + '. The censusLayerWorker runs on startup.',
+      zip,
+    });
+  }
+
+  const layer = JSON.parse(fsLib.readFileSync(layerFile, 'utf8'));
+  const gaps  = layer.sector_gaps || [];
+
+  if (gaps.length === 0) {
+    return JSON.stringify({
+      zip,
+      name:        layer.name || zip,
+      county:      layer.county || '',
+      message:     'No sector gaps found — all major NAICS sectors present at ZIP level, or ZBP data not yet ingested.',
+      sector_gaps: [],
+    });
+  }
+
+  let demo = {}, oracle = {};
+  try {
+    const zones = JSON.parse(fsLib.readFileSync(zonesFile, 'utf8'));
+    demo = (zones && zones.zones && zones.zones[zip]) ? zones.zones[zip] : {};
+  } catch (_) {}
+  try {
+    const oracleFile = path.join(oracleDir, zip + '.json');
+    if (fsLib.existsSync(oracleFile)) oracle = JSON.parse(fsLib.readFileSync(oracleFile, 'utf8'));
+  } catch (_) {}
+
+  const population   = demo.population   || (oracle.demographics && oracle.demographics.population) || 0;
+  const medianHHI    = demo.median_household_income || (oracle.demographics && oracle.demographics.median_hhi) || 0;
+  const ownerOccPct  = demo.ownership_rate_pct   || 0;
+  const affluencePct = demo.affluence_pct        || 0;
+  const ultraAffPct  = demo.ultra_affluence_pct  || 0;
+  const wfhPct       = demo.wfh_pct              || 0;
+  const daytimeMult  = demo.daytime_pop_multiplier || 1.0;
+  const renovWave    = demo.renovation_wave       || null;
+  const familyHHPct  = demo.family_hh_pct        || 0;
+  const retireeIndex = demo.retiree_index         || 1.0;
+  const vacancyPct   = (demo.vacancy_rate_pct != null) ? demo.vacancy_rate_pct : null;
+
+  const confidence = layer.confidence || {};
+  const confTier   = confidence.confidence_tier       || 'ESTIMATED';
+  const confScore  = confidence.data_confidence_score || 0;
+
+  function sectorSignal(naics, countyEstab, countyEmpShare) {
+    if (!population) return { demand_estimate: null, demand_narrative: 'Population data unavailable.', relevance_score: 0 };
+    const hhi_k      = Math.round((medianHHI || 0) / 1000);
+    const daytimePop = Math.round(population * daytimeMult);
+
+    switch (naics) {
+      case '61': {
+        const schoolAge = Math.round(population * 0.18);
+        const centers   = Math.max(2, Math.min(20, Math.round(schoolAge / 800)));
+        const relevance = Math.round(30 + (familyHHPct * 0.4) + (affluencePct * 0.3) + (Math.min(hhi_k, 150) * 0.1));
+        return {
+          demand_estimate:  (centers - 2) + '\u2013' + (centers + 2) + ' tutoring/enrichment centers',
+          demand_narrative: schoolAge.toLocaleString() + ' est. school-age residents. ' + familyHHPct + '% family HH, ' + affluencePct + '% earning $100k+. ' + countyEstab + ' Educational Services at county — none at ZIP.',
+          relevance_score:  Math.min(99, relevance),
+        };
+      }
+      case '62': {
+        const retirees  = Math.round(population * 0.15 * retireeIndex);
+        const providers = Math.max(3, Math.round(population / 3500));
+        const relevance = Math.round(40 + (retireeIndex * 15) + (Math.min(population, 70000) / 1500));
+        return {
+          demand_estimate:  (providers - 1) + '\u2013' + (providers + 2) + ' primary care / specialist providers',
+          demand_narrative: population.toLocaleString() + ' residents, retiree index ' + retireeIndex.toFixed(1) + 'x (' + retirees.toLocaleString() + ' est. seniors). ' + countyEmpShare + '% of county employment is healthcare — structurally underserved at ZIP level.',
+          relevance_score:  Math.min(99, relevance),
+        };
+      }
+      case '72': {
+        const isSeasonal = (vacancyPct || 0) > 25;
+        const concepts   = Math.max(2, Math.round(daytimePop / 2500));
+        const relevance  = Math.round(35 + (daytimeMult * 20) + (isSeasonal ? 15 : 0) + ((ultraAffPct || 0) * 0.2));
+        const vacStr     = isSeasonal ? (vacancyPct + '% housing vacancy = seasonal/tourist overlay.') : 'Primarily residential demand base.';
+        return {
+          demand_estimate:  (concepts - 1) + '\u2013' + (concepts + 3) + ' food/beverage concepts',
+          demand_narrative: daytimePop.toLocaleString() + ' est. daytime pop (' + daytimeMult.toFixed(2) + 'x multiplier). ' + vacStr + ' $' + hhi_k + 'k median HHI supports hospitality.',
+          relevance_score:  Math.min(99, relevance),
+        };
+      }
+      case '44':
+      case '45': {
+        const spendCap  = Math.round((population * medianHHI * 0.12) / 1e6 * 10) / 10;
+        const stores    = Math.max(2, Math.round(population / 2000));
+        const relevance = Math.round(30 + (Math.min(hhi_k, 150) * 0.15) + (wfhPct * 0.3) + ((affluencePct || 0) * 0.2));
+        return {
+          demand_estimate:  (stores - 1) + '\u2013' + (stores + 3) + ' retail establishments',
+          demand_narrative: '~$' + spendCap + 'M annual retail spending capacity (' + population.toLocaleString() + ' residents x $' + hhi_k + 'k HHI x 12% retail share). ' + wfhPct + '% WFH drives daytime foot traffic. ' + countyEstab + ' retail establishments at county — structural gap at ZIP.',
+          relevance_score:  Math.min(99, relevance),
+        };
+      }
+      case '52': {
+        const relevance = Math.round(25 + (affluencePct * 0.4) + (ownerOccPct * 0.2) + (ultraAffPct * 0.3));
+        const advisors  = Math.max(1, Math.round(population / 5000));
+        return {
+          demand_estimate:  advisors + '\u2013' + (advisors + 2) + ' financial services providers',
+          demand_narrative: affluencePct + '% of HH earn $100k+ (' + ultraAffPct + '% earn $200k+). ' + ownerOccPct + '% owner-occupied. Wealth management, insurance, mortgage, and tax services underrepresented.',
+          relevance_score:  Math.min(99, relevance),
+        };
+      }
+      case '53': {
+        const relevance = Math.round(25 + (ownerOccPct * 0.25) + (affluencePct * 0.2) + (renovWave === 'HIGH' ? 20 : renovWave === 'MODERATE' ? 10 : 0));
+        const agents    = Math.max(1, Math.round(population / 4000));
+        const renovStr  = renovWave ? ('Renovation wave: ' + renovWave + '. ') : '';
+        return {
+          demand_estimate:  agents + '\u2013' + (agents + 3) + ' real estate / property management offices',
+          demand_narrative: ownerOccPct + '% owner-occupied. ' + renovStr + '$' + hhi_k + 'k median HHI. County has ' + countyEstab + ' RE establishments — no local presence at ZIP level.',
+          relevance_score:  Math.min(99, relevance),
+        };
+      }
+      case '54': {
+        const relevance = Math.round(20 + (wfhPct * 0.5) + (affluencePct * 0.2) + (Math.min(hhi_k, 150) * 0.1));
+        const firms     = Math.max(1, Math.round(population / 3500));
+        return {
+          demand_estimate:  firms + '\u2013' + (firms + 3) + ' professional services firms',
+          demand_narrative: wfhPct + '% WFH drives demand for accounting, legal, consulting, and tech services. ' + affluencePct + '% affluent HH. County has ' + countyEstab + ' professional services firms — zero at ZIP.',
+          relevance_score:  Math.min(99, relevance),
+        };
+      }
+      case '23': {
+        const relevance   = Math.round(20 + (renovWave === 'HIGH' ? 30 : renovWave === 'MODERATE' ? 15 : 5) + (Math.min(population, 70000) / 2000));
+        const contractors = Math.max(1, Math.round(population / 4500));
+        return {
+          demand_estimate:  contractors + '\u2013' + (contractors + 3) + ' construction / home services contractors',
+          demand_narrative: 'Renovation wave: ' + (renovWave || 'UNKNOWN') + '. ' + countyEstab + ' construction establishments at county. ' + ownerOccPct + '% owner-occupied = strong home services demand.',
+          relevance_score:  Math.min(99, relevance),
+        };
+      }
+      case '71': {
+        const isSeasonal = (vacancyPct || 0) > 20;
+        const relevance  = Math.round(15 + (isSeasonal ? 25 : 0) + (ultraAffPct * 0.4) + (daytimeMult * 10));
+        const venues     = Math.max(1, Math.round(daytimePop / 8000));
+        const vacStr2    = isSeasonal ? (vacancyPct + '% vacancy = seasonal/tourist market with entertainment demand spikes.') : 'Resident-anchored market.';
+        return {
+          demand_estimate:  venues + '\u2013' + (venues + 2) + ' entertainment / recreation venues',
+          demand_narrative: vacStr2 + ' ' + ultraAffPct + '% ultra-affluent HH supports premium experiences. ' + daytimePop.toLocaleString() + ' daytime population.',
+          relevance_score:  Math.min(99, relevance),
+        };
+      }
+      case '51': {
+        const relevance = Math.round(10 + (wfhPct * 0.6) + (affluencePct * 0.15));
+        return {
+          demand_estimate:  '1\u20133 tech services / co-working providers',
+          demand_narrative: wfhPct + '% WFH creates demand for co-working, IT support, and digital services. ' + affluencePct + '% affluent HH. County has ' + countyEstab + ' information sector establishments.',
+          relevance_score:  Math.min(99, relevance),
+        };
+      }
+      default: {
+        const relevance = Math.round(10 + (countyEmpShare * 1.5));
+        return {
+          demand_estimate:  null,
+          demand_narrative: countyEstab + ' establishments at county level (' + countyEmpShare + '% of county employment). No ZIP-level presence via ZBP 2018 baseline.',
+          relevance_score:  Math.min(99, relevance),
+        };
+      }
+    }
+  }
+
+  const rankedGaps = gaps.map(function(g) {
+    var sig = sectorSignal(g.naics, g.county_estab, g.county_emp_share);
+    return {
+      rank:             0,
+      naics:            g.naics,
+      sector:           g.label,
+      oracle_vertical:  g.oracle_vertical || null,
+      county_estab:     g.county_estab,
+      county_emp_share: g.county_emp_share,
+      demand_estimate:  sig.demand_estimate,
+      signal:           sig.demand_narrative,
+      confidence:       confTier,
+      relevance_score:  sig.relevance_score,
+    };
+  })
+  .sort(function(a, b) { return b.relevance_score - a.relevance_score; })
+  .map(function(g, i) { return Object.assign({}, g, { rank: i + 1 }); });
+
+  const topGap    = rankedGaps[0];
+  const hhi_k_d   = Math.round((medianHHI || 0) / 1000);
+  const demoParts = [];
+  if (population)          demoParts.push('Population: ' + population.toLocaleString());
+  if (medianHHI)           demoParts.push('Median HHI: $' + hhi_k_d + 'k');
+  if (affluencePct)        demoParts.push('Affluent HH (>$100k): ' + affluencePct + '%');
+  if (ultraAffPct)         demoParts.push('Ultra-affluent HH (>$200k): ' + ultraAffPct + '%');
+  if (ownerOccPct)         demoParts.push('Owner-occupied: ' + ownerOccPct + '%');
+  if (wfhPct)              demoParts.push('WFH rate: ' + wfhPct + '%');
+  if (daytimeMult !== 1.0) demoParts.push('Daytime pop multiplier: ' + daytimeMult.toFixed(2) + 'x');
+  if (renovWave)           demoParts.push('Renovation wave: ' + renovWave);
+  if (vacancyPct != null)  demoParts.push('Housing vacancy: ' + vacancyPct + '%');
+  const demoBlock = demoParts.length ? demoParts.join(' | ') : 'Demographic data not yet loaded for this ZIP.';
+
+  const result = {
+    zip,
+    name:     layer.name || zip,
+    county:   layer.county || '',
+    summary:  rankedGaps.length + ' sector gap' + (rankedGaps.length !== 1 ? 's' : '') + ' identified in ' + (layer.name || zip) + ' (' + zip + '). Top opportunity: ' + topGap.sector + ' (NAICS ' + topGap.naics + ') — ' + (topGap.demand_estimate || 'demand estimated from county benchmarks') + '. Data confidence: ' + confTier + ' (score ' + confScore + '/100).',
+    demographics: demoBlock,
+    data_confidence: {
+      tier:  confTier,
+      score: confScore,
+      note:  confTier === 'SPARSE'    ? 'Low signal density — treat as directional only'
+           : confTier === 'PROXY'     ? 'Moderate confidence — demographics estimated from proxies'
+           : confTier === 'ESTIMATED' ? 'Good confidence — Census-backed with growing oracle history'
+           :                            'High confidence — Census-verified with validated oracle signal history',
+    },
+    sector_gaps:  rankedGaps,
+    generated_at: new Date().toISOString(),
+    source:       'ZBP 2018 (ZIP-level) + CBP 2023 (county-level) + ACS 5-yr 2023 (demographics)',
+    cost_pathusd: 0.03,
+    _llm_hint:    'Use sector_gaps[].signal for actionable framing. Use sector_gaps[].oracle_vertical to chain into vertical agents (e.g. local_intel_healthcare for NAICS 62). Top gap by relevance_score is the strongest opportunity. ESTIMATED confidence = good to act on; SPARSE = verify before committing.',
+  };
+
+  return JSON.stringify(result, null, 2);
+}
+
 const { wrapMCPHandler } = require('./workers/mcpMiddleware');
 const { getStaleness, stalenessBlock, zipFreshnessBlock } = require('./workers/stalenessUtils');
 
@@ -61,6 +290,7 @@ const TOOL_COSTS = {
   local_intel_bedrock:   0.02,
   local_intel_for_agent: 0.05,
   local_intel_oracle:    0.03,
+  local_intel_sector_gap: 0.03,
   local_intel_realtor:      0.02,
   local_intel_healthcare:   0.02,
   local_intel_retail:       0.02,
@@ -732,6 +962,7 @@ const TOOLS = {
   local_intel_bedrock:   { fn: handleBedrock,  desc: 'Infrastructure momentum — permits, road projects, flood zones. Leading indicator (12-36mo ahead).' },
   local_intel_for_agent: { fn: handleForAgent, desc: 'Premium composite entry point. Declare agent_type + intent, get pre-ranked signals for your use case.' },
   local_intel_oracle:    { fn: handleOracle,   desc: 'Pre-baked economic narrative for a ZIP: restaurant saturation, price-tier gaps, growth trajectory, and the 3 questions you should be asking with answers.' },
+  local_intel_sector_gap: { fn: handleSectorGap, desc: 'Ranked sector gap opportunities for a ZIP — NAICS sectors present at county but absent at ZIP. Returns demand estimates, demographic framing, and confidence tier. LLM-ready signal narrative per gap. Cross-references ZBP 2018 + CBP 2023 + ACS demographics.' },
   // ── Vertical agents (trained on 100 industry prompts each) ─────────────────────────
   local_intel_realtor:      { fn: (p) => handleVerticalQuery('realtor',      p.query, p.zip), desc: 'Real estate intelligence for a ZIP: demographics, commercial gaps, flood risk, infrastructure, market signals. Trained for buyer briefs and investment analysis.' },
   local_intel_healthcare:   { fn: (p) => handleVerticalQuery('healthcare',   p.query, p.zip), desc: 'Healthcare market intelligence: provider density, demographics, patient demand gaps, senior population signals.' },
@@ -905,6 +1136,18 @@ const MCP_MANIFEST = {
           zip: { type: 'string', description: 'ZIP code to analyze (e.g. 32081)' },
         },
         required: ['zip'],
+      },
+      annotations: { readOnly: true },
+    },
+    {
+      name: 'local_intel_sector_gap',
+      description: 'Ranked sector gap analysis for a ZIP. Identifies NAICS sectors present at county level but absent at ZIP \u2014 the structural whitespace in a local economy. Returns ranked opportunities with: NAICS code, sector label, county employment share, demand estimate, confidence tier, and LLM-ready signal narrative. Backed by ZBP 2018 (ZIP-level establishment counts), CBP 2023 (county-level sector health), and ACS 5-yr 2023 demographics. Example output: \"NAICS 61 Educational Services: 0 establishments in 32259 vs 47 in St. Johns County. 69,866 residents, $144k median HHI, 89% owner-occupied. Estimated demand: 8\u201312 tutoring/enrichment centers. Confidence: ESTIMATED. Signal: Strong family formation market with no educational services presence.\" Use oracle_vertical field to chain into matching vertical agents. Cost: $0.03 pathUSD. Free discovery feed at /api/sector-gap/feed.',
+      inputSchema: {
+        type: 'object',
+        required: ['zip'],
+        properties: {
+          zip: { type: 'string', description: 'ZIP code to analyze (e.g. 32081, 32082, 32259)' },
+        },
       },
       annotations: { readOnly: true },
     },

@@ -477,12 +477,67 @@ app.get('/.well-known/agent.json', (req, res) => {
 });
 
 // ── MCP Registry server card — lets Smithery + PulseMCP scan without auth issues
+// GET /api/sector-gap/feed — top sector gaps across all covered ZIPs (FREE, no payment required)
+// Discovery hook for agents and LLMs — shows what LocalIntel knows without paying
+app.get('/api/sector-gap/feed', (req, res) => {
+  const layerDir  = path.join(__dirname, 'data', 'census_layer');
+  const zonesFile = path.join(__dirname, 'data', 'spendingZones.json');
+
+  if (!fs.existsSync(layerDir)) {
+    return res.json({ status: 'not_yet_computed', message: 'Census layer not yet built. Redeploy or wait for next startup cycle.', feed: [] });
+  }
+
+  let zones = {};
+  try { zones = JSON.parse(fs.readFileSync(zonesFile, 'utf8'))?.zones || {}; } catch (_) {}
+
+  const feed = [];
+  const files = fs.readdirSync(layerDir).filter(f => /^\d{5}\.json$/.test(f));
+
+  for (const file of files) {
+    try {
+      const layer = JSON.parse(fs.readFileSync(path.join(layerDir, file), 'utf8'));
+      if (!layer.sector_gaps || layer.sector_gaps.length === 0) continue;
+
+      const zip    = layer.zip || file.replace('.json', '');
+      const demo   = zones[zip] || {};
+      const topGap = layer.sector_gaps[0]; // already sorted by county_emp_share
+      const conf   = layer.confidence || {};
+
+      feed.push({
+        zip,
+        name:              layer.name || zip,
+        county:            layer.county || '',
+        top_gap_naics:     topGap.naics,
+        top_gap_sector:    topGap.label,
+        county_emp_share:  topGap.county_emp_share,
+        gap_count:         layer.sector_gaps.length,
+        population:        demo.population || 0,
+        median_hhi:        demo.median_household_income || 0,
+        confidence_tier:   conf.confidence_tier || 'UNKNOWN',
+        confidence_score:  conf.data_confidence_score || 0,
+        oracle_vertical:   topGap.oracle_vertical || null,
+      });
+    } catch (_) {}
+  }
+
+  // Sort by confidence score desc, then gap_count desc
+  feed.sort((a, b) => (b.confidence_score - a.confidence_score) || (b.gap_count - a.gap_count));
+
+  res.json({
+    generated_at:  new Date().toISOString(),
+    total_zips:    feed.length,
+    note:          'Free discovery feed. Call local_intel_sector_gap (MCP) with any zip for full ranked analysis with demand estimates. Cost: $0.03 pathUSD.',
+    mcp_endpoint:  'https://gsb-swarm-production.up.railway.app/api/local-intel/mcp',
+    feed,
+  });
+});
+
 app.get('/.well-known/mcp/server-card.json', (req, res) => {
   res.json({
     serverInfo: {
       name: 'LocalIntel by MCFLAMINGO',
       version: '1.2.0',
-      description: 'Agentic business intelligence for NE Florida — St. Johns, Duval, Clay, Nassau counties. 30+ covered ZIPs, 33K+ businesses. 18 MCP tools across 5 verticals (realtor, healthcare, retail, construction, restaurant). 500 oracle prompts. Composite NL query via local_intel_ask — single entry point for LLMs. Two payment rails: $0.01–$0.05/call USDC on Base (x402) or pathUSD on Tempo mainnet.'
+      description: 'Agentic business intelligence for NE Florida — St. Johns, Duval, Clay, Nassau counties. 30+ covered ZIPs, 33K+ businesses. 19 MCP tools across 5 verticals. Sector gap analysis (local_intel_sector_gap) identifies NAICS whitespace at ZIP level — Census-backed demand estimates with confidence scoring. 500 oracle prompts. Composite NL query via local_intel_ask. Two payment rails: $0.01–$0.05/call USDC on Base (x402) or pathUSD on Tempo mainnet. Free discovery feed: /api/sector-gap/feed'
     },
     authentication: { required: false },
     tools: [
@@ -499,6 +554,7 @@ app.get('/.well-known/mcp/server-card.json', (req, res) => {
       { name: 'local_intel_bedrock',   description: 'Infrastructure momentum score for a ZIP from permits, road projects, flood zones, utility extensions. Predicts conditions 12-36 months ahead.', inputSchema: { type: 'object', required: ['zip'], properties: { zip: { type: 'string', description: 'ZIP code', examples: ['32081', '32082'] } } } },
       { name: 'local_intel_for_agent', description: 'PREMIUM ($0.05). Declare agent_type and intent, receive pre-ranked top-10 signals from all 4 data layers personalized for your use case.', inputSchema: { type: 'object', required: ['agent_type', 'intent'], properties: { agent_type: { type: 'string', description: 'Agent role', examples: ['real_estate', 'restaurant', 'retail', 'investor', 'logistics'] }, intent: { type: 'string', description: 'What the agent is trying to accomplish', examples: ['find underserved areas', 'scout new locations', 'assess market saturation'] }, zip: { type: 'string', description: 'Optional ZIP filter' } } } },
       { name: 'local_intel_oracle',    description: 'Pre-baked economic oracle for a ZIP. Returns restaurant saturation, price-tier gap analysis, growth trajectory, and 3 pre-formed questions with answers. Time-series trend tracking across 6h cycles.', inputSchema: { type: 'object', required: ['zip'], properties: { zip: { type: 'string', description: 'ZIP code', examples: ['32081', '32082'] } } } },
+      { name: 'local_intel_sector_gap', description: 'Ranked sector gap opportunities for a ZIP. Identifies NAICS sectors present at county but absent at ZIP — structural whitespace. Returns demand estimates, demographic framing, confidence tier (VERIFIED/ESTIMATED/PROXY/SPARSE), and LLM-ready signal per gap. Backed by ZBP 2018 + CBP 2023 + ACS demographics. Free discovery feed at /api/sector-gap/feed. Use oracle_vertical field to chain into vertical agents.', inputSchema: { type: 'object', required: ['zip'], properties: { zip: { type: 'string', description: 'ZIP code', examples: ['32081', '32082', '32259'] } } } },
       { name: 'local_intel_realtor',   description: 'Real estate intelligence for a ZIP: demographics, commercial gaps, flood risk, infrastructure momentum, market signals. Trained on 100 realtor business prompts.', inputSchema: { type: 'object', required: ['query', 'zip'], properties: { query: { type: 'string', description: 'Natural language question about real estate or demographics' }, zip: { type: 'string', description: 'ZIP code' } } } },
       { name: 'local_intel_healthcare', description: 'Healthcare market intelligence: provider density, demographics, patient demand gaps, senior population signals.', inputSchema: { type: 'object', required: ['query', 'zip'], properties: { query: { type: 'string', description: 'Natural language question about healthcare market' }, zip: { type: 'string', description: 'ZIP code' } } } },
       { name: 'local_intel_retail',    description: 'Retail market intelligence: store categories, spending capture, consumer profile, undersupplied niches.', inputSchema: { type: 'object', required: ['query', 'zip'], properties: { query: { type: 'string', description: 'Natural language question about retail market' }, zip: { type: 'string', description: 'ZIP code' } } } },
