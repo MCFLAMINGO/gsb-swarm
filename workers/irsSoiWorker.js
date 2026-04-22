@@ -27,7 +27,7 @@ const https = require('https');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const DATA_DIR          = path.join(__dirname, '..', 'data');
-const ZIPS_DIR          = path.join(DATA_DIR, 'zips');
+const ZIPS_DIR          = path.join(DATA_DIR, 'osm');
 const SPENDING_ZONES_FP = path.join(DATA_DIR, 'spendingZones.json');
 const CSV_CACHE_FP      = path.join(DATA_DIR, 'irs_soi_2022.csv');
 const CSV_URL           = 'https://www.irs.gov/pub/irs-soi/22zpallagi.csv';

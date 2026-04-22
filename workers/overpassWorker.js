@@ -22,7 +22,7 @@ const https = require('https');
 const { getZipsByPriority, getZipBbox } = require('./flZipRegistry');
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const DATA_DIR      = path.join(__dirname, '..', 'data', 'zips');
+const DATA_DIR      = path.join(__dirname, '..', 'data', 'osm');
 const OVERPASS_URL  = 'https://overpass-api.de/api/interpreter';
 const RATE_MS       = 2200;          // 1 req / 2.2 s — stay under public limit
 const BBOX_DEG      = 0.07;          // ~7.7 km half-width; tighter = fewer noise POIs
