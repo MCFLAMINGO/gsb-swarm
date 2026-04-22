@@ -5616,6 +5616,7 @@ app.use((req, res, next) => {
     { name: 'Census Layer',            file: 'workers/censusLayerWorker.js'     },
     { name: 'Overpass Worker',         file: 'workers/overpassWorker.js'        },
     { name: 'IRS SOI Worker',          file: 'workers/irsSoiWorker.js'          },
+    { name: 'ACP Intel Cycle',         file: 'workers/localIntelAcpCycle.js'    },
   ];
 
   function spawnLocalIntelWorker(w) {
