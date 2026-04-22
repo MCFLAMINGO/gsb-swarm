@@ -39,7 +39,24 @@ const ENRICHMENT_ENDPOINT = process.env.ENRICHMENT_ENDPOINT || 'http://localhost
 const inferenceCache = require('./inferenceCache');
 
 // ── Scout dispatch — triggers enrichmentAgent on cache miss + low confidence ──
+// In-process dedup set prevents concurrent cold-cache requests from firing
+// multiple scouts for the same ZIP+vertical. TTL: 60s (auto-cleared).
+const _scoutInFlight = new Map(); // key → timestamp
+const SCOUT_DEDUP_TTL_MS = 60 * 1000;
+
 function dispatchScout(zip, vertical, query) {
+  const key = `${zip}|${vertical}`;
+  const now = Date.now();
+
+  // Dedup: if a scout already fired for this ZIP+vertical within the TTL, skip
+  if (_scoutInFlight.has(key) && (now - _scoutInFlight.get(key)) < SCOUT_DEDUP_TTL_MS) {
+    console.log(`[verticalAgent] scout deduped for ${zip}/${vertical} (in-flight)`);
+    return;
+  }
+  _scoutInFlight.set(key, now);
+  // Auto-clear after TTL so future low-confidence results can re-trigger
+  setTimeout(() => { _scoutInFlight.delete(key); }, SCOUT_DEDUP_TTL_MS);
+
   try {
     const payload = JSON.stringify({ zip, vertical, query, source: 'vertical_agent_miss' });
     const url     = new URL(ENRICHMENT_ENDPOINT);
@@ -49,13 +66,19 @@ function dispatchScout(zip, vertical, query) {
       path:     url.pathname,
       method:   'POST',
       headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
-    }, () => {}); // fire-and-forget
-    req.on('error', () => {}); // swallow — enrichment is best-effort
+    }, () => {});
+    req.on('error', () => {});
     req.write(payload);
     req.end();
     console.log(`[verticalAgent] scout dispatched for ${zip}/${vertical}`);
   } catch (_) {}
 }
+
+// Exported for tests — lets the test suite inspect / reset the dedup state
+function _scoutDispatchCount(zip, vertical) {
+  return _scoutInFlight.has(`${zip}|${vertical}`) ? 1 : 0;
+}
+function _resetScoutDedup() { _scoutInFlight.clear(); }
 
 // ── Vertical Configs ──────────────────────────────────────────────────────────
 // Each config maps industry intent to MCP tool + how to extract params from prompt
@@ -520,7 +543,7 @@ async function handleVerticalQuery(verticalKey, query, zip) {
   };
 }
 
-module.exports = { runAllVerticals, runVertical, handleVerticalQuery, VERTICALS };
+module.exports = { runAllVerticals, runVertical, handleVerticalQuery, VERTICALS, _scoutDispatchCount, _resetScoutDedup };
 
 // ── Bootstrap (when run as worker) ───────────────────────────────────────────
 

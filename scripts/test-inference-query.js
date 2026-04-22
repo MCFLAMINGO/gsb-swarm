@@ -362,6 +362,179 @@ async function suiteIntentRouting() {
   }
 }
 
+// ── Suite 5: Concurrent cold-cache stress — no duplicate scout dispatches ──────
+async function suiteConcurrentColdCache() {
+  console.log(`\n${C.bold}Suite 5 — Concurrent cold-cache / scout dedup${C.reset}`);
+
+  const CONCURRENCY = 8;
+  const STRESS_ZIP  = '32081'; // Nocatee — separate ZIP from Suite 1 to avoid warm-cache crossover
+  const STRESS_Q    = 'is there a retail gap in Nocatee for a specialty grocery store';
+
+  // ── Local path: use internals directly ───────────────────────────────────────
+  if (IS_LOCAL) {
+    const { handleVerticalQuery, _resetScoutDedup, _scoutDispatchCount } = require('../workers/verticalAgentWorker');
+    const cache = require('../workers/inferenceCache');
+
+    // Wipe state
+    cache.invalidate(STRESS_ZIP, 'retail');
+    _resetScoutDedup();
+    info(`wiped cache + scout dedup state for ${STRESS_ZIP}/retail`);
+
+    // Track HTTP calls to enrichment endpoint via monkey-patch
+    const http = require('http');
+    let scoutCallCount = 0;
+    const _origRequest = http.request.bind(http);
+    http.request = function(opts, cb) {
+      // Intercept calls to the enrichment endpoint (port 3007)
+      const port = (typeof opts === 'object' ? opts.port : null);
+      if (String(port) === '3007') scoutCallCount++;
+      return _origRequest(opts, cb);
+    };
+
+    // Fire CONCURRENCY requests simultaneously
+    info(`firing ${CONCURRENCY} concurrent handleVerticalQuery calls for ${STRESS_ZIP}/retail`);
+    const t0 = Date.now();
+    const responses = await Promise.all(
+      Array.from({ length: CONCURRENCY }, () =>
+        handleVerticalQuery('retail', STRESS_Q, STRESS_ZIP).catch(e => ({ error: e.message }))
+      )
+    );
+    const elapsed = Date.now() - t0;
+    info(`all ${CONCURRENCY} calls resolved in ${elapsed}ms`);
+
+    // Restore http.request
+    http.request = _origRequest;
+
+    // All calls should succeed
+    const errors = responses.filter(r => r.error);
+    if (errors.length === 0) {
+      pass(`all ${CONCURRENCY} concurrent calls resolved without error`);
+    } else {
+      fail(`all ${CONCURRENCY} concurrent calls resolved without error`, `${errors.length} errors: ${errors[0].error}`);
+    }
+
+    // Exactly one scout dispatch (dedup fired for the rest)
+    if (scoutCallCount <= 1) {
+      pass(`scout dispatched at most once (got ${scoutCallCount}) — dedup held under ${CONCURRENCY}x concurrency`);
+    } else {
+      fail(`scout dispatched at most once`, `got ${scoutCallCount} dispatches — race condition not prevented`);
+    }
+
+    // All responses share the same vertical + zip
+    const verticals = [...new Set(responses.filter(r => !r.error).map(r => r.vertical))];
+    const zips      = [...new Set(responses.filter(r => !r.error).map(r => r.zip))];
+    if (verticals.length === 1 && verticals[0] === 'retail') {
+      pass('all responses report vertical=retail');
+    } else {
+      fail('all responses report vertical=retail', `got: ${verticals.join(', ')}`);
+    }
+    if (zips.length === 1 && zips[0] === STRESS_ZIP) {
+      pass(`all responses report zip=${STRESS_ZIP}`);
+    } else {
+      fail(`all responses report zip=${STRESS_ZIP}`, `got: ${zips.join(', ')}`);
+    }
+
+    // Cache consistency: all non-error responses return the same answer shape
+    // (either all cache hits or all misses — no split-brain where some get stale data)
+    const cacheHits   = responses.filter(r => !r.error && r._cache?.hit === true).length;
+    const cacheMisses = responses.filter(r => !r.error && r._cache?.hit === false).length;
+    info(`cache breakdown: ${cacheMisses} miss(es), ${cacheHits} hit(s) across ${CONCURRENCY} concurrent calls`);
+
+    // Exactly one miss is expected (first writer wins), rest should be hits
+    // Allow up to 2 misses in case of legitimate write-write interleave on the first write
+    if (cacheMisses <= 2) {
+      pass(`cache write converged — at most 2 misses out of ${CONCURRENCY} (got ${cacheMisses})`);
+    } else {
+      fail(`cache write converged`, `${cacheMisses} misses — all ${CONCURRENCY} calls bypassed cache (write not persisting)`);
+    }
+
+    // All hit responses must return identical answer data (no cache corruption)
+    const hitAnswers = responses
+      .filter(r => !r.error && r._cache?.hit === true)
+      .map(r => JSON.stringify(r.answer?.data || r.answer));
+    const uniqueAnswers = new Set(hitAnswers);
+    if (hitAnswers.length === 0) {
+      info('no cache hits to compare — skipping answer consistency check');
+    } else if (uniqueAnswers.size === 1) {
+      pass(`all ${hitAnswers.length} cache-hit responses return identical answer data`);
+    } else {
+      fail('cache-hit responses return identical answer data', `${uniqueAnswers.size} distinct answer shapes found — cache corruption`);
+    }
+
+    // Dedup map holds exactly one entry for this ZIP+vertical
+    const dedupCount = _scoutDispatchCount(STRESS_ZIP, 'retail');
+    if (dedupCount === 1 || scoutCallCount === 0) {
+      pass('dedup map state clean (1 entry or no low-confidence result)');
+    } else {
+      fail('dedup map state clean', `_scoutInFlight has unexpected state`);
+    }
+
+    return;
+  }
+
+  // ── Remote path: fire concurrent MCP calls, verify response consistency ───────
+  info(`remote mode — firing ${CONCURRENCY} concurrent MCP calls (cannot inspect scout internals)`);
+  info('verifying: all calls succeed, same vertical+zip, no divergent answers on cache hits');
+
+  const t0 = Date.now();
+  const responses = await Promise.allSettled(
+    Array.from({ length: CONCURRENCY }, () =>
+      callTool('local_intel_query', { query: STRESS_Q })
+    )
+  );
+  const elapsed = Date.now() - t0;
+  info(`all ${CONCURRENCY} concurrent MCP calls settled in ${elapsed}ms`);
+
+  const fulfilled = responses.filter(r => r.status === 'fulfilled').map(r => r.value);
+  const rejected  = responses.filter(r => r.status === 'rejected');
+
+  if (rejected.length === 0) {
+    pass(`all ${CONCURRENCY} concurrent MCP calls fulfilled`);
+  } else {
+    fail(`all ${CONCURRENCY} concurrent MCP calls fulfilled`, `${rejected.length} rejected: ${rejected[0].reason?.message}`);
+  }
+
+  // Vertical consistency
+  const verticals = [...new Set(fulfilled.map(r => r.vertical))];
+  if (verticals.length === 1) {
+    pass(`vertical consistent across all concurrent responses (${verticals[0]})`);
+  } else {
+    fail('vertical consistent across all concurrent responses', `got: ${verticals.join(', ')}`);
+  }
+
+  // ZIP consistency
+  const zips = [...new Set(fulfilled.map(r => r.zip))];
+  if (zips.length === 1) {
+    pass(`zip consistent across all concurrent responses (${zips[0]})`);
+  } else {
+    fail('zip consistent across all concurrent responses', `got: ${zips.join(', ')}`);
+  }
+
+  // Cache hit responses must have identical answer data
+  const hitResponses = fulfilled.filter(r => r._cache?.hit === true);
+  const hitAnswers   = hitResponses.map(r => JSON.stringify(r.answer?.data || r.answer));
+  const uniqueHits   = new Set(hitAnswers);
+  const cacheHits    = hitResponses.length;
+  const cacheMisses  = fulfilled.filter(r => r._cache?.hit === false).length;
+  info(`cache breakdown: ${cacheMisses} miss(es), ${cacheHits} hit(s) across ${CONCURRENCY} concurrent calls`);
+
+  if (cacheHits === 0) {
+    info('no cache hits on remote (Railway may restart between calls) — skipping answer consistency check');
+  } else if (uniqueHits.size === 1) {
+    pass(`all ${cacheHits} cache-hit responses return identical answer data`);
+  } else {
+    fail('cache-hit responses return identical answer data', `${uniqueHits.size} distinct answer shapes found — possible cache corruption`);
+  }
+
+  // _llm_hint present on all responses
+  const hintsMissing = fulfilled.filter(r => typeof r._llm_hint !== 'string').length;
+  if (hintsMissing === 0) {
+    pass('_llm_hint present on all concurrent responses');
+  } else {
+    fail('_llm_hint present on all concurrent responses', `${hintsMissing} responses missing _llm_hint`);
+  }
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────────
 function printSummary() {
   const passed = results.filter(r => r.status === 'PASS').length;
@@ -397,6 +570,7 @@ function printSummary() {
     await suiteWarmCache(coldResult);
     await suiteRegionQuery();
     await suiteIntentRouting();
+    await suiteConcurrentColdCache();
   } catch (e) {
     console.error(`\n${C.red}Unhandled error:${C.reset}`, e.message);
     process.exitCode = 1;
