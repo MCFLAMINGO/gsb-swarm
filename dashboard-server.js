@@ -5174,6 +5174,18 @@ setInterval(async () => {
   }
 }, 15000);
 
+// ── Upstash Redis keep-alive — ping every 6h to prevent archival ─────────────
+// RAIDERSOFTHECHAIN stores X OAuth state, linked accounts, DCA sessions, job log
+setInterval(async () => {
+  try {
+    const redis = require('./routes/redis-client');
+    await redis.set('__keepalive__', Date.now(), 43200); // 12h TTL
+    console.log('[redis-keepalive] ping ok —', new Date().toISOString());
+  } catch (e) {
+    console.error('[redis-keepalive] ping failed:', e.message);
+  }
+}, 6 * 60 * 60 * 1000); // every 6 hours
+
 // ══════════════════════════════════════════════════════════════════════════════
 // GSB CONTENT ENGINE — 12 API endpoints (Post King competitor)
 // ══════════════════════════════════════════════════════════════════════════════
