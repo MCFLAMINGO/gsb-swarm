@@ -143,12 +143,24 @@ function computeOracle(zip, name) {
 
   // ── Demographics ──────────────────────────────────────────────────────────
   const population   = zone?.population              || ocean?.population           || 0;
-  const medianHHI    = zone?.median_household_income || ocean?.median_household_income || 0;
+  const medianHHI    = zone?.median_household_income || zone?.median_income         || ocean?.median_household_income || 0;
   const medianHome   = zone?.median_home_value       || ocean?.median_home_value     || 0;
-  const ownerOccPct  = zone?.ownership_rate_pct      || ocean?.owner_pct             || 60;
+  const ownerOccPct  = zone?.ownership_rate_pct      || zone?.ownership_rate        || ocean?.owner_pct             || 60;
   const ownerUnits   = zone?.owner_occupied_units    || 0;
   const renterUnits  = zone?.renter_occupied_units   || 0;
   const totalHH      = ownerUnits + renterUnits || Math.round(population / 2.5);
+
+  // ── Extended Census signals ───────────────────────────────────────────────
+  const wfhPct              = zone?.wfh_pct               || 0;    // % workers who WFH
+  const daytimeMultiplier   = zone?.daytime_pop_multiplier || 1.0; // WFH workers boost daytime demand
+  const retireeIndex        = zone?.retiree_index          || 0;   // 0-100; high = large retiree base
+  const vacancyRatePct      = zone?.vacancy_rate_pct       || 8;   // housing vacancy %
+  const familyHHPct         = zone?.family_hh_pct          || 60;  // % family households
+  const affluencePct        = zone?.affluence_pct          || 0;   // % HH earning $100k+
+  const ultraAffluencePct   = zone?.ultra_affluence_pct    || 0;   // % HH earning $200k+
+  const renovationWave      = zone?.renovation_wave        || 'low';
+  const housingAgeProfile   = zone?.housing_age_profile    || 'mixed_vintage';
+  const newBuildPct         = zone?.new_build_pct          || 0;
 
   // ── Business inventory ────────────────────────────────────────────────────
   const foodBiz = businesses.filter(b => {
@@ -182,7 +194,11 @@ function computeOracle(zip, name) {
   // ── Restaurant capacity model ─────────────────────────────────────────────
   const isAffluent = medianHHI >= 100_000;
   const mealsOutPerDay = isAffluent ? MEALS_OUT_PER_DAY_AFFLUENT : MEALS_OUT_PER_DAY_BASE;
-  const totalMealsOutPerDay = population * mealsOutPerDay;
+  // Daytime multiplier: WFH workers stay in the ZIP during business hours, inflating lunch demand.
+  // Retiree index adds a breakfast/lunch premium (retirees eat out more during the day).
+  // We apply to population before multiplying by meals rate — effective demand is higher than resident count alone.
+  const daytimeDemandPop = Math.round(population * daytimeMultiplier * (1 + retireeIndex * 0.002));
+  const totalMealsOutPerDay = daytimeDemandPop * mealsOutPerDay;
 
   // Weighted avg covers/day (mix of fast food and sit-down)
   const fastFoodShare = (tierCounts.budget / Math.max(1, restaurantCount));
@@ -321,11 +337,23 @@ function computeOracle(zip, name) {
 
     demographics: {
       population,
-      median_household_income: medianHHI,
-      median_home_value:       medianHome,
-      owner_occupied_pct:      ownerOccPct,
-      total_households:        totalHH,
-      consumer_profile:        isAffluent ? 'affluent_established' : 'mixed',
+      median_household_income:  medianHHI,
+      median_home_value:        medianHome,
+      owner_occupied_pct:       ownerOccPct,
+      total_households:         totalHH,
+      consumer_profile:         isAffluent ? 'affluent_established' : 'mixed',
+      // Extended Census signals
+      wfh_pct,
+      daytime_pop_multiplier:   daytimeMultiplier,
+      daytime_demand_population: daytimeDemandPop,
+      retiree_index:            retireeIndex,
+      vacancy_rate_pct:         vacancyRatePct,
+      family_hh_pct:            familyHHPct,
+      affluence_pct,
+      ultra_affluence_pct:      ultraAffluencePct,
+      renovation_wave:          renovationWave,
+      housing_age_profile:      housingAgeProfile,
+      new_build_pct:            newBuildPct,
     },
 
     restaurant_capacity: {
