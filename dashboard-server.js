@@ -5614,6 +5614,8 @@ app.use((req, res, next) => {
     { name: 'Vertical Agent',        file: 'workers/verticalAgentWorker.js' },
     { name: 'Prompt Evolution',       file: 'workers/promptEvolutionWorker.js' },
     { name: 'Census Layer',            file: 'workers/censusLayerWorker.js'     },
+    { name: 'Overpass Worker',         file: 'workers/overpassWorker.js'        },
+    { name: 'IRS SOI Worker',          file: 'workers/irsSoiWorker.js'          },
   ];
 
   function spawnLocalIntelWorker(w) {
