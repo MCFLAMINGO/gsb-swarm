@@ -408,6 +408,33 @@ app.use('/api/bbb', bbbRouter);
 const { router: btrRouter } = require('./workers/btrWorker');
 app.use('/api/btr', btrRouter);
 
+// ── Prompt Evolution API ──────────────────────────────────────────────────────
+// GET  /api/evolution/report  — latest audit report (signal quality, gaps, prompt counts)
+// GET  /api/evolution/gaps    — full per-ZIP gap audit
+// POST /api/evolution/run     — manually trigger an evolution cycle
+app.get('/api/evolution/report', (req, res) => {
+  const file = path.join(__dirname, 'data', 'evolution', '_report.json');
+  if (!fs.existsSync(file)) return res.json({ status: 'not_yet_run', message: 'First evolution cycle runs at 2am or next restart.' });
+  res.json(JSON.parse(fs.readFileSync(file, 'utf8')));
+});
+app.get('/api/evolution/gaps', (req, res) => {
+  const file = path.join(__dirname, 'data', 'evolution', '_gaps.json');
+  if (!fs.existsSync(file)) return res.json({ status: 'not_yet_run' });
+  res.json(JSON.parse(fs.readFileSync(file, 'utf8')));
+});
+app.post('/api/evolution/run', async (req, res) => {
+  res.json({ status: 'dispatched', message: 'Evolution cycle started — check /api/evolution/report in ~60s.' });
+  // Non-blocking — run after response sent
+  setTimeout(async () => {
+    try {
+      const { runEvolution } = require('./workers/promptEvolutionWorker');
+      await runEvolution();
+    } catch (err) {
+      console.error('[evolution-api] Manual run error:', err.message);
+    }
+  }, 100);
+});
+
 // ── ACP compliance endpoints — MUST be before express.static ─────────────────
 // Virtuals probes these to verify agent is hireable on ACP marketplace
 app.get('/.well-known/agent.json', (req, res) => {
@@ -5478,6 +5505,7 @@ app.use((req, res, next) => {
     { name: 'Wave Surface Worker',  file: 'workers/waveSurfaceWorker.js' },
     { name: 'BTR Worker',           file: 'workers/btrWorker.js' },
     { name: 'Vertical Agent',        file: 'workers/verticalAgentWorker.js' },
+    { name: 'Prompt Evolution',       file: 'workers/promptEvolutionWorker.js' },
   ];
 
   function spawnLocalIntelWorker(w) {
