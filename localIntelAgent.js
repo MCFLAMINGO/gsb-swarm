@@ -945,6 +945,121 @@ router.get('/router-learning', (req, res) => {
   }
 });
 
+// ── GET /api/local-intel/router-learning/report ──────────────────────────────
+// Structured patch history: score_before, score_after, delta per vertical per run.
+// Query params:
+//   ?vertical=restaurant   — filter to one vertical
+//   ?limit=N               — last N patches (default 50)
+//   ?runs=1                — include run-level summary alongside patches
+router.get('/router-learning/report', (req, res) => {
+  try {
+    const file = path.join(DATA_DIR_AGENT, 'router_learning.json');
+    if (!fs.existsSync(file)) {
+      return res.json({
+        status:  'no_data_yet',
+        message: 'Router learning worker has not run yet — check back in ~35 minutes',
+      });
+    }
+
+    const data     = JSON.parse(fs.readFileSync(file));
+    const limit    = Math.min(parseInt(req.query.limit || '50', 10), 500);
+    const vertical = req.query.vertical || null;
+    const includeRuns = req.query.runs === '1';
+
+    // ── Patch history ─────────────────────────────────────────────────────────
+    let patches = (data.patches || []).slice(-limit);
+    if (vertical) patches = patches.filter(p => p.vertical === vertical);
+
+    // Enrich each patch with a human-readable summary line
+    const patchRows = patches.map(p => ({
+      ts:           p.ts,
+      cycle:        p.cycle,
+      vertical:     p.vertical,
+      terms_added:  p.terms || [],
+      score_before: p.score_before ?? null,
+      score_after:  p.score_after  ?? null,
+      delta:        p.delta        ?? null,
+      improved:     typeof p.delta === 'number' ? p.delta > 0 : null,
+      confirmations: (p.confirmations || []).map(c => ({
+        query:        c.query,
+        zip:          c.zip,
+        score_before: c.score_before,
+        score_after:  c.score_after,
+        delta:        c.delta,
+      })),
+    }));
+
+    // ── Per-vertical aggregate ─────────────────────────────────────────────────
+    const VERTICALS = ['restaurant','healthcare','retail','construction','realtor'];
+    const verticalSummary = {};
+    for (const v of VERTICALS) {
+      const vPatches = (data.patches || []).filter(p => p.vertical === v);
+      const withDelta = vPatches.filter(p => typeof p.delta === 'number');
+      const avgBefore = withDelta.length
+        ? Math.round(withDelta.reduce((s, p) => s + p.score_before, 0) / withDelta.length)
+        : null;
+      const avgAfter = withDelta.length
+        ? Math.round(withDelta.reduce((s, p) => s + p.score_after, 0) / withDelta.length)
+        : null;
+      const totalImproved = withDelta.filter(p => p.delta > 0).length;
+      const totalDegraded = withDelta.filter(p => p.delta < 0).length;
+      // Latest score trend from rolling history
+      const vHistory = data.verticals?.[v];
+      const latestBefore = vHistory?.avg_score_before?.slice(-1)[0] ?? null;
+      const latestAfter  = vHistory?.avg_score_after?.slice(-1)[0]  ?? null;
+      verticalSummary[v] = {
+        total_patches:   vPatches.length,
+        patches_with_measurement: withDelta.length,
+        avg_score_before: avgBefore,
+        avg_score_after:  avgAfter,
+        avg_delta:        avgBefore !== null && avgAfter !== null ? avgAfter - avgBefore : null,
+        patches_improved: totalImproved,
+        patches_degraded: totalDegraded,
+        latest_score_before: latestBefore,
+        latest_score_after:  latestAfter,
+        latest_delta: latestBefore !== null && latestAfter !== null ? latestAfter - latestBefore : null,
+        terms_learned: (vHistory?.patches || []).length,
+      };
+    }
+
+    // ── Overall health score ───────────────────────────────────────────────────
+    const allWithDelta = (data.patches || []).filter(p => typeof p.delta === 'number');
+    const overallAvgDelta = allWithDelta.length
+      ? Math.round(allWithDelta.reduce((s, p) => s + p.delta, 0) / allWithDelta.length)
+      : null;
+    const improvementRate = allWithDelta.length
+      ? Math.round(allWithDelta.filter(p => p.delta > 0).length / allWithDelta.length * 100)
+      : null;
+
+    const payload = {
+      generated_at:           new Date().toISOString(),
+      total_patches_applied:  data.total_patches_applied || 0,
+      patches_with_measurement: allWithDelta.length,
+      overall_avg_delta:      overallAvgDelta,
+      improvement_rate_pct:   improvementRate,
+      last_run_at:            data.runs?.[data.runs.length - 1]?.ts || null,
+      total_runs:             data.runs?.length || 0,
+      vertical_summary:       verticalSummary,
+      patches:                patchRows,
+    };
+
+    if (includeRuns) {
+      payload.runs = (data.runs || []).slice(-20).map(r => ({
+        ts:             r.ts,
+        cycle:          r.cycle,
+        log_entries:    r.log_entries,
+        failures_found: r.failures_found,
+        patches_count:  r.patches?.length || 0,
+        score_trends:   r.score_trends,
+      }));
+    }
+
+    res.json(payload);
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/zip-queue', (req, res) => {
   try {
     const file = path.join(DATA_DIR_AGENT, 'zipQueue.json');
