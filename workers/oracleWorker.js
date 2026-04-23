@@ -19,6 +19,20 @@
 const path = require('path');
 const fs   = require('fs');
 
+// flZipRegistry — Census ACS population + income fallback when no zone/ocean data
+let _flRegistry = null;
+function getFlRegistry() {
+  if (_flRegistry) return _flRegistry;
+  try {
+    const { getAllZips } = require('./flZipRegistry');
+    _flRegistry = {};
+    getAllZips().forEach(z => { _flRegistry[z.zip] = z; });
+  } catch (e) {
+    _flRegistry = {};
+  }
+  return _flRegistry;
+}
+
 const DATA_DIR    = path.join(__dirname, '..', 'data');
 const ORACLE_DIR  = path.join(DATA_DIR, 'oracle');
 const INDEX_FILE  = path.join(ORACLE_DIR, '_index.json');
@@ -147,8 +161,11 @@ function computeOracle(zip, name) {
   }
 
   // ── Demographics ──────────────────────────────────────────────────────────
-  const population   = zone?.population              || ocean?.population           || 0;
-  const medianHHI    = zone?.median_household_income || zone?.median_income         || ocean?.median_household_income || 0;
+  // flZipRegistry fallback: when no spending zone or ocean floor data exists,
+  // use Census ACS population + median HHI so the oracle can still compute.
+  const reg = getFlRegistry()[zip] || {};
+  const population   = zone?.population              || ocean?.population           || reg.population   || 0;
+  const medianHHI    = zone?.median_household_income || zone?.median_income         || ocean?.median_household_income || reg.median_hhi || 0;
   const medianHome   = zone?.median_home_value       || ocean?.median_home_value     || 0;
   const ownerOccPct  = zone?.ownership_rate_pct      || zone?.ownership_rate        || ocean?.owner_pct             || 60;
   const ownerUnits   = zone?.owner_occupied_units    || 0;
@@ -501,26 +518,60 @@ async function runOracle() {
   })();
   const zoneZips = Object.keys(zones?.zones || {});
 
-  // Also discover from zips/ directory
+  // Also discover from zips/ directory — include all ZIPs with sufficient business data
   const zipDir = path.join(DATA_DIR, 'zips');
   const fileZips = fs.existsSync(zipDir)
-    ? fs.readdirSync(zipDir).filter(f => f.endsWith('.json')).map(f => f.replace('.json',''))
+    ? fs.readdirSync(zipDir)
+        .filter(f => f.endsWith('.json') && /^\d{5}\.json$/.test(f))
+        .map(f => f.replace('.json', ''))
     : [];
 
-  // Merge and dedupe
-  // NOTE: fileZips intentionally excluded — data/zips/ contains non-SJC ZIPs
-  // (Georgia, etc.) with no demographic data that produce bogus gap signals.
-  // Only zone-backed ZIPs + KNOWN_ZIPS run through the oracle.
-  const allZips = [...new Set([...zoneZips])];
+  // Merge: zone-backed ZIPs + file ZIPs with >=10 businesses (enough for meaningful signals)
+  // flZipRegistry fallback handles demographics for file ZIPs without zone data
+  const registry = getFlRegistry();
+  const qualifiedFileZips = fileZips.filter(zip => {
+    try {
+      const d = JSON.parse(fs.readFileSync(path.join(zipDir, `${zip}.json`), 'utf8'));
+      const count = Array.isArray(d) ? d.length : (d?.businesses?.length || 0);
+      // Must have >=10 businesses AND either zone data OR a registry entry with population
+      return count >= 10 && (zoneZips.includes(zip) || (registry[zip]?.population || 0) > 0);
+    } catch { return false; }
+  });
 
-  // Add known ZIPs even without zone data
+  const allZips = [...new Set([...zoneZips, ...qualifiedFileZips])];
+
+  // Top 30 known ZIPs — always included even if file data is still building
   const KNOWN_ZIPS = [
-    { zip: '32081', name: 'Nocatee' },
     { zip: '32082', name: 'Ponte Vedra Beach' },
-    { zip: '32092', name: 'World Golf Village' },
+    { zip: '32250', name: 'Jacksonville Beach' },
     { zip: '32084', name: 'St. Augustine' },
     { zip: '32086', name: 'St. Augustine South' },
+    { zip: '32081', name: 'Nocatee' },
+    { zip: '32246', name: 'Jacksonville East' },
+    { zip: '32224', name: 'Jacksonville SE' },
+    { zip: '32233', name: 'Atlantic Beach' },
+    { zip: '32080', name: 'St. Augustine Beach' },
+    { zip: '32092', name: 'World Golf Village' },
+    { zip: '32256', name: 'Jacksonville SW' },
+    { zip: '32225', name: 'Jacksonville NE' },
+    { zip: '32216', name: 'Jacksonville Southside' },
+    { zip: '32266', name: 'Neptune Beach' },
+    { zip: '32177', name: 'Palatka' },
+    { zip: '32257', name: 'Jacksonville S' },
+    { zip: '32211', name: 'Arlington' },
+    { zip: '32258', name: 'Mandarin South' },
+    { zip: '32217', name: 'San Jose' },
+    { zip: '32207', name: 'San Marco' },
+    { zip: '32259', name: 'Switzerland' },
+    { zip: '32131', name: 'East Palatka' },
     { zip: '32095', name: 'Palm Valley' },
+    { zip: '32223', name: 'Mandarin' },
+    { zip: '32033', name: 'Elkton' },
+    { zip: '32073', name: 'Orange Park' },
+    { zip: '32277', name: 'Jacksonville N' },
+    { zip: '32065', name: 'Orange Park West' },
+    { zip: '32043', name: 'Green Cove Springs' },
+    { zip: '32068', name: 'Middleburg' },
   ];
   for (const k of KNOWN_ZIPS) {
     if (!allZips.includes(k.zip)) allZips.push(k.zip);
