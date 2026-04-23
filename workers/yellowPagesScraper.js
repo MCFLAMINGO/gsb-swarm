@@ -260,7 +260,7 @@ async function bulkScrapeYellowPages(options = {}) {
 
     for (const cat of categories) {
       // Page 1
-      for (let page = 1; page <= 3; page++) {
+      for (let page = 1; page <= 10; page++) {
         const url = page === 1
           ? `https://www.yellowpages.com/${city}/${cat}`
           : `https://www.yellowpages.com/${city}/${cat}?page=${page}`;
