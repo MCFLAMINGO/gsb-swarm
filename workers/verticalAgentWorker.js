@@ -133,7 +133,7 @@ const VERTICALS = {
       { pattern: /gap|undersupplied|need|opportunity|unmet|missing/i,                                                                                                                                       tool: 'local_intel_oracle',  params: (zip) => ({ zip }) },
       { pattern: /new.*added|recently.*added|new.*opening|recently.*open|new.*business/i,                                                                                                                   tool: 'local_intel_changes', params: (zip) => ({ zip }) },
       { pattern: /nearby|radius|within.*miles|3 miles|close to/i,                                                                                                                                           tool: 'local_intel_nearby',  params: (zip) => ({ lat: ZIP_CENTERS[zip]?.lat, lon: ZIP_CENTERS[zip]?.lon, radius_miles: 3 }) },
-      { pattern: /patient|clinic|hospital|doctor|physician|dental|pharmacy|health|optom|vision|physical.therap|urgent.care|walk.in|mental.health|counseling|rehab/i,                                       tool: 'local_intel_search',  params: (zip, q) => ({ query: extractCategory(q, 'healthcare'), zip }) },
+      { pattern: /patient|clinic|hospital|doctor|physician|dental|pharmacy|health|optom|vision|physical.therap|urgent.care|walk.in|mental.health|counseling|rehab/i,                                       tool: 'local_intel_search',  params: (zip, q) => ({ query: extractCategory(q, 'healthcare'), zip, group: 'health' }) },
     ],
     mcpPrompts: [
       { q: 'What dentists operate in this ZIP?', zip: '32082' },

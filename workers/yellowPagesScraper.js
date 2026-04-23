@@ -143,7 +143,13 @@ function parseYPResults(html, category) {
                         .filter(Boolean).join(', ') || null,
             zip:      addr.postalCode || null,
             category: (item['@type'] === 'LocalBusiness' ? (inferCategoryFromName(item.name) || 'LocalBusiness') : item['@type']) || category,
-            hours:    item.openingHours ? (Array.isArray(item.openingHours) ? item.openingHours.join(', ') : item.openingHours) : null,
+            hours:    (() => {
+              const raw = item.openingHours ? (Array.isArray(item.openingHours) ? item.openingHours.join(', ') : item.openingHours) : null;
+              if (!raw) return null;
+              // Sanitize: valid hours look like "Mo-Fr 09:00-17:00" — strip anything with JSON artifacts
+              const sanitized = String(raw).replace(/\\"[^"]*\\":[^,}]*(,)?/g, '').trim();
+              return /^[A-Z][a-z]/.test(sanitized) && sanitized.length < 200 ? sanitized : null;
+            })(),
             source:   'yellowpages',
           });
         }
