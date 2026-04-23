@@ -46,8 +46,8 @@ async function handleQuery(params) {
 
   const r = route(query);
 
-  // Override ZIP if caller provided one explicitly
-  const zip = (params.zip || r.zip || '').replace(/\D/g, '').slice(0, 5) || r.zip;
+  // Override ZIP if caller provided one explicitly; fall back to primary coverage ZIP
+  const zip = (params.zip || r.zip || '').replace(/\D/g, '').slice(0, 5) || r.zip || '32082';
 
   // Cache check
   if (r.vertical) {
