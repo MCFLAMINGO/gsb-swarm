@@ -262,15 +262,28 @@ function makeFare(p) {
 }
 
 // ── CEO Claude Synthesis ────────────────────────────────────────────────────
+// Throttle: max 1 Claude call per 10 min — heartbeat + routine ACP jobs reuse last brief
+let _ceoBuyerLastSynthAt   = 0;
+let _ceoBuyerLastSynthText = 'GSB Intelligence Swarm is online. Synthesis warming up.';
+const _CEO_SYNTH_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+
 async function ceoSynthesize(prompt) {
   if (anthropic) {
+    const now = Date.now();
+    const cooledDown = (now - _ceoBuyerLastSynthAt) >= _CEO_SYNTH_COOLDOWN_MS;
+    if (!cooledDown) {
+      console.log('[CEO] Synthesis skipped — cooldown active, reusing last brief');
+      return _ceoBuyerLastSynthText;
+    }
     try {
       const msg = await anthropic.messages.create({
         model: 'claude-haiku-3-5',
         max_tokens: 600,
         messages: [{ role: 'user', content: prompt }],
       });
-      return msg.content[0].text;
+      _ceoBuyerLastSynthText = msg.content[0].text;
+      _ceoBuyerLastSynthAt   = now;
+      return _ceoBuyerLastSynthText;
     } catch (err) {
       console.warn('[CEO] Claude synthesis failed, using fallback:', err.message);
     }

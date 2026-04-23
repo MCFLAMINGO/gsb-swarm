@@ -159,6 +159,15 @@ const jobHistory     = [];     // { jobId, worker, event, status, ts }
 const jobWorkerMap   = new Map(); // jobId → worker name
 const briefResults   = {};     // role → parsed data
 let   acpReady       = false;
+
+// ── Claude synthesis throttle — avoid redundant API calls ──────────────────
+let   _lastSynthesisHash = '';       // hash of briefResults at last Claude call
+let   _lastSynthesisAt   = 0;        // timestamp of last Claude synthesis
+const _SYNTHESIS_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+function _briefHash(obj) {
+  // Lightweight fingerprint — keys + truncated values
+  return Object.entries(obj).map(([k, v]) => k + ':' + JSON.stringify(v).slice(0, 80)).join('|');
+}
 let   acceptQueue    = Promise.resolve();
 let   evaluatedCount = 0;
 
@@ -375,8 +384,19 @@ function ceoSynthesizeRuleBased(workerResults, originalCommand) {
 
 async function ceoSynthesize(workerResults, originalCommand) {
   if (anthropic) {
+    const now = Date.now();
+    const currentHash = _briefHash(workerResults);
+    const dataChanged = currentHash !== _lastSynthesisHash;
+    const cooledDown  = (now - _lastSynthesisAt) >= _SYNTHESIS_COOLDOWN_MS;
+    if (!dataChanged && !cooledDown) {
+      console.log('[CEO] Synthesis skipped — data unchanged + cooldown active, using rule-based');
+      return ceoSynthesizeRuleBased(workerResults, originalCommand);
+    }
     try {
-      return await ceoSynthesizeWithClaude(workerResults, originalCommand);
+      const result = await ceoSynthesizeWithClaude(workerResults, originalCommand);
+      _lastSynthesisHash = currentHash;
+      _lastSynthesisAt   = now;
+      return result;
     } catch (err) {
       console.warn('[CEO] Claude synthesis failed, falling back to rule-based:', err.message);
     }
