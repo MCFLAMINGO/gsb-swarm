@@ -45,8 +45,10 @@
 const fs   = require('fs');
 const path = require('path');
 
-const DATA_DIR      = path.join(__dirname, '..', 'data');
-const CACHE_DIR     = path.join(DATA_DIR, 'inference');
+const DATA_DIR           = path.join(__dirname, '..', 'data');
+const CACHE_DIR          = path.join(DATA_DIR, 'inference');
+const ROUTER_LEARNING    = path.join(DATA_DIR, 'router_learning.json');
+const LEARNED_RELOAD_MS  = 5 * 60 * 1000; // re-read every 5 min
 
 // TTL in ms
 const TTL = {
@@ -63,6 +65,39 @@ const STOP = new Set([
   'open','start','launch','business','market','area','town','city','region',
   'northeast','florida','fl','county','zip','code',
 ]);
+
+// ── Learned signal hot-reload ────────────────────────────────────────────────
+// routerLearningWorker writes patches to data/router_learning.json.
+// Because Node.js require() caches modules, file-level patches to this file
+// are invisible to a running process. Instead we read the JSON at runtime
+// and merge learned terms into _learnedSignals, which detectVertical() checks
+// FIRST before falling back to the hardcoded VERTICAL_SIGNALS regexes below.
+
+let _learnedSignals   = {};  // { vertical: Set<string> }
+let _lastLearnedLoad  = 0;
+
+function loadLearnedSignals() {
+  const now = Date.now();
+  if (now - _lastLearnedLoad < LEARNED_RELOAD_MS) return; // throttle
+  _lastLearnedLoad = now;
+  try {
+    const raw = JSON.parse(fs.readFileSync(ROUTER_LEARNING, 'utf8'));
+    const next = {};
+    for (const patch of (raw.patches || [])) {
+      if (!patch.vertical || !Array.isArray(patch.terms)) continue;
+      if (!next[patch.vertical]) next[patch.vertical] = new Set();
+      for (const t of patch.terms) next[patch.vertical].add(t.toLowerCase());
+    }
+    _learnedSignals = next;
+  } catch (_) {
+    // file may not exist yet — that's fine
+  }
+}
+
+// Kick off first load immediately
+loadLearnedSignals();
+// Refresh on interval so the module stays current without a restart
+setInterval(loadLearnedSignals, LEARNED_RELOAD_MS).unref();
 
 // Vertical keyword signals — used to detect vertical from free-text query
 const VERTICAL_SIGNALS = {
@@ -164,6 +199,15 @@ function fingerprintSimilarity(fpA, fpB) {
 // ── Vertical detection ────────────────────────────────────────────────────────
 
 function detectVertical(query) {
+  // 1. Check learned signals first — they reflect runtime improvements
+  loadLearnedSignals(); // no-op if within throttle window
+  const lower = query.toLowerCase();
+  for (const [vertical, termSet] of Object.entries(_learnedSignals)) {
+    for (const term of termSet) {
+      if (lower.includes(term)) return vertical;
+    }
+  }
+  // 2. Fall back to hardcoded regex patterns
   for (const [v, pattern] of Object.entries(VERTICAL_SIGNALS)) {
     if (pattern.test(query)) return v;
   }

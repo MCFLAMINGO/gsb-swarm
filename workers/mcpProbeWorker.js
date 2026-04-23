@@ -238,15 +238,18 @@ async function runPersona(persona, zipPool, cycleIndex) {
       // local_intel_query is the fuzzy intent router — pass plain English, it resolves everything
       const resp = await callMcp('local_intel_query', { query });
       entry.latency_ms  = Date.now() - t0;
-      const { score, reason } = scoreResponse(resp.body, 'local_intel_query');
-      entry.score       = score;
-      entry.reason      = reason;
+      const scored = scoreResponse(resp.body, 'local_intel_query', persona.expectedVertical);
+      entry.score             = scored.score;
+      entry.reason            = scored.reason;
+      entry.expected_vertical = scored.expected_vertical || persona.expectedVertical;
+      entry.detected_vertical = scored.detected_vertical || null;
+      entry.vertical_density  = scored.vertical_density  || null;
       entry.http_status = resp.status;
       const content     = resp.body?.result?.content;
       const text        = Array.isArray(content) ? content.map(c => c?.text || '').join(' ') : '';
       entry.answer_snippet = text.slice(0, 400);
       entry.answer_length  = text.length;
-      console.log(`[mcp-probe] ${persona.id} | ${zip} | score:${score} | ${reason} | ${entry.latency_ms}ms | "${query.slice(0,60)}..."`);
+      console.log(`[mcp-probe] ${persona.id} | ${zip} | score:${scored.score} | ${scored.reason} | density:${scored.vertical_density ?? '-'}% | ${entry.latency_ms}ms | "${query.slice(0,60)}..."`);
     } catch (err) {
       entry.latency_ms = Date.now() - t0;
       entry.error      = err.message;

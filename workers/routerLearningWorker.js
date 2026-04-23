@@ -166,6 +166,81 @@ function findCandidateTerms(failures, vertical) {
 }
 
 // ── Patch inferenceCache.js ───────────────────────────────────────────────────
+// ── Lightweight MCP probe (no daemon) ────────────────────────────────────────
+function probeMcp(query) {
+  return new Promise((resolve) => {
+    const body = JSON.stringify({
+      jsonrpc: '2.0', id: Date.now(),
+      method: 'tools/call',
+      params: { name: 'local_intel_query', arguments: { query } },
+    });
+    const url  = new URL(MCP_URL);
+    const opts = {
+      method: 'POST',
+      host: url.hostname, port: url.port || 8080, path: url.pathname,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    };
+    const req = http.request(opts, (res) => {
+      let raw = '';
+      res.on('data', d => raw += d);
+      res.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve(null); } });
+    });
+    req.setTimeout(12000, () => { req.destroy(); resolve(null); });
+    req.on('error', () => resolve(null));
+    req.write(body); req.end();
+  });
+}
+
+// Vertical signature terms — mirrors mcpProbeWorker, no import needed
+const VERTICAL_TERMS = {
+  realtor:      ['real estate','property','listing','buyer','seller','vacancy','appreciation','zoning','condo','median','income','flood zone','development','commercial vacancy'],
+  restaurant:   ['restaurant','dining','cuisine','eatery','food','cafe','breakfast','lunch','dinner','daypart','franchise','delivery','dine-in','fast casual'],
+  construction: ['permit','contractor','builder','remodel','renovation','roofing','hvac','plumbing','electrical','deck','pool','construction','commercial project'],
+  retail:       ['retail','store','shop','boutique','spending','merchandise','apparel','grocery','consumer','ecommerce','fashion','outdoor','fitness'],
+  healthcare:   ['clinic','healthcare','medical','doctor','physician','dentist','urgent care','therapy','pediatric','senior','nursing','pharmacy','hospital','specialist'],
+};
+
+function quickScore(body, expectedVertical) {
+  const content = Array.isArray(body?.result?.content) ? body.result.content : [];
+  const text    = content.map(c => c?.text || '').join(' ');
+  if (!text || text.length < 20) return 0;
+  if (text.includes('no data') || text.includes('not found') || text.includes('0 businesses')) return 20;
+  if (!expectedVertical) return text.length > 200 ? 80 : 50;
+  const lower   = text.toLowerCase();
+  const terms   = VERTICAL_TERMS[expectedVertical] || [];
+  const matches = terms.filter(t => lower.includes(t.toLowerCase()));
+  const density = terms.length > 0 ? matches.length / terms.length : 0;
+  let maxWrong  = 0;
+  for (const [v, vTerms] of Object.entries(VERTICAL_TERMS)) {
+    if (v === expectedVertical) continue;
+    const w = vTerms.filter(t => lower.includes(t.toLowerCase())).length / vTerms.length;
+    if (w > maxWrong) maxWrong = w;
+  }
+  if (maxWrong > density && maxWrong > 0.15) return 0;  // wrong vertical
+  if (density >= 0.2 && text.length > 200)   return 100; // correct + dense
+  if (density > 0 || text.length > 200)      return 60;  // correct sparse
+  return 20;
+}
+
+// Re-run up to 3 failing queries post-patch and measure score delta
+async function measureImprovement(vertical, failedQueries) {
+  const sample  = failedQueries.slice(0, 3);
+  const results = [];
+  for (const f of sample) {
+    const body = await probeMcp(f.query);
+    const scoreAfter = body ? quickScore(body, vertical) : f.score;
+    results.push({
+      query:        f.query,
+      zip:          f.zip,
+      score_before: f.score,
+      score_after:  scoreAfter,
+      delta:        scoreAfter - f.score,
+    });
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  return results;
+}
+
 function patchRouterFile(vertical, newTerms) {
   if (!newTerms.length) return false;
 
@@ -264,19 +339,48 @@ async function runLearningCycle(cycleIndex) {
 
     const applied = patchRouterFile(vertical, candidates);
     if (applied && applied.length) {
+      console.log(`[router-learning]   ✓ Patched ${vertical} with: ${applied.join(', ')} — running confirmation probes...`);
+
+      // Before/after confirmation loop — re-score the same failing queries post-patch
+      const improvements = await measureImprovement(vertical, vFailures);
+      const avgBefore = improvements.length
+        ? Math.round(improvements.reduce((s, r) => s + r.score_before, 0) / improvements.length)
+        : 0;
+      const avgAfter = improvements.length
+        ? Math.round(improvements.reduce((s, r) => s + r.score_after, 0) / improvements.length)
+        : 0;
+      const avgDelta = avgAfter - avgBefore;
+
+      improvements.forEach(r =>
+        console.log(`[router-learning]     "${r.query.slice(0, 55)}" | before:${r.score_before} → after:${r.score_after} (${r.delta >= 0 ? '+' : ''}${r.delta})`)
+      );
+      console.log(`[router-learning]   ${vertical} avg delta: ${avgDelta >= 0 ? '+' : ''}${avgDelta} (${avgBefore} → ${avgAfter})`);
+
       const patch = {
-        ts:       new Date().toISOString(),
+        ts:           new Date().toISOString(),
         vertical,
-        terms:    applied,
-        evidence: vFailures.slice(0, 3).map(f => ({ query: f.query, score: f.score })),
-        cycle:    cycleIndex + 1,
+        terms:        applied,
+        evidence:     vFailures.slice(0, 3).map(f => ({ query: f.query, score: f.score })),
+        cycle:        cycleIndex + 1,
+        score_before: avgBefore,
+        score_after:  avgAfter,
+        delta:        avgDelta,
+        confirmations: improvements,
       };
       runRecord.patches.push(patch);
       learning.patches.push(patch);
       learning.total_patches_applied += applied.length;
       learning.verticals[vertical]?.patches.push(...applied);
 
-      console.log(`[router-learning]   ✓ Patched ${vertical} with: ${applied.join(', ')}`);
+      // Track per-vertical score history
+      if (learning.verticals[vertical]) {
+        learning.verticals[vertical].avg_score_before.push(avgBefore);
+        learning.verticals[vertical].avg_score_after.push(avgAfter);
+        if (learning.verticals[vertical].avg_score_before.length > 50) {
+          learning.verticals[vertical].avg_score_before = learning.verticals[vertical].avg_score_before.slice(-50);
+          learning.verticals[vertical].avg_score_after  = learning.verticals[vertical].avg_score_after.slice(-50);
+        }
+      }
     }
   }
 
