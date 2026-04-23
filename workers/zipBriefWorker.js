@@ -28,6 +28,8 @@ const ZIPS_DIR    = path.join(BASE_DIR, 'data', 'zips');
 const BRIEFS_DIR  = path.join(BASE_DIR, 'data', 'briefs');
 const OSM_DIR     = path.join(BASE_DIR, 'data', 'osm');
 
+const { validateAll, getFailedZips } = require('./briefValidator');
+
 const CYCLE_MS   = 4 * 60 * 60 * 1000; // 4 hours
 const STAGGER_MS = 3 * 60 * 1000;       // 3 min after startup
 
@@ -282,7 +284,33 @@ async function runBriefPass() {
 
   while (true) {
     try {
-      await runBriefPass();
+      // Build/rebuild all stale briefs
+      const passResult = await runBriefPass();
+
+      // Validate every built brief — flag failures before next cycle
+      if (passResult && passResult.built > 0) {
+        console.log('[zip-brief] Running validation pass on all briefs');
+        const report = validateAll();
+        if (report) {
+          const failedZips = report.failed_zips || [];
+          if (failedZips.length > 0) {
+            console.warn(`[zip-brief] ${failedZips.length} briefs failed validation: ${failedZips.join(', ')}`)
+            console.warn('[zip-brief] These ZIPs will be force-rebuilt next cycle');
+            // Touch the zip files to force rebuild on next pass
+            failedZips.forEach(zip => {
+              try {
+                const zipFile = path.join(ZIPS_DIR, `${zip}.json`);
+                if (fs.existsSync(zipFile)) {
+                  const now = new Date();
+                  fs.utimesSync(zipFile, now, now);
+                }
+              } catch (_) {}
+            });
+          } else {
+            console.log(`[zip-brief] All ${report.total_checked} briefs passed validation ✓`);
+          }
+        }
+      }
     } catch (err) {
       console.error('[zip-brief] Pass error:', err.message);
     }

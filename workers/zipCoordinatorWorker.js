@@ -144,9 +144,9 @@ function checkBudgetGate() {
     .reduce((sum, entry) => sum + (entry.amount || 0), 0);
 
   if (revenue7d === 0) {
-    CONCURRENT_AGENTS = 2;
+    CONCURRENT_AGENTS = 6; // Pre-revenue: run full FL expansion — data is the asset
     gateStatus = 'zero_revenue';
-    console.log('[ZipCoordinator] Budget gate: zero revenue — throttling to 2 agents, enrichment-only mode');
+    console.log('[ZipCoordinator] Budget gate: zero revenue — running 6 agents for FL expansion (data-first mode)');
   } else if (revenue7d < 5) {
     CONCURRENT_AGENTS = 5;
     gateStatus = 'low_revenue';
@@ -171,12 +171,73 @@ function saveCoverage(coverage) {
   fs.writeFileSync(COVERAGE_FILE, JSON.stringify(coverage, null, 2));
 }
 
+function buildFullFlQueue() {
+  // Merge FL_ZIPS_PRIORITY (has pre-seeded names/regions) with flZipRegistry (all 1013 FL ZCTAs)
+  let registry = [];
+  try {
+    const { getAllZips } = require('./flZipRegistry');
+    registry = getAllZips();
+  } catch (e) {
+    console.warn('[ZipCoordinator] flZipRegistry unavailable, falling back to FL_ZIPS_PRIORITY:', e.message);
+  }
+
+  const priorityMap = {};
+  FL_ZIPS_PRIORITY.forEach(z => { priorityMap[z.zip] = z; });
+
+  const seen = new Set();
+  const queue = [];
+
+  // 1. Priority ZIPs first (already have names, regions, priority scores)
+  FL_ZIPS_PRIORITY.forEach(z => {
+    seen.add(z.zip);
+    queue.push({ ...z, status: 'pending', attempts: 0 });
+  });
+
+  // 2. All remaining FL ZIPs from registry, sorted by population desc
+  const remaining = registry
+    .filter(z => !seen.has(z.zip) && z.lat && z.lon)
+    .sort((a, b) => (b.population || 0) - (a.population || 0));
+
+  remaining.forEach(z => {
+    queue.push({
+      zip:      z.zip,
+      region:   'FL',
+      priority: Math.min(60, Math.max(1, Math.round((z.population || 1000) / 1000))),
+      lat:      z.lat,
+      lon:      z.lon,
+      name:     z.zip,
+      status:   'pending',
+      attempts: 0,
+    });
+  });
+
+  console.log(`[ZipCoordinator] Full FL queue built: ${queue.length} ZIPs (${FL_ZIPS_PRIORITY.length} priority + ${remaining.length} registry)`);
+  return queue;
+}
+
 function loadQueue() {
   if (fs.existsSync(QUEUE_FILE)) {
-    return JSON.parse(fs.readFileSync(QUEUE_FILE));
+    const existing = JSON.parse(fs.readFileSync(QUEUE_FILE));
+    // If queue was seeded from old FL_ZIPS_PRIORITY only (<100 ZIPs), expand it to full FL
+    if (existing.length < 200) {
+      console.log(`[ZipCoordinator] Queue has only ${existing.length} ZIPs — expanding to full FL registry`);
+      const fullQueue = buildFullFlQueue();
+      // Preserve completed/failed status for ZIPs already in existing queue
+      const statusMap = {};
+      existing.forEach(z => { statusMap[z.zip] = { status: z.status, attempts: z.attempts }; });
+      fullQueue.forEach(z => {
+        if (statusMap[z.zip]) {
+          z.status   = statusMap[z.zip].status;
+          z.attempts = statusMap[z.zip].attempts;
+        }
+      });
+      fs.writeFileSync(QUEUE_FILE, JSON.stringify(fullQueue, null, 2));
+      return fullQueue;
+    }
+    return existing;
   }
-  // Initialize from FL_ZIPS_PRIORITY
-  const queue = FL_ZIPS_PRIORITY.map(z => ({ ...z, status: 'pending', attempts: 0 }));
+  // First run — build full FL queue
+  const queue = buildFullFlQueue();
   fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
   return queue;
 }

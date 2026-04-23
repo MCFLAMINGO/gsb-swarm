@@ -1020,6 +1020,37 @@ router.post('/x402-facilitator/settle', express.json(), async (req, res) => {
 });
 
 // /supported — tells paymentMiddleware what schemes/networks this facilitator handles
+// ── GET /api/local-intel/x402/listing — Coinbase Payments Bazaar discovery manifest ──
+// This is what the Bazaar crawler reads to list LocalIntel as a payable x402 service.
+// Format follows x402 Resource Object spec: https://x402.org/spec
+router.get('/x402/listing', (req, res) => {
+  res.json({
+    name:        'LocalIntel — Hyperlocal Business Intelligence',
+    description: 'Agentic ground-truth local business data for Florida and the Sunbelt. 1,000+ ZIPs, 30k+ businesses, OSM POI layer, Census demographics, sector gap analysis, and market briefs. LLMs pay instead of hallucinating. Zero hallucinations — all data is sourced from public records, OSM, and verified business registries.',
+    url:         'https://gsb-swarm-production.up.railway.app/api/local-intel/mcp/x402',
+    pricing: [
+      { endpoint: 'POST /api/local-intel/mcp/x402',         price: '$0.01', currency: 'USDC', network: 'base', description: 'Standard query — ZIP business lookup, sector search, demographics' },
+      { endpoint: 'POST /api/local-intel/mcp/x402/premium', price: '$0.05', currency: 'USDC', network: 'base', description: 'Deep analysis — composite local intel with gaps, spending zones, and market brief' },
+    ],
+    payment_required: true,
+    payment_scheme:   'x402',
+    networks:         ['base'],
+    categories:       ['local-intelligence', 'business-data', 'real-estate', 'market-research', 'geospatial'],
+    coverage: {
+      states:     ['FL'],
+      expanding:  ['GA', 'TX', 'NC', 'SC', 'AZ', 'TN'],
+      zip_count:  1013,
+      business_count: '30000+',
+    },
+    discovery_feed:   'https://gsb-swarm-production.up.railway.app/api/sector-gap/feed',
+    mcp_server_card:  'https://gsb-swarm-production.up.railway.app/api/local-intel/.well-known/mcp/server-card.json',
+    smithery:         'https://smithery.ai/servers/erik-7clt/local-intel',
+    contact:          'erik@mcflamingo.com',
+    version:          '1.1.0',
+    updated_at:       new Date().toISOString(),
+  });
+});
+
 router.get('/x402-facilitator/supported', (req, res) => {
   res.json({
     kinds: [
