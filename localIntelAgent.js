@@ -1126,6 +1126,178 @@ router.get('/budget-status', async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/nl-query — NIM natural language → structured oracle ──
+// Parses free-text queries like "high-income ZIPs near Jacksonville with low WFH"
+// into structured filters, runs oracle on matching ZIPs, returns ranked results.
+router.post('/nl-query', express.json(), async (req, res) => {
+  try {
+    const { question } = req.body || {};
+    if (!question || typeof question !== 'string') {
+      return res.status(400).json({ error: 'question required' });
+    }
+
+    const nvim = require('./lib/nvim');
+    const { getAllZips } = require('./workers/flZipRegistry');
+
+    // Step 1 — NIM parses intent into structured filters
+    const systemPrompt = `You are a geospatial query parser for a Florida local business intelligence platform.
+Extract search filters from the user's natural language query and return ONLY valid JSON.
+
+Fields you can extract (all optional):
+- near_city: string — city name (e.g. "Jacksonville", "Tampa", "Miami")
+- min_income: number — minimum median household income in USD
+- max_income: number — maximum median household income in USD  
+- min_population: number — minimum ZIP population
+- max_wfh_pct: number — maximum WFH saturation (0-100)
+- min_wfh_pct: number — minimum WFH saturation (0-100)
+- growth_state: string — one of: growing, stable, transitioning, transient
+- vertical: string — one of: restaurant, retail, health, finance, services
+- saturation: string — one of: undersupplied, oversupplied, balanced
+- limit: number — max ZIPs to return (default 5, max 10)
+- intent: string — 1 sentence description of what the user wants
+
+Return ONLY a JSON object with these fields. No explanation.`;
+
+    const userPrompt = `Query: "${question}"`;
+
+    let filters = {};
+    try {
+      const raw = await nvim.nvimChat(systemPrompt, userPrompt, 300);
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (jsonMatch) filters = JSON.parse(jsonMatch[0]);
+    } catch (e) {
+      console.warn('[nl-query] NIM parse failed:', e.message);
+      return res.status(500).json({ error: 'NIM unavailable — set NVIDIA_API_KEY in Railway' });
+    }
+
+    // Step 2 — Load oracle index + ZIP registry, apply filters
+    const fs = require('fs');
+    const path = require('path');
+    const DATA_DIR_NL = path.join(__dirname, 'data');
+
+    // City → lat/lon for proximity filter
+    const CITY_COORDS = {
+      'jacksonville': { lat: 30.33, lon: -81.66 },
+      'tampa':        { lat: 27.95, lon: -82.46 },
+      'orlando':      { lat: 28.54, lon: -81.38 },
+      'miami':        { lat: 25.77, lon: -80.19 },
+      'fort lauderdale': { lat: 26.12, lon: -80.14 },
+      'gainesville':  { lat: 29.65, lon: -82.32 },
+      'tallahassee':  { lat: 30.44, lon: -84.28 },
+      'sarasota':     { lat: 27.34, lon: -82.53 },
+      'fort myers':   { lat: 26.64, lon: -81.87 },
+      'pensacola':    { lat: 30.42, lon: -87.22 },
+      'daytona':      { lat: 29.21, lon: -81.02 },
+      'st augustine': { lat: 29.89, lon: -81.32 },
+      'ponte vedra':  { lat: 30.19, lon: -81.38 },
+      'nocatee':      { lat: 30.11, lon: -81.42 },
+    };
+
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R = 3958.8; // miles
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLon/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    const allZips = getAllZips();
+    const oracleDir = path.join(DATA_DIR_NL, 'oracle');
+    const censusDir = path.join(DATA_DIR_NL, 'census_layer');
+    const limit = Math.min(filters.limit || 5, 10);
+
+    // Proximity center
+    const cityKey = (filters.near_city || '').toLowerCase().trim();
+    const cityCenter = CITY_COORDS[cityKey] || null;
+    const RADIUS_MILES = 60; // default search radius
+
+    // Score + filter each ZIP
+    const candidates = [];
+    for (const zipEntry of allZips) {
+      const { zip, population, median_hhi, lat, lon } = zipEntry;
+
+      // Proximity filter
+      if (cityCenter) {
+        if (!lat || !lon) continue;
+        const dist = haversine(cityCenter.lat, cityCenter.lon, lat, lon);
+        if (dist > RADIUS_MILES) continue;
+      }
+
+      // Income filter (use registry median_hhi as fast fallback)
+      const income = median_hhi || 0;
+      if (filters.min_income && income < filters.min_income) continue;
+      if (filters.max_income && income > filters.max_income) continue;
+
+      // Population filter
+      if (filters.min_population && (population || 0) < filters.min_population) continue;
+
+      // Load oracle data if available
+      const oracleFile = path.join(oracleDir, `${zip}.json`);
+      let oracle = null;
+      if (fs.existsSync(oracleFile)) {
+        try { oracle = JSON.parse(fs.readFileSync(oracleFile, 'utf8')); } catch {}
+      }
+
+      // Load census layer for WFH + extended signals
+      const censusFile = path.join(censusDir, `${zip}.json`);
+      let census = null;
+      if (fs.existsSync(censusFile)) {
+        try { census = JSON.parse(fs.readFileSync(censusFile, 'utf8')); } catch {}
+      }
+
+      const wfhPct = census?.wfh_pct || oracle?.demographics?.wfh_pct || null;
+
+      // WFH filter
+      if (filters.max_wfh_pct != null && wfhPct != null && wfhPct > filters.max_wfh_pct) continue;
+      if (filters.min_wfh_pct != null && wfhPct != null && wfhPct < filters.min_wfh_pct) continue;
+
+      // Growth state filter
+      if (filters.growth_state && oracle?.growth_trajectory?.state !== filters.growth_state) continue;
+
+      // Saturation filter
+      if (filters.saturation && oracle?.restaurant_capacity?.saturation_status !== filters.saturation) continue;
+
+      // Score: higher income + matching oracle signals = higher rank
+      const score = (income / 1000) +
+        (oracle ? 20 : 0) +
+        (wfhPct != null ? (filters.max_wfh_pct ? (filters.max_wfh_pct - wfhPct) : wfhPct) : 0) +
+        (cityCenter && lat && lon ? Math.max(0, RADIUS_MILES - haversine(cityCenter.lat, cityCenter.lon, lat, lon)) : 0);
+
+      candidates.push({
+        zip,
+        name: oracle?.name || zip,
+        population: population || oracle?.demographics?.population || 0,
+        median_household_income: income || oracle?.demographics?.median_household_income || 0,
+        wfh_pct: wfhPct,
+        growth_trajectory: oracle?.growth_trajectory || null,
+        saturation_status: oracle?.restaurant_capacity?.saturation_status || null,
+        gap_count: oracle?.restaurant_capacity?.gap_count || 0,
+        oracle_narrative: oracle?.oracle_narrative || null,
+        top_gap: oracle?.market_gaps?.top_gap || null,
+        has_oracle: !!oracle,
+        score,
+      });
+    }
+
+    // Sort by score desc, return top N
+    candidates.sort((a, b) => b.score - a.score);
+    const top = candidates.slice(0, limit);
+
+    res.json({
+      ok: true,
+      question,
+      intent: filters.intent || question,
+      filters_applied: filters,
+      total_matched: candidates.length,
+      results: top,
+    });
+
+  } catch (err) {
+    console.error('[nl-query] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /api/local-intel/oracle?zip=XXXXX ───────────────────────────────────
 // Returns pre-baked economic narrative for a ZIP: restaurant capacity, market gaps, growth
 router.get('/oracle', (req, res) => {
