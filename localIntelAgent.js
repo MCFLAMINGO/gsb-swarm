@@ -24,6 +24,7 @@ const express = require('express');
 const path    = require('path');
 const fs      = require('fs');
 const { paymentMiddleware } = require('x402-express');
+const { declareDiscoveryExtension } = require('@x402/extensions/bazaar');
 const { createPublicClient, createWalletClient, http, getAddress, publicActions } = require('viem');
 const { base } = require('viem/chains');
 const { privateKeyToAccount } = require('viem/accounts');
@@ -60,8 +61,84 @@ const selfFacilitator = {
 const x402Middleware = paymentMiddleware(
   X402_TREASURY,
   {
-    'POST /mcp/x402':         { price: '$0.01', network: 'base', config: { description: 'LocalIntel MCP — standard tool call' } },
-    'POST /mcp/x402/premium': { price: '$0.05', network: 'base', config: { description: 'LocalIntel MCP — local_intel_for_agent premium composite' } },
+    'POST /mcp/x402': {
+      price: '$0.01',
+      network: 'base',
+      config: {
+        description: 'LocalIntel MCP — standard local business intelligence query. Returns businesses, demographics, sector gaps, and market data for any Florida ZIP code.',
+        discoverable: true,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            method:  { type: 'string', enum: ['tools/call'] },
+            tool:    { type: 'string', description: 'MCP tool name, e.g. local_intel_query, local_intel_ask, local_intel_zone' },
+            zip:     { type: 'string', description: 'Target ZIP code (Florida)' },
+            query:   { type: 'string', description: 'Natural language query, e.g. "best restaurants near 32082"' },
+          },
+        },
+        outputSchema: {
+          type: 'object',
+          properties: {
+            businesses: { type: 'array',  description: 'Matched business records with name, address, phone, category, confidence' },
+            zip:        { type: 'string',  description: 'ZIP code queried' },
+            total:      { type: 'number',  description: 'Total businesses in dataset for this ZIP' },
+            vertical:   { type: 'string',  description: 'Detected vertical: food, health, retail, auto, legal, financial, etc.' },
+          },
+        },
+        ...declareDiscoveryExtension({
+          output: {
+            example: { businesses: [{ name: 'Example Cafe', address: '123 Main St, Ponte Vedra Beach, FL', category: 'restaurant', confidence: 85 }], zip: '32082', total: 557, vertical: 'food' },
+            schema: {
+              type: 'object',
+              properties: {
+                businesses: { type: 'array' },
+                zip:        { type: 'string' },
+                total:      { type: 'number' },
+                vertical:   { type: 'string' },
+              },
+            },
+          },
+        }),
+      },
+    },
+    'POST /mcp/x402/premium': {
+      price: '$0.05',
+      network: 'base',
+      config: {
+        description: 'LocalIntel MCP — deep composite analysis. Returns full market brief, spending zones, sector gap analysis, and demographic overlay for a Florida ZIP code.',
+        discoverable: true,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            zip:   { type: 'string', description: 'Target ZIP code (Florida)' },
+            query: { type: 'string', description: 'Deep analysis query' },
+          },
+        },
+        outputSchema: {
+          type: 'object',
+          properties: {
+            brief:         { type: 'object', description: 'Full ZIP market brief with narrative, group breakdown, gaps, and saturation signals' },
+            spending_zones: { type: 'array',  description: 'Consumer spending zone scores by sector' },
+            demographics:  { type: 'object', description: 'Census ACS demographics: population, income, housing, ownership rate' },
+            sector_gaps:   { type: 'array',  description: 'Underserved business categories with opportunity scores' },
+          },
+        },
+        ...declareDiscoveryExtension({
+          output: {
+            example: { brief: { zip: '32082', label: 'Ponte Vedra Beach', total: 557, narrative: 'Upscale coastal market...' }, spending_zones: [], demographics: { population: 28000, median_hhi: 142000 }, sector_gaps: [{ category: 'urgent_care', score: 0.87 }] },
+            schema: {
+              type: 'object',
+              properties: {
+                brief:          { type: 'object' },
+                spending_zones: { type: 'array' },
+                demographics:   { type: 'object' },
+                sector_gaps:    { type: 'array' },
+              },
+            },
+          },
+        }),
+      },
+    },
   },
   selfFacilitator
 );
