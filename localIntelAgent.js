@@ -822,6 +822,28 @@ router.get('/mcp-probe-log', (req, res) => {
   }
 });
 
+router.get('/router-learning', (req, res) => {
+  try {
+    const file = path.join(DATA_DIR_AGENT, 'router_learning.json');
+    if (!fs.existsSync(file)) return res.json({ status: 'no_data_yet', message: 'Router learning worker has not run a cycle yet — check back in 35 minutes' });
+    const data = JSON.parse(fs.readFileSync(file));
+    // Surface the most useful summary
+    const lastRun   = data.runs?.[data.runs.length - 1] || null;
+    const recentPatches = (data.patches || []).slice(-20);
+    const scoreTrend    = (data.score_trend || []).slice(-10);
+    res.json({
+      total_patches_applied: data.total_patches_applied || 0,
+      last_run:              lastRun,
+      recent_patches:        recentPatches,
+      score_trend:           scoreTrend,
+      verticals:             data.verticals,
+      generatedAt:           new Date().toISOString(),
+    });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/zip-queue', (req, res) => {
   try {
     const file = path.join(DATA_DIR_AGENT, 'zipQueue.json');
