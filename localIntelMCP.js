@@ -1978,11 +1978,16 @@ const server = http.createServer((req, res) => {
   res.end(JSON.stringify({ error: 'Not found. POST /mcp for JSON-RPC, GET /manifest for tool list.' }));
 });
 
-server.listen(PORT, () => {
-  console.log(`[LocalIntelMCP] MCP server listening on port ${PORT}`);
-  console.log(`[LocalIntelMCP] ${Object.keys(TOOLS).length} tools registered`);
-  console.log(`[LocalIntelMCP] Covered zips: ${Object.keys(ZIP_CENTERS).join(', ')}`);
-});
+// Only bind the HTTP server when run directly (forked worker).
+// When require()'d by localIntelTidalTools or localIntelAcpCycle, skip listen
+// to avoid EADDRINUSE on port 3004.
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`[LocalIntelMCP] MCP server listening on port ${PORT}`);
+    console.log(`[LocalIntelMCP] ${Object.keys(TOOLS).length} tools registered`);
+    console.log(`[LocalIntelMCP] Covered zips: ${Object.keys(ZIP_CENTERS).join(', ')}`);
+  });
+}
 
 // _tools: lazy export consumed by callTool() in localIntelTidalTools.js
 module.exports = { handleRPC, MCP_MANIFEST, _tools: TOOLS };
