@@ -822,6 +822,30 @@ router.get('/mcp-probe-log', (req, res) => {
   }
 });
 
+router.get('/brief/:zip', (req, res) => {
+  try {
+    const zip  = (req.params.zip || '').replace(/\D/g, '').slice(0, 5);
+    const file = path.join(DATA_DIR_AGENT, 'briefs', `${zip}.json`);
+    if (!fs.existsSync(file)) return res.status(404).json({ error: `No brief for ZIP ${zip} yet — check back after next brief worker cycle` });
+    res.json(JSON.parse(fs.readFileSync(file)));
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/briefs', (req, res) => {
+  try {
+    const dir = path.join(DATA_DIR_AGENT, 'briefs');
+    if (!fs.existsSync(dir)) return res.json({ count: 0, zips: [] });
+    const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+    const summaries = files.map(f => {
+      try {
+        const b = JSON.parse(fs.readFileSync(path.join(dir, f)));
+        return { zip: b.zip, label: b.label, total: b.total, data_grade: b.data_grade, generated_at: b.generated_at };
+      } catch { return null; }
+    }).filter(Boolean).sort((a,b) => (b.total||0)-(a.total||0));
+    res.json({ count: summaries.length, zips: summaries });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/router-learning', (req, res) => {
   try {
     const file = path.join(DATA_DIR_AGENT, 'router_learning.json');

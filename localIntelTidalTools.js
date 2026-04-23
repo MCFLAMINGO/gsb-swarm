@@ -1215,6 +1215,26 @@ function handleAsk(params) {
   const zip = String(params.zip || extractZip(question) || '32082').replace(/\D/g, '').slice(0, 5) || '32082';
   const center = ZIP_CENTERS[zip] || ZIP_CENTERS['32082'];
 
+  // Serve pre-built brief for market overview questions — much richer than raw synthesis
+  const isOverviewQuery = /tell me about|overview|summary|what is|describe|market summary|what.s in|what does|general|about this zip|about this market/i.test(question);
+  if (isOverviewQuery) {
+    try {
+      const briefFile = require('path').join(__dirname, 'data', 'briefs', `${zip}.json`);
+      if (require('fs').existsSync(briefFile)) {
+        const brief = JSON.parse(require('fs').readFileSync(briefFile, 'utf8'));
+        return {
+          zip,
+          intent: 'market_overview',
+          source: 'zip_brief',
+          brief,
+          narrative: brief.narrative,
+          tools_used: ['zip_brief_worker'],
+          confidence: brief.data_grade === 'A' ? 90 : brief.data_grade === 'B' ? 75 : 60,
+        };
+      }
+    } catch (_) { /* fall through to normal routing */ }
+  }
+
   // Classify intent
   const intent = classifyIntent(question);
   const toolsToRun = intent.tools;
