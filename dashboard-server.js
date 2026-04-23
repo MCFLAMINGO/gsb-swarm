@@ -48,20 +48,14 @@ if (globalThis.__ACP_SDK__) {
 }
 
 // ── Anthropic (Claude) — lazy async import ──────────────────────────────────
-let anthropic = null;
-(async () => {
-  if (process.env.ANTHROPIC_API_KEY) {
-    try {
-      const { default: Anthropic } = await import('@anthropic-ai/sdk');
-      anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-      console.log('[CEO] ✓ Claude brain online');
-    } catch (e) {
-      console.warn('[CEO] Anthropic SDK load failed:', e.message);
-    }
-  } else {
-    console.log('[CEO] No ANTHROPIC_API_KEY — using rule-based synthesis');
-  }
-})();
+// ── NVIDIA NIM inference (replaces Anthropic haiku) ────────────────────────────────
+const nvim = require('./lib/nvim');
+const anthropic = null; // kept for unused-reference safety — all calls now use nvim
+if (nvim.isReady()) {
+  console.log('[CEO] ✓ NVIDIA NIM brain online (free Llama-3.3-70B)');
+} else {
+  console.log('[CEO] No NVIDIA_API_KEY — using rule-based synthesis');
+}
 
 // ── Config ───────────────────────────────────────────────────────────────────
 const CEO_SIGNER_PK      = process.env.CEO_SIGNER_PK || process.env.AGENT_WALLET_PRIVATE_KEY;
@@ -264,13 +258,10 @@ Write a CEO Intelligence Brief with these exact sections:
 
 Be direct, specific, use numbers from the data. No fluff. Sound like a sharp DeFi analyst, not a chatbot.`;
 
-  const msg = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 600,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  const text = msg.content[0].text;
+  const text = await nvim.nvimChat(
+    'You are the GSB CEO — orchestration hub of the GSB Intelligence Swarm, a tokenized AI agent on Virtuals Protocol (Base chain). Write crisp, professional CEO briefs.',
+    prompt, 600
+  );
   const parsed = parseClaudeResponse(text);
 
   // Collect worker names for metadata
@@ -383,7 +374,7 @@ function ceoSynthesizeRuleBased(workerResults, originalCommand) {
 }
 
 async function ceoSynthesize(workerResults, originalCommand) {
-  if (anthropic) {
+  if (nvim.isReady()) {
     const now = Date.now();
     const currentHash = _briefHash(workerResults);
     const dataChanged = currentHash !== _lastSynthesisHash;
@@ -1629,14 +1620,9 @@ app.post('/api/strategy/cook', async (req, res) => {
           'GSB Alpha Scanner': `You are the GSB Alpha Scanner. Scan Base chain for alpha. Return top opportunities with risk/reward.\nRequirement: ${w.req}`,
         }[w.name] || `You are ${w.name}. Complete this task: ${w.req}`;
 
-        if (!anthropic) { workerResults[w.name] = { error: 'No AI key configured' }; continue; }
+        if (!nvim.isReady()) { workerResults[w.name] = { error: 'No NVIDIA_API_KEY configured' }; continue; }
 
-        const msg = await anthropic.messages.create({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 1000,
-          messages: [{ role: 'user', content: rolePrompt }],
-        });
-        const result = msg.content[0]?.text || '';
+        const result = await nvim.nvimChat('', rolePrompt, 1000);
         workerResults[w.name] = { raw: result };
         broadcast('job-result', { worker: w.name, result, jobId: 'cook_' + Date.now() });
         console.log(`[cook] ${w.name} ✓`);
@@ -1697,11 +1683,7 @@ app.post('/api/fire-job', requireOperator, async (req, res) => {
         'GSB Alpha Scanner': `You are the GSB Alpha Scanner. Scan for alpha signals on Base chain. Return top opportunities with risk/reward assessment.\n\nRequirement: ${requirement}`,
       }[workerName] || `You are ${workerName}. Complete this task:\n\nRequirement: ${requirement}`;
 
-      const msg = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1500,
-        messages: [{ role: 'user', content: rolePrompt }],
-      });
+      const msg = { content: [{ text: await nvim.nvimChat('', rolePrompt, 1500) }] };
       const result = msg.content[0]?.text || '';
 
       // If Thread Writer + X keys configured, attempt to post
@@ -2858,13 +2840,12 @@ app.post('/api/command', async (req, res) => {
 
       } else if (intent.worker === 'GSB Thread Writer') {
         // Thread Writer always needs Claude — generative content, no free API equivalent
-        if (!anthropic) {
-          result = 'Thread Writer requires Claude API key (ANTHROPIC_API_KEY not set).';
+        if (!nvim.isReady()) {
+          result = 'Thread Writer requires NVIDIA_API_KEY to be set in Railway env.';
         } else {
           try {
             const prompt = `You are the GSB Thread Writer. Write a crypto Twitter/X thread. Format as numbered tweets (1/, 2/, ...) separated by blank lines. Each tweet max 280 chars.\n\nFacts:\n- Virtuals Protocol Twitter: @virtuals_io\n- GSB token page: app.virtuals.io/virtuals/68291\n- GSB ticker: $GSB, Chain: Base\n- CA (Base): 0x8E223841aA396d36a6727EfcEAFC61d691692a37\n- ALWAYS include "CA (Base): 0x8E223841aA396d36a6727EfcEAFC61d691692a37" in the final tweet\n\nRequirement: ${intent.requirement}`;
-            const msg = await anthropic.messages.create({ model: 'claude-haiku-4-5-20251001', max_tokens: 1200, messages: [{ role: 'user', content: prompt }] });
-            result = msg.content[0]?.text || '';
+            result = await nvim.nvimChat('You are the GSB Thread Writer. Write compelling crypto Twitter/X threads.', prompt, 1200);
             const role = WORKER_CATALOG[intent.worker]?.role;
             if (role) { briefResults[role] = { thread: result, raw: result }; }
           } catch (err) {

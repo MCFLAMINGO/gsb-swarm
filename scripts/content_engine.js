@@ -18,6 +18,7 @@
  *   get_x_mentions             — $0.75
  */
 
+const nvim = require('../lib/nvim');
 const fs   = require('fs');
 const path = require('path');
 const https = require('https');
@@ -77,14 +78,12 @@ async function fetchPageContent(url) {
 
 // ── Claude call helper ────────────────────────────────────────────────────────
 async function claudeCall(anthropic, prompt, systemPrompt = '', maxTokens = 1500) {
-  if (!anthropic) throw new Error('Claude not initialized');
-  const msg = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: maxTokens,
-    system: systemPrompt || 'You are the GSB Content Engine — an expert content strategist and copywriter.',
-    messages: [{ role: 'user', content: prompt }],
-  });
-  return msg.content[0]?.text || '';
+  // anthropic param kept for API compatibility but ignored — uses NVIDIA NIM (free)
+  return nvim.nvimChat(
+    systemPrompt || 'You are the GSB Content Engine — an expert content strategist and copywriter.',
+    prompt,
+    maxTokens
+  );
 }
 
 // ── Public voice profiles ─────────────────────────────────────────────────────

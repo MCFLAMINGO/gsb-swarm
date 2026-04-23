@@ -5,6 +5,7 @@
  * Usage: node token_analysis.js <tokenAddress|ticker>
  */
 
+const nvim = require('../lib/nvim');
 const axios = require('axios');
 
 const TOKEN_INPUT  = process.argv[2] || '$VIRTUAL';
@@ -42,7 +43,7 @@ async function checkHoneypot(contractAddress, chain = 'base') {
     return { isHoneypot: false, buyTax: null, sellTax: null, isBlacklisted: false, flags: ['check failed'] };
   }
 }
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+// ANTHROPIC_KEY removed — using NVIDIA NIM
 
 async function getTokenData(input) {
   // Try DexScreener first
@@ -203,11 +204,22 @@ function calculateTechnicals(price, priceChange24h, priceChange1h, priceChange6h
 }
 
 async function generateAISummary(tokenData, technicals) {
-  if (!ANTHROPIC_KEY) {
+  if (!nvim.isReady()) {
+    // No NVIDIA key — return deterministic summary from technicals
     return {
-      summary: `${tokenData.symbol} is ${technicals.trend} with ${tokenData.priceChange24h?.toFixed(2)}% 24h change. ${technicals.recommendation} recommendation based on current momentum and liquidity ($${(tokenData.liquidity || 0).toLocaleString()}).`,
-      summary_advanced: `Technical picture: ${tokenData.symbol} shows ${technicals.trend} characteristics. Key support at $${technicals.supportLevels[0]}, resistance at $${technicals.resistanceLevels[0]}. Volume of $${Number(tokenData.volume24h || 0).toLocaleString()} in 24h indicates ${Number(tokenData.volume24h || 0) > 100000 ? 'strong' : 'moderate'} activity.`,
+      summary: `${tokenData.symbol} momentum is ${technicals.trend}. ${technicals.recommendation} at current levels with entry around $${technicals.entryZone.min}–$${technicals.entryZone.max}.`,
+      summary_advanced: `Technical picture: ${technicals.patterns.join('; ')}. Support at $${technicals.supportLevels[0]}, target $${technicals.targets[0]}. Confidence: ${technicals.confidence}%.`,
     };
+  }
+  try {
+    const text = await nvim.nvimChat(
+      'You are a crypto trading analyst. Return ONLY valid JSON with keys "summary" and "summary_advanced". No markdown, no explanation.',
+      prompt, 400
+    );
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+  } catch (e) {
+    console.error('[ai] NVIDIA error:', e.message);
   }
 
   try {
@@ -229,16 +241,10 @@ Write:
 
 Return ONLY valid JSON: {"summary": "...", "summary_advanced": "..."}`;
 
-    const res = await axios.post(
-      'https://api.anthropic.com/v1/messages',
-      {
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 400,
-        messages: [{ role: 'user', content: prompt }],
-      },
-      { headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 15000 }
+    const text = await nvim.nvimChat(
+      'You are a crypto trading analyst. Return ONLY valid JSON with keys "summary" and "summary_advanced". No markdown, no explanation.',
+      prompt, 400
     );
-    const text = res.data.content[0].text.trim();
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
   } catch (e) {

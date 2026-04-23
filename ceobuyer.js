@@ -15,20 +15,13 @@ const {
 } = require('@virtuals-protocol/acp-node');
 
 // ── Anthropic (Claude) — lazy async import ──────────────────────────────────
-let anthropic = null;
-(async () => {
-  if (process.env.ANTHROPIC_API_KEY) {
-    try {
-      const { default: Anthropic } = await import('@anthropic-ai/sdk');
-      anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-      console.log('[CEO] ✓ Claude brain online');
-    } catch (e) {
-      console.warn('[CEO] Anthropic SDK load failed:', e.message);
-    }
-  } else {
-    console.log('[CEO] No ANTHROPIC_API_KEY — using fallback synthesis');
-  }
-})();
+// ── NVIDIA NIM inference (free Llama-3.3-70B) ────────────────────────────────────
+const nvim = require('./lib/nvim');
+if (nvim.isReady()) {
+  console.log('[CEO] ✓ NVIDIA NIM brain online (free Llama-3.3-70B)');
+} else {
+  console.log('[CEO] No NVIDIA_API_KEY — using fallback synthesis');
+}
 
 // ── CEO Intelligence Cache ────────────────────────────────────────────────
 const ceoCache = {
@@ -262,13 +255,13 @@ function makeFare(p) {
 }
 
 // ── CEO Claude Synthesis ────────────────────────────────────────────────────
-// Throttle: max 1 Claude call per 10 min — heartbeat + routine ACP jobs reuse last brief
+// Throttle: max 1 NVIDIA call per 10 min — heartbeat + routine ACP jobs reuse last brief
 let _ceoBuyerLastSynthAt   = 0;
 let _ceoBuyerLastSynthText = 'GSB Intelligence Swarm is online. Synthesis warming up.';
 const _CEO_SYNTH_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
 
 async function ceoSynthesize(prompt) {
-  if (anthropic) {
+  if (nvim.isReady()) {
     const now = Date.now();
     const cooledDown = (now - _ceoBuyerLastSynthAt) >= _CEO_SYNTH_COOLDOWN_MS;
     if (!cooledDown) {
@@ -276,20 +269,18 @@ async function ceoSynthesize(prompt) {
       return _ceoBuyerLastSynthText;
     }
     try {
-      const msg = await anthropic.messages.create({
-        model: 'claude-haiku-3-5',
-        max_tokens: 600,
-        messages: [{ role: 'user', content: prompt }],
-      });
-      _ceoBuyerLastSynthText = msg.content[0].text;
-      _ceoBuyerLastSynthAt   = now;
+      _ceoBuyerLastSynthText = await nvim.nvimChat(
+        'You are the GSB CEO — the orchestration hub of the GSB Intelligence Swarm, a tokenized AI agent on Virtuals Protocol (Base chain). Write crisp, professional CEO briefs. Be direct, data-driven, crypto-native.',
+        prompt, 600
+      );
+      _ceoBuyerLastSynthAt = now;
       return _ceoBuyerLastSynthText;
     } catch (err) {
-      console.warn('[CEO] Claude synthesis failed, using fallback:', err.message);
+      console.warn('[CEO] NVIDIA synthesis failed, using fallback:', err.message);
     }
   }
   // Fallback: return a simple note so we never return empty
-  return 'GSB Intelligence Swarm is online. Claude synthesis unavailable — raw data was used to compile this brief.';
+  return 'GSB Intelligence Swarm is online. NVIDIA synthesis unavailable — raw data was used to compile this brief.';
 }
 
 function formatCeoBrief(content, timestamp) {
