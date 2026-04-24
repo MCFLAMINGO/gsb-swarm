@@ -95,48 +95,52 @@ function bbox(lat, lon, deg = 0.07) {
 // ── Data fetchers ─────────────────────────────────────────────────────────────
 
 /**
- * Fetch building permits from SJC ArcGIS FeatureServer.
- * Replaces dead Socrata endpoint (data.sjcfl.us — connection refused).
+ * Derive construction activity signals from our own ZIP business data.
+ * External permit ArcGIS endpoints (SJC, FDOT) are unreliable — we own this data.
+ * Signals:
+ *   new_construction_count  — OSM nodes tagged construction/building_construction in our ZIP file
+ *   renovation_count        — businesses in construction/home_improvement/hardware categories
+ *   utility_extensions      — proxy: business count growth vs ocean_floor baseline
+ *   zoning_changes          — proxy: new businesses added since last ocean_floor snapshot
  */
-async function fetchPermits(zipEntry) {
+function fetchPermits(zipEntry) {
   const { zip } = zipEntry;
-  // SJC ArcGIS permits layer — publicly accessible, no key required
-  const url =
-    `https://services1.arcgis.com/AVP60cs0Q9PEA8rH/arcgis/rest/services/Building_Permits/FeatureServer/0/query` +
-    `?where=${encodeURIComponent(`ZIP_CODE='${zip}'`)}` +
-    `&outFields=PERMIT_TYPE,WORK_TYPE,ISSUED_DATE` +
-    `&returnGeometry=false` +
-    `&f=json` +
-    `&resultRecordCount=1000`;
-
-  let features = [];
-  try {
-    const data = await safeFetch(url, { _timeout: 15_000 });
-    features = data.features || [];
-  } catch (err) {
-    if (!fetchPermits._warned) fetchPermits._warned = {};
-    if (!fetchPermits._warned[zip]) {
-      console.warn(`[bedrockWorker] Permits unavailable for ${zip} — using zeros (won't repeat)`);
-      fetchPermits._warned[zip] = true;
-    }
-    return { new_construction_count: 0, renovation_count: 0, utility_extensions: 0, zoning_changes: 0 };
-  }
+  const ZIPS_DIR = path.join(DATA_DIR, 'zips');
+  const zipFile  = path.join(ZIPS_DIR, `${zip}.json`);
 
   let new_construction_count = 0;
   let renovation_count       = 0;
   let utility_extensions     = 0;
   let zoning_changes         = 0;
 
-  for (const f of features) {
-    const attrs = f.attributes || {};
-    const type = ((attrs.PERMIT_TYPE || attrs.WORK_TYPE || '')).toLowerCase();
-    if (/new.*(construction|building|residential|commercial)/.test(type)) new_construction_count++;
-    else if (/renov|remodel|addition|alter/.test(type)) renovation_count++;
-    else if (/utilit|sewer|water.*(main|ext)|electric.*ext/.test(type)) utility_extensions++;
-    else if (/zoning|rezone|variance/.test(type)) zoning_changes++;
+  try {
+    const raw  = fs.readFileSync(zipFile, 'utf8');
+    const data = JSON.parse(raw);
+    const businesses = Array.isArray(data) ? data : (data?.businesses || []);
+
+    for (const b of businesses) {
+      const cat = ((b.category || b.type || b.amenity || '')).toLowerCase();
+      if (/construction|building.*supply|general.*contractor|home.*builder/.test(cat)) new_construction_count++;
+      if (/renovation|remodel|home.*improve|hardware|lumber|paint/.test(cat))          renovation_count++;
+      if (/electrician|plumber|hvac|utility|sewer|water.*service/.test(cat))           utility_extensions++;
+    }
+
+    // Business density vs population proxy for zoning activity
+    const oceanFile = path.join(DATA_DIR, 'ocean_floor', `${zip}.json`);
+    if (fs.existsSync(oceanFile)) {
+      const ocean    = JSON.parse(fs.readFileSync(oceanFile, 'utf8'));
+      const baseline = ocean?.total_businesses || 0;
+      const current  = businesses.length;
+      // Each 5% growth above baseline = 1 zoning signal
+      if (baseline > 0 && current > baseline) {
+        zoning_changes = Math.floor(((current - baseline) / baseline) * 20);
+      }
+    }
+  } catch (err) {
+    // No zip data yet — zeros are correct
   }
 
-  return { new_construction_count, renovation_count, utility_extensions, zoning_changes };
+  return Promise.resolve({ new_construction_count, renovation_count, utility_extensions, zoning_changes });
 }
 
 /**

@@ -64,13 +64,18 @@ async function fetchACS(zip, variables) {
   const url = `https://api.census.gov/data/2022/acs/acs5?get=NAME,${varStr}&for=zip%20code%20tabulation%20area:${zip}`;
   try {
     const data = await fetchJson(url);
-    if (!Array.isArray(data) || data.length < 2) return null;
+    if (!Array.isArray(data) || data.length < 2) {
+      // API returns error object instead of array on bad ZIP
+      if (data && data.error) console.warn(`[acsWorker] Census API error for ${zip} (${varStr.slice(0,20)}): ${data.error}`);
+      return null;
+    }
     const headers = data[0];
     const row     = data[1];
     const result  = {};
     headers.forEach((h, i) => { result[h] = row[i]; });
     return result;
   } catch(e) {
+    console.warn(`[acsWorker] fetchACS failed for ${zip} vars=${varStr.slice(0,30)}: ${e.message}`);
     return null;
   }
 }
