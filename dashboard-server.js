@@ -447,6 +447,7 @@ app.post('/api/admin/run-migration', async (req, res) => {
 // POST /api/admin/download-sunbiz  — pulls 1.6GB cordata.zip to Railway volume
 // GET  /api/admin/sunbiz-status    — check download progress
 let _sunbizDownloading = false;
+let _sunbizLastError = null;
 app.post('/api/admin/download-sunbiz', async (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
   if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
@@ -460,18 +461,21 @@ app.post('/api/admin/download-sunbiz', async (req, res) => {
       const { downloadSunbiz } = require('./scripts/download-sunbiz');
       await downloadSunbiz();
       console.log('[admin] ✅ Sunbiz download complete — run import-sunbiz next');
-    } catch (e) {
+    } catch(e) {
+      _sunbizLastError = e.message;
       console.error('[admin] ❌ Sunbiz download failed:', e.message);
     } finally { _sunbizDownloading = false; }
   });
 });
 app.get('/api/admin/sunbiz-status', (req, res) => {
   const fs2 = require('fs');
-  const p = '/app/data/sunbiz/cordata.zip';
+  const dataDir = process.env.DATA_DIR || '/app/data';
+  const p = require('path').join(dataDir, 'sunbiz', 'cordata.zip');
   const exists = fs2.existsSync(p);
   const size = exists ? fs2.statSync(p).size : 0;
   res.json({
     downloading: _sunbizDownloading,
+    last_error: _sunbizLastError,
     size_mb: (size/1024/1024).toFixed(1),
     total_mb: 1663.8,
     pct: exists ? ((size/(1663.8*1024*1024))*100).toFixed(1) : '0.0',
