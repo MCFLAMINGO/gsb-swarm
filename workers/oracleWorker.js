@@ -39,6 +39,67 @@ const INDEX_FILE  = path.join(ORACLE_DIR, '_index.json');
 const HISTORY_DIR = path.join(ORACLE_DIR, 'history'); // time-series per ZIP
 const MAX_HISTORY = 180; // keep 90 days @ 2x/day headroom
 
+// ── Postgres (optional — fire-and-forget, never blocks oracle) ────────────────
+let _db = null;
+function getDb() {
+  if (!_db && process.env.LOCAL_INTEL_DB_URL) {
+    try { _db = require('../lib/db'); } catch (_) {}
+  }
+  return _db;
+}
+async function upsertZipIntelligence(zip, result) {
+  const db = getDb();
+  if (!db) return;
+  try {
+    await db.query(
+      `INSERT INTO zip_intelligence (
+         zip, name, state,
+         population, median_household_income, median_home_value,
+         owner_occupied_pct, total_households,
+         restaurant_count, total_businesses, gap_count,
+         saturation_status, growth_state, consumer_profile,
+         oracle_json, computed_at, updated_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,NOW(),NOW())
+       ON CONFLICT (zip) DO UPDATE SET
+         name                   = EXCLUDED.name,
+         state                  = EXCLUDED.state,
+         population             = EXCLUDED.population,
+         median_household_income = EXCLUDED.median_household_income,
+         median_home_value      = EXCLUDED.median_home_value,
+         owner_occupied_pct     = EXCLUDED.owner_occupied_pct,
+         total_households       = EXCLUDED.total_households,
+         restaurant_count       = EXCLUDED.restaurant_count,
+         total_businesses       = EXCLUDED.total_businesses,
+         gap_count              = EXCLUDED.gap_count,
+         saturation_status      = EXCLUDED.saturation_status,
+         growth_state           = EXCLUDED.growth_state,
+         consumer_profile       = EXCLUDED.consumer_profile,
+         oracle_json            = EXCLUDED.oracle_json,
+         computed_at            = NOW(),
+         updated_at             = NOW()`,
+      [
+        zip,
+        result.name || zip,
+        result.state || 'FL',
+        result.demographics?.population              || null,
+        result.demographics?.median_hhi              || null,
+        result.demographics?.median_home_value       || null,
+        result.demographics?.owner_occupied_pct      || null,
+        result.demographics?.total_households        || null,
+        result.restaurant_capacity?.restaurant_count || null,
+        result.total_businesses                      || null,
+        result.market_gaps?.tier_gaps?.filter(g => g.gap > 0).length || null,
+        result.restaurant_capacity?.saturation_status || null,
+        result.growth_trajectory?.state              || null,
+        result.demographics?.consumer_profile        || null,
+        JSON.stringify(result),
+      ]
+    );
+  } catch (e) {
+    console.error(`[oracleWorker] PG upsert failed for ${zip}:`, e.message);
+  }
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 // Average US restaurant serves ~100-150 covers/day, ~350 meals/day
@@ -629,6 +690,8 @@ async function runOracle() {
       result.trend = trend;
 
       atomicWrite(path.join(ORACLE_DIR, `${zip}.json`), result);
+      // Persist to Postgres — survives Railway deploys
+      upsertZipIntelligence(zip, result).catch(() => {});
       index.zips[zip] = {
         name:               result.name,
         saturation_status:  result.restaurant_capacity.saturation_status,

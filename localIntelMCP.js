@@ -103,9 +103,29 @@ async function handleQuery(params) {
 }
 
 // ── Oracle handler ─────────────────────────────────────────────────────────────
-function handleOracle(params) {
+async function handleOracle(params) {
   const zip = (params.zip || '').replace(/\D/g, '').slice(0, 5);
   if (!zip) return { error: 'zip required' };
+
+  // 1. Try Postgres first — persists across deploys
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const db = require('./lib/db');
+      const row = await db.queryOne(
+        'SELECT oracle_json, computed_at FROM zip_intelligence WHERE zip = $1',
+        [zip]
+      );
+      if (row && row.oracle_json) {
+        const data = typeof row.oracle_json === 'string'
+          ? JSON.parse(row.oracle_json) : row.oracle_json;
+        data._source = 'postgres';
+        data._computed_at = row.computed_at;
+        return data;
+      }
+    } catch (_) {}
+  }
+
+  // 2. Fall back to flat file (warm after local oracle run)
   const oracleDir = path.join(__dirname, 'data', 'oracle');
   const file = path.join(oracleDir, `${zip}.json`);
   if (!require('fs').existsSync(file)) {
@@ -371,22 +391,18 @@ const TOOL_COSTS = {
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
 function loadBusinesses() {
-  // Merge seed file + all accumulated zip files for the full dataset
-  const seen  = new Map(); // key -> index in all[]
-  const all   = [];
+  // Sync flat-file load — used for non-zip-specific queries and as fallback
+  const seen = new Map();
+  const all  = [];
   const addBiz = (b) => {
-    const name = (b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const zip  = b.zip || '';
-    // Primary key: normalized name + zip (catches same biz from OSM vs YP)
-    // Secondary: if lat/lon present use them to further disambiguate chains
+    if (!b || !b.name) return;
+    const name     = (b.name    || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const zip      = b.zip      || '';
     const addrNorm = (b.address || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
     const key = `${name}|${zip}|${addrNorm}`;
     if (seen.has(key)) {
-      // Keep higher-confidence record
       const existingIdx = seen.get(key);
-      if ((b.confidence || 0) > (all[existingIdx].confidence || 0)) {
-        all[existingIdx] = b;
-      }
+      if ((b.confidence || 0) > (all[existingIdx].confidence || 0)) all[existingIdx] = b;
     } else {
       seen.set(key, all.length);
       all.push(b);
@@ -401,6 +417,59 @@ function loadBusinesses() {
     }
   } catch {}
   return all;
+}
+
+// Postgres-backed loader for a specific ZIP — survives Railway deploys
+async function loadBusinessesByZip(zip) {
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const db = require('./lib/db');
+      const rows = await db.query(
+        `SELECT name, zip, address, city, phone, website, hours,
+                category, category_group, lat, lon,
+                confidence_score AS confidence, status, sources,
+                owner_verified, last_confirmed, tags, description
+         FROM businesses
+         WHERE zip = $1 AND status != 'inactive'
+         ORDER BY confidence_score DESC`,
+        [zip]
+      );
+      if (rows.length > 0) {
+        return rows.map(r => ({
+          name:           r.name,
+          zip:            r.zip,
+          address:        r.address        || '',
+          city:           r.city           || '',
+          phone:          r.phone          || '',
+          website:        r.website        || '',
+          hours:          r.hours          || '',
+          category:       r.category       || 'business',
+          group:          r.category_group || 'services',
+          lat:            r.lat  != null   ? parseFloat(r.lat)  : null,
+          lon:            r.lon  != null   ? parseFloat(r.lon)  : null,
+          confidence:     r.confidence     ? parseFloat(r.confidence) * 100 : 50,
+          status:         r.status         || 'active',
+          source:         (r.sources || [])[0] || 'unknown',
+          owner_verified: r.owner_verified || false,
+          last_confirmed: r.last_confirmed || null,
+          tags:           r.tags           || [],
+          description:    r.description    || '',
+          _pg:            true,
+        }));
+      }
+    } catch (e) {
+      console.error('[MCP] PG loadBusinessesByZip error:', e.message);
+    }
+  }
+  // Fallback: flat JSON for this ZIP
+  try {
+    const file = path.join(ZIPS_DIR_MCP, `${zip}.json`);
+    if (fs.existsSync(file)) {
+      const d = JSON.parse(fs.readFileSync(file, 'utf8'));
+      return Array.isArray(d) ? d : (d.businesses || []);
+    }
+  } catch {}
+  return [];
 }
 function loadZones() {
   try { return JSON.parse(fs.readFileSync(ZONES_PATH, 'utf8')); } catch { return {}; }
@@ -752,11 +821,15 @@ function extractZipFromQuery(query) {
   return m ? m[1] : null;
 }
 
-function toolSearch({ zip, query, category, group, limit = 20 }) {
-  let results = loadBusinesses();
+async function toolSearch({ zip, query, category, group, limit = 20 }) {
   // Resolve ZIP: explicit param > numeric in query string > city name in query
   const resolvedZip = zip || extractZipFromQuery(query) || resolveZip(query);
-  if (resolvedZip) results = results.filter(b => b.zip === resolvedZip);
+  // Use Postgres-backed loader when a ZIP is known — survives Railway deploys
+  let results = resolvedZip
+    ? await loadBusinessesByZip(resolvedZip)
+    : loadBusinesses();
+  // (no need to re-filter by ZIP — loadBusinessesByZip already scoped it)
+  if (!resolvedZip) results = results; // full set, no zip filter needed
   if (category) results = results.filter(b => b.category === category);
   if (group)    results = results.filter(b => getGroup(b.category) === group);
   if (query) {

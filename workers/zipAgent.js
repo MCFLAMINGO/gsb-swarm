@@ -33,6 +33,65 @@ try { ({ bulkImport: bulkImportChamber } = require('./chamberScraper'));  } catc
 try { ({ bulkScrapeZip: bulkScrapeZipBBB } = require('./bbbScraper'));    } catch(e) { console.warn('[ZipAgent] BBB scraper unavailable:', e.message); }
 try { ({ discoverAndImport: discoverAndImportChamber } = require('./chamberDiscovery')); } catch(e) { console.warn('[ZipAgent] Chamber discovery unavailable:', e.message); }
 
+// ── Postgres dual-write (optional — non-fatal if DB unavailable) ──────────────
+let _db = null;
+function getDb() {
+  if (!_db && process.env.LOCAL_INTEL_DB_URL) {
+    try { _db = require('../lib/db'); } catch (_) {}
+  }
+  return _db;
+}
+
+// Category → group mapping (mirrors MCP layer)
+const PG_GROUP_MAP = {
+  restaurant:'food', fast_food:'food', cafe:'food', bar:'food', pub:'food',
+  doctor:'health', dentist:'health', clinic:'health', hospital:'health', pharmacy:'health',
+  chiropractor:'health', physical_therapy:'health', optometrist:'health',
+  bank:'finance', insurance:'finance', finance:'finance', accounting:'finance', mortgage:'finance',
+  legal:'legal', attorney:'legal',
+  retail:'retail', boutique:'retail', salon:'retail', spa:'retail', gym:'retail', fitness:'retail',
+  school:'civic', church:'civic', government:'civic', library:'civic',
+};
+function pgGroup(cat) {
+  if (!cat) return 'services';
+  return PG_GROUP_MAP[cat.toLowerCase().replace(/[^a-z_]/g,'_')] || 'services';
+}
+
+async function dualWritePostgres(businesses, zip, state) {
+  const db = getDb();
+  if (!db || !businesses || !businesses.length) return;
+  let written = 0, failed = 0;
+  for (const b of businesses) {
+    try {
+      await db.upsertBusiness({
+        name:             b.name,
+        zip:              b.zip || zip,
+        address:          b.address   || null,
+        city:             b.city      || null,
+        phone:            b.phone     || null,
+        website:          b.website   || null,
+        hours:            b.hours     || null,
+        category:         b.category  || null,
+        category_group:   b.group     || pgGroup(b.category),
+        status:           b.status    || 'active',
+        lat:              b.lat       || null,
+        lon:              b.lon       || null,
+        confidence_score: (b.confidence || 50) / 100,
+        tags:             b.tags      || [],
+        description:      b.description || null,
+        source_id:        b.source    || b.primary_source || 'zipagent',
+        source_weight:    0.2,
+        source_raw:       null,
+      });
+      written++;
+    } catch (e) {
+      failed++;
+      if (failed === 1) console.warn(`[ZipAgent PG] first upsert error (${zip}):`, e.message);
+    }
+  }
+  console.log(`[ZipAgent PG] ${zip}: wrote ${written} / ${businesses.length} to Postgres (${failed} failed)`);
+}
+
 // ZIP → YP city slug (for passing a focused city to YP bulk scrape)
 const ZIP_TO_YP_CITY = {
   // SJC
@@ -564,6 +623,9 @@ async function run() {
   log(`Final: ${final.length} businesses`);
   fs.writeFileSync(ZIP_FILE, JSON.stringify(final, null, 2));
   log(`Written → data/zips/${ZIP}.json`);
+
+  // Dual-write to Postgres — persists across Railway deploys
+  await dualWritePostgres(final, ZIP, STATE || 'FL');
 
   // Update coverage
   const covFile = path.join(DATA_DIR, 'zipCoverage.json');

@@ -22,6 +22,14 @@ const workers = [
   { name: 'Zip Coordinator',    file: 'workers/zipCoordinatorWorker.js' },
   { name: 'Enrichment Agent',   file: 'workers/enrichmentAgent.js' },
   { name: 'ACP Broadcaster',    file: 'workers/acpBroadcaster.js' },
+  // ── LocalIntel learning loop workers ─────────────────────────────────────────────
+  { name: 'ACS Worker',           file: 'workers/acsWorker.js' },
+  { name: 'MCP Probe',            file: 'workers/mcpProbeWorker.js' },
+  { name: 'Router Learning',      file: 'workers/routerLearningWorker.js' },
+  { name: 'Vertical Agents',      file: 'workers/verticalAgentWorker.js' },
+  { name: 'Chamber Scraper',      file: 'workers/chamberScraper.js' },
+  { name: 'Prompt Evolution',     file: 'workers/promptEvolutionWorker.js' },
+  { name: 'Brief Validator',      file: 'workers/briefValidator.js' },
   ...(process.env.FINANCIAL_ANALYST_ENTITY_ID
     ? [{ name: 'Financial Analyst', file: 'financialAnalyst.js' }]
     : []),
