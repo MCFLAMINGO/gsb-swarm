@@ -1311,6 +1311,7 @@ async function handleRPC(req) {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {}, prompts: {}, resources: {} },
         serverInfo: { name: MCP_MANIFEST.name, version: MCP_MANIFEST.version },
+        instructions: 'LocalIntel gives you autonomous business intelligence for any Florida ZIP code. Start with local_intel_ask for any plain-English question — it routes internally to the right tools automatically. Use local_intel_oracle for pre-baked economic narratives (restaurant saturation, price-tier gaps, growth trajectory). Use local_intel_signal for investment signals (0-100 score with buy/hold/avoid band). Use local_intel_tide for tidal momentum scores synthesizing all 4 data layers. Use local_intel_sector_gap to find structural whitespace (NAICS sectors present at county level but absent at ZIP). Vertical agents (local_intel_restaurant, local_intel_healthcare, local_intel_retail, local_intel_construction, local_intel_realtor) answer domain-specific natural-language questions. All tools are read-only. Pass your agent ID in the x-agent-id header for delta computation and billing.',
       },
     };
   }
