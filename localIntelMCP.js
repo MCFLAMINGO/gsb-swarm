@@ -1278,20 +1278,6 @@ const MCP_MANIFEST = {
       },
       annotations: { readOnly: true },
     },
-    {
-      name: 'local_intel_query',
-      description: '[DUPLICATE — see position 1 in tools list. This entry retained for backward compatibility.]',
-      deprecated: true,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Any plain-English question about a local market, e.g. "where should I open a clinic in Northeast Florida" or "what food gaps exist in Nocatee"' },
-          zip:   { type: 'string', description: 'Optional ZIP code override. If omitted, ZIP is detected from the query or derived from region signals.' },
-        },
-        required: ['query'],
-      },
-      annotations: { readOnly: true },
-    },
   ],
 };
 

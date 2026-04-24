@@ -2,7 +2,7 @@
 
 [![smithery badge](https://smithery.ai/badge/erik-7clt/local-intel)](https://smithery.ai/servers/erik-7clt/local-intel)
 
-Autonomous business intelligence for Florida ZIP codes. 21 MCP tools. 1,445 ZIP briefs. Built for LLMs and autonomous agents.
+Autonomous business intelligence for Florida ZIP codes. 20 MCP tools. 1,445 ZIP briefs. Built for LLMs and autonomous agents.
 
 > *"Let Google pay for the satellites. We sell the weather forecast."*
 
