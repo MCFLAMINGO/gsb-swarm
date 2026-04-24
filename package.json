@@ -1,7 +1,7 @@
 {
   "name": "gsb-intelligence-swarm",
   "version": "1.0.2",
-  "description": "LocalIntel \u2014 agentic local business intelligence for Florida. 20 MCP tools covering spatial context, sector gap analysis, oracle narratives, tidal momentum scores, and vertical agents for restaurant, healthcare, retail, construction, and real estate. 1,445 ZIP briefs. LLMs pay $0.01\u2013$0.05/call in pathUSD on Tempo.",
+  "description": "LocalIntel — agentic local business intelligence for Florida. 20 MCP tools covering spatial context, sector gap analysis, oracle narratives, tidal momentum scores, and vertical agents for restaurant, healthcare, retail, construction, and real estate. 1,445 ZIP briefs. LLMs pay $0.01–$0.05/call in pathUSD on Tempo.",
   "main": "dashboard-server.js",
   "scripts": {
     "start": "node --experimental-require-module --no-warnings dashboard-server.js",
@@ -58,5 +58,6 @@
     "type": "git",
     "url": "https://github.com/MCFLAMINGO/gsb-swarm"
   },
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "mcpName": "io.github.mcflamingo/local-intel"
 }

@@ -36,9 +36,7 @@ CREATE TABLE IF NOT EXISTS state_registry (
   status             TEXT       NOT NULL DEFAULT 'locked',  -- locked | active | complete
   zip_total          INT        DEFAULT 0,
   zip_covered        INT        DEFAULT 0,
-  zip_pct            FLOAT4     GENERATED ALWAYS AS (
-                       CASE WHEN zip_total > 0 THEN zip_covered::float / zip_total * 100 ELSE 0 END
-                     ) STORED,
+  zip_pct            FLOAT4     DEFAULT 0.0,  -- updated by coordinator on each cycle
   phase_unlocked_at  TIMESTAMPTZ,
   first_zip_at       TIMESTAMPTZ,
   completed_at       TIMESTAMPTZ,
@@ -74,9 +72,18 @@ ON CONFLICT (state) DO UPDATE SET
   notes      = EXCLUDED.notes,
   updated_at = NOW();
 
--- Trigger to auto-update updated_at on state_registry
-DO $$ BEGIN
+-- Trigger: auto-update updated_at + recompute zip_pct on state_registry
+CREATE OR REPLACE FUNCTION update_state_registry_pct()
+RETURNS TRIGGER AS $
+BEGIN
+  NEW.updated_at = NOW();
+  NEW.zip_pct = CASE WHEN NEW.zip_total > 0 THEN NEW.zip_covered::float / NEW.zip_total * 100.0 ELSE 0 END;
+  RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+DO $ BEGIN
   CREATE TRIGGER trg_state_registry_updated
     BEFORE UPDATE ON state_registry
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    FOR EACH ROW EXECUTE FUNCTION update_state_registry_pct();
+EXCEPTION WHEN duplicate_object THEN NULL; END $;
