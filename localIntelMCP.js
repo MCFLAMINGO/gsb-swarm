@@ -406,6 +406,7 @@ function loadZones() {
   try { return JSON.parse(fs.readFileSync(ZONES_PATH, 'utf8')); } catch { return {}; }
 }
 function logUsage(tool, caller, meta) {
+  // ── 1. Flat JSON ledger (dashboard source) ────────────────────────────────
   try {
     const ledger = (() => { try { return JSON.parse(fs.readFileSync(LEDGER_PATH, 'utf8')); } catch { return []; } })();
     const entry = {
@@ -423,6 +424,26 @@ function logUsage(tool, caller, meta) {
     if (ledger.length > 10000) ledger.splice(0, ledger.length - 10000);
     fs.writeFileSync(LEDGER_PATH, JSON.stringify(ledger, null, 2));
   } catch {}
+
+  // ── 2. Postgres usage_ledger (billing source) ─────────────────────────────
+  // Fire-and-forget — never block a tool response over billing
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const db = require('./lib/db');
+      db.query(
+        `INSERT INTO usage_ledger
+           (agent_token, tool_name, zip, cost_path_usd, response_ms, cache_hit)
+         VALUES ($1, $2, $3, $4, $5, false)`,
+        [
+          caller || 'unknown',
+          tool,
+          meta?.zip || null,
+          TOOL_COSTS[tool] || 0,
+          meta?.latency || null,
+        ]
+      ).catch(() => {}); // non-fatal
+    } catch {}
+  }
 }
 
 // ── Haversine distance (miles) ────────────────────────────────────────────────
