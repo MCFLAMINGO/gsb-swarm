@@ -177,7 +177,11 @@ async function run() {
   console.log(`  zip_intelligence:${zipCount.count}`);
   console.log(`  source_evidence: ${evCount.count}`);
 
-  process.exit(0);
+  if (require.main === module) process.exit(0);
 }
 
-run().catch(e => { console.error('[migrate] Fatal:', e); process.exit(1); });
+if (require.main === module) {
+  run().catch(e => { console.error('[migrate] Fatal:', e); process.exit(1); });
+}
+
+module.exports = { migrateJsonToPg: run };

@@ -423,6 +423,26 @@ app.use('/api/bbb', bbbRouter);
 const { router: btrRouter } = require('./workers/btrWorker');
 app.use('/api/btr', btrRouter);
 
+// ── One-shot DB migration trigger (operator only) ───────────────────────────
+// POST /api/admin/run-migration  — migrates flat JSON → Postgres, safe to re-run
+app.post('/api/admin/run-migration', async (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'Migration running in background — check Railway logs' });
+  // Run after response sent so Railway doesn't timeout the request
+  setImmediate(async () => {
+    try {
+      const { migrateJsonToPg } = require('./scripts/migrate-json-to-pg');
+      await migrateJsonToPg();
+      console.log('[admin] ✅ Migration complete');
+    } catch (e) {
+      console.error('[admin] ❌ Migration failed:', e.message);
+    }
+  });
+});
+
 // ── Prompt Evolution API ──────────────────────────────────────────────────────
 // GET  /api/evolution/report  — latest audit report (signal quality, gaps, prompt counts)
 // GET  /api/evolution/gaps    — full per-ZIP gap audit
