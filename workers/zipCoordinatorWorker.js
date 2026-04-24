@@ -14,6 +14,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { execSync, spawn } = require('child_process');
+const { ALL_SUNBELT_ZIPS, getZipsByPhase, getSummary: getSunbeltSummary } = require('./sunbeltZipRegistry');
 
 const PORT = 3006;
 const DATA_DIR = path.join(__dirname, '../data');
@@ -22,96 +23,48 @@ const COVERAGE_FILE = path.join(DATA_DIR, 'zipCoverage.json');
 const QUEUE_FILE = path.join(DATA_DIR, 'zipQueue.json');
 const LEDGER_FILE = path.join(DATA_DIR, 'usageLedger.json');
 
-// Florida ZIP codes with approximate population priority scores
-// Sorted: metro/suburban first, rural last
-// Full 983-zip FL list — top 200 highest-priority to start, coordinator fetches rest from OSM/Census
+// FL priority seeds — SJC + major metro anchors only.
+// Full 1013-ZIP FL list is loaded from flZipRegistry.js at runtime.
+// Non-FL states live in sunbeltZipRegistry.js and are phase-gated.
 const FL_ZIPS_PRIORITY = [
-  // SJC (already seeded — run enrichment not discovery)
   { zip: '32082', region: 'SJC', priority: 100, lat: 30.1893, lon: -81.3815, name: 'Ponte Vedra Beach' },
   { zip: '32081', region: 'SJC', priority: 100, lat: 30.1100, lon: -81.4175, name: 'Nocatee' },
-  { zip: '32084', region: 'SJC', priority: 90, lat: 29.8957, lon: -81.3153, name: 'St. Augustine' },
-  { zip: '32086', region: 'SJC', priority: 90, lat: 29.8360, lon: -81.2760, name: 'St. Augustine South' },
-  { zip: '32092', region: 'SJC', priority: 85, lat: 30.0579, lon: -81.5279, name: 'World Golf Village' },
-  { zip: '32095', region: 'SJC', priority: 80, lat: 30.1579, lon: -81.4140, name: 'St. Johns North' },
-  { zip: '32080', region: 'SJC', priority: 80, lat: 29.8643, lon: -81.2682, name: 'St. Augustine Beach' },
-  { zip: '32259', region: 'SJC', priority: 75, lat: 30.0830, lon: -81.5557, name: 'Switzerland' },
-  { zip: '32033', region: 'SJC', priority: 70, lat: 29.7988, lon: -81.5198, name: 'Elkton' },
-  { zip: '32004', region: 'SJC', priority: 65, lat: 29.9627, lon: -81.4302, name: 'Anastasia Island' },
-  { zip: '32068', region: 'SJC', priority: 60, lat: 30.0600, lon: -81.7800, name: 'Middleburg' },
+  { zip: '32084', region: 'SJC', priority:  90, lat: 29.8957, lon: -81.3153, name: 'St. Augustine' },
+  { zip: '32086', region: 'SJC', priority:  90, lat: 29.8360, lon: -81.2760, name: 'St. Augustine South' },
+  { zip: '32092', region: 'SJC', priority:  85, lat: 30.0579, lon: -81.5279, name: 'World Golf Village' },
+  { zip: '32095', region: 'SJC', priority:  80, lat: 30.1579, lon: -81.4140, name: 'St. Johns North' },
+  { zip: '32080', region: 'SJC', priority:  80, lat: 29.8643, lon: -81.2682, name: 'St. Augustine Beach' },
+  { zip: '32259', region: 'SJC', priority:  75, lat: 30.0830, lon: -81.5557, name: 'Switzerland' },
   // Jacksonville metro
-  { zip: '32256', region: 'JAX', priority: 88, lat: 30.1983, lon: -81.5548, name: 'Jacksonville SE' },
-  { zip: '32258', region: 'JAX', priority: 85, lat: 30.1396, lon: -81.5523, name: 'Jacksonville SW' },
-  { zip: '32223', region: 'JAX', priority: 83, lat: 30.1512, lon: -81.6398, name: 'Mandarin' },
-  { zip: '32225', region: 'JAX', priority: 82, lat: 30.3512, lon: -81.4762, name: 'Jacksonville NE' },
-  { zip: '32246', region: 'JAX', priority: 80, lat: 30.2768, lon: -81.4987, name: 'Jacksonville E' },
-  { zip: '32218', region: 'JAX', priority: 78, lat: 30.4512, lon: -81.5762, name: 'Jacksonville N' },
-  { zip: '32244', region: 'JAX', priority: 76, lat: 30.2012, lon: -81.7298, name: 'Westside' },
-  { zip: '32210', region: 'JAX', priority: 74, lat: 30.2512, lon: -81.7348, name: 'Jacksonville W' },
-  { zip: '32205', region: 'JAX', priority: 72, lat: 30.3112, lon: -81.7148, name: 'Riverside/Avondale' },
-  { zip: '32207', region: 'JAX', priority: 70, lat: 30.2912, lon: -81.6448, name: 'San Marco' },
+  { zip: '32256', region: 'JAX', priority:  88, lat: 30.1983, lon: -81.5548, name: 'Jacksonville SE' },
+  { zip: '32258', region: 'JAX', priority:  85, lat: 30.1396, lon: -81.5523, name: 'Jacksonville SW' },
+  { zip: '32223', region: 'JAX', priority:  83, lat: 30.1512, lon: -81.6398, name: 'Mandarin' },
+  { zip: '32225', region: 'JAX', priority:  82, lat: 30.3512, lon: -81.4762, name: 'Jacksonville NE' },
+  { zip: '32246', region: 'JAX', priority:  80, lat: 30.2768, lon: -81.4987, name: 'Jacksonville E' },
   // Tampa metro
-  { zip: '33629', region: 'TPA', priority: 87, lat: 27.9212, lon: -82.5148, name: 'South Tampa' },
-  { zip: '33618', region: 'TPA', priority: 85, lat: 28.0512, lon: -82.5148, name: 'Carrollwood' },
-  { zip: '33647', region: 'TPA', priority: 83, lat: 28.1412, lon: -82.3748, name: 'New Tampa' },
-  { zip: '34202', region: 'TPA', priority: 81, lat: 27.4512, lon: -82.4548, name: 'Lakewood Ranch' },
-  { zip: '33626', region: 'TPA', priority: 79, lat: 28.0612, lon: -82.6148, name: 'Westchase' },
+  { zip: '33629', region: 'TPA', priority:  87, lat: 27.9212, lon: -82.5148, name: 'South Tampa' },
+  { zip: '33618', region: 'TPA', priority:  85, lat: 28.0512, lon: -82.5148, name: 'Carrollwood' },
+  { zip: '33647', region: 'TPA', priority:  83, lat: 28.1412, lon: -82.3748, name: 'New Tampa' },
+  { zip: '34202', region: 'TPA', priority:  81, lat: 27.4512, lon: -82.4548, name: 'Lakewood Ranch' },
+  { zip: '33626', region: 'TPA', priority:  79, lat: 28.0612, lon: -82.6148, name: 'Westchase' },
   // Orlando metro
-  { zip: '32828', region: 'ORL', priority: 86, lat: 28.5212, lon: -81.1748, name: 'East Orlando' },
-  { zip: '32836', region: 'ORL', priority: 84, lat: 28.3912, lon: -81.5148, name: 'Dr. Phillips' },
-  { zip: '34786', region: 'ORL', priority: 82, lat: 28.4512, lon: -81.5948, name: 'Windermere' },
-  { zip: '32771', region: 'ORL', priority: 80, lat: 28.8012, lon: -81.3148, name: 'Sanford' },
-  { zip: '34711', region: 'ORL', priority: 78, lat: 28.5612, lon: -81.7748, name: 'Clermont' },
+  { zip: '32828', region: 'ORL', priority:  86, lat: 28.5212, lon: -81.1748, name: 'East Orlando' },
+  { zip: '32836', region: 'ORL', priority:  84, lat: 28.3912, lon: -81.5148, name: 'Dr. Phillips' },
+  { zip: '34786', region: 'ORL', priority:  82, lat: 28.4512, lon: -81.5948, name: 'Windermere' },
+  { zip: '32771', region: 'ORL', priority:  80, lat: 28.8012, lon: -81.3148, name: 'Sanford' },
+  { zip: '34711', region: 'ORL', priority:  78, lat: 28.5612, lon: -81.7748, name: 'Clermont' },
   // South Florida
-  { zip: '33458', region: 'SFL', priority: 85, lat: 26.9212, lon: -80.1048, name: 'Jupiter' },
-  { zip: '33496', region: 'SFL', priority: 83, lat: 26.3812, lon: -80.1448, name: 'Boca Raton N' },
-  { zip: '33433', region: 'SFL', priority: 81, lat: 26.3512, lon: -80.1648, name: 'Boca Raton' },
-  { zip: '33076', region: 'SFL', priority: 79, lat: 26.3612, lon: -80.2648, name: 'Parkland' },
-  { zip: '33326', region: 'SFL', priority: 77, lat: 26.1312, lon: -80.3648, name: 'Weston' },
-  // Alabama Gulf Coast
-  { zip: '36695', region: 'MOB', priority: 76, lat: 30.6354, lon: -88.1581, name: 'Mobile West' },
-  { zip: '36608', region: 'MOB', priority: 74, lat: 30.6887, lon: -88.1462, name: 'Mobile Midtown' },
-  { zip: '36609', region: 'MOB', priority: 72, lat: 30.6624, lon: -88.1741, name: 'Mobile W' },
-  { zip: '36526', region: 'MOB', priority: 70, lat: 30.6021, lon: -87.9168, name: 'Daphne' },
-  { zip: '36532', region: 'MOB', priority: 68, lat: 30.5077, lon: -87.8928, name: 'Fairhope' },
-  { zip: '36542', region: 'MOB', priority: 65, lat: 30.2593, lon: -87.7008, name: 'Gulf Shores' },
-  { zip: '36561', region: 'MOB', priority: 63, lat: 30.2961, lon: -87.6003, name: 'Orange Beach' },
-  // Georgia — Savannah metro (Gulf Coast adjacent, high growth)
-  { zip: '31405', region: 'SAV', priority: 78, lat: 32.0468, lon: -81.1276, name: 'Savannah Midtown' },
-  { zip: '31406', region: 'SAV', priority: 76, lat: 31.9938, lon: -81.0996, name: 'Savannah South' },
-  { zip: '31419', region: 'SAV', priority: 74, lat: 31.9488, lon: -81.1876, name: 'Savannah SW' },
-  { zip: '31407', region: 'SAV', priority: 72, lat: 32.1288, lon: -81.2176, name: 'Port Wentworth' },
-  { zip: '31322', region: 'SAV', priority: 70, lat: 32.0788, lon: -81.2576, name: 'Pooler' },
-  { zip: '31326', region: 'SAV', priority: 68, lat: 32.1488, lon: -81.0476, name: 'Rincon' },
-  // Georgia — Atlanta suburbs (high-income sunbelt targets)
-  { zip: '30097', region: 'ATL', priority: 82, lat: 34.0488, lon: -84.1576, name: 'Johns Creek' },
-  { zip: '30022', region: 'ATL', priority: 80, lat: 34.0188, lon: -84.2176, name: 'Alpharetta' },
-  { zip: '30005', region: 'ATL', priority: 78, lat: 34.0688, lon: -84.1976, name: 'Alpharetta N' },
-  { zip: '30024', region: 'ATL', priority: 76, lat: 34.0588, lon: -84.0776, name: 'Suwanee' },
-  { zip: '30068', region: 'ATL', priority: 74, lat: 33.9688, lon: -84.3676, name: 'Marietta E' },
-  { zip: '30062', region: 'ATL', priority: 72, lat: 34.0088, lon: -84.4576, name: 'Marietta W' },
-  { zip: '30009', region: 'ATL', priority: 70, lat: 34.0788, lon: -84.2876, name: 'Alpharetta City' },
-  // Texas Gulf Coast — Houston metro
-  { zip: '77494', region: 'HOU', priority: 84, lat: 29.7388, lon: -95.7648, name: 'Katy' },
-  { zip: '77479', region: 'HOU', priority: 82, lat: 29.5588, lon: -95.6148, name: 'Sugar Land' },
-  { zip: '77459', region: 'HOU', priority: 80, lat: 29.5388, lon: -95.5548, name: 'Missouri City' },
-  { zip: '77584', region: 'HOU', priority: 78, lat: 29.5088, lon: -95.3748, name: 'Pearland' },
-  { zip: '77450', region: 'HOU', priority: 76, lat: 29.7688, lon: -95.7348, name: 'Katy W' },
-  { zip: '77382', region: 'HOU', priority: 74, lat: 30.1688, lon: -95.5048, name: 'The Woodlands' },
-  { zip: '77380', region: 'HOU', priority: 72, lat: 30.1888, lon: -95.4748, name: 'Spring' },
-  { zip: '77573', region: 'HOU', priority: 70, lat: 29.0988, lon: -95.0748, name: 'League City' },
-  // Texas Gulf Coast — Corpus Christi
-  { zip: '78412', region: 'CRP', priority: 65, lat: 27.7088, lon: -97.3948, name: 'Corpus Christi S' },
-  { zip: '78413', region: 'CRP', priority: 63, lat: 27.6788, lon: -97.4148, name: 'Corpus Christi SW' },
-  { zip: '78418', region: 'CRP', priority: 61, lat: 27.6288, lon: -97.2248, name: 'Padre Island' },
+  { zip: '33458', region: 'SFL', priority:  85, lat: 26.9212, lon: -80.1048, name: 'Jupiter' },
+  { zip: '33496', region: 'SFL', priority:  83, lat: 26.3812, lon: -80.1448, name: 'Boca Raton N' },
+  { zip: '33433', region: 'SFL', priority:  81, lat: 26.3512, lon: -80.1648, name: 'Boca Raton' },
+  { zip: '33076', region: 'SFL', priority:  79, lat: 26.3612, lon: -80.2648, name: 'Parkland' },
+  { zip: '33326', region: 'SFL', priority:  77, lat: 26.1312, lon: -80.3648, name: 'Weston' },
 ];
 
-// Sunbelt expansion ZIPs (after AL/GA/TX Gulf Coast seeded above)
-const SUNBELT_REGIONS = [
-  { state: 'SC', metros: ['Charleston', 'Columbia', 'Myrtle Beach'] },
-  { state: 'NC', metros: ['Charlotte', 'Raleigh', 'Wilmington'] },
-  { state: 'TX', metros: ['Dallas', 'Austin', 'San Antonio'] },
-  { state: 'AZ', metros: ['Phoenix', 'Scottsdale', 'Tucson'] },
-];
+// ── Phase gate ────────────────────────────────────────────────────────────────
+// FL must reach FL_PHASE_GATE_PCT% before non-FL ZIPs are added to the queue.
+// Non-FL ZIPs are registered in sunbeltZipRegistry.js but never queued until unlocked.
+const FL_PHASE_GATE_PCT = 95; // percent of FL ZIPs complete to unlock Phase 2
 
 // ── Budget Gate ──────────────────────────────────────────────────────────────
 
@@ -171,70 +124,117 @@ function saveCoverage(coverage) {
   fs.writeFileSync(COVERAGE_FILE, JSON.stringify(coverage, null, 2));
 }
 
-function buildFullFlQueue() {
-  // Merge FL_ZIPS_PRIORITY (has pre-seeded names/regions) with flZipRegistry (all 1013 FL ZCTAs)
+function getFlCoveragePct(queue) {
+  const flZips = queue.filter(z => !z.state || z.state === 'FL');
+  if (!flZips.length) return 0;
+  const done = flZips.filter(z => z.status === 'complete').length;
+  return Math.round(done / flZips.length * 100);
+}
+
+function buildFullQueue(existingQueue) {
+  // ── Step 1: FL ZIPs ────────────────────────────────────────────────────────
   let registry = [];
   try {
     const { getAllZips } = require('./flZipRegistry');
     registry = getAllZips();
   } catch (e) {
-    console.warn('[ZipCoordinator] flZipRegistry unavailable, falling back to FL_ZIPS_PRIORITY:', e.message);
+    console.warn('[ZipCoordinator] flZipRegistry unavailable:', e.message);
   }
-
-  const priorityMap = {};
-  FL_ZIPS_PRIORITY.forEach(z => { priorityMap[z.zip] = z; });
 
   const seen = new Set();
   const queue = [];
 
-  // 1. Priority ZIPs first (already have names, regions, priority scores)
+  // Priority FL seeds first
   FL_ZIPS_PRIORITY.forEach(z => {
     seen.add(z.zip);
-    queue.push({ ...z, status: 'pending', attempts: 0 });
+    queue.push({ ...z, state: 'FL', phase: 1, status: 'pending', attempts: 0 });
   });
 
-  // 2. All remaining FL ZIPs from registry, sorted by population desc
-  const remaining = registry
+  // Remaining FL from registry
+  registry
     .filter(z => !seen.has(z.zip) && z.lat && z.lon)
-    .sort((a, b) => (b.population || 0) - (a.population || 0));
+    .sort((a, b) => (b.population || 0) - (a.population || 0))
+    .forEach(z => {
+      seen.add(z.zip);
+      queue.push({
+        zip: z.zip, state: 'FL', region: 'FL', phase: 1,
+        priority: Math.min(60, Math.max(1, Math.round((z.population || 1000) / 1000))),
+        lat: z.lat, lon: z.lon, name: z.zip,
+        status: 'pending', attempts: 0,
+      });
+    });
 
-  remaining.forEach(z => {
+  console.log(`[ZipCoordinator] FL queue: ${queue.length} ZIPs`);
+
+  // ── Step 2: Check phase gate — only add non-FL if FL ≥ 95% ────────────────
+  const existing = existingQueue || [];
+  const flPct = existing.length ? getFlCoveragePct(existing) : 0;
+  const unlockedPhases = new Set([1]);
+
+  if (flPct >= FL_PHASE_GATE_PCT) {
+    unlockedPhases.add(2);
+    console.log(`[ZipCoordinator] Phase gate: FL at ${flPct}% — Phase 2 (TX/AL/MS/LA) UNLOCKED`);
+  } else {
+    console.log(`[ZipCoordinator] Phase gate: FL at ${flPct}% — non-FL ZIPs locked until ${FL_PHASE_GATE_PCT}%`);
+  }
+
+  // Phase 3/4/5 gate: Phase 2 must be ≥95% complete
+  if (unlockedPhases.has(2)) {
+    const p2Zips = existing.filter(z => z.phase === 2);
+    const p2Pct = p2Zips.length
+      ? Math.round(p2Zips.filter(z => z.status === 'complete').length / p2Zips.length * 100)
+      : 0;
+    if (p2Pct >= FL_PHASE_GATE_PCT) { unlockedPhases.add(3); }
+    if (unlockedPhases.has(3)) {
+      const p3Zips = existing.filter(z => z.phase === 3);
+      const p3Pct = p3Zips.length
+        ? Math.round(p3Zips.filter(z => z.status === 'complete').length / p3Zips.length * 100)
+        : 0;
+      if (p3Pct >= FL_PHASE_GATE_PCT) { unlockedPhases.add(4); }
+      if (unlockedPhases.has(4)) {
+        const p4Zips = existing.filter(z => z.phase === 4);
+        const p4Pct = p4Zips.length
+          ? Math.round(p4Zips.filter(z => z.status === 'complete').length / p4Zips.length * 100)
+          : 0;
+        if (p4Pct >= FL_PHASE_GATE_PCT) { unlockedPhases.add(5); }
+      }
+    }
+  }
+
+  // ── Step 3: Add non-FL ZIPs for unlocked phases ───────────────────────────
+  const statusMap = {};
+  existing.forEach(z => { statusMap[z.zip] = { status: z.status, attempts: z.attempts }; });
+
+  ALL_SUNBELT_ZIPS.forEach(z => {
+    if (seen.has(z.zip)) return;
+    if (!unlockedPhases.has(z.phase)) return;
+    seen.add(z.zip);
     queue.push({
-      zip:      z.zip,
-      region:   'FL',
-      priority: Math.min(60, Math.max(1, Math.round((z.population || 1000) / 1000))),
-      lat:      z.lat,
-      lon:      z.lon,
-      name:     z.zip,
-      status:   'pending',
-      attempts: 0,
+      ...z, status: 'pending', attempts: 0,
+      ...(statusMap[z.zip] || {}),
     });
   });
 
-  console.log(`[ZipCoordinator] Full FL queue built: ${queue.length} ZIPs (${FL_ZIPS_PRIORITY.length} priority + ${remaining.length} registry)`);
+  console.log(`[ZipCoordinator] Total queue: ${queue.length} ZIPs | Unlocked phases: ${[...unlockedPhases].join(',')}`);
   return queue;
+}
+
+function buildFullFlQueue() {
+  // Legacy alias — called on first boot when no existing queue exists
+  return buildFullQueue([]);
 }
 
 function loadQueue() {
   if (fs.existsSync(QUEUE_FILE)) {
     const existing = JSON.parse(fs.readFileSync(QUEUE_FILE));
-    // If queue was seeded from old FL_ZIPS_PRIORITY only (<100 ZIPs), expand it to full FL
-    if (existing.length < 200) {
-      console.log(`[ZipCoordinator] Queue has only ${existing.length} ZIPs — expanding to full FL registry`);
-      const fullQueue = buildFullFlQueue();
-      // Preserve completed/failed status for ZIPs already in existing queue
-      const statusMap = {};
-      existing.forEach(z => { statusMap[z.zip] = { status: z.status, attempts: z.attempts }; });
-      fullQueue.forEach(z => {
-        if (statusMap[z.zip]) {
-          z.status   = statusMap[z.zip].status;
-          z.attempts = statusMap[z.zip].attempts;
-        }
-      });
+    // Rebuild queue each load to pick up phase gate unlocks and new state ZIPs
+    const fullQueue = buildFullQueue(existing);
+    // Only rewrite if meaningfully different (new ZIPs added or phase unlocked)
+    if (fullQueue.length !== existing.length) {
+      console.log(`[ZipCoordinator] Queue expanded: ${existing.length} → ${fullQueue.length} ZIPs`);
       fs.writeFileSync(QUEUE_FILE, JSON.stringify(fullQueue, null, 2));
-      return fullQueue;
     }
-    return existing;
+    return fullQueue;
   }
   // First run — build full FL queue
   const queue = buildFullFlQueue();
@@ -263,6 +263,7 @@ async function runZipAgent(zipEntry) {
       '--lat', zipEntry.lat,
       '--lon', zipEntry.lon,
       '--region', zipEntry.region,
+      '--state', zipEntry.state || 'FL',
       '--name', zipEntry.name || zipEntry.zip,
     ], {
       env: { ...process.env },
@@ -428,6 +429,15 @@ app.get('/health', (req, res) => {
   const failed = queue.filter(z => z.status === 'failed').length;
   const inProgress = queue.filter(z => z.status === 'inProgress').length;
 
+  const flPct = getFlCoveragePct(queue);
+  const byPhase = {};
+  queue.forEach(z => {
+    const p = z.phase || 1;
+    if (!byPhase[p]) byPhase[p] = { total: 0, complete: 0, pending: 0 };
+    byPhase[p].total++;
+    if (z.status === 'complete') byPhase[p].complete++;
+    else if (z.status === 'pending') byPhase[p].pending++;
+  });
   res.json({
     worker: 'zipCoordinator',
     port: PORT,
@@ -436,6 +446,9 @@ app.get('/health', (req, res) => {
     activeAgents: Object.keys(activeAgents),
     lastRun: coverage.lastRun,
     coveragePercent: queue.length ? Math.round(completed / queue.length * 100) : 0,
+    flCoveragePct: flPct,
+    phaseGate: { fl_pct: flPct, gate_pct: FL_PHASE_GATE_PCT, phase2_locked: flPct < FL_PHASE_GATE_PCT },
+    byPhase,
   });
 });
 

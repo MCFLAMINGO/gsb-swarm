@@ -865,9 +865,11 @@ router.get('/coverage-stats', (req, res) => {
       .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))
       .slice(0, 20);
 
+    // Dynamic total: FL=1013 + unlocked sunbelt phases. Use queue length when available.
+    const queueTotalDynamic = queue.length > 0 ? queue.length : 1013;
     res.json({
       zipsCompleted:    completedZips.length,
-      zipsTotal:        983,
+      zipsTotal:        queueTotalDynamic,
       totalBusinesses,
       avgConfidence:    confCount ? Math.round(confSum / confCount) : 0,
       activeAgents:     inProgress,

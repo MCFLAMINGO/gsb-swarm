@@ -132,68 +132,35 @@ function checkZipCoverageChange() {
 // ── Registry announcements ───────────────────────────────────────────────────
 
 async function announceToSmithery(zipsCount) {
+  // Smithery indexes automatically from GitHub — no POST API exists (returns 404).
+  // Instead, verify the live MCP endpoint is reachable (what Smithery actually crawls).
   const registry = 'smithery';
   try {
-    const res = await fetch('https://smithery.ai/api/submit', {
+    const res = await fetch(MCP_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(ANNOUNCEMENT_PAYLOAD),
+      body: JSON.stringify({ jsonrpc: '2.0', method: 'tools/list', id: 1 }),
       signal: AbortSignal.timeout(10000),
     });
-    const status = res.ok ? 'success' : `http_${res.status}`;
-    logBroadcast({ registry, status, message: `HTTP ${res.status}`, zipsCount });
+    const status = res.ok ? 'mcp_reachable' : `mcp_http_${res.status}`;
+    logBroadcast({ registry, status, message: `MCP endpoint HTTP ${res.status} — Smithery auto-indexes from GitHub`, zipsCount });
   } catch (e) {
     logBroadcast({ registry, status: 'error', message: e.message, zipsCount });
   }
 }
 
 async function announceToPulseMCP(zipsCount) {
+  // PulseMCP requires manual form submission — no open POST API (returns 403).
+  // Log status internally; manual submit: https://www.pulsemcp.com/submit
   const registry = 'pulsemcp';
-  try {
-    const res = await fetch('https://www.pulsemcp.com/api/servers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(ANNOUNCEMENT_PAYLOAD),
-      signal: AbortSignal.timeout(10000),
-    });
-    const status = res.ok ? 'success' : `http_${res.status}`;
-    logBroadcast({ registry, status, message: `HTTP ${res.status}`, zipsCount });
-  } catch (e) {
-    logBroadcast({ registry, status: 'error', message: e.message, zipsCount });
-  }
+  logBroadcast({ registry, status: 'manual_required', message: 'PulseMCP requires manual submission at pulsemcp.com/submit — skipping auto-ping', zipsCount });
 }
 
 async function announceToFetchAi(zipsCount) {
+  // Fetch.ai Agentverse almanac requires an agent wallet/registration — returns 404 unauthenticated.
+  // Skipping until Fetch.ai agent identity is provisioned. Log status only.
   const registry = 'fetchai_agentverse';
-  try {
-    // First check if the almanac endpoint exists
-    const checkRes = await fetch('https://agentverse.ai/api/v1/almanac/agents', {
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!checkRes.ok) {
-      logBroadcast({ registry, status: `check_http_${checkRes.status}`, message: 'Almanac endpoint returned non-OK', zipsCount });
-      return;
-    }
-    // Attempt registration
-    const regRes = await fetch('https://agentverse.ai/api/v1/almanac/agents', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        address: 'localintel-gsb-swarm',
-        endpoints: [{ url: MCP_URL, weight: 1 }],
-        protocols: ['mcp'],
-        metadata: {
-          name: ANNOUNCEMENT_PAYLOAD.name,
-          description: ANNOUNCEMENT_PAYLOAD.description,
-        },
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-    const status = regRes.ok ? 'success' : `http_${regRes.status}`;
-    logBroadcast({ registry, status, message: `Registration HTTP ${regRes.status}`, zipsCount });
-  } catch (e) {
-    logBroadcast({ registry, status: 'error', message: e.message, zipsCount });
-  }
+  logBroadcast({ registry, status: 'auth_required', message: 'Agentverse requires agent wallet — skip until provisioned', zipsCount });
 }
 
 // ── Main broadcast cycle ─────────────────────────────────────────────────────

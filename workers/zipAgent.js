@@ -162,6 +162,7 @@ const ZIP    = args.zip;
 const LAT    = parseFloat(args.lat);
 const LON    = parseFloat(args.lon);
 const REGION = args.region || 'FL';
+const STATE  = args.state  || (REGION === 'FL' || REGION === 'SJC' || REGION === 'JAX' || REGION === 'TPA' || REGION === 'ORL' || REGION === 'SFL' ? 'FL' : (args.state || 'FL'));
 const NAME   = args.name   || ZIP;
 
 if (!ZIP || isNaN(LAT) || isNaN(LON)) {
@@ -298,7 +299,7 @@ async function fetchOSM() {
           return {
             name: tags.name, category, zip: ZIP, lat, lon,
             address: [tags['addr:housenumber'], tags['addr:street']].filter(Boolean).join(' ') || null,
-            city: tags['addr:city'] || NAME, state: 'FL',
+            city: tags['addr:city'] || NAME, state: STATE,
             phone: tags.phone || tags['contact:phone'] || null,
             website: tags.website || tags['contact:website'] || null,
             hours: tags.opening_hours || null,
@@ -531,7 +532,7 @@ async function run() {
     const city = ZIP_TO_CITY[ZIP] || NAME;
     log(`Source 8: Chamber Discovery — ${city}`);
     try {
-      const cdStats = await discoverAndImportChamber({ zip: ZIP, city, state: 'FL', lat: LAT, lon: LON });
+      const cdStats = await discoverAndImportChamber({ zip: ZIP, city, state: STATE, lat: LAT, lon: LON });
       log(`Source 8 done — added:${cdStats.added} enriched:${cdStats.enriched} (${cdStats.chamber || cdStats.reason || 'n/a'})`);
       logSource('chamber_discovery', cdStats.added + cdStats.enriched > 0 ? 'ok' : 'unavailable',
         cdStats.chamber ? `added:${cdStats.added} enriched:${cdStats.enriched} via ${cdStats.chamber}` : cdStats.reason || 'no data');
