@@ -18,6 +18,7 @@ const path   = require('path');
 const fs     = require('fs');
 
 const DATA_DIR  = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const { computeConfidence } = require('../lib/computeConfidence');
 const ZIPS_DIR  = path.join(DATA_DIR, 'zips');  // flat-array format, matches zipAgent + MCP
 
 // Infer OSM-style category from business name when schema.org type is generic 'LocalBusiness'
@@ -227,12 +228,12 @@ function mergeIntoZipFile(zipCode, biz) {
     if (changed) {
       existing.last_enriched = now;
       existing.yp_source = true;
-      existing.confidence = Math.min(90, (existing.confidence || 60) + 8);
+      existing.confidence = computeConfidence(existing);
       fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     }
     return changed ? 'enriched' : 'skipped';
   } else {
-    data.push({
+    const newBiz = {
       name:         biz.name,
       phone:        biz.phone || null,
       website:      biz.website || null,
@@ -242,12 +243,13 @@ function mergeIntoZipFile(zipCode, biz) {
       zip:          zipCode,
       lat:          null,
       lon:          null,
-      confidence:   72,
       source:       'yellowpages',
       yp_source:    true,
       added_at:     now,
       last_enriched: now,
-    });
+    };
+    newBiz.confidence = computeConfidence(newBiz);
+    data.push(newBiz);
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     return 'added';
   }

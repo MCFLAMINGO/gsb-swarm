@@ -16,7 +16,7 @@
       "google_maps"
     ],
     "claimed": true,
-    "notes": "Owner-verified listing \u2014 MCFL Restaurant Holdings LLC / MCFLAMINGO. Coords confirmed from Google Maps place ID."
+    "notes": "Owner-verified listing — MCFL Restaurant Holdings LLC / MCFLAMINGO. Coords confirmed from Google Maps place ID."
   },
   {
     "name": "Publix",
@@ -28,7 +28,7 @@
     "phone": "+1 904-825-0263",
     "website": "https://www.publix.com/locations/1243",
     "hours": "Mo-Su 07:00-22:00",
-    "confidence": 100,
+    "confidence": 90,
     "sources": [
       "OSM"
     ]
@@ -43,7 +43,7 @@
     "phone": "+1 904-373-0426",
     "website": "https://locations.dunkindonuts.com/en/fl/ponte-vedra-beach/641-crosswater-pkwy/354697",
     "hours": "Mo-Su 05:00-21:00",
-    "confidence": 100,
+    "confidence": 90,
     "sources": [
       "OSM"
     ]
@@ -58,7 +58,7 @@
     "phone": "+1-904-273-0125",
     "website": "https://www.frankelrealtygroup.com/",
     "hours": "Mo-Sa 09:00-18:00",
-    "confidence": 100,
+    "confidence": 90,
     "sources": [
       "OSM"
     ]
@@ -73,7 +73,7 @@
     "phone": "+1 904-826-3356",
     "website": "https://www.publix.com/locations/1701",
     "hours": "Mo-Su 08:00-08:00",
-    "confidence": 100,
+    "confidence": 90,
     "sources": [
       "OSM"
     ]
@@ -88,7 +88,7 @@
     "phone": "+1-904-302-6000",
     "website": "https://ecowisecleaners.com",
     "hours": "Mo-Fr 07:00-18:30; Sa 09:00 - 14:00",
-    "confidence": 100,
+    "confidence": 90,
     "sources": [
       "OSM"
     ]
@@ -103,7 +103,7 @@
     "phone": "+1-904-621-2348",
     "website": "https://solrenewed.com/",
     "hours": "Mo-Th 9:00-17:00",
-    "confidence": 100,
+    "confidence": 90,
     "sources": [
       "OSM"
     ]
@@ -118,7 +118,7 @@
     "phone": "+1 904-567-3157",
     "website": "https://locations.wendys.com/united-states/fl/ponte-vedra/153-capital-green",
     "hours": "06:30-22:00",
-    "confidence": 100,
+    "confidence": 90,
     "sources": [
       "OSM"
     ]
@@ -133,7 +133,7 @@
     "phone": "+1-904-330-0153",
     "website": "https://stjp2.net/",
     "hours": "Mo-Fr 09:00-16:00, 09:00-18:00; Su 08:30-23:30",
-    "confidence": 100,
+    "confidence": 90,
     "sources": [
       "OSM"
     ]
@@ -148,7 +148,7 @@
     "phone": "+1 904-273-7490",
     "website": "https://www.mcdonalds.com/us/en-us/location/12869.html",
     "hours": "06:00-22:00",
-    "confidence": 100,
+    "confidence": 90,
     "sources": [
       "OSM"
     ]
@@ -163,7 +163,7 @@
     "phone": "+1 904-273-6565",
     "website": "https://www.publix.com/locations/1028",
     "hours": "Mo-Su 07:00-22:00",
-    "confidence": 100,
+    "confidence": 90,
     "sources": [
       "OSM"
     ]
@@ -178,7 +178,7 @@
     "phone": "+1 904-686-3031",
     "website": "https://locations.panerabread.com/fl/ponte-vedra/35-capital-green-drive.html",
     "hours": "Mo-Sa 06:00-21:00; Su 07:00-21:00",
-    "confidence": 100,
+    "confidence": 90,
     "sources": [
       "OSM"
     ]
@@ -200,7 +200,7 @@
     ],
     "osm_id": 5880853617,
     "osm_type": "node",
-    "confidence": 95
+    "confidence": 90
   },
   {
     "name": "Carla Shoes & Accessories",
@@ -219,7 +219,7 @@
     ],
     "osm_id": 11156005975,
     "osm_type": "node",
-    "confidence": 95
+    "confidence": 90
   },
   {
     "name": "Barbara Jean's On The Water - Southern Restaurant",
@@ -231,7 +231,7 @@
     "phone": "+1-904-280-7522",
     "website": "https://barbarajeansonthewater.com/",
     "hours": "",
-    "confidence": 90,
+    "confidence": 80,
     "sources": [
       "OSM"
     ]
@@ -246,7 +246,7 @@
     "phone": "+1-904-285-3235",
     "website": "https://www.valleysmoke.com/",
     "hours": "",
-    "confidence": 90,
+    "confidence": 80,
     "sources": [
       "OSM"
     ]
@@ -261,7 +261,7 @@
     "phone": "+1 904-460-3685",
     "website": "https://www.starbucks.com/store-locator/store/1018312/nocatee-parkway-crosswater-p-41-settlement-dr-ponte-vedra-beach-fl-320810947-us",
     "hours": "",
-    "confidence": 90,
+    "confidence": 80,
     "sources": [
       "OSM"
     ]
@@ -283,7 +283,7 @@
     ],
     "osm_id": 7176682902,
     "osm_type": "node",
-    "confidence": 85
+    "confidence": 80
   },
   {
     "name": "Palm Valley Fish Camp",
@@ -302,7 +302,7 @@
     ],
     "osm_id": 7176682914,
     "osm_type": "node",
-    "confidence": 85
+    "confidence": 80
   },
   {
     "name": "Lord of Life Lutheran Church - Lutheran church",
@@ -321,7 +321,7 @@
     ],
     "osm_id": 7199199461,
     "osm_type": "node",
-    "confidence": 85
+    "confidence": 80
   },
   {
     "name": "Ponte Vedra Movers",
@@ -340,7 +340,7 @@
     ],
     "osm_id": 9718295756,
     "osm_type": "node",
-    "confidence": 85
+    "confidence": 80
   },
   {
     "name": "Ace Hardware",
@@ -371,7 +371,7 @@
     "phone": "",
     "website": "",
     "hours": "06:00-14:30",
-    "confidence": 80,
+    "confidence": 65,
     "sources": [
       "OSM"
     ]
@@ -386,7 +386,7 @@
     "phone": "+1-904-834-7183",
     "website": "",
     "hours": "",
-    "confidence": 80,
+    "confidence": 75,
     "sources": [
       "OSM"
     ]
@@ -401,7 +401,7 @@
     "phone": "+1 904-285-6555",
     "website": "",
     "hours": "",
-    "confidence": 80,
+    "confidence": 75,
     "sources": [
       "OSM"
     ]
@@ -416,7 +416,7 @@
     "phone": "+1-904-824-8304",
     "website": "",
     "hours": "",
-    "confidence": 80,
+    "confidence": 75,
     "sources": [
       "OSM"
     ]
@@ -431,7 +431,7 @@
     "phone": "+1 904-900-7644",
     "website": "",
     "hours": "",
-    "confidence": 80,
+    "confidence": 75,
     "sources": [
       "OSM"
     ]
@@ -446,7 +446,7 @@
     "phone": "",
     "website": "https://www-pvhs.stjohns.k12.fl.us/",
     "hours": "",
-    "confidence": 80,
+    "confidence": 65,
     "sources": [
       "OSM"
     ]
@@ -461,7 +461,7 @@
     "phone": "+1 904-686-3000",
     "website": "https://locator.chase.com/fl/ponte-vedra/187-capital-green-dr",
     "hours": "Mo-Fr 09:00-17:00; Sa-Su closed",
-    "confidence": 80,
+    "confidence": 85,
     "sources": [
       "OSM"
     ]
@@ -483,7 +483,7 @@
     ],
     "osm_id": 6264980405,
     "osm_type": "node",
-    "confidence": 95
+    "confidence": 85
   },
   {
     "name": "Palm Valley Outdoors Bar & Grill",
@@ -521,7 +521,7 @@
     ],
     "osm_id": 9579966908,
     "osm_type": "node",
-    "confidence": 95
+    "confidence": 85
   },
   {
     "name": "Aqua Premier, Irrigation, Gutters & Drainage",
@@ -540,7 +540,7 @@
     ],
     "osm_id": 13362182180,
     "osm_type": "node",
-    "confidence": 75
+    "confidence": 70
   },
   {
     "name": "Gate Express Carwash",
@@ -552,7 +552,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 70,
+    "confidence": 60,
     "sources": [
       "OSM"
     ]
@@ -567,7 +567,7 @@
     "phone": "+1-904-280-5141",
     "website": "https://www.ponte-vedra-umc.org/",
     "hours": "",
-    "confidence": 70,
+    "confidence": 75,
     "sources": [
       "OSM"
     ]
@@ -582,7 +582,7 @@
     "phone": "+1-904-285-8009",
     "website": "https://www.redeemerpv.com/",
     "hours": "",
-    "confidence": 70,
+    "confidence": 75,
     "sources": [
       "OSM"
     ]
@@ -597,7 +597,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 70,
+    "confidence": 60,
     "sources": [
       "OSM"
     ]
@@ -612,7 +612,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 70,
+    "confidence": 60,
     "sources": [
       "OSM"
     ]
@@ -627,7 +627,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 70,
+    "confidence": 60,
     "sources": [
       "OSM"
     ]
@@ -642,7 +642,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 70,
+    "confidence": 60,
     "sources": [
       "OSM"
     ]
@@ -657,7 +657,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 70,
+    "confidence": 60,
     "sources": [
       "OSM"
     ]
@@ -672,7 +672,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 70,
+    "confidence": 60,
     "sources": [
       "OSM"
     ]
@@ -687,7 +687,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 70,
+    "confidence": 60,
     "sources": [
       "OSM"
     ]
@@ -702,7 +702,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 70,
+    "confidence": 60,
     "sources": [
       "OSM"
     ]
@@ -717,7 +717,7 @@
     "phone": "+1-904-280-5694",
     "website": "https://www.familybiblepvb.com/",
     "hours": "",
-    "confidence": 70,
+    "confidence": 75,
     "sources": [
       "OSM"
     ]
@@ -732,7 +732,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 70,
+    "confidence": 60,
     "sources": [
       "OSM"
     ]
@@ -754,7 +754,7 @@
     ],
     "osm_id": 7199236521,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 75
   },
   {
     "name": "Redeemer Church",
@@ -773,7 +773,7 @@
     ],
     "osm_id": 7199236556,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 75
   },
   {
     "name": "First Baptist Church of Ponte Vedra",
@@ -792,7 +792,7 @@
     ],
     "osm_id": 7199236697,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 75
   },
   {
     "name": "Family Bible Church",
@@ -811,7 +811,7 @@
     ],
     "osm_id": 771194322,
     "osm_type": "way",
-    "confidence": 65
+    "confidence": 75
   },
   {
     "name": "Anastasia Club",
@@ -838,7 +838,7 @@
     "phone": "+1-904-285-8225",
     "website": "",
     "hours": "",
-    "confidence": 60,
+    "confidence": 70,
     "sources": [
       "OSM"
     ]
@@ -853,7 +853,7 @@
     "phone": "",
     "website": "",
     "hours": "24/7",
-    "confidence": 60,
+    "confidence": 65,
     "sources": [
       "OSM"
     ]
@@ -883,7 +883,7 @@
     "phone": "",
     "website": "",
     "hours": "Mo-Sa 09:00-19:00",
-    "confidence": 60,
+    "confidence": 65,
     "sources": [
       "OSM"
     ]
@@ -898,7 +898,7 @@
     "phone": "",
     "website": "",
     "hours": "Mo-Th,Su 11:00-20:00; Fr-Sa 11:00-21:00",
-    "confidence": 60,
+    "confidence": 65,
     "sources": [
       "OSM"
     ]
@@ -913,7 +913,7 @@
     "phone": "",
     "website": "",
     "hours": "Mo-Fr 09:00-19:00; Sa 09:00-18:00; Su 10:00-17:00",
-    "confidence": 60,
+    "confidence": 65,
     "sources": [
       "OSM"
     ]
@@ -1010,7 +1010,7 @@
     ],
     "osm_id": 4723443952,
     "osm_type": "node",
-    "confidence": 55
+    "confidence": 60
   },
   {
     "name": "Ponte Vedra Presbyterian Church",
@@ -1029,7 +1029,7 @@
     ],
     "osm_id": 7199236677,
     "osm_type": "node",
-    "confidence": 55
+    "confidence": 70
   },
   {
     "name": "Coastal Wine Market",
@@ -1048,7 +1048,7 @@
     ],
     "osm_id": 11709456680,
     "osm_type": "node",
-    "confidence": 55
+    "confidence": 65
   },
   {
     "name": "Walgreens",
@@ -1067,7 +1067,7 @@
     ],
     "osm_id": 769502495,
     "osm_type": "way",
-    "confidence": 55
+    "confidence": 60
   },
   {
     "name": "Six Mile Landing Boat Ramp",
@@ -1079,7 +1079,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1094,7 +1094,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1109,7 +1109,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1124,7 +1124,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1139,7 +1139,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1154,7 +1154,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1169,7 +1169,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1184,13 +1184,13 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
   },
   {
-    "name": "Trompe L\u2019oeil Luxury Hair Salon",
+    "name": "Trompe L’oeil Luxury Hair Salon",
     "category": "hairdresser",
     "zip": "32081",
     "lat": 30.111636,
@@ -1199,7 +1199,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1214,7 +1214,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1229,7 +1229,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1244,7 +1244,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1259,7 +1259,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1274,7 +1274,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1289,7 +1289,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1304,7 +1304,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1319,7 +1319,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1334,7 +1334,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1349,7 +1349,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1364,7 +1364,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1379,7 +1379,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1394,7 +1394,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1409,7 +1409,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1424,7 +1424,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1439,7 +1439,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1454,7 +1454,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1469,7 +1469,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1484,7 +1484,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1499,7 +1499,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1514,7 +1514,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1529,7 +1529,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1544,7 +1544,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1559,7 +1559,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1574,7 +1574,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1589,7 +1589,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1604,7 +1604,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1619,7 +1619,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1634,7 +1634,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1649,7 +1649,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1664,7 +1664,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1679,7 +1679,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1694,7 +1694,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1709,7 +1709,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1724,7 +1724,7 @@
     "phone": "",
     "website": "",
     "hours": "",
-    "confidence": 50,
+    "confidence": 55,
     "sources": [
       "OSM"
     ]
@@ -1746,7 +1746,7 @@
     ],
     "osm_id": 574809653,
     "osm_type": "node",
-    "confidence": 45
+    "confidence": 55
   },
   {
     "name": "Seaside Sign",
@@ -1765,7 +1765,7 @@
     ],
     "osm_id": 5882219590,
     "osm_type": "node",
-    "confidence": 45
+    "confidence": 55
   },
   {
     "name": "Metro Diner",
@@ -1784,7 +1784,7 @@
     ],
     "osm_id": 6262063915,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 55
   },
   {
     "name": "Trasca & Co Eatery",
@@ -1803,7 +1803,7 @@
     ],
     "osm_id": 6264980401,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 55
   },
   {
     "name": "Chico's",
@@ -1822,7 +1822,7 @@
     ],
     "osm_id": 6264980402,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 55
   },
   {
     "name": "Christy's Dream Ice Cream",
@@ -1841,7 +1841,7 @@
     ],
     "osm_id": 6264980403,
     "osm_type": "node",
-    "confidence": 45
+    "confidence": 55
   },
   {
     "name": "Peterbrooke Chocolatier",
@@ -1860,7 +1860,7 @@
     ],
     "osm_id": 6264980404,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 55
   },
   {
     "name": "Mulligans Pub",
@@ -1879,7 +1879,7 @@
     ],
     "osm_id": 6264980406,
     "osm_type": "node",
-    "confidence": 45
+    "confidence": 55
   },
   {
     "name": "Cafe on the Green",
@@ -1898,7 +1898,7 @@
     ],
     "osm_id": 6264980468,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 55
   },
   {
     "name": "Starbucks",
@@ -1917,7 +1917,7 @@
     ],
     "osm_id": 6264980469,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 55
   },
   {
     "name": "Beth El - Reform synagogue",
@@ -1936,7 +1936,7 @@
     ],
     "osm_id": 7199236493,
     "osm_type": "node",
-    "confidence": 45
+    "confidence": 55
   },
   {
     "name": "Bicycle's Etc.",
@@ -1955,7 +1955,7 @@
     ],
     "osm_id": 7738431638,
     "osm_type": "node",
-    "confidence": 45
+    "confidence": 55
   },
   {
     "name": "Woof Gang Bakery & Grooming",
@@ -1974,7 +1974,7 @@
     ],
     "osm_id": 7738431639,
     "osm_type": "node",
-    "confidence": 45
+    "confidence": 55
   },
   {
     "name": "Saint Johns Eye Associates",
@@ -1993,7 +1993,7 @@
     ],
     "osm_id": 7738431668,
     "osm_type": "node",
-    "confidence": 45
+    "confidence": 55
   },
   {
     "name": "Ponte Vedra Ballet",
@@ -2012,7 +2012,7 @@
     ],
     "osm_id": 7908084094,
     "osm_type": "node",
-    "confidence": 45
+    "confidence": 55
   },
   {
     "name": "V pizza",
@@ -2031,7 +2031,7 @@
     ],
     "osm_id": 8761543718,
     "osm_type": "node",
-    "confidence": 65
+    "confidence": 55
   },
   {
     "name": "Cultural Center at Ponte Vedra Beach",
@@ -2050,7 +2050,7 @@
     ],
     "osm_id": 362672956,
     "osm_type": "way",
-    "confidence": 65
+    "confidence": 55
   },
   {
     "name": "United States Post Office",
@@ -2069,7 +2069,7 @@
     ],
     "osm_id": 610263514,
     "osm_type": "way",
-    "confidence": 45
+    "confidence": 55
   },
   {
     "name": "Caffe Andiamo",
@@ -2088,7 +2088,7 @@
     ],
     "osm_id": 668688250,
     "osm_type": "way",
-    "confidence": 65
+    "confidence": 55
   },
   {
     "name": "Wells Fargo",
@@ -2107,7 +2107,7 @@
     ],
     "osm_id": 668689350,
     "osm_type": "way",
-    "confidence": 65
+    "confidence": 55
   },
   {
     "name": "Nona Blue Modern Tavern",
@@ -2126,7 +2126,7 @@
     ],
     "osm_id": 668689351,
     "osm_type": "way",
-    "confidence": 65
+    "confidence": 55
   },
   {
     "name": "Aqua Grill",
@@ -2145,7 +2145,7 @@
     ],
     "osm_id": 668689355,
     "osm_type": "way",
-    "confidence": 65
+    "confidence": 55
   },
   {
     "name": "ABC Fine Wines & Spirits",
@@ -2164,7 +2164,7 @@
     ],
     "osm_id": 668689356,
     "osm_type": "way",
-    "confidence": 45
+    "confidence": 55
   },
   {
     "name": "Palm Valley Baptist Church",
@@ -2183,6 +2183,6 @@
     ],
     "osm_id": 771194323,
     "osm_type": "way",
-    "confidence": 45
+    "confidence": 55
   }
 ]

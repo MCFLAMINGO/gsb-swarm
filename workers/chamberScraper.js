@@ -22,6 +22,7 @@ const path   = require('path');
 const fs     = require('fs');
 
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const { computeConfidence } = require('../lib/computeConfidence');
 const BASE_URL   = 'https://business.sjcchamber.com';
 const DELAY_MS   = 1200; // polite crawl delay
 
@@ -217,7 +218,7 @@ function mergeIntoZipFile(zipCode, business) {
       existing.chamber_member   = true;
       existing.chamber_source   = 'sjc_chamber';
       existing.last_enriched    = now;
-      existing.confidence       = Math.min(92, (existing.confidence || 60) + 10);
+      existing.confidence       = computeConfidence(existing);
     }
     return changed ? 'enriched' : 'skipped';
   } else {
@@ -232,13 +233,13 @@ function mergeIntoZipFile(zipCode, business) {
       zip:            zipCode,
       lat:            business.lat || null,
       lon:            business.lon || null,
-      confidence:     78,
       chamber_member: true,
       chamber_source: 'sjc_chamber',
       source:         'sjc_chamber',
       added_at:       now,
       last_enriched:  now,
     };
+    newBiz.confidence = computeConfidence(newBiz);
     data.businesses.push(newBiz);
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     return 'added';

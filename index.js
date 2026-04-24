@@ -64,6 +64,14 @@ function spawnWorker({ name, file }) {
 }
 
 (async () => {
+  // ── Boot: rescore all flat-file confidence scores (deterministic, <1s) ──────
+  try {
+    require('./scripts/enrichConfidence');
+    console.log('[SWARM] Confidence enrichment pass complete');
+  } catch (e) {
+    console.warn('[SWARM] Confidence enrichment pass failed (non-fatal):', e.message);
+  }
+
   for (let i = 0; i < workers.length; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, STAGGER_DELAY_MS));
     spawnWorker(workers[i]);
