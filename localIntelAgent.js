@@ -145,6 +145,28 @@ const x402Middleware = paymentMiddleware(
 
 const router = express.Router();
 
+// ── Usage ledger middleware ──────────────────────────────────────────────────────
+// Logs every query to Postgres usage_ledger. This is the billing layer.
+// caller_id = x-agent-id header | x-api-key first 8 chars | ip
+// credits_charged: oracle=1, brief=1, nl-query=5
+async function logUsage(callerId, queryType, zip, credits) {
+  if (!process.env.LOCAL_INTEL_DB_URL) return;
+  try {
+    const db = require('./lib/db');
+    await db.query(
+      `INSERT INTO usage_ledger (caller_id, query_type, zip, credits_charged)
+       VALUES ($1, $2, $3, $4)`,
+      [callerId, queryType, zip || null, credits]
+    );
+  } catch (e) { /* non-fatal — never block a query over billing */ }
+}
+function getCallerId(req) {
+  return req.headers['x-agent-id']
+    || (req.headers['x-api-key'] ? req.headers['x-api-key'].slice(0,8) : null)
+    || req.ip
+    || 'anon';
+}
+
 // ── Load dataset ──────────────────────────────────────────────────────────────
 // In production this would be a DB — for now it's the JSON file written by the pull script
 const DATA_PATH = path.join(__dirname, 'data', 'localIntel.json');
@@ -942,6 +964,7 @@ router.get('/brief/:zip', (req, res) => {
     const zip  = (req.params.zip || '').replace(/\D/g, '').slice(0, 5);
     const file = path.join(DATA_DIR_AGENT, 'briefs', `${zip}.json`);
     if (!fs.existsSync(file)) return res.status(404).json({ error: `No brief for ZIP ${zip} yet — check back after next brief worker cycle` });
+    logUsage(getCallerId(req), 'brief', zip, 1);
     res.json(JSON.parse(fs.readFileSync(file)));
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -1173,6 +1196,7 @@ router.post('/nl-query', express.json(), async (req, res) => {
     if (!question || typeof question !== 'string') {
       return res.status(400).json({ error: 'question required' });
     }
+    logUsage(getCallerId(req), 'nl-query', null, 5);
 
     const nvim = require('./lib/nvim');
     const { getAllZips } = require('./workers/flZipRegistry');
@@ -1341,6 +1365,7 @@ Return ONLY a JSON object with these fields. No explanation.`;
 router.get('/oracle', (req, res) => {
   try {
     const zip = (req.query.zip || '').replace(/\D/g, '').slice(0, 5);
+    logUsage(getCallerId(req), 'oracle', zip || 'all', 1);
     const oracleDir = path.join(DATA_DIR_AGENT, 'oracle');
 
     if (zip) {

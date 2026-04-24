@@ -241,7 +241,11 @@ async function run() {
   console.log(`  Errors:          ${errors}`);
   console.log(`  sunbiz_raw rows: ${rawCount?.count}`);
 
-  process.exit(0);
+  if (require.main === module) process.exit(0);
 }
 
-run().catch(e => { console.error('[sunbiz] Fatal:', e); process.exit(1); });
+if (require.main === module) {
+  run().catch(e => { console.error('[sunbiz] Fatal:', e); process.exit(1); });
+}
+
+module.exports = { importSunbiz: run };

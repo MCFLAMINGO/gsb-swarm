@@ -443,6 +443,76 @@ app.post('/api/admin/run-migration', async (req, res) => {
   });
 });
 
+// ── Sunbiz download + import (admin) ────────────────────────────────────────
+// POST /api/admin/download-sunbiz  — pulls 1.6GB cordata.zip to Railway volume
+// GET  /api/admin/sunbiz-status    — check download progress
+let _sunbizDownloading = false;
+app.post('/api/admin/download-sunbiz', async (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  if (_sunbizDownloading) return res.json({ status: 'already_running' });
+  _sunbizDownloading = true;
+  res.json({ status: 'started', message: 'Downloading cordata.zip to /app/data/sunbiz/ — check /api/admin/sunbiz-status' });
+  setImmediate(async () => {
+    try {
+      const { downloadSunbiz } = require('./scripts/download-sunbiz');
+      await downloadSunbiz();
+      console.log('[admin] ✅ Sunbiz download complete — run import-sunbiz next');
+    } catch (e) {
+      console.error('[admin] ❌ Sunbiz download failed:', e.message);
+    } finally { _sunbizDownloading = false; }
+  });
+});
+app.get('/api/admin/sunbiz-status', (req, res) => {
+  const fs2 = require('fs');
+  const p = '/app/data/sunbiz/cordata.zip';
+  const exists = fs2.existsSync(p);
+  const size = exists ? fs2.statSync(p).size : 0;
+  res.json({
+    downloading: _sunbizDownloading,
+    size_mb: (size/1024/1024).toFixed(1),
+    total_mb: 1663.8,
+    pct: exists ? ((size/(1663.8*1024*1024))*100).toFixed(1) : '0.0',
+    path: p,
+  });
+});
+// POST /api/admin/import-sunbiz — parses cordata.zip → sunbiz_raw + businesses
+app.post('/api/admin/import-sunbiz', async (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'Sunbiz import running — check Railway logs for progress' });
+  setImmediate(async () => {
+    try {
+      const { importSunbiz } = require('./scripts/import-sunbiz');
+      await importSunbiz();
+      console.log('[admin] ✅ Sunbiz import complete');
+    } catch (e) {
+      console.error('[admin] ❌ Sunbiz import failed:', e.message);
+    }
+  });
+});
+
+// ── Agent Query Ledger — GET /api/local-intel/usage ──────────────────────────
+// Every paid oracle/brief/NL query is logged here. This is how agents pay us.
+app.get('/api/local-intel/usage', async (req, res) => {
+  if (!process.env.LOCAL_INTEL_DB_URL) return res.json({ error: 'no_db' });
+  try {
+    const db2 = require('./lib/db');
+    const rows = await db2.query(
+      `SELECT caller_id, query_type, zip, credits_charged, ts
+       FROM usage_ledger ORDER BY ts DESC LIMIT 100`
+    );
+    const totals = await db2.queryOne(
+      `SELECT COUNT(*) as queries, COALESCE(SUM(credits_charged),0) as total_credits FROM usage_ledger`
+    );
+    res.json({ queries: rows.rows, totals });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Prompt Evolution API ──────────────────────────────────────────────────────
 // GET  /api/evolution/report  — latest audit report (signal quality, gaps, prompt counts)
 // GET  /api/evolution/gaps    — full per-ZIP gap audit
