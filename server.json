@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.mcflamingo/local-intel",
+  "name": "io.github.MCFLAMINGO/local-intel",
   "description": "Hyperlocal business intelligence for AI agents. 20 MCP tools. Florida-first, Sunbelt expansion.",
   "repository": {
     "url": "https://github.com/MCFLAMINGO/gsb-swarm",
