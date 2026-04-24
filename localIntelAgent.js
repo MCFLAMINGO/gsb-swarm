@@ -197,6 +197,26 @@ function getGroup(cat) {
 }
 
 // ── POST /api/local-intel — main query endpoint ───────────────────────────────
+// NIM-powered intent → group/tag mapping for human queries
+const NL_INTENT_MAP = [
+  { patterns: [/healthy|health food|organic|clean eat|nutritious|salad|vegan|vegetarian|juice|smoothie/i], group: 'food', tags: ['healthy','organic','vegan','vegetarian','juice','salad'] },
+  { patterns: [/restaurant|eat|dining|food|lunch|dinner|breakfast|cafe|coffee|pizza|sushi|burger|taco|bbq|bar/i], group: 'food', tags: null },
+  { patterns: [/doctor|dentist|clinic|medical|health|urgent care|physic|therapy|chiro|optom/i], group: 'health', tags: null },
+  { patterns: [/lawyer|attorney|legal|law firm/i], group: 'legal', tags: null },
+  { patterns: [/bank|finance|invest|insurance|mortgage|credit/i], group: 'finance', tags: null },
+  { patterns: [/shop|store|retail|boutique|salon|spa|beauty|gym|fitness/i], group: 'retail', tags: null },
+];
+
+function resolveNlIntent(query) {
+  if (!query) return { group: null, tags: null };
+  for (const rule of NL_INTENT_MAP) {
+    if (rule.patterns.some(p => p.test(query))) {
+      return { group: rule.group, tags: rule.tags };
+    }
+  }
+  return { group: null, tags: null };
+}
+
 router.post('/', (req, res) => {
   const { zip, query, category, group, limit = 50, minConfidence = 0 } = req.body || {};
 
@@ -206,22 +226,40 @@ router.post('/', (req, res) => {
     return res.status(503).json({ ok: false, error: 'Local intel dataset not loaded. Run data pull first.' });
   }
 
-  // Filter
-  if (zip)           results = results.filter(b => b.zip === zip);
-  if (category)      results = results.filter(b => b.category === category);
-  if (group)         results = results.filter(b => getGroup(b.category) === group);
-  if (minConfidence) results = results.filter(b => b.confidence >= minConfidence);
-  if (query) {
-    const q = query.toLowerCase();
-    results = results.filter(b =>
-      b.name.toLowerCase().includes(q) ||
-      b.category.toLowerCase().includes(q) ||
-      b.address.toLowerCase().includes(q)
-    );
-  }
+  // Resolve NL intent from query when no explicit group/category given
+  const nlIntent = (!group && !category) ? resolveNlIntent(query) : { group: null, tags: null };
+  const effectiveGroup = group || nlIntent.group;
 
-  // Sort by confidence desc
-  results.sort((a, b) => b.confidence - a.confidence);
+  // Filter
+  if (zip)            results = results.filter(b => b.zip === zip);
+  if (category)       results = results.filter(b => b.category === category);
+  if (effectiveGroup) results = results.filter(b => getGroup(b.category) === effectiveGroup);
+  if (minConfidence)  results = results.filter(b => b.confidence >= minConfidence);
+
+  // Tag-based boosting for semantic queries like "healthy food"
+  // Tags in records get score boost; non-tagged results filtered to bottom
+  if (nlIntent.tags) {
+    results.sort((a, b) => {
+      const aTagged = nlIntent.tags.some(t => (a.tags || []).includes(t) || (a.name || '').toLowerCase().includes(t) || (a.description || '').toLowerCase().includes(t));
+      const bTagged = nlIntent.tags.some(t => (b.tags || []).includes(t) || (b.name || '').toLowerCase().includes(t) || (b.description || '').toLowerCase().includes(t));
+      if (aTagged && !bTagged) return -1;
+      if (bTagged && !aTagged) return 1;
+      return b.confidence - a.confidence;
+    });
+  } else if (query) {
+    // Text match on name/category/address only when no semantic group resolved
+    if (!effectiveGroup) {
+      const q = query.toLowerCase();
+      results = results.filter(b =>
+        b.name.toLowerCase().includes(q) ||
+        b.category.toLowerCase().includes(q) ||
+        b.address.toLowerCase().includes(q)
+      );
+    }
+    results.sort((a, b) => b.confidence - a.confidence);
+  } else {
+    results.sort((a, b) => b.confidence - a.confidence);
+  }
 
   // Apply limit
   const total = results.length;

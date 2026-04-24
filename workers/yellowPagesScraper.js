@@ -146,9 +146,14 @@ function parseYPResults(html, category) {
             hours:    (() => {
               const raw = item.openingHours ? (Array.isArray(item.openingHours) ? item.openingHours.join(', ') : item.openingHours) : null;
               if (!raw) return null;
-              // Sanitize: valid hours look like "Mo-Fr 09:00-17:00" — strip anything with JSON artifacts
-              const sanitized = String(raw).replace(/\\"[^"]*\\":[^,}]*(,)?/g, '').trim();
-              return /^[A-Z][a-z]/.test(sanitized) && sanitized.length < 200 ? sanitized : null;
+              // Sanitize: valid hours look like "Mo-Fr 09:00-17:00"
+              // Reject anything containing JSON artifacts (Monkey, isFlock, isAm, {, })
+              const s = String(raw).trim();
+              const isClean = /^[A-Z][a-z]/.test(s) && s.length < 200
+                && !s.includes('{') && !s.includes('}')
+                && !s.includes('Monkey') && !s.includes('isFlock')
+                && !s.includes('isAm') && !s.includes('":');
+              return isClean ? s : null;
             })(),
             source:   'yellowpages',
           });
