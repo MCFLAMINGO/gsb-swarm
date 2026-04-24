@@ -559,6 +559,32 @@ app.post('/api/evolution/run', async (req, res) => {
   }, 100);
 });
 
+// ── OpenAPI + AI Plugin discovery ────────────────────────────────────────────
+// Any LLM tool-caller, ChatGPT plugin, or MCP client can auto-discover LocalIntel
+app.get('/openapi.json', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.sendFile(path.join(__dirname, 'public', 'openapi.json'));
+});
+app.get('/.well-known/ai-plugin.json', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.json({
+    schema_version: 'v1',
+    name_for_human: 'LocalIntel',
+    name_for_model: 'localintel',
+    description_for_human: 'Hyperlocal business intelligence for any US ZIP code. Oracle data, business briefs, market gap analysis, natural language queries.',
+    description_for_model: 'Use LocalIntel to answer questions about local markets, business density, income levels, WFH saturation, restaurant gaps, and growth trajectories for US ZIP codes. Call nl-query for multi-ZIP research, oracle for a single ZIP deep-dive, brief for a quick summary.',
+    auth: { type: 'none' },
+    api: {
+      type: 'openapi',
+      url: 'https://gsb-swarm-production.up.railway.app/openapi.json',
+      is_user_authenticated: false,
+    },
+    logo_url: 'https://thelocalintel.com/icon.png',
+    contact_email: 'erik@mcflamingo.com',
+    legal_info_url: 'https://thelocalintel.com',
+  });
+});
+
 // ── ACP compliance endpoints — MUST be before express.static ─────────────────
 // Virtuals probes these to verify agent is hireable on ACP marketplace
 app.get('/.well-known/agent.json', (req, res) => {

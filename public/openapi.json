@@ -1,0 +1,375 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "LocalIntel Data API",
+    "version": "1.0.0",
+    "description": "Hyperlocal business intelligence for US ZIP codes. Real-time oracle data, structured business briefs, and natural language queries. Served by The Local Intel — autonomous data infrastructure for agents and LLMs.\n\nPricing: oracle=1 credit, brief=1 credit, nl-query=5 credits. Pass your agent ID in x-agent-id header for billing attribution.",
+    "contact": {
+      "name": "Erik Osol / LocalIntel Data Services",
+      "email": "erik@mcflamingo.com",
+      "url": "https://thelocalintel.com"
+    },
+    "x-pricing": {
+      "oracle": "1 credit per ZIP",
+      "brief": "1 credit per ZIP",
+      "nl-query": "5 credits per query",
+      "payment_network": "Tempo mainnet (pathUSD)"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://gsb-swarm-production.up.railway.app/api/local-intel",
+      "description": "Production — Railway"
+    }
+  ],
+  "paths": {
+    "/oracle": {
+      "get": {
+        "operationId": "getOracle",
+        "summary": "ZIP oracle — market signals for a single ZIP or all ZIPs",
+        "description": "Returns real-time economic oracle for a ZIP code: business density, gap analysis, saturation signals, growth trajectory, WFH index, affluence score, retiree index. Use this when you need to evaluate a local market, find underserved categories, or compare ZIPs. Cost: 1 credit.",
+        "parameters": [
+          {
+            "name": "zip",
+            "in": "query",
+            "required": false,
+            "description": "5-digit US ZIP code. Omit to get index of all available ZIPs.",
+            "schema": { "type": "string", "pattern": "^\\d{5}$", "example": "32082" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Oracle data for requested ZIP",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OracleData" }
+              }
+            }
+          },
+          "404": { "description": "ZIP not yet in dataset" }
+        },
+        "x-agent-hints": [
+          "Use when asked: 'what is the market like in ZIP 32082?'",
+          "Use when asked: 'find ZIPs with high income and low WFH saturation'",
+          "Use when asked: 'is there a gap for restaurants in Ponte Vedra?'"
+        ]
+      }
+    },
+    "/brief/{zip}": {
+      "get": {
+        "operationId": "getBrief",
+        "summary": "Structured business brief for a ZIP code",
+        "description": "Returns a pre-computed intelligence brief: total businesses by category, coverage grade (A-F), top categories, average confidence score, and coverage gaps. Ideal for a quick market overview before deeper oracle analysis. Cost: 1 credit.",
+        "parameters": [
+          {
+            "name": "zip",
+            "in": "query",
+            "required": true,
+            "description": "5-digit US ZIP code",
+            "schema": { "type": "string", "pattern": "^\\d{5}$", "example": "32082" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ZIP brief",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ZipBrief" }
+              }
+            }
+          },
+          "404": { "description": "No brief computed for this ZIP yet" }
+        },
+        "x-agent-hints": [
+          "Use when asked: 'give me a summary of Ponte Vedra Beach 32082'",
+          "Use when asked: 'how many businesses are in this ZIP?'",
+          "Use when asked: 'what is the data quality for this market?'"
+        ]
+      }
+    },
+    "/nl-query": {
+      "post": {
+        "operationId": "naturalLanguageQuery",
+        "summary": "Natural language query across all ZIPs — agent-ready",
+        "description": "Parse a free-text market question into structured filters, run across all available Florida ZIPs, and return ranked results. Powered by Llama-3.3-70B on NVIDIA NIM. This is the primary endpoint for agent-driven market research. Cost: 5 credits.\n\nExample questions:\n- 'find high-income ZIPs near Jacksonville with low WFH saturation'\n- 'which ZIP codes have the biggest gap for Italian restaurants?'\n- 'show me retiree-heavy markets with high home values near Tampa'",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["question"],
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "description": "Natural language market research question",
+                    "example": "find high-income ZIPs near Jacksonville with low WFH saturation"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "Max results to return (default 10)",
+                    "default": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ranked ZIP results matching the query",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/NlQueryResult" }
+              }
+            }
+          }
+        },
+        "x-agent-hints": [
+          "Use when the question spans multiple ZIPs or requires comparison",
+          "Use when the user mentions a persona: 'construction worker', 'real estate agent', 'retiree'",
+          "Use when the user asks 'where should I open a restaurant?'"
+        ]
+      }
+    },
+    "/search": {
+      "get": {
+        "operationId": "searchBusinesses",
+        "summary": "Search businesses within a ZIP by category or keyword",
+        "description": "Keyword + category search across all businesses in a ZIP. Returns matching businesses with confidence scores, hours, contact info, and tags. Supports category groups: food, health, retail, finance, legal, civic, services.",
+        "parameters": [
+          {
+            "name": "zip",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "example": "32082" }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Search keyword",
+            "schema": { "type": "string", "example": "healthy food" }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "example": "restaurant" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "default": 20 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching businesses",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BusinessList" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/usage": {
+      "get": {
+        "operationId": "getUsage",
+        "summary": "Query usage and billing ledger",
+        "description": "Returns the last 100 API queries with caller ID, query type, ZIP, credits charged, and timestamp. Also returns aggregate totals. Use to audit your agent's spend.",
+        "responses": {
+          "200": {
+            "description": "Usage ledger",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "queries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "caller_id": { "type": "string" },
+                          "query_type": { "type": "string", "enum": ["oracle", "brief", "nl-query", "search"] },
+                          "zip": { "type": "string" },
+                          "credits_charged": { "type": "number" },
+                          "ts": { "type": "string", "format": "date-time" }
+                        }
+                      }
+                    },
+                    "totals": {
+                      "type": "object",
+                      "properties": {
+                        "queries": { "type": "string" },
+                        "total_credits": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "OracleData": {
+        "type": "object",
+        "description": "Economic oracle snapshot for a ZIP code",
+        "properties": {
+          "zip":               { "type": "string" },
+          "name":              { "type": "string", "description": "City/neighborhood name" },
+          "computed_at":       { "type": "string", "format": "date-time" },
+          "demographics": {
+            "type": "object",
+            "properties": {
+              "population":               { "type": "integer" },
+              "median_household_income":  { "type": "number" },
+              "median_home_value":        { "type": "number" },
+              "wfh_pct":                  { "type": "number", "description": "% of workforce working from home" },
+              "affluence_pct":            { "type": "number", "description": "% of households earning >$100k" },
+              "retiree_index":            { "type": "number", "description": "0-1 score, higher = more retirees" },
+              "owner_occupied_pct":       { "type": "number" },
+              "consumer_profile":         { "type": "string", "enum": ["affluent_family","retiree_belt","young_professional","working_class","mixed"] }
+            }
+          },
+          "restaurant_capacity": {
+            "type": "object",
+            "properties": {
+              "total_businesses":  { "type": "integer" },
+              "restaurant_count":  { "type": "integer" },
+              "gap_count":         { "type": "integer", "description": "Identified underserved categories" },
+              "saturation_status": { "type": "string", "enum": ["underserved","balanced","saturated"] }
+            }
+          },
+          "market_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "category":    { "type": "string" },
+                "gap_score":   { "type": "number" },
+                "opportunity": { "type": "string" }
+              }
+            }
+          },
+          "growth_trajectory": {
+            "type": "object",
+            "properties": {
+              "state":       { "type": "string", "enum": ["growing","stable","declining","emerging"] },
+              "confidence":  { "type": "number" }
+            }
+          }
+        }
+      },
+      "ZipBrief": {
+        "type": "object",
+        "properties": {
+          "zip":         { "type": "string" },
+          "label":       { "type": "string" },
+          "total":       { "type": "integer", "description": "Total businesses in dataset" },
+          "data_grade":  { "type": "string", "enum": ["A","B","C","D","F"] },
+          "by_group": {
+            "type": "object",
+            "description": "Business count by category group",
+            "additionalProperties": { "type": "integer" }
+          },
+          "avg_confidence": { "type": "number" },
+          "generated_at":   { "type": "string", "format": "date-time" }
+        }
+      },
+      "NlQueryResult": {
+        "type": "object",
+        "properties": {
+          "question":  { "type": "string" },
+          "filters":   { "type": "object", "description": "Parsed structured filters from your question" },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "zip":    { "type": "string" },
+                "name":   { "type": "string" },
+                "score":  { "type": "number" },
+                "reason": { "type": "string" },
+                "oracle": { "$ref": "#/components/schemas/OracleData" }
+              }
+            }
+          },
+          "total_zips_scanned": { "type": "integer" }
+        }
+      },
+      "BusinessList": {
+        "type": "object",
+        "properties": {
+          "zip":       { "type": "string" },
+          "count":     { "type": "integer" },
+          "businesses": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name":             { "type": "string" },
+                "category":         { "type": "string" },
+                "address":          { "type": "string" },
+                "phone":            { "type": "string" },
+                "website":          { "type": "string" },
+                "hours":            { "type": "string" },
+                "confidence_score": { "type": "number", "description": "0-100 data confidence" },
+                "tags":             { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "AgentId": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-agent-id",
+        "description": "Your agent or system identifier for billing attribution. Any string works — this is how we track who owes what."
+      }
+    }
+  },
+  "security": [{ "AgentId": [] }],
+  "x-agent-personas": {
+    "description": "LocalIntel is designed for agents acting as specific personas. Here's how each persona should use the API:",
+    "personas": {
+      "real_estate_agent": {
+        "primary_endpoint": "nl-query",
+        "example": "find ZIPs near Jacksonville with high home values, growing population, and low vacancy rates",
+        "use_case": "Evaluate neighborhoods before recommending to buyers"
+      },
+      "construction_worker": {
+        "primary_endpoint": "oracle",
+        "example": "GET /oracle?zip=32082 — check growth_trajectory.state and restaurant_capacity.gap_count",
+        "use_case": "Identify areas with new development, permit activity, and construction demand"
+      },
+      "restaurant_owner": {
+        "primary_endpoint": "nl-query",
+        "example": "which Florida ZIPs have high affluence, low restaurant saturation, and WFH workers?",
+        "use_case": "Site selection for new restaurant location"
+      },
+      "retiree_market_researcher": {
+        "primary_endpoint": "nl-query",
+        "example": "ZIPs with retiree_index > 0.6 and median_home_value > 400000 near Tampa",
+        "use_case": "Target marketing for retirement services, healthcare, leisure"
+      },
+      "investor": {
+        "primary_endpoint": "oracle + nl-query",
+        "example": "find emerging ZIPs with growing trajectory, low saturation, and high income",
+        "use_case": "Identify undervalued markets before capital flows in"
+      }
+    }
+  },
+  "x-mcp-endpoint": "https://gsb-swarm-production.up.railway.app/api/local-intel/mcp",
+  "x-smithery-listing": "https://smithery.ai/servers/erik-7clt/local-intel"
+}
