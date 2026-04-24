@@ -90,14 +90,17 @@ const VERTICALS = {
     defaultZips: ['32082', '32081', '32084', '32086', '32092', '32080'],
     // Maps keyword patterns → MCP tool + param extraction
     toolRoutes: [
-      // Zone first — catches owner-occ, home value, income, growth trajectory before falling to search
-      { pattern: /income|household|median|owner.occup|home value|median home|HHI|affluent|wealth|demographic|population|growth.trajec|growth.state|consumer profile|spending profile/i, tool: 'local_intel_zone',      params: (zip) => ({ zip }) },
-      { pattern: /neighborhood|undervalued|market trend|inventory|school|flood|infrastructure|saturation|gap|opportunity/i,                                                             tool: 'local_intel_oracle',    params: (zip) => ({ zip }) },
-      { pattern: /permit|construction|build|develop|zoning/i,                                                                                                                           tool: 'local_intel_bedrock',   params: (zip) => ({ zip }) },
-      { pattern: /investment|signal|score|momentum/i,                                                                                                                                   tool: 'local_intel_signal',    params: (zip) => ({ zip }) },
-      { pattern: /corridor|A1A|street|road|highway/i,                                                                                                                                   tool: 'local_intel_corridor',  params: (zip, q) => ({ street: extractStreet(q), zip }) },
-      { pattern: /nearby|radius|distance|close|around/i,                                                                                                                                tool: 'local_intel_nearby',    params: (zip) => ({ lat: ZIP_CENTERS[zip]?.lat, lon: ZIP_CENTERS[zip]?.lon, radius_miles: 2 }) },
-      { pattern: /business|restaurant|dental|retail|commercial|service|office|contractor|realtor|agent/i,                                                                               tool: 'local_intel_search',    params: (zip, q) => ({ query: q, zip }) },
+      // Oracle first for all demographic/market questions — has income, HHI, growth state, saturation
+      // (local_intel_zone reads spendingZones.json which is empty — oracle is the live source)
+      { pattern: /income|household|median|owner.occup|home value|median home|HHI|affluent|wealth|demographic|population|growth.trajec|growth.state|consumer profile|spending profile|buyer|seller|market condition|hot market|buyers market|sellers market/i, tool: 'local_intel_oracle', params: (zip) => ({ zip }) },
+      { pattern: /neighborhood|undervalued|market trend|inventory|school|flood|infrastructure|saturation|gap|opportunity|appreciate|appreciation/i,                                    tool: 'local_intel_oracle',   params: (zip) => ({ zip }) },
+      { pattern: /permit|construction|build|develop|zoning/i,                                                                                                                          tool: 'local_intel_bedrock',  params: (zip) => ({ zip }) },
+      { pattern: /investment|signal|score|momentum|tide/i,                                                                                                                             tool: 'local_intel_signal',   params: (zip) => ({ zip }) },
+      { pattern: /corridor|A1A|street|road|highway/i,                                                                                                                                  tool: 'local_intel_corridor', params: (zip, q) => ({ street: extractStreet(q), zip }) },
+      { pattern: /nearby|radius|distance|close|around/i,                                                                                                                               tool: 'local_intel_nearby',   params: (zip) => ({ lat: ZIP_CENTERS[zip]?.lat, lon: ZIP_CENTERS[zip]?.lon, radius_miles: 2 }) },
+      { pattern: /business|restaurant|dental|retail|commercial|service|office|contractor|realtor|agent/i,                                                                              tool: 'local_intel_search',   params: (zip, q) => ({ query: q, zip }) },
+      // Catch-all: oracle gives a narrative answer for any market question
+      { pattern: /.*/,                                                                                                                                                                   tool: 'local_intel_oracle',   params: (zip) => ({ zip }) },
     ],
     // Prompts focused on what LocalIntel can actually answer
     mcpPrompts: [
@@ -129,11 +132,13 @@ const VERTICALS = {
     defaultZips: ['32082', '32081', '32084', '32086', '32092', '32080'],
     toolRoutes: [
       // Zone/demographic questions FIRST — must not fall through to search
-      { pattern: /income|household|median|affluent|consumer profile|spending profile|demographic|age|senior|population|growth trend|growth rate|growth trajectory|owner.occup|home value|median home|HHI/i, tool: 'local_intel_zone',    params: (zip) => ({ zip }) },
-      { pattern: /gap|undersupplied|need|opportunity|unmet|missing/i,                                                                                                                                       tool: 'local_intel_oracle',  params: (zip) => ({ zip }) },
-      { pattern: /new.*added|recently.*added|new.*opening|recently.*open|new.*business/i,                                                                                                                   tool: 'local_intel_changes', params: (zip) => ({ zip }) },
-      { pattern: /nearby|radius|within.*miles|3 miles|close to/i,                                                                                                                                           tool: 'local_intel_nearby',  params: (zip) => ({ lat: ZIP_CENTERS[zip]?.lat, lon: ZIP_CENTERS[zip]?.lon, radius_miles: 3 }) },
-      { pattern: /patient|clinic|hospital|doctor|physician|dental|pharmacy|health|optom|vision|physical.therap|urgent.care|walk.in|mental.health|counseling|rehab/i,                                       tool: 'local_intel_search',  params: (zip, q) => ({ query: extractCategory(q, 'healthcare'), zip, group: 'health' }) },
+      // Oracle for all demographic/population signals — zone (spendingZones.json) is empty
+      { pattern: /income|household|median|affluent|consumer profile|spending profile|demographic|age|senior|population|growth trend|growth rate|growth trajectory|owner.occup|home value|median home|HHI|demand|saturation|gap|undersupplied|need|opportunity|unmet|missing/i, tool: 'local_intel_oracle',  params: (zip) => ({ zip }) },
+      { pattern: /new.*added|recently.*added|new.*opening|recently.*open|new.*business/i,                                                                                                                                                                                      tool: 'local_intel_changes', params: (zip) => ({ zip }) },
+      { pattern: /nearby|radius|within.*miles|3 miles|close to/i,                                                                                                                                                                                                              tool: 'local_intel_nearby',  params: (zip) => ({ lat: ZIP_CENTERS[zip]?.lat, lon: ZIP_CENTERS[zip]?.lon, radius_miles: 3 }) },
+      { pattern: /patient|clinic|hospital|doctor|physician|dental|pharmacy|health|optom|vision|physical.therap|urgent.care|walk.in|mental.health|counseling|rehab/i,                                                                                                          tool: 'local_intel_search',  params: (zip, q) => ({ query: extractCategory(q, 'healthcare'), zip, group: 'health' }) },
+      // Catch-all: oracle narrative for any healthcare market question
+      { pattern: /.*/,                                                                                                                                                                                                                                                          tool: 'local_intel_oracle',  params: (zip) => ({ zip }) },
     ],
     mcpPrompts: [
       { q: 'What dentists operate in this ZIP?', zip: '32082' },
@@ -158,11 +163,14 @@ const VERTICALS = {
     name: 'Retail & Grocery',
     defaultZips: ['32082', '32081', '32084', '32086'],
     toolRoutes: [
-      { pattern: /store|shop|retail|grocery|supermarket|convenience|specialty/i, tool: 'local_intel_search',    params: (zip, q) => ({ query: extractCategory(q, 'retail'), zip }) },
-      { pattern: /corridor|street|plaza|center|mall/i,                            tool: 'local_intel_corridor',  params: (zip, q) => ({ street: extractStreet(q), zip }) },
-      { pattern: /gap|missing|undersupplied|need/i,                               tool: 'local_intel_oracle',    params: (zip) => ({ zip }) },
-      { pattern: /income|spending|demographic/i,                                  tool: 'local_intel_zone',      params: (zip) => ({ zip }) },
-      { pattern: /nearby|radius|close/i,                                           tool: 'local_intel_nearby',    params: (zip) => ({ lat: ZIP_CENTERS[zip]?.lat, lon: ZIP_CENTERS[zip]?.lon, radius_miles: 2 }) },
+      { pattern: /store|shop|retail|grocery|supermarket|convenience|specialty|boutique|clothing|apparel|outdoor|sporting|pet|hardware/i, tool: 'local_intel_search',   params: (zip, q) => ({ query: extractCategory(q, 'retail'), zip }) },
+      { pattern: /corridor|street|plaza|center|mall/i,                                                                                tool: 'local_intel_corridor', params: (zip, q) => ({ street: extractStreet(q), zip }) },
+      // Oracle for gaps, income, demographics, spending — zone is empty
+      { pattern: /gap|missing|undersupplied|need|income|spending|demographic|consumer|capture|saturation|opportunity|luxury|profile/i, tool: 'local_intel_oracle',   params: (zip) => ({ zip }) },
+      { pattern: /signal|momentum|trend/i,                                                                                             tool: 'local_intel_signal',   params: (zip) => ({ zip }) },
+      { pattern: /nearby|radius|close/i,                                                                                               tool: 'local_intel_nearby',   params: (zip) => ({ lat: ZIP_CENTERS[zip]?.lat, lon: ZIP_CENTERS[zip]?.lon, radius_miles: 2 }) },
+      // Catch-all
+      { pattern: /.*/,                                                                                                                  tool: 'local_intel_oracle',   params: (zip) => ({ zip }) },
     ],
     mcpPrompts: [
       { q: 'What grocery stores or supermarkets operate in this ZIP?', zip: '32082' },
@@ -187,10 +195,13 @@ const VERTICALS = {
     name: 'Construction & Home Services',
     defaultZips: ['32082', '32081', '32084', '32086', '32092'],
     toolRoutes: [
-      { pattern: /contractor|plumber|electrician|landscap|remodel|builder|roofing|hvac/i, tool: 'local_intel_search',  params: (zip, q) => ({ query: extractCategory(q, 'construction'), zip }) },
-      { pattern: /permit|construction|development|project/i,                               tool: 'local_intel_bedrock', params: (zip) => ({ zip }) },
-      { pattern: /population|growth|new homes|housing/i,                                   tool: 'local_intel_zone',    params: (zip) => ({ zip }) },
-      { pattern: /signal|momentum|opportunity/i,                                            tool: 'local_intel_signal',  params: (zip) => ({ zip }) },
+      { pattern: /contractor|plumber|electrician|landscap|remodel|builder|roofing|hvac|pool|pest|flooring|painting|window|door|inspection/i, tool: 'local_intel_search',  params: (zip, q) => ({ query: extractCategory(q, 'construction'), zip }) },
+      { pattern: /permit|construction|development|project|active.*build|pipeline/i,                                                          tool: 'local_intel_bedrock', params: (zip) => ({ zip }) },
+      // Oracle for population/growth — has demographics, oracle_narrative; zone is empty
+      { pattern: /population|growth|new homes|housing|demand|household|income|owner/i,                                                       tool: 'local_intel_oracle',  params: (zip) => ({ zip }) },
+      { pattern: /signal|momentum|opportunity|saturation|oversatur/i,                                                                         tool: 'local_intel_signal',  params: (zip) => ({ zip }) },
+      // Catch-all: oracle narrative answers market-level construction questions
+      { pattern: /.*/,                                                                                                                         tool: 'local_intel_oracle',  params: (zip) => ({ zip }) },
     ],
     mcpPrompts: [
       { q: 'What general contractors operate in Ponte Vedra Beach?', zip: '32082' },
@@ -215,11 +226,13 @@ const VERTICALS = {
     name: 'Food Services & Restaurants',
     defaultZips: ['32082', '32081', '32084', '32086', '32080'],
     toolRoutes: [
-      { pattern: /restaurant|cafe|bar|dining|food|pizza|sushi|burger|breakfast|lunch|dinner/i, tool: 'local_intel_search',    params: (zip, q) => ({ query: extractCategory(q, 'food'), zip }) },
-      { pattern: /corridor|A1A|street/i,                                                         tool: 'local_intel_corridor',  params: (zip, q) => ({ street: extractStreet(q), zip }) },
-      { pattern: /gap|saturation|undersupplied|market|opportunity/i,                             tool: 'local_intel_oracle',    params: (zip) => ({ zip }) },
-      { pattern: /income|demographic|spending|capture/i,                                         tool: 'local_intel_zone',      params: (zip) => ({ zip }) },
-      { pattern: /signal|trend|momentum/i,                                                        tool: 'local_intel_tide',      params: (zip) => ({ zip }) },
+      { pattern: /restaurant|cafe|bar|dining|food|pizza|sushi|burger|breakfast|lunch|dinner|ramen|cuisine|franchise|fast.casual|dine.in|delivery/i, tool: 'local_intel_search',   params: (zip, q) => ({ query: extractCategory(q, 'food'), zip }) },
+      { pattern: /corridor|A1A|street/i,                                                                                                         tool: 'local_intel_corridor', params: (zip, q) => ({ street: extractStreet(q), zip }) },
+      // Oracle for gaps, saturation, market analysis, income, demographics — zone is empty
+      { pattern: /gap|saturation|undersupplied|market|opportunity|income|demographic|spending|capture|price.tier|oversatur|missing|cuisine.type/i, tool: 'local_intel_oracle',   params: (zip) => ({ zip }) },
+      { pattern: /signal|trend|momentum|tide/i,                                                                                                    tool: 'local_intel_tide',     params: (zip) => ({ zip }) },
+      // Catch-all
+      { pattern: /.*/,                                                                                                                              tool: 'local_intel_oracle',   params: (zip) => ({ zip }) },
     ],
     mcpPrompts: [
       { q: 'What restaurants are in Ponte Vedra Beach?', zip: '32082' },
