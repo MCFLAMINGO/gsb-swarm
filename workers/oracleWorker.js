@@ -141,6 +141,31 @@ function loadCensusLayer(zip) {
   return readJson(path.join(DATA_DIR, 'census_layer', `${zip}.json`));
 }
 
+function loadAcs(zip) {
+  return readJson(path.join(DATA_DIR, 'acs', `${zip}.json`));
+}
+
+// Load all vertical gap entries for this ZIP from data/gaps/{vertical}.json
+function loadGapsForZip(zip) {
+  const GAPS_DIR = path.join(DATA_DIR, 'gaps');
+  if (!fs.existsSync(GAPS_DIR)) return [];
+  const results = [];
+  const files = fs.readdirSync(GAPS_DIR).filter(f => f.endsWith('.json') && !f.startsWith('_'));
+  for (const file of files) {
+    try {
+      const entries = JSON.parse(fs.readFileSync(path.join(GAPS_DIR, file), 'utf8'));
+      if (!Array.isArray(entries)) continue;
+      const vertical = file.replace('.json', '');
+      for (const entry of entries) {
+        if (String(entry.zip) === String(zip)) {
+          results.push({ vertical, ...entry });
+        }
+      }
+    } catch { /* skip bad file */ }
+  }
+  return results;
+}
+
 // ── Core oracle computation ───────────────────────────────────────────────────
 
 function computeOracle(zip, name) {
@@ -149,6 +174,8 @@ function computeOracle(zip, name) {
   const bedrock     = loadBedrock(zip);
   const ocean       = loadOceanFloor(zip);
   const censusLayer = loadCensusLayer(zip);
+  const acs         = loadAcs(zip);
+  const verticalGaps = loadGapsForZip(zip);
 
   // ── Data quality gate ─────────────────────────────────────────────────────
   // Reject ZIPs with no demographic data AND insufficient business coverage.
@@ -161,28 +188,27 @@ function computeOracle(zip, name) {
   }
 
   // ── Demographics ──────────────────────────────────────────────────────────
-  // flZipRegistry fallback: when no spending zone or ocean floor data exists,
-  // use Census ACS population + median HHI so the oracle can still compute.
+  // Priority: ACS worker (fresh Census B-series) > spending zone > ocean floor > flZipRegistry
   const reg = getFlRegistry()[zip] || {};
-  const population   = zone?.population              || ocean?.population           || reg.population   || 0;
-  const medianHHI    = zone?.median_household_income || zone?.median_income         || ocean?.median_household_income || reg.median_hhi || 0;
-  const medianHome   = zone?.median_home_value       || ocean?.median_home_value     || 0;
-  const ownerOccPct  = zone?.ownership_rate_pct      || zone?.ownership_rate        || ocean?.owner_pct             || 60;
-  const ownerUnits   = zone?.owner_occupied_units    || 0;
-  const renterUnits  = zone?.renter_occupied_units   || 0;
-  const totalHH      = ownerUnits + renterUnits || Math.round(population / 2.5);
+  const population   = acs?.population              || zone?.population              || ocean?.population                    || reg.population || 0;
+  const medianHHI    = acs?.median_household_income || zone?.median_household_income || zone?.median_income                  || ocean?.median_household_income || reg.median_hhi || 0;
+  const medianHome   = acs?.median_home_value       || zone?.median_home_value       || ocean?.median_home_value             || 0;
+  const ownerOccPct  = acs?.owner_occupied_pct      || zone?.ownership_rate_pct      || zone?.ownership_rate                 || ocean?.owner_pct || 60;
+  const ownerUnits   = acs?.owner_occupied_units    || zone?.owner_occupied_units    || 0;
+  const renterUnits  = acs?.renter_occupied_units   || zone?.renter_occupied_units   || 0;
+  const totalHH      = acs?.total_households        || (ownerUnits + renterUnits)    || Math.round(population / 2.5);
 
-  // ── Extended Census signals ───────────────────────────────────────────────
-  const wfhPct              = zone?.wfh_pct               || 0;    // % workers who WFH
-  const daytimeMultiplier   = zone?.daytime_pop_multiplier || 1.0; // WFH workers boost daytime demand
-  const retireeIndex        = zone?.retiree_index          || 0;   // 0-100; high = large retiree base
-  const vacancyRatePct      = zone?.vacancy_rate_pct       || 8;   // housing vacancy %
-  const familyHHPct         = zone?.family_hh_pct          || 60;  // % family households
-  const affluencePct        = zone?.affluence_pct          || 0;   // % HH earning $100k+
-  const ultraAffluencePct   = zone?.ultra_affluence_pct    || 0;   // % HH earning $200k+
-  const renovationWave      = zone?.renovation_wave        || 'low';
-  const housingAgeProfile   = zone?.housing_age_profile    || 'mixed_vintage';
-  const newBuildPct         = zone?.new_build_pct          || 0;
+  // ── Extended Census signals — prefer ACS worker output, fall back to zone ──
+  const wfhPct              = acs?.wfh_pct               || zone?.wfh_pct               || 0;
+  const daytimeMultiplier   = acs?.daytime_pop_multiplier || zone?.daytime_pop_multiplier || 1.0;
+  const retireeIndex        = acs?.retiree_index          || zone?.retiree_index          || 0;
+  const vacancyRatePct      = zone?.vacancy_rate_pct      || 8;
+  const familyHHPct         = zone?.family_hh_pct         || 60;
+  const affluencePct        = acs?.affluence_pct          || zone?.affluence_pct          || 0;
+  const ultraAffluencePct   = acs?.ultra_affluence_pct    || zone?.ultra_affluence_pct    || 0;
+  const renovationWave      = zone?.renovation_wave       || 'low';
+  const housingAgeProfile   = zone?.housing_age_profile   || 'mixed_vintage';
+  const newBuildPct         = zone?.new_build_pct         || 0;
 
   // ── Business inventory ────────────────────────────────────────────────────
   const foodBiz = businesses.filter(b => {
@@ -410,14 +436,18 @@ function computeOracle(zip, name) {
     top_questions: questions,
     oracle_narrative: narrative,
 
+    vertical_gaps: verticalGaps,
+
     data_sources: {
       businesses_indexed:  totalBiz,
       has_spending_zone:   !!zone,
       has_bedrock:         !!bedrock,
       has_ocean_floor:     !!ocean,
       has_census_layer:    !!censusLayer,
+      has_acs:             !!acs,
       has_zbp:             !!censusLayer?.zbp,
       has_cbp:             !!censusLayer?.cbp,
+      vertical_gap_count:  verticalGaps.length,
     },
 
     // ── Census economic layer ───────────────────────────────────────────────

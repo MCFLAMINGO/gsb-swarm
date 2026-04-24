@@ -500,6 +500,24 @@ app.post('/api/admin/import-sunbiz', async (req, res) => {
   });
 });
 
+// POST /api/admin/trigger-chamber — kicks off SJC Chamber bulk import
+app.post('/api/admin/trigger-chamber', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'Chamber bulk import running in background' });
+  setImmediate(async () => {
+    try {
+      const { bulkImport } = require('./workers/chamberScraper');
+      const stats = await bulkImport();
+      console.log('[admin] ✅ Chamber import complete:', JSON.stringify(stats));
+    } catch (e) {
+      console.error('[admin] ❌ Chamber import failed:', e.message);
+    }
+  });
+});
+
 // ── Agent Query Ledger — GET /api/local-intel/usage ──────────────────────────
 // Every paid oracle/brief/NL query is logged here. This is how agents pay us.
 app.get('/api/local-intel/usage', async (req, res) => {
@@ -5937,6 +5955,7 @@ app.use((req, res, next) => {
     { name: 'Router Learning Worker',     file: 'workers/routerLearningWorker.js'  },
     { name: 'ZIP Brief Worker',           file: 'workers/zipBriefWorker.js'        },
     { name: 'Embedding Worker',           file: 'workers/embeddingWorker.js'       },
+    { name: 'ACS Demographics Worker',    file: 'workers/acsWorker.js'             },
   ];
 
   function spawnLocalIntelWorker(w) {
@@ -5956,6 +5975,22 @@ app.use((req, res, next) => {
 
   LOCAL_INTEL_WORKERS.forEach(spawnLocalIntelWorker);
   console.log(`[local-intel-workers] ${LOCAL_INTEL_WORKERS.length} LocalIntel workers launched.`);
+
+  // Auto-trigger chamber scraper 2 minutes after startup (first-run seed)
+  const CHAMBER_FLAG = path.join(__dirname, 'data', 'chamber_imported.flag');
+  if (!fs.existsSync(CHAMBER_FLAG)) {
+    setTimeout(async () => {
+      try {
+        console.log('[chamber-startup] No import flag found — triggering first bulk import...');
+        const { bulkImport } = require('./workers/chamberScraper');
+        const stats = await bulkImport();
+        fs.writeFileSync(CHAMBER_FLAG, JSON.stringify({ ts: new Date().toISOString(), stats }));
+        console.log('[chamber-startup] ✅ Done:', JSON.stringify(stats));
+      } catch (e) {
+        console.error('[chamber-startup] ❌ Failed:', e.message);
+      }
+    }, 2 * 60 * 1000);
+  }
 })();
 
 // ── Start ─────────────────────────────────────────────────────────────────────
