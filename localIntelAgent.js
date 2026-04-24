@@ -1478,6 +1478,22 @@ router.get('/x402/listing', (req, res) => {
   });
 });
 
+// ── GET /api/local-intel/usage — agent billing ledger ──────────────────────────
+router.get('/usage', async (req, res) => {
+  if (!process.env.LOCAL_INTEL_DB_URL) return res.json({ error: 'no_db', queries: [], totals: { queries: 0, total_credits: 0 } });
+  try {
+    const db = require('./lib/db');
+    const rows = await db.query(
+      `SELECT caller_id, query_type, zip, credits_charged, ts
+       FROM usage_ledger ORDER BY ts DESC LIMIT 100`
+    );
+    const totals = await db.queryOne(
+      `SELECT COUNT(*) as queries, COALESCE(SUM(credits_charged),0) as total_credits FROM usage_ledger`
+    );
+    res.json({ queries: rows.rows, totals });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/x402-facilitator/supported', (req, res) => {
   res.json({
     kinds: [
