@@ -49,6 +49,10 @@ if (globalThis.__ACP_SDK__) {
 
 // ── Anthropic (Claude) — lazy async import ──────────────────────────────────
 // ── NVIDIA NIM inference (replaces Anthropic haiku) ────────────────────────────────
+// ── PostgreSQL — run schema migration on startup ──────────────────────────────
+const { runMigration } = require('./lib/dbMigrate');
+runMigration().catch(e => console.warn('[db-migrate] Non-fatal:', e.message));
+
 const nvim = require('./lib/nvim');
 const anthropic = null; // kept for unused-reference safety — all calls now use nvim
 if (nvim.isReady()) {
