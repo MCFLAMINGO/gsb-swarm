@@ -15,7 +15,7 @@ const path = require('path');
 const SFTP_HOST   = 'sftp.floridados.gov';
 const SFTP_USER   = 'Public';
 const SFTP_PASS   = 'PubAccess1845!';
-const REMOTE_PATH = '/doc/quarterly/cor/cordata.zip';
+const REMOTE_PATH = 'doc/quarterly/cor/cordata.zip';  // no leading slash — sftp root is already /
 
 const LOCAL_DIR  = process.env.DATA_DIR
   ? path.join(process.env.DATA_DIR, 'sunbiz')
