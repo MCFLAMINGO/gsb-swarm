@@ -1343,7 +1343,7 @@ async function handleProject(params) {
   const isResidential = ['residential_development','real_estate'].includes(projectType);
   const scoreCol = isResidential ? 'residential_score' : 'market_opportunity_score';
 
-  const db = getDb();
+  const db = process.env.LOCAL_INTEL_DB_URL ? require('./lib/db') : null;
   let l1Zips = [];
   if (db) {
     try {
