@@ -1348,7 +1348,7 @@ async function handleProject(params) {
   if (db) {
     try {
       const qArgs    = zip ? [limit, zip] : [limit];
-      const l1Res = await db.query(
+      l1Zips = await db.query(
         `SELECT zip, name, ${scoreCol} AS score, market_opportunity_score,
                 residential_score, dominant_sector, business_density,
                 median_household_income, population, growth_state, new_build_pct
@@ -1359,7 +1359,6 @@ async function handleProject(params) {
          LIMIT $1`,
         qArgs
       );
-      l1Zips = l1Res.rows;
     } catch (e) {
       l1Zips = [];
     }
@@ -1370,7 +1369,7 @@ async function handleProject(params) {
   if (db && l1Zips.length > 0) {
     try {
       const topZips  = zip ? [zip] : l1Zips.slice(0, 3).map(z => z.zip);
-      const l2Res = await db.query(
+      l2Businesses = await db.query(
         `SELECT name, category, category_group, zip, city, address,
                 sunbiz_doc_number, verified
          FROM businesses
@@ -1380,7 +1379,6 @@ async function handleProject(params) {
          LIMIT 20`,
         [topZips, targetGroups]
       );
-      l2Businesses = l2Res.rows;
     } catch (e) {
       l2Businesses = [];
     }

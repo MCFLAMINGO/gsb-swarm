@@ -1617,7 +1617,7 @@ router.post('/job/create', express.json(), async (req, res) => {
   if (!title) return res.status(400).json({ error: 'title is required' });
   try {
     const db = require('./lib/db');
-    const r = await db.query(
+    const rows = await db.query(
       `INSERT INTO jobs (title, description, project_type, zip, budget_usd, poster_wallet, poster_email, meta)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
        RETURNING id, title, status, created_at`,
@@ -1625,7 +1625,7 @@ router.post('/job/create', express.json(), async (req, res) => {
        budget_usd||null, poster_wallet||null, poster_email||null,
        meta ? JSON.stringify(meta) : null]
     );
-    res.json({ ok: true, job: r.rows[0] });
+    res.json({ ok: true, job: rows[0] });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1642,7 +1642,7 @@ router.get('/job/feed', async (req, res) => {
     if (zip)          { vals.push(zip);          conditions.push(`zip = $${vals.length}`); }
     if (project_type) { vals.push(project_type); conditions.push(`project_type = $${vals.length}`); }
     vals.push(Math.min(Number(limit)||20, 100));
-    const r = await db.query(
+    const rows = await db.query(
       `SELECT id, title, description, project_type, zip, budget_usd,
               poster_wallet, status, created_at, meta
        FROM jobs
@@ -1651,7 +1651,7 @@ router.get('/job/feed', async (req, res) => {
        LIMIT $${vals.length}`,
       vals
     );
-    res.json({ ok: true, jobs: r.rows, count: r.rows.length });
+    res.json({ ok: true, jobs: rows, count: rows.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1664,15 +1664,15 @@ router.post('/job/accept', express.json(), async (req, res) => {
   if (!job_id || !acceptor_wallet) return res.status(400).json({ error: 'job_id + acceptor_wallet required' });
   try {
     const db = require('./lib/db');
-    const r = await db.query(
+    const rows = await db.query(
       `UPDATE jobs
        SET status='accepted', acceptor_wallet=$1, accepted_at=NOW()
        WHERE id=$2 AND status='open'
        RETURNING id, title, status, acceptor_wallet, accepted_at`,
       [acceptor_wallet, job_id]
     );
-    if (r.rows.length === 0) return res.status(409).json({ error: 'Job not found or already taken' });
-    res.json({ ok: true, job: r.rows[0] });
+    if (rows.length === 0) return res.status(409).json({ error: 'Job not found or already taken' });
+    res.json({ ok: true, job: rows[0] });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1685,15 +1685,15 @@ router.post('/job/complete', express.json(), async (req, res) => {
   if (!job_id || !acceptor_wallet) return res.status(400).json({ error: 'job_id + acceptor_wallet required' });
   try {
     const db = require('./lib/db');
-    const r = await db.query(
+    const rows = await db.query(
       `UPDATE jobs
        SET status='completed', proof=$1, completed_at=NOW()
        WHERE id=$2 AND acceptor_wallet=$3 AND status='accepted'
        RETURNING id, title, status, proof, completed_at`,
       [proof||null, job_id, acceptor_wallet]
     );
-    if (r.rows.length === 0) return res.status(409).json({ error: 'Job not found, already completed, or wrong wallet' });
-    res.json({ ok: true, job: r.rows[0] });
+    if (rows.length === 0) return res.status(409).json({ error: 'Job not found, already completed, or wrong wallet' });
+    res.json({ ok: true, job: rows[0] });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
