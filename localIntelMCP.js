@@ -103,6 +103,15 @@ async function handleQuery(params) {
 }
 
 // ── Oracle handler ─────────────────────────────────────────────────────────────
+// Strips internal bookkeeping fields before returning oracle data to agents
+function cleanOracleResponse(data) {
+  const clean = { ...data };
+  // Remove internal probe gaps — noisy, not useful to callers
+  delete clean.vertical_gaps;
+  // Rename trend.cycles etc. to more readable form — keep but don't expose raw array
+  return clean;
+}
+
 async function handleOracle(params) {
   const zip = (params.zip || '').replace(/\D/g, '').slice(0, 5);
   if (!zip) return { error: 'zip required' };
@@ -120,7 +129,7 @@ async function handleOracle(params) {
           ? JSON.parse(row.oracle_json) : row.oracle_json;
         data._source = 'postgres';
         data._computed_at = row.computed_at;
-        return data;
+        return cleanOracleResponse(data);
       }
     } catch (_) {}
   }
@@ -131,7 +140,8 @@ async function handleOracle(params) {
   if (!require('fs').existsSync(file)) {
     return { error: `Oracle not yet computed for ${zip}. The oracle worker runs every 6h — try again shortly.` };
   }
-  return require('fs').readFileSync(file, 'utf8');
+  const raw = JSON.parse(require('fs').readFileSync(file, 'utf8'));
+  return cleanOracleResponse(raw);
 }
 
 
@@ -387,6 +397,7 @@ const TOOL_COSTS = {
   local_intel_ask:          0.05,
   local_intel_query:        0.03,
   local_intel_stats:    0.005,
+  local_intel_compare:   0.08,  // premium — runs oracle for up to 10 ZIPs
 };
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
@@ -821,25 +832,103 @@ function extractZipFromQuery(query) {
   return m ? m[1] : null;
 }
 
+// ── PG-powered category search ────────────────────────────────────────────────
+// Expands a normalized query term into all category variants PG might store,
+// then queries businesses table directly. Falls back to in-memory if PG unavailable.
+async function pgCategorySearch(resolvedZip, normalizedQuery, rawQuery, limitN) {
+  if (!process.env.LOCAL_INTEL_DB_URL) return null;
+  try {
+    const db = require('./lib/db');
+    // Build category terms: the normalized alias + common variants
+    const terms = new Set([normalizedQuery, rawQuery].filter(Boolean));
+    // Add known expansions for common query types
+    const EXPANSIONS = {
+      'fitness_centre': ['fitness_centre','fitness','gym','sports_centre','yoga','pilates'],
+      'restaurant':     ['restaurant','cafe','bar','pub','fast_food','food'],
+      'clinic':         ['clinic','doctor','hospital','urgent_care','healthcare','medical'],
+      'roofing':        ['roofing','contractor','general_contractor','construction'],
+      'supermarket':    ['supermarket','grocery','convenience'],
+      'estate_agent':   ['estate_agent','real_estate','realtor'],
+      'finance':        ['finance','bank','mortgage','insurance','accounting'],
+      'childcare':      ['childcare','preschool','daycare'],
+      'legal':          ['legal','attorney','lawyer'],
+    };
+    if (EXPANSIONS[normalizedQuery]) EXPANSIONS[normalizedQuery].forEach(t => terms.add(t));
+    // Also add the raw words as ILIKE terms
+    const termArr = [...terms];
+    const where = resolvedZip ? 'WHERE zip = $1 AND status != $2' : 'WHERE status != $1';
+    const catConditions = termArr.map((_, i) => {
+      const pi = resolvedZip ? i + 3 : i + 2;
+      return `(category ILIKE $${pi} OR category_group ILIKE $${pi} OR name ILIKE $${pi})`;
+    }).join(' OR ');
+    const params = resolvedZip
+      ? [resolvedZip, 'inactive', ...termArr.map(t => `%${t}%`)]
+      : ['inactive', ...termArr.map(t => `%${t}%`)];
+    const rows = await db.query(
+      `SELECT name, zip, address, city, phone, website, hours,
+              category, category_group, lat, lon,
+              confidence_score AS confidence, status, sources, owner_verified, tags
+       FROM businesses
+       ${where} AND (${catConditions})
+       ORDER BY confidence_score DESC
+       LIMIT $${resolvedZip ? termArr.length + 3 : termArr.length + 2}`,
+      [...params, limitN]
+    );
+    if (!rows.length) return null;
+    return rows.map(r => ({
+      name:           r.name,
+      zip:            r.zip,
+      address:        r.address   || '',
+      city:           r.city      || '',
+      phone:          r.phone     || '',
+      website:        r.website   || '',
+      hours:          r.hours     || '',
+      category:       r.category  || 'business',
+      group:          r.category_group || 'services',
+      lat:            r.lat  != null ? parseFloat(r.lat)  : null,
+      lon:            r.lon  != null ? parseFloat(r.lon)  : null,
+      confidence:     r.confidence ? parseFloat(r.confidence) * 100 : 50,
+      status:         r.status    || 'active',
+      source:         (r.sources || [])[0] || 'pg',
+      owner_verified: r.owner_verified || false,
+      tags:           r.tags || [],
+      _pg:            true,
+    }));
+  } catch (e) {
+    console.error('[MCP] pgCategorySearch error:', e.message);
+    return null;
+  }
+}
+
 async function toolSearch({ zip, query, category, group, limit = 20 }) {
   // Resolve ZIP: explicit param > numeric in query string > city name in query
   const resolvedZip = zip || extractZipFromQuery(query) || resolveZip(query);
-  // Use Postgres-backed loader when a ZIP is known — survives Railway deploys
-  let results = resolvedZip
-    ? await loadBusinessesByZip(resolvedZip)
-    : loadBusinesses();
-  // (no need to re-filter by ZIP — loadBusinessesByZip already scoped it)
-  if (!resolvedZip) results = results; // full set, no zip filter needed
-  if (category) results = results.filter(b => b.category === category);
-  if (group)    results = results.filter(b => getGroup(b.category) === group);
-  if (query) {
-    // Strip ZIP and city/location phrase before tokenizing so they don't score against addresses
-    const strippedQuery = query
-      .replace(/\b\d{5}\b/g, '')                       // remove ZIP digits
-      .replace(/(?:in|near|at)\s+[a-z\s.]+$/i, '')    // remove "in ponte vedra" etc
-      .trim();
-    const raw   = (strippedQuery || query).toLowerCase().trim();
-    const q     = normalizeQuery(raw);  // alias + de-plural
+
+  // Strip ZIP and city phrase from query before scoring
+  const strippedQuery = (query || '')
+    .replace(/\b\d{5}\b/g, '')
+    .replace(/(?:in|near|at)\s+[a-z\s.]+$/i, '')
+    .trim();
+  const raw = (strippedQuery || query || '').toLowerCase().trim();
+  const q   = normalizeQuery(raw);
+
+  // ── PG fast path: category/name search directly in Postgres ─────────────────
+  let pgResults = null;
+  if (q || category) {
+    pgResults = await pgCategorySearch(resolvedZip, category || q, raw, Math.min(limit * 2, 100));
+  }
+
+  // ── Flat-file fallback ───────────────────────────────────────────────────────
+  let results;
+  if (pgResults && pgResults.length > 0) {
+    results = pgResults;
+  } else {
+    results = resolvedZip ? await loadBusinessesByZip(resolvedZip) : loadBusinesses();
+    if (category) results = results.filter(b => b.category === category);
+    if (group)    results = results.filter(b => getGroup(b.category) === group);
+  }
+  // Only re-score in-memory results; PG results are already ranked by confidence
+  if (query && !pgResults) {
     const STOP  = new Set(['for','the','and','near','in','at','of','a','an','show','me','find','get','list','all','any','some','what','where','who','how','is','are','there','best','top','good','great','closest','nearby','around','here','places','spots','shops','open','now','today','local','services','service','things','stuff','options']);
     // Generate word variants: original + de-pluraled + alias-resolved
     const wordVariants = (w) => {
@@ -1111,6 +1200,96 @@ function toolStats() {
 }
 
 // ── MCP tool registry ─────────────────────────────────────────────────────────
+
+// ── local_intel_compare ──────────────────────────────────────────────────────
+// Multi-ZIP ranked comparison. Accepts up to 10 ZIPs, returns a ranked table
+// with key signals per ZIP plus a recommendation for the top opportunity.
+async function toolCompare({ zips, focus = 'opportunity', limit = 10 }) {
+  if (!zips || !Array.isArray(zips) || !zips.length) {
+    return { error: 'zips array required (e.g. ["32082","32081","32084"])' };
+  }
+  const zipList = zips.slice(0, Math.min(zips.length, 10))
+    .map(z => z.toString().replace(/\D/g,'').slice(0, 5))
+    .filter(z => z.length === 5);
+  if (!zipList.length) return { error: 'No valid 5-digit ZIPs provided' };
+
+  // Fetch oracle data for all ZIPs in parallel
+  const results = await Promise.all(zipList.map(async (zip) => {
+    try {
+      const data = await handleOracle({ zip });
+      if (data.error) return { zip, error: data.error };
+      const d  = data.demographics        || {};
+      const rc = data.restaurant_capacity || {};
+      const gt = data.growth_trajectory   || {};
+      const ec = data.economic_layer      || {};
+      const mg = data.market_gaps         || {};
+
+      // Composite opportunity score (0-100)
+      const hhi        = d.median_household_income || 0;
+      const hhiScore   = Math.min(30, Math.round((hhi / 200000) * 30));
+      const capRate    = rc.capture_rate_pct || 100;
+      const satScore   = Math.min(30, Math.round(Math.max(0, 100 - capRate) / 100 * 30));
+      const infraScore = Math.min(20, Math.round((gt.infrastructure_momentum || 0) / 100 * 20));
+      const popScore   = Math.min(20, Math.round(Math.min((d.population || 0) / 50000, 1) * 20));
+      const opportunityScore = hhiScore + satScore + infraScore + popScore;
+
+      const topGap = mg.top_gap || {};
+
+      return {
+        zip,
+        name:                 data.name || zip,
+        population:           d.population || 0,
+        median_hhi:           hhi,
+        consumer_profile:     d.consumer_profile || 'unknown',
+        affluence_pct:        d.affluence_pct || 0,
+        wfh_pct:              d.wfh_pct || 0,
+        retiree_index:        d.retiree_index || 0,
+        growth_state:         gt.state || 'unknown',
+        infra_momentum:       gt.infrastructure_momentum || 0,
+        saturation_status:    rc.saturation_status || 'unknown',
+        capture_rate_pct:     capRate,
+        restaurant_count:     rc.restaurant_count || 0,
+        top_gap_category:     topGap.tier  || null,
+        top_gap_size:         topGap.gap   || 0,
+        total_establishments: ec.total_establishments || 0,
+        data_confidence:      ec.data_confidence?.data_confidence_score || 0,
+        opportunity_score:    opportunityScore,
+        summary:              data.oracle_narrative || '',
+      };
+    } catch (e) {
+      return { zip, error: e.message };
+    }
+  }));
+
+  const valid  = results.filter(r => !r.error);
+  const errors = results.filter(r =>  r.error);
+
+  const SORTS = {
+    opportunity: (a, b) => b.opportunity_score - a.opportunity_score,
+    hhi:         (a, b) => b.median_hhi - a.median_hhi,
+    population:  (a, b) => b.population  - a.population,
+    saturation:  (a, b) => a.capture_rate_pct - b.capture_rate_pct,
+    growth:      (a, b) => b.infra_momentum   - a.infra_momentum,
+  };
+  valid.sort(SORTS[focus] || SORTS.opportunity);
+
+  const ranked = valid.slice(0, limit).map((r, i) => ({ rank: i + 1, ...r }));
+  const winner = ranked[0];
+
+  return {
+    focus,
+    zips_evaluated: zipList.length,
+    ranked,
+    top_pick: winner ? {
+      zip:    winner.zip,
+      name:   winner.name,
+      score:  winner.opportunity_score,
+      reason: `Highest opportunity score (${winner.opportunity_score}/100). HHI $${winner.median_hhi?.toLocaleString()}, ${winner.saturation_status} market, ${winner.infra_momentum} infra momentum. Top gap: ${winner.top_gap_category || 'none identified'} (${winner.top_gap_size} units).`,
+    } : null,
+    errors: errors.length ? errors : undefined,
+  };
+}
+
 const TOOLS = {
   local_intel_context:   { fn: toolContext,    desc: 'Full spatial context block for a zip or lat/lon. Best first call for any location query.' },
   local_intel_search:    { fn: toolSearch,     desc: 'Search businesses by name, category, or group.' },
@@ -1134,6 +1313,7 @@ const TOOLS = {
   local_intel_restaurant:   { fn: (p) => handleVerticalQuery('restaurant',   p.query, p.zip), desc: 'Restaurant market intelligence: saturation scores, price-tier gaps, capture rate, corridor analysis, tidal momentum.' },
   local_intel_ask:          { fn: handleAsk, desc: 'Composite NL query layer — ask any plain-English question about a ZIP and get a synthesized, sourced answer. Routes internally to zone, oracle, search, bedrock, signal, tide, corridor, changes, and nearby tools. Single entry point for humans and LLMs.' },
   local_intel_query:        { fn: handleQuery, desc: 'Fuzzy intent router — pass any plain-English question about any local market. Automatically detects ZIP, industry vertical, and best tool. Checks inference cache first (instant return if hit). On cache miss, routes to the correct vertical agent, stores result, and dispatches a scout agent if confidence is low. Handles region queries ("Northeast Florida", "St Johns County") by evaluating top ZIPs in parallel. Best first call for any LLM that does not know the ZIP or industry in advance.' },
+  local_intel_compare:      { fn: toolCompare, desc: 'Compare up to 10 ZIPs side-by-side and get a ranked opportunity table. Pass focus="opportunity" (default), "hhi", "saturation", "growth", or "population". Returns per-ZIP signals (HHI, capture rate, infra momentum, consumer profile, top gap) plus a top_pick recommendation with reasoning. Best tool for site selection, franchise expansion, investment screening, and market prioritization.' },
 };
 
 // ── MCP manifest (tools/list response) ───────────────────────────────────────
@@ -1369,6 +1549,20 @@ const MCP_MANIFEST = {
           zip: { type: 'string', description: 'ZIP code (optional — will be extracted from question if present, defaults to 32082)' },
         },
         required: ['question'],
+      },
+      annotations: { readOnly: true },
+    },
+    {
+      name: 'local_intel_compare',
+      description: 'Compare up to 10 ZIP codes side-by-side and get a ranked opportunity table. Returns per-ZIP signals (HHI, capture rate, infra momentum, consumer profile, top gap) plus a top_pick recommendation with reasoning. Best tool for site selection, franchise expansion, investment screening, and market prioritization.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          zips:  { type: 'array',  items: { type: 'string' }, description: 'Array of ZIP codes to compare, e.g. ["32082","32081","32084"]. Max 10.' },
+          focus: { type: 'string', description: 'Ranking focus: "opportunity" (default), "hhi", "saturation", "growth", or "population".' },
+          limit: { type: 'number', description: 'Max rows to return (default 10).' },
+        },
+        required: ['zips'],
       },
       annotations: { readOnly: true },
     },
