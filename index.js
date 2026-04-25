@@ -72,6 +72,15 @@ function spawnWorker({ name, file }) {
     console.warn('[SWARM] Confidence enrichment pass failed (non-fatal):', e.message);
   }
 
+  // ── Boot: backfill flat-file businesses → Postgres (idempotent) ─────────────
+  // Runs async in background — workers launch immediately, backfill streams in.
+  try {
+    require('./scripts/backfillBusinesses');
+    console.log('[SWARM] Backfill started (async)');
+  } catch (e) {
+    console.warn('[SWARM] Backfill failed to start (non-fatal):', e.message);
+  }
+
   for (let i = 0; i < workers.length; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, STAGGER_DELAY_MS));
     spawnWorker(workers[i]);
