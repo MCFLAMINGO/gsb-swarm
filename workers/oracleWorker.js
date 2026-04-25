@@ -62,35 +62,42 @@ async function upsertZipIntelligence(zip, result) {
          vacancy_rate_pct, family_hh_pct,
          restaurant_count, total_businesses, gap_count,
          saturation_status, growth_state, consumer_profile,
-         oracle_json, computed_at, updated_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25::jsonb,NOW(),NOW())
+         oracle_json, computed_at, updated_at,
+         market_opportunity_score, residential_score,
+         dominant_sector, business_density, sector_counts
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25::jsonb,NOW(),NOW(),$26,$27,$28,$29,$30::jsonb)
        ON CONFLICT (zip) DO UPDATE SET
-         name                    = EXCLUDED.name,
-         state                   = EXCLUDED.state,
-         population              = EXCLUDED.population,
-         median_household_income = EXCLUDED.median_household_income,
-         median_home_value       = EXCLUDED.median_home_value,
-         owner_occupied_pct      = EXCLUDED.owner_occupied_pct,
-         total_households        = EXCLUDED.total_households,
-         wfh_pct                 = EXCLUDED.wfh_pct,
-         affluence_pct           = EXCLUDED.affluence_pct,
-         ultra_affluence_pct     = EXCLUDED.ultra_affluence_pct,
-         retiree_index           = EXCLUDED.retiree_index,
-         new_build_pct           = EXCLUDED.new_build_pct,
-         age_25_34_pct           = EXCLUDED.age_25_34_pct,
-         age_35_54_pct           = EXCLUDED.age_35_54_pct,
-         age_55_plus_pct         = EXCLUDED.age_55_plus_pct,
-         vacancy_rate_pct        = EXCLUDED.vacancy_rate_pct,
-         family_hh_pct           = EXCLUDED.family_hh_pct,
-         restaurant_count        = EXCLUDED.restaurant_count,
-         total_businesses        = EXCLUDED.total_businesses,
-         gap_count               = EXCLUDED.gap_count,
-         saturation_status       = EXCLUDED.saturation_status,
-         growth_state            = EXCLUDED.growth_state,
-         consumer_profile        = EXCLUDED.consumer_profile,
-         oracle_json             = EXCLUDED.oracle_json,
-         computed_at             = NOW(),
-         updated_at              = NOW()`,
+         name                     = EXCLUDED.name,
+         state                    = EXCLUDED.state,
+         population               = EXCLUDED.population,
+         median_household_income  = EXCLUDED.median_household_income,
+         median_home_value        = EXCLUDED.median_home_value,
+         owner_occupied_pct       = EXCLUDED.owner_occupied_pct,
+         total_households         = EXCLUDED.total_households,
+         wfh_pct                  = EXCLUDED.wfh_pct,
+         affluence_pct            = EXCLUDED.affluence_pct,
+         ultra_affluence_pct      = EXCLUDED.ultra_affluence_pct,
+         retiree_index            = EXCLUDED.retiree_index,
+         new_build_pct            = EXCLUDED.new_build_pct,
+         age_25_34_pct            = EXCLUDED.age_25_34_pct,
+         age_35_54_pct            = EXCLUDED.age_35_54_pct,
+         age_55_plus_pct          = EXCLUDED.age_55_plus_pct,
+         vacancy_rate_pct         = EXCLUDED.vacancy_rate_pct,
+         family_hh_pct            = EXCLUDED.family_hh_pct,
+         restaurant_count         = EXCLUDED.restaurant_count,
+         total_businesses         = EXCLUDED.total_businesses,
+         gap_count                = EXCLUDED.gap_count,
+         saturation_status        = EXCLUDED.saturation_status,
+         growth_state             = EXCLUDED.growth_state,
+         consumer_profile         = EXCLUDED.consumer_profile,
+         oracle_json              = EXCLUDED.oracle_json,
+         market_opportunity_score = EXCLUDED.market_opportunity_score,
+         residential_score        = EXCLUDED.residential_score,
+         dominant_sector          = EXCLUDED.dominant_sector,
+         business_density         = EXCLUDED.business_density,
+         sector_counts            = EXCLUDED.sector_counts,
+         computed_at              = NOW(),
+         updated_at               = NOW()`,
       [
         zip,
         result.name || zip,
@@ -111,12 +118,17 @@ async function upsertZipIntelligence(zip, result) {
         result.demographics?.vacancy_rate_pct                                || null,
         result.demographics?.family_hh_pct                                   || null,
         result.restaurant_capacity?.restaurant_count                         || null,
-        result.restaurant_capacity?.total_businesses                         || null,  // FIX: was result.total_businesses
-        result.restaurant_capacity?.gap_count                                || result.market_gaps?.price_tier_gaps?.filter(g => g.gap > 0).length || null,
+        result.market_intelligence?.total_businesses || result.restaurant_capacity?.total_businesses || null,
+        result.restaurant_capacity?.gap_count || null,
         result.restaurant_capacity?.saturation_status                        || null,
         result.growth_trajectory?.state                                      || null,
         result.demographics?.consumer_profile                                || null,
         JSON.stringify(result),
+        result.market_intelligence?.market_opportunity_score                 || null,
+        result.market_intelligence?.residential_opportunity_score            || null,
+        result.market_intelligence?.dominant_sector                          || null,
+        result.market_intelligence?.business_density_per_1k                 || null,
+        result.market_intelligence?.sector_breakdown ? JSON.stringify(result.market_intelligence.sector_breakdown) : null,
       ]
     );
   } catch (e) {
@@ -489,6 +501,54 @@ function computeOracle(zip, name) {
       new_build_pct:            newBuildPct,
     },
 
+    // ── Universal market intelligence (replaces restaurant-only model) ─────
+    market_intelligence: {
+      total_businesses:          totalBiz,
+      business_density_per_1k:   population > 0 ? Math.round((totalBiz / population) * 1000 * 10) / 10 : 0,
+      market_opportunity_score:  (() => {
+        let s = 0;
+        if (newBuildPct > 20) s += 25; else if (newBuildPct > 10) s += 15; else if (newBuildPct > 3) s += 8;
+        if (medianHHI > 120000) s += 20; else if (medianHHI > 80000) s += 14; else if (medianHHI > 50000) s += 8;
+        if (affluencePct > 60) s += 15; else if (affluencePct > 30) s += 8;
+        if (wfhPct > 30) s += 12; else if (wfhPct > 15) s += 6;
+        if (population > 50000) s += 10; else if (population > 20000) s += 6;
+        const bDensity = population > 0 ? (totalBiz / population) * 1000 : 0;
+        if (bDensity < 8) s += 12; else if (bDensity < 15) s += 6;
+        if (growth?.state === 'growing') s += 6; else if (growth?.state === 'transitioning') s += 3;
+        return Math.min(100, s);
+      })(),
+      residential_opportunity_score: (() => {
+        let s = 0;
+        if (medianHHI >= 40000 && medianHHI <= 95000) s += 30;
+        else if (medianHHI > 95000 && medianHHI <= 140000) s += 10;
+        if (newBuildPct > 20) s += 25; else if (newBuildPct > 10) s += 15; else if (newBuildPct > 3) s += 8;
+        if (vacancyRatePct > 15) s += 20; else if (vacancyRatePct > 8) s += 10; else if (vacancyRatePct > 4) s += 5;
+        if (growth?.state === 'growing') s += 15; else if (growth?.state === 'transitioning') s += 8;
+        if (population > 30000) s += 10; else if (population > 15000) s += 5;
+        return Math.min(100, s);
+      })(),
+      sector_breakdown: {
+        construction: businesses.filter(b => b.category_group === 'construction').length,
+        real_estate:  businesses.filter(b => b.category_group === 'real_estate').length,
+        banking:      businesses.filter(b => b.category_group === 'banking').length,
+        health:       businesses.filter(b => b.category_group === 'health').length,
+        food:         businesses.filter(b => b.category_group === 'food').length,
+        legal:        businesses.filter(b => b.category_group === 'legal').length,
+        retail:       businesses.filter(b => b.category_group === 'retail').length,
+        hospitality:  businesses.filter(b => b.category_group === 'hospitality').length,
+        fitness:      businesses.filter(b => b.category_group === 'fitness').length,
+        auto:         businesses.filter(b => b.category_group === 'auto').length,
+      },
+      dominant_sector: (() => {
+        const groups = {};
+        businesses.forEach(b => { if (b.category_group) groups[b.category_group] = (groups[b.category_group]||0)+1; });
+        return Object.entries(groups).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
+      })(),
+      daytime_demand_population: daytimeDemandPop,
+      wfh_demand_multiplier:     Math.round(daytimeMultiplier * 100) / 100,
+    },
+
+    // ── Food service model (kept for backward compat, food-vertical queries) ─
     restaurant_capacity: {
       restaurant_count:          restaurantCount,
       total_businesses:          totalBiz,

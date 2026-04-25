@@ -400,6 +400,7 @@ const TOOL_COSTS = {
   local_intel_query:        0.03,
   local_intel_stats:    0.005,
   local_intel_compare:   0.08,  // premium — runs oracle for up to 10 ZIPs
+  local_intel_project:   0.15,  // project type → L1 ZIP scoring + L2 matched verified businesses
 };
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
@@ -1293,6 +1294,127 @@ async function toolCompare({ zips, focus = 'opportunity', limit = 10 }) {
   };
 }
 
+// ── local_intel_project ─────────────────────────────────────────────────────
+// project_type → L1: ranked ZIPs by market_opportunity_score (or residential_score)
+//              → L2: matched verified businesses by sector
+//
+// project_type examples: 'restaurant', 'clinic', 'retail', 'construction',
+//   'real_estate', 'residential_development', 'banking', 'legal', 'fitness'
+async function handleProject(params) {
+  const projectType = (params?.project_type || '').toLowerCase().trim();
+  const zip         = params?.zip   || null;   // optional — filter L2 to a single ZIP
+  const limit       = Math.min(params?.limit  || 5, 10);
+  if (!projectType) return { error: 'project_type is required' };
+
+  // ── Sector mapping: project_type → category_groups that matter ──────────────
+  const SECTOR_MAP = {
+    restaurant:             ['food', 'hospitality'],
+    food:                   ['food'],
+    bar:                    ['food', 'hospitality'],
+    clinic:                 ['health'],
+    healthcare:             ['health'],
+    medical:                ['health'],
+    pharmacy:               ['health'],
+    retail:                 ['retail'],
+    boutique:               ['retail'],
+    construction:           ['construction'],
+    contractor:             ['construction'],
+    home_services:          ['construction'],
+    real_estate:            ['real_estate'],
+    residential_development:['construction', 'real_estate'],
+    banking:                ['banking'],
+    finance:                ['banking'],
+    lending:                ['banking'],
+    legal:                  ['legal'],
+    law:                    ['legal'],
+    fitness:                ['fitness'],
+    gym:                    ['fitness'],
+    auto:                   ['auto'],
+    automotive:             ['auto'],
+    beauty:                 ['beauty'],
+    salon:                  ['beauty'],
+    grocery:                ['grocery'],
+    pets:                   ['pets'],
+    professional:           ['professional', 'legal', 'banking'],
+  };
+  const targetGroups = SECTOR_MAP[projectType] || [projectType];
+
+  // ── L1: ZIPs scored by market_opportunity_score (or residential if dev type) ──
+  const isResidential = ['residential_development','real_estate'].includes(projectType);
+  const scoreCol = isResidential ? 'residential_score' : 'market_opportunity_score';
+
+  const db = getDb();
+  let l1Zips = [];
+  if (db) {
+    try {
+      const qArgs    = zip ? [limit, zip] : [limit];
+      const l1Res = await db.query(
+        `SELECT zip, name, ${scoreCol} AS score, market_opportunity_score,
+                residential_score, dominant_sector, business_density,
+                median_household_income, population, growth_state, new_build_pct
+         FROM zip_intelligence
+         WHERE ${scoreCol} IS NOT NULL
+         ${zip ? 'AND zip = $2' : ''}
+         ORDER BY ${scoreCol} DESC
+         LIMIT $1`,
+        qArgs
+      );
+      l1Zips = l1Res.rows;
+    } catch (e) {
+      l1Zips = [];
+    }
+  }
+
+  // ── L2: matched businesses in those ZIPs by target sector ───────────────────
+  let l2Businesses = [];
+  if (db && l1Zips.length > 0) {
+    try {
+      const topZips  = zip ? [zip] : l1Zips.slice(0, 3).map(z => z.zip);
+      const l2Res = await db.query(
+        `SELECT name, category, category_group, zip, city, address,
+                sunbiz_doc_number, verified
+         FROM businesses
+         WHERE zip = ANY($1)
+           AND category_group = ANY($2)
+         ORDER BY verified DESC, name ASC
+         LIMIT 20`,
+        [topZips, targetGroups]
+      );
+      l2Businesses = l2Res.rows;
+    } catch (e) {
+      l2Businesses = [];
+    }
+  }
+
+  // ── Sector gap: how underrepresented is this sector in L1 ZIPs? ─────────────
+  const sectorGaps = l1Zips.map(z => {
+    const counts = z.sector_counts || {};
+    const sectorTotal = targetGroups.reduce((sum, g) => sum + (counts[g] || 0), 0);
+    return {
+      zip:         z.zip,
+      name:        z.name,
+      score:       Number(z.score),
+      population:  z.population,
+      median_hhi:  z.median_household_income,
+      growth_state: z.growth_state,
+      new_build_pct: z.new_build_pct,
+      [`${targetGroups[0]}_count`]: sectorTotal,
+      business_density: z.business_density,
+    };
+  });
+
+  return {
+    project_type:   projectType,
+    target_sectors: targetGroups,
+    score_basis:    isResidential ? 'residential_opportunity_score' : 'market_opportunity_score',
+    l1_top_zips:    sectorGaps,
+    l2_businesses:  l2Businesses,
+    l2_note:        l2Businesses.length === 0
+      ? 'No verified businesses found in target sectors for these ZIPs — whitespace opportunity'
+      : `${l2Businesses.length} existing ${targetGroups.join('/')} operators in top ZIPs`,
+  };
+}
+
 const TOOLS = {
   local_intel_context:   { fn: toolContext,    desc: 'Full spatial context block for a zip or lat/lon. Best first call for any location query.' },
   local_intel_search:    { fn: toolSearch,     desc: 'Search businesses by name, category, or group.' },
@@ -1317,13 +1439,14 @@ const TOOLS = {
   local_intel_ask:          { fn: handleAsk, desc: 'Composite NL query layer — ask any plain-English question about a ZIP and get a synthesized, sourced answer. Routes internally to zone, oracle, search, bedrock, signal, tide, corridor, changes, and nearby tools. Single entry point for humans and LLMs.' },
   local_intel_query:        { fn: handleQuery, desc: 'Fuzzy intent router — pass any plain-English question about any local market. Automatically detects ZIP, industry vertical, and best tool. Checks inference cache first (instant return if hit). On cache miss, routes to the correct vertical agent, stores result, and dispatches a scout agent if confidence is low. Handles region queries ("Northeast Florida", "St Johns County") by evaluating top ZIPs in parallel. Best first call for any LLM that does not know the ZIP or industry in advance.' },
   local_intel_compare:      { fn: toolCompare, desc: 'Compare up to 10 ZIPs side-by-side and get a ranked opportunity table. Pass focus="opportunity" (default), "hhi", "saturation", "growth", or "population". Returns per-ZIP signals (HHI, capture rate, infra momentum, consumer profile, top gap) plus a top_pick recommendation with reasoning. Best tool for site selection, franchise expansion, investment screening, and market prioritization.' },
+  local_intel_project:      { fn: handleProject, desc: 'Project-type query: pass project_type (e.g. restaurant, clinic, banking, construction, real_estate) and get L1 ZIPs ranked by market or residential opportunity score + L2 matched verified businesses in that sector. Best tool for site selection when you know the business type but not the ZIP.' },
 };
 
 // ── MCP manifest (tools/list response) ───────────────────────────────────────
 const MCP_MANIFEST = {
   name: 'localintel',
   version: '1.0.0',
-  description: 'LocalIntel — agentic business intelligence for Northeast Florida. 20 tools: spatial context, business search, spending zones, corridor analysis, tidal momentum scores, sector gap ranking, vertical agents (restaurant/healthcare/retail/construction/realtor), inference cache with scout dispatch, and local_intel_query — a fuzzy intent router that resolves any plain-English market question to the right ZIP, vertical, and tool automatically. 500+ trained prompts across 27 ZIPs. Two payment rails: $0.01–$0.05/call USDC on Base via x402, or pathUSD on Tempo mainnet.',
+  description: 'LocalIntel 2014 agentic business intelligence for Northeast Florida. 22 tools: spatial context, business search, spending zones, corridor analysis, tidal momentum scores, sector gap ranking, universal market + residential opportunity scoring, project-type site selection (local_intel_project), vertical agents (restaurant/healthcare/retail/construction/realtor/banking/legal/fitness), inference cache with scout dispatch, and local_intel_query 2014 a fuzzy intent router that resolves any plain-English market question to the right ZIP, vertical, and tool. 500+ trained prompts. 113k+ verified businesses across 360 FL ZIPs with ACS demographics. Two payment rails: $0.0120130.15/call USDC on Base via x402, or pathUSD on Tempo mainnet.',
   tools: [
     {
       name: 'local_intel_query',
@@ -1566,6 +1689,20 @@ const MCP_MANIFEST = {
           limit: { type: 'number', description: 'Max rows to return (default 10).' },
         },
         required: ['zips'],
+      },
+      annotations: { readOnly: true },
+    },
+    {
+      name: 'local_intel_project',
+      description: 'Project-type intelligence: pass a project_type (restaurant, clinic, banking, construction, real_estate, residential_development, fitness, legal, retail, auto, etc.) and get L1 ZIPs ranked by market or residential opportunity score plus L2 matching verified businesses already operating in that sector. Returns sector gap counts, HHI, population, growth state, and new-build %. Best tool for site selection and franchise expansion when you know the business type but not the ZIP.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project_type: { type: 'string', description: 'Business type or project category. Examples: restaurant, clinic, banking, construction, real_estate, residential_development, fitness, legal, retail, grocery, auto, beauty, pets.' },
+          zip:          { type: 'string', description: 'Optional. Filter L2 businesses to a specific ZIP. If omitted, returns top ZIPs ranked by score.' },
+          limit:        { type: 'number', description: 'Number of L1 ZIPs to return (default 5, max 10).' },
+        },
+        required: ['project_type'],
       },
       annotations: { readOnly: true },
     },

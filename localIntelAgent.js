@@ -1578,4 +1578,125 @@ router.get('/register/info', (req, res) => {
   });
 });
 
+// ── Jobs table auto-create ────────────────────────────────────────────────────
+// McFlamingo back door + booths = job #1 test case
+// All jobs are ZIP-routed. Accepting agent declares their wallet. Completion requires proof.
+async function ensureJobsTable() {
+  if (!process.env.LOCAL_INTEL_DB_URL) return;
+  try {
+    const db = require('./lib/db');
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS jobs (
+        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        title         TEXT NOT NULL,
+        description   TEXT,
+        project_type  TEXT,
+        zip           TEXT,
+        budget_usd    NUMERIC(12,2),
+        poster_wallet TEXT,
+        poster_email  TEXT,
+        acceptor_wallet TEXT,
+        status        TEXT NOT NULL DEFAULT 'open',
+        proof         TEXT,
+        created_at    TIMESTAMPTZ DEFAULT NOW(),
+        accepted_at   TIMESTAMPTZ,
+        completed_at  TIMESTAMPTZ,
+        meta          JSONB
+      )
+    `);
+  } catch (e) {
+    console.error('[localIntelAgent] ensureJobsTable failed:', e.message);
+  }
+}
+ensureJobsTable();
+
+// POST /job/create — create a new job posting
+router.post('/job/create', express.json(), async (req, res) => {
+  if (!process.env.LOCAL_INTEL_DB_URL) return res.status(503).json({ error: 'no_db' });
+  const { title, description, project_type, zip, budget_usd, poster_wallet, poster_email, meta } = req.body || {};
+  if (!title) return res.status(400).json({ error: 'title is required' });
+  try {
+    const db = require('./lib/db');
+    const r = await db.query(
+      `INSERT INTO jobs (title, description, project_type, zip, budget_usd, poster_wallet, poster_email, meta)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+       RETURNING id, title, status, created_at`,
+      [title, description||null, project_type||null, zip||null,
+       budget_usd||null, poster_wallet||null, poster_email||null,
+       meta ? JSON.stringify(meta) : null]
+    );
+    res.json({ ok: true, job: r.rows[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /job/feed — list open jobs (filter by zip or project_type)
+router.get('/job/feed', async (req, res) => {
+  if (!process.env.LOCAL_INTEL_DB_URL) return res.status(503).json({ error: 'no_db' });
+  const { zip, project_type, limit = 20 } = req.query;
+  try {
+    const db = require('./lib/db');
+    const conditions = ["status = 'open'"];
+    const vals = [];
+    if (zip)          { vals.push(zip);          conditions.push(`zip = $${vals.length}`); }
+    if (project_type) { vals.push(project_type); conditions.push(`project_type = $${vals.length}`); }
+    vals.push(Math.min(Number(limit)||20, 100));
+    const r = await db.query(
+      `SELECT id, title, description, project_type, zip, budget_usd,
+              poster_wallet, status, created_at, meta
+       FROM jobs
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY created_at DESC
+       LIMIT $${vals.length}`,
+      vals
+    );
+    res.json({ ok: true, jobs: r.rows, count: r.rows.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /job/accept — claim a job (agent declares their wallet)
+router.post('/job/accept', express.json(), async (req, res) => {
+  if (!process.env.LOCAL_INTEL_DB_URL) return res.status(503).json({ error: 'no_db' });
+  const { job_id, acceptor_wallet } = req.body || {};
+  if (!job_id || !acceptor_wallet) return res.status(400).json({ error: 'job_id + acceptor_wallet required' });
+  try {
+    const db = require('./lib/db');
+    const r = await db.query(
+      `UPDATE jobs
+       SET status='accepted', acceptor_wallet=$1, accepted_at=NOW()
+       WHERE id=$2 AND status='open'
+       RETURNING id, title, status, acceptor_wallet, accepted_at`,
+      [acceptor_wallet, job_id]
+    );
+    if (r.rows.length === 0) return res.status(409).json({ error: 'Job not found or already taken' });
+    res.json({ ok: true, job: r.rows[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /job/complete — mark a job done + attach proof (tx_hash, url, note, etc.)
+router.post('/job/complete', express.json(), async (req, res) => {
+  if (!process.env.LOCAL_INTEL_DB_URL) return res.status(503).json({ error: 'no_db' });
+  const { job_id, acceptor_wallet, proof } = req.body || {};
+  if (!job_id || !acceptor_wallet) return res.status(400).json({ error: 'job_id + acceptor_wallet required' });
+  try {
+    const db = require('./lib/db');
+    const r = await db.query(
+      `UPDATE jobs
+       SET status='completed', proof=$1, completed_at=NOW()
+       WHERE id=$2 AND acceptor_wallet=$3 AND status='accepted'
+       RETURNING id, title, status, proof, completed_at`,
+      [proof||null, job_id, acceptor_wallet]
+    );
+    if (r.rows.length === 0) return res.status(409).json({ error: 'Job not found, already completed, or wrong wallet' });
+    res.json({ ok: true, job: r.rows[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
