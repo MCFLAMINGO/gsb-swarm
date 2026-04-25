@@ -35,6 +35,8 @@ const { handleTide, handleSignal, handleBedrock, handleForAgent, handleAsk } = r
 const { handleVerticalQuery } = require('./workers/verticalAgentWorker');
 const { route }               = require('./workers/intentRouter');
 const inferenceCache          = require('./workers/inferenceCache');
+const { resolveCaller }       = require('./lib/agentRegistry');
+const { x402Gate }            = require('./lib/x402Middleware');
 
 // ── handleQuery — fuzzy intent router entry point ─────────────────────────────
 // Single tool an LLM can call with any plain-English question about any market.
@@ -512,14 +514,15 @@ function logUsage(tool, caller, meta) {
       const db = require('./lib/db');
       db.query(
         `INSERT INTO usage_ledger
-           (agent_token, tool_name, zip, cost_path_usd, response_ms, cache_hit)
-         VALUES ($1, $2, $3, $4, $5, false)`,
+           (agent_token, tool_name, zip, cost_path_usd, response_ms, cache_hit, tx_hash)
+         VALUES ($1, $2, $3, $4, $5, false, $6)`,
         [
           caller || 'unknown',
           tool,
           meta?.zip || null,
-          TOOL_COSTS[tool] || 0,
+          meta?.paidAmt || TOOL_COSTS[tool] || 0,  // actual paid amount if collected
           meta?.latency || null,
+          meta?.txHash  || null,
         ]
       ).catch(() => {}); // non-fatal
     } catch {}
@@ -1570,8 +1573,11 @@ const MCP_MANIFEST = {
 };
 
 // ── JSON-RPC 2.0 handler ──────────────────────────────────────────────────────
-async function handleRPC(req) {
+async function handleRPC(req, callerInfo) {
   const { jsonrpc, id, method, params } = req;
+  // callerInfo injected by HTTP handler after header extraction + tier resolution
+  // Falls back to params._caller for internal/programmatic calls
+  const _ci = callerInfo || {};
 
   if (jsonrpc !== '2.0') {
     return { jsonrpc: '2.0', id, error: { code: -32600, message: 'Invalid JSON-RPC version' } };
@@ -2165,29 +2171,80 @@ async function handleRPC(req) {
   if (method === 'tools/call') {
     const toolName = params?.name;
     const toolArgs = params?.arguments || {};
-    const caller   = params?._caller || 'unknown';
+    // Prefer header-resolved caller (from HTTP handler) over body _caller
+    const caller   = _ci.caller || params?._caller || 'unknown';
+    const callerTier   = _ci.tier   || 'sandbox';
+    const callerWallet = _ci.wallet || null;
 
     if (!TOOLS[toolName]) {
       return { jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${toolName}` } };
     }
 
+    // Sandbox tier: allowed flag already checked by HTTP handler for non-x402 paths
+    // For internal calls (no callerInfo) we skip payment enforcement
+    const COST = TOOL_COSTS[toolName] || 0;
+
     try {
       const t0 = Date.now();
       const result = await Promise.resolve(TOOLS[toolName].fn(toolArgs));
       const latency = Date.now() - t0;
-      // Extract zip + intent for observability (present on local_intel_ask results)
+      // Extract zip + intent for observability
       const parsed = (typeof result === 'object' && result !== null) ? result : {};
+
+      // ── Tempo sponsor-tx payment for paid-tier local_intel_compare ──────────
+      let txHash = _ci.paymentTxHash || null; // x402 path already has a hash
+      let paidAmt = 0;
+
+      if (toolName === 'local_intel_compare' && callerTier === 'paid' && callerWallet && !txHash) {
+        // Pull pathUSD from agent's registered wallet via sponsor-tx
+        try {
+          const SPONSOR_URL = 'https://www.throw5onit.com/api/sponsor-tx';
+          // Fetch executor PK from env (set in Railway)
+          const execPK = (process.env.TEMPO_EXECUTOR_PK || '').replace(/\s/g, '');
+          if (execPK) {
+            const sRes = await fetch(SPONSOR_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                fromPK:    execPK,          // EXECUTOR co-signs as feePayer
+                from:      callerWallet,    // debit agent's registered wallet
+                to:        '0x774f484192Cf3F4fB9716Af2e15f44371fD32FEA', // TREASURY
+                tokenAddr: 'auto',          // pathUSD
+                amount:    COST,
+              }),
+            });
+            const sBody = await sRes.json().catch(() => ({}));
+            if (sBody.hash) {
+              txHash  = sBody.hash;
+              paidAmt = COST;
+              console.log(`[payment] local_intel_compare $${COST} pathUSD from ${callerWallet} → TREASURY | tx: ${txHash}`);
+            } else {
+              console.warn('[payment] sponsor-tx failed:', JSON.stringify(sBody));
+            }
+          }
+        } catch (pe) {
+          console.warn('[payment] sponsor-tx error:', pe.message);
+        }
+      }
+
       logUsage(toolName, caller, {
-        entry:   params?._entry || 'free',
+        entry:   callerTier === 'paid' ? 'paid' : (params?._entry || 'free'),
         zip:     toolArgs?.zip || parsed?.zip || null,
         intent:  parsed?.intent || null,
         latency,
+        txHash,
+        paidAmt,
       });
       return {
         jsonrpc: '2.0', id,
         result: {
           content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }],
-          _meta: { cost_pathusd: TOOL_COSTS[toolName] || 0, latency_ms: latency },
+          _meta: {
+            cost_pathusd: COST,
+            latency_ms:   latency,
+            tier:         callerTier,
+            ...(txHash ? { tx_hash: txHash, paid: true } : {}),
+          },
         },
       };
     } catch (e) {
@@ -2228,16 +2285,83 @@ const server = http.createServer((req, res) => {
     req.on('end', async () => {
       try {
         const parsed = JSON.parse(body);
-        // Handle batch requests
+
+        // ── Extract agent token from HTTP headers ───────────────────────────
+        // Priority: Authorization: Bearer <token>  >  x-agent-id header
+        let rawToken = null;
+        const authHeader = req.headers['authorization'] || '';
+        if (authHeader.toLowerCase().startsWith('bearer ')) {
+          rawToken = authHeader.slice(7).trim();
+        } else if (req.headers['x-agent-id']) {
+          rawToken = (req.headers['x-agent-id'] || '').trim();
+        }
+        const callerIP = (
+          req.headers['x-forwarded-for'] ||
+          req.socket?.remoteAddress ||
+          'unknown'
+        ).split(',')[0].trim();
+
+        // ── Resolve caller tier (async, hits Postgres agent_registry) ───────
+        const callerInfo = await resolveCaller(rawToken, callerIP);
+
+        // ── Sandbox daily limit exceeded → 429 ──────────────────────────────
+        if (!callerInfo.allowed) {
+          res.writeHead(429);
+          return res.end(JSON.stringify({
+            error: 'sandbox_limit_exceeded',
+            message: 'Free tier allows 3 calls/day. Register an API token at thelocalintel.com to unlock full access.',
+            tier: 'sandbox',
+          }));
+        }
+
+        // ── x402 gate for tools that require payment ─────────────────────────
+        // Only applies to direct HTTP callers without a registered bearer token.
+        // Paid-tier bearer callers are charged via sponsor-tx inside handleRPC.
+        // Batch requests and internal callers skip x402.
+        let x402PaymentInfo = null;
+        const isSingleCall = !Array.isArray(parsed);
+        const toolName = isSingleCall && parsed?.params?.name;
+        const toolCost = TOOL_COSTS[toolName] || 0;
+        const needsX402 = (
+          isSingleCall &&
+          parsed?.method === 'tools/call' &&
+          toolCost > 0 &&
+          callerInfo.tier === 'sandbox' // only gate unauthenticated callers via x402
+        );
+
+        if (needsX402) {
+          const gate = await x402Gate(req, toolName, toolCost);
+          if (gate.reject) {
+            res.writeHead(gate.status);
+            return res.end(JSON.stringify(gate.body));
+          }
+          // Payment verified on-chain — promote to paid for this call
+          x402PaymentInfo = gate.paymentInfo;
+          callerInfo.tier   = 'x402';
+          callerInfo.caller = x402PaymentInfo?.from || callerInfo.caller;
+          callerInfo.paymentTxHash = x402PaymentInfo?.txHash || null;
+        }
+
+        // ── Dispatch to handleRPC ────────────────────────────────────────────
         if (Array.isArray(parsed)) {
-          const responses = (await Promise.all(parsed.map(handleRPC))).filter(Boolean);
+          const responses = (await Promise.all(
+            parsed.map(rpc => handleRPC(rpc, callerInfo))
+          )).filter(Boolean);
           res.writeHead(200);
           return res.end(JSON.stringify(responses));
         }
-        const response = await handleRPC(parsed);
+        const response = await handleRPC(parsed, callerInfo);
         if (response === null) {
           res.writeHead(204);
           return res.end();
+        }
+        // Add X-PAYMENT-RESPONSE header so x402-fetch clients confirm settlement
+        if (x402PaymentInfo?.txHash) {
+          res.setHeader('X-PAYMENT-RESPONSE', Buffer.from(JSON.stringify({
+            txHash:  x402PaymentInfo.txHash,
+            network: x402PaymentInfo.network,
+            settled: true,
+          })).toString('base64'));
         }
         res.writeHead(200);
         res.end(JSON.stringify(response));
