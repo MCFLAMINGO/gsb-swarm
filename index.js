@@ -82,15 +82,16 @@ function spawnWorker({ name, file }) {
   }
 
 
-  // ── Boot: backfill oracle flat files → zip_intelligence (fixes null ACS fields) ───
-  // Reads every data/oracle/{zip}.json and upserts all rich fields to PG.
-  // Fast (~2s for 360 ZIPs), idempotent, critical for data quality.
+  // ── Boot: patch ACS columns in zip_intelligence from spendingZones.json ──────────────
+  // Reads spendingZones.json (source of truth) → patches wfh_pct, affluence_pct,
+  // retiree_index, new_build_pct, vacancy_rate_pct, median_home_value in PG.
+  // Runs in <1s, idempotent, fixes any deploy where oracle_json had zeros.
   try {
-    const { backfillOracle } = require('./scripts/backfillOracle');
-    backfillOracle().catch(e => console.warn('[SWARM] Oracle backfill error (non-fatal):', e.message));
-    console.log('[SWARM] Oracle backfill started (async)');
+    const { patchAcsFromZones } = require('./scripts/patchAcsFromZones');
+    patchAcsFromZones().catch(e => console.warn('[SWARM] ACS patch error (non-fatal):', e.message));
+    console.log('[SWARM] ACS patch from spendingZones started');
   } catch (e) {
-    console.warn('[SWARM] Oracle backfill failed to start (non-fatal):', e.message);
+    console.warn('[SWARM] ACS patch failed to start (non-fatal):', e.message);
   }
 
   for (let i = 0; i < workers.length; i++) {
