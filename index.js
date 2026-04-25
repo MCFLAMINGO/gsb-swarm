@@ -81,6 +81,18 @@ function spawnWorker({ name, file }) {
     console.warn('[SWARM] Backfill failed to start (non-fatal):', e.message);
   }
 
+
+  // ── Boot: backfill oracle flat files → zip_intelligence (fixes null ACS fields) ───
+  // Reads every data/oracle/{zip}.json and upserts all rich fields to PG.
+  // Fast (~2s for 360 ZIPs), idempotent, critical for data quality.
+  try {
+    const { backfillOracle } = require('./scripts/backfillOracle');
+    backfillOracle().catch(e => console.warn('[SWARM] Oracle backfill error (non-fatal):', e.message));
+    console.log('[SWARM] Oracle backfill started (async)');
+  } catch (e) {
+    console.warn('[SWARM] Oracle backfill failed to start (non-fatal):', e.message);
+  }
+
   for (let i = 0; i < workers.length; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, STAGGER_DELAY_MS));
     spawnWorker(workers[i]);

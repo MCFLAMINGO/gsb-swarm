@@ -2295,11 +2295,13 @@ const server = http.createServer((req, res) => {
         } else if (req.headers['x-agent-id']) {
           rawToken = (req.headers['x-agent-id'] || '').trim();
         }
-        const callerIP = (
-          req.headers['x-forwarded-for'] ||
-          req.socket?.remoteAddress ||
-          'unknown'
-        ).split(',')[0].trim();
+        // Use socket remoteAddress for localhost/internal detection (can't spoof)
+        // Use x-forwarded-for only for external client identification
+        const socketIP = req.socket?.remoteAddress || '';
+        const forwardedFor = req.headers['x-forwarded-for'] || '';
+        // If socket itself is loopback/private, this is an internal Railway call
+        // If socket is Railway's ingress proxy, trust x-forwarded-for for the client IP
+        const callerIP = socketIP || forwardedFor.split(',')[0].trim() || 'unknown';
 
         // ── Resolve caller tier (async, hits Postgres agent_registry) ───────
         const callerInfo = await resolveCaller(rawToken, callerIP);

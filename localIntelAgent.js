@@ -1505,4 +1505,77 @@ router.get('/x402-facilitator/supported', (req, res) => {
   });
 });
 
+// ── Agent self-registration ───────────────────────────────────────────────────────────────
+// POST /api/local-intel/register
+// Body: { wallet: '0x...', label: 'my-agent' }
+// Returns: { token, tier, daily_limit, mcp_endpoint, instructions }
+// The token goes in Authorization: Bearer <token> on every MCP call.
+router.post('/register', express.json(), async (req, res) => {
+  const { wallet, label } = req.body || {};
+  if (!wallet || !/^0x[0-9a-fA-F]{40}$/.test(wallet)) {
+    return res.status(400).json({ error: 'wallet required — must be a valid 0x EVM address' });
+  }
+  try {
+    const crypto = require('crypto');
+    const { registerToken } = require('./lib/agentRegistry');
+    // Generate a secure random token
+    const token = `li_${crypto.randomBytes(24).toString('hex')}`;
+    await registerToken({ token, wallet, tier: 'paid', daily_limit: 10000, label: label || null });
+    return res.json({
+      token,
+      tier:         'paid',
+      daily_limit:  10000,
+      wallet,
+      mcp_endpoint: 'https://gsb-swarm-production.up.railway.app/api/local-intel/mcp',
+      auth_header:  `Authorization: Bearer ${token}`,
+      tool_costs: {
+        local_intel_compare:  '$0.08 pathUSD per call',
+        local_intel_oracle:   '$0.03 pathUSD per call',
+        local_intel_ask:      '$0.05 pathUSD per call',
+        local_intel_search:   '$0.01 pathUSD per call',
+        local_intel_realtor:  '$0.02 pathUSD per call',
+      },
+      payment_rails: [
+        { network: 'base',  asset: 'USDC',    method: 'x402 — send X-PAYMENT header with Base tx hash' },
+        { network: 'tempo', asset: 'pathUSD', method: 'bearer token — sponsor-tx pulled on each call' },
+      ],
+      instructions: 'Include Authorization: Bearer <token> in every MCP request. Your registered wallet will be debited pathUSD on Tempo mainnet per tool call. Top up your wallet at thelocalintel.com.',
+    });
+  } catch (e) {
+    console.error('[register] error:', e.message);
+    res.status(500).json({ error: 'Registration failed', detail: e.message });
+  }
+});
+
+// GET /api/local-intel/register/info — pricing + docs, no auth needed
+router.get('/register/info', (req, res) => {
+  res.json({
+    product:      'LocalIntel MCP — Agentic Local Business Intelligence',
+    coverage:     '113k+ businesses, 360 FL ZIPs with ACS demographics, oracle narratives, sector gap analysis',
+    tools:        21,
+    smithery_score: 90,
+    registry:     'io.github.MCFLAMINGO/local-intel',
+    mcp_endpoint: 'https://gsb-swarm-production.up.railway.app/api/local-intel/mcp',
+    register_endpoint: 'POST https://gsb-swarm-production.up.railway.app/api/local-intel/register',
+    register_body: { wallet: '0xYourEVMWallet', label: 'my-agent-name' },
+    free_tier: '3 calls/day (no token required)',
+    x402: {
+      supported: true,
+      networks: ['base (USDC)', 'tempo (pathUSD)'],
+      facilitator: 'https://api.cdp.coinbase.com/platform/v2/x402',
+      note: 'Any x402-fetch compatible agent auto-pays on call. No registration needed for x402 path.',
+    },
+    tool_costs: {
+      local_intel_compare:     0.08,
+      local_intel_ask:         0.05,
+      local_intel_oracle:      0.03,
+      local_intel_signal:      0.03,
+      local_intel_query:       0.03,
+      local_intel_sector_gap:  0.03,
+      local_intel_search:      0.01,
+    },
+    contact: 'erik@mcflamingo.com',
+  });
+});
+
 module.exports = router;
