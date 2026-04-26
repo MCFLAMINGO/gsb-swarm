@@ -16,6 +16,7 @@
 const fs   = require('fs');
 const path = require('path');
 const http = require('https');
+const { stamp } = require('../lib/categoryNormalizer');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const ZIPS_DIR = path.join(DATA_DIR, 'zips');
@@ -227,6 +228,8 @@ function mergeIntoZipFile(zipCode, biz) {
     if (!match.phone   && biz.phone)   { match.phone   = biz.phone;   changed = true; }
     if (!match.website && biz.website) { match.website = biz.website; changed = true; }
     if (!match.address && biz.address) { match.address = biz.address; changed = true; }
+    // Stamp category_group if missing — heals older records on every enrichment pass
+    if (stamp(match)) changed = true;
     if (changed) {
       match.last_enriched = now;
       match.bbb_verified  = true;
@@ -235,7 +238,7 @@ function mergeIntoZipFile(zipCode, biz) {
     if (changed) fs.writeFileSync(filePath, JSON.stringify(existing, null, 2));
     return changed ? 'enriched' : 'skipped';
   } else {
-    existing.push({
+    const newBiz = {
       name:         biz.name,
       phone:        biz.phone   || null,
       website:      biz.website || null,
@@ -250,7 +253,9 @@ function mergeIntoZipFile(zipCode, biz) {
       bbb_verified: true,
       added_at:     now,
       last_enriched: now,
-    });
+    };
+    stamp(newBiz); // always stamp on creation
+    existing.push(newBiz);
     fs.writeFileSync(filePath, JSON.stringify(existing, null, 2));
     return 'added';
   }

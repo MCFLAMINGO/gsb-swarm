@@ -9,10 +9,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 60,
+    "confidence": 56,
     "source": "yellowpages",
     "added_at": "2026-04-21T05:59:11.562Z",
-    "last_enriched": "2026-04-21T05:59:11.562Z"
+    "last_enriched": "2026-04-21T05:59:11.562Z",
+    "category_group": "services"
   },
   {
     "name": "Beachcomber Restaurant",
@@ -24,10 +25,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:24.134Z",
-    "last_enriched": "2026-04-21T06:25:24.134Z"
+    "last_enriched": "2026-04-21T06:25:24.134Z",
+    "category_group": "food"
   },
   {
     "name": "Salt Water Cowboys",
@@ -39,10 +41,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:24.135Z",
-    "last_enriched": "2026-04-21T06:25:24.135Z"
+    "last_enriched": "2026-04-21T06:25:24.135Z",
+    "category_group": "services"
   },
   {
     "name": "Haszard's Open Pit Beef at the Beach",
@@ -54,10 +57,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:24.136Z",
-    "last_enriched": "2026-04-21T06:25:24.136Z"
+    "last_enriched": "2026-04-21T06:25:24.136Z",
+    "category_group": "services"
   },
   {
     "name": "O'Steen's Restaurant",
@@ -69,10 +73,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:24.136Z",
-    "last_enriched": "2026-04-21T06:25:24.136Z"
+    "last_enriched": "2026-04-21T06:25:24.136Z",
+    "category_group": "food"
   },
   {
     "name": "Seafood Kitchen",
@@ -84,10 +89,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:24.136Z",
-    "last_enriched": "2026-04-21T06:25:24.136Z"
+    "last_enriched": "2026-04-21T06:25:24.136Z",
+    "category_group": "food"
   },
   {
     "name": "Lucky Garden",
@@ -99,10 +105,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:24.137Z",
-    "last_enriched": "2026-04-21T06:25:24.137Z"
+    "last_enriched": "2026-04-21T06:25:24.137Z",
+    "category_group": "services"
   },
   {
     "name": "Panama Hatties",
@@ -114,10 +121,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:24.138Z",
-    "last_enriched": "2026-04-21T06:25:24.138Z"
+    "last_enriched": "2026-04-21T06:25:24.138Z",
+    "category_group": "services"
   },
   {
     "name": "Violas Pizza Pasta & Seafood",
@@ -129,10 +137,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:26.990Z",
-    "last_enriched": "2026-04-21T06:25:26.990Z"
+    "last_enriched": "2026-04-21T06:25:26.990Z",
+    "category_group": "food"
   },
   {
     "name": "Purple Olive Restaurant",
@@ -144,10 +153,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:26.991Z",
-    "last_enriched": "2026-04-21T06:25:26.991Z"
+    "last_enriched": "2026-04-21T06:25:26.991Z",
+    "category_group": "food"
   },
   {
     "name": "La Strada Italian Restaurant",
@@ -159,10 +169,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:26.992Z",
-    "last_enriched": "2026-04-21T06:25:26.992Z"
+    "last_enriched": "2026-04-21T06:25:26.992Z",
+    "category_group": "food"
   },
   {
     "name": "Hurricane Grill & Wings",
@@ -174,10 +185,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:26.993Z",
-    "last_enriched": "2026-04-21T06:25:26.993Z"
+    "last_enriched": "2026-04-21T06:25:26.993Z",
+    "category_group": "food"
   },
   {
     "name": "Zaharias Restaurant",
@@ -189,10 +201,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:26.994Z",
-    "last_enriched": "2026-04-21T06:25:26.994Z"
+    "last_enriched": "2026-04-21T06:25:26.994Z",
+    "category_group": "food"
   },
   {
     "name": "Sporks",
@@ -204,10 +217,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:26.996Z",
-    "last_enriched": "2026-04-21T06:25:26.996Z"
+    "last_enriched": "2026-04-21T06:25:26.996Z",
+    "category_group": "services"
   },
   {
     "name": "Redfrog & McToad's",
@@ -219,10 +233,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:26.998Z",
-    "last_enriched": "2026-04-21T06:25:26.998Z"
+    "last_enriched": "2026-04-21T06:25:26.998Z",
+    "category_group": "services"
   },
   {
     "name": "Antonio's New York Style Pizza",
@@ -234,10 +249,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:26.998Z",
-    "last_enriched": "2026-04-21T06:25:26.998Z"
+    "last_enriched": "2026-04-21T06:25:26.998Z",
+    "category_group": "food"
   },
   {
     "name": "Salt Life Food Shack",
@@ -249,10 +265,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:26.999Z",
-    "last_enriched": "2026-04-21T06:25:26.999Z"
+    "last_enriched": "2026-04-21T06:25:26.999Z",
+    "category_group": "services"
   },
   {
     "name": "Sea Oats Caffe",
@@ -264,10 +281,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:26.999Z",
-    "last_enriched": "2026-04-21T06:25:26.999Z"
+    "last_enriched": "2026-04-21T06:25:26.999Z",
+    "category_group": "services"
   },
   {
     "name": "Sandbar Pub",
@@ -279,10 +297,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:30.519Z",
-    "last_enriched": "2026-04-21T06:25:30.519Z"
+    "last_enriched": "2026-04-21T06:25:30.519Z",
+    "category_group": "services"
   },
   {
     "name": "Pelican Pub",
@@ -294,10 +313,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:30.521Z",
-    "last_enriched": "2026-04-21T06:25:30.521Z"
+    "last_enriched": "2026-04-21T06:25:30.521Z",
+    "category_group": "services"
   },
   {
     "name": "Bar None Saloon",
@@ -309,10 +329,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:30.521Z",
-    "last_enriched": "2026-04-21T06:25:30.521Z"
+    "last_enriched": "2026-04-21T06:25:30.521Z",
+    "category_group": "food"
   },
   {
     "name": "O'Loughlin Pub",
@@ -324,10 +345,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:30.522Z",
-    "last_enriched": "2026-04-21T06:25:30.522Z"
+    "last_enriched": "2026-04-21T06:25:30.522Z",
+    "category_group": "services"
   },
   {
     "name": "Ebb Tide Poolside Bar & Grill",
@@ -339,10 +361,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:30.523Z",
-    "last_enriched": "2026-04-21T06:25:30.523Z"
+    "last_enriched": "2026-04-21T06:25:30.523Z",
+    "category_group": "food"
   },
   {
     "name": "Odd Birds Kitchen & Cocktail Lounge",
@@ -354,10 +377,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:30.526Z",
-    "last_enriched": "2026-04-21T06:25:30.526Z"
+    "last_enriched": "2026-04-21T06:25:30.526Z",
+    "category_group": "food"
   },
   {
     "name": "Old Coast Ales",
@@ -369,10 +393,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:30.526Z",
-    "last_enriched": "2026-04-21T06:25:30.526Z"
+    "last_enriched": "2026-04-21T06:25:30.526Z",
+    "category_group": "services"
   },
   {
     "name": "The British Pub",
@@ -384,10 +409,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:32.479Z",
-    "last_enriched": "2026-04-21T06:25:32.479Z"
+    "last_enriched": "2026-04-21T06:25:32.479Z",
+    "category_group": "services"
   },
   {
     "name": "Dune's Cracker House",
@@ -399,10 +425,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 60,
+    "confidence": 56,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:34.513Z",
-    "last_enriched": "2026-04-21T06:25:34.513Z"
+    "last_enriched": "2026-04-21T06:25:34.513Z",
+    "category_group": "services"
   },
   {
     "name": "Mellow Mushroom St. Augustine",
@@ -414,10 +441,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:34.514Z",
-    "last_enriched": "2026-04-21T06:25:34.514Z"
+    "last_enriched": "2026-04-21T06:25:34.514Z",
+    "category_group": "services"
   },
   {
     "name": "Gas Full Service Restaurant",
@@ -429,10 +457,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:34.517Z",
-    "last_enriched": "2026-04-21T06:25:34.517Z"
+    "last_enriched": "2026-04-21T06:25:34.517Z",
+    "category_group": "food"
   },
   {
     "name": "Safe Harbor Seafood, Crescent Beach",
@@ -444,10 +473,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:34.517Z",
-    "last_enriched": "2026-04-21T06:25:34.517Z"
+    "last_enriched": "2026-04-21T06:25:34.517Z",
+    "category_group": "food"
   },
   {
     "name": "World Famous Oasis Restaurant",
@@ -459,10 +489,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:34.518Z",
-    "last_enriched": "2026-04-21T06:25:34.518Z"
+    "last_enriched": "2026-04-21T06:25:34.518Z",
+    "category_group": "food"
   },
   {
     "name": "The Atlantic Beach & Tennis Club",
@@ -474,10 +505,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:34.518Z",
-    "last_enriched": "2026-04-21T06:25:34.518Z"
+    "last_enriched": "2026-04-21T06:25:34.518Z",
+    "category_group": "services"
   },
   {
     "name": "The Tides Oyster Co. & Grill",
@@ -489,10 +521,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:34.523Z",
-    "last_enriched": "2026-04-21T06:25:34.523Z"
+    "last_enriched": "2026-04-21T06:25:34.523Z",
+    "category_group": "food"
   },
   {
     "name": "Crabby's Beachside",
@@ -504,10 +537,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:34.523Z",
-    "last_enriched": "2026-04-21T06:25:34.523Z"
+    "last_enriched": "2026-04-21T06:25:34.523Z",
+    "category_group": "services"
   },
   {
     "name": "Bea's Fine Foods",
@@ -519,10 +553,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:34.525Z",
-    "last_enriched": "2026-04-21T06:25:34.525Z"
+    "last_enriched": "2026-04-21T06:25:34.525Z",
+    "category_group": "services"
   },
   {
     "name": "Brudventure Inc",
@@ -534,10 +569,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:34.526Z",
-    "last_enriched": "2026-04-21T06:25:34.526Z"
+    "last_enriched": "2026-04-21T06:25:34.526Z",
+    "category_group": "services"
   },
   {
     "name": "Shanghai Nobby's",
@@ -549,10 +585,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:34.527Z",
-    "last_enriched": "2026-04-21T06:25:34.527Z"
+    "last_enriched": "2026-04-21T06:25:34.527Z",
+    "category_group": "services"
   },
   {
     "name": "La Taza Coffee Shop",
@@ -564,10 +601,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:38.351Z",
-    "last_enriched": "2026-04-21T06:25:38.351Z"
+    "last_enriched": "2026-04-21T06:25:38.351Z",
+    "category_group": "food"
   },
   {
     "name": "Planet! Sarbez!",
@@ -579,10 +617,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:38.352Z",
-    "last_enriched": "2026-04-21T06:25:38.352Z"
+    "last_enriched": "2026-04-21T06:25:38.352Z",
+    "category_group": "services"
   },
   {
     "name": "Growers Alliance Cafe And Gift Shop",
@@ -594,10 +633,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:38.353Z",
-    "last_enriched": "2026-04-21T06:25:38.353Z"
+    "last_enriched": "2026-04-21T06:25:38.353Z",
+    "category_group": "services"
   },
   {
     "name": "Fresh Market Island",
@@ -605,14 +645,15 @@
     "website": "https://www.yellowpages.com/saint-augustine-fl/mip/fresh-market-island-573817804",
     "address": "1830 A1a S, Saint Augustine, FL, 32080",
     "hours": "Mo-Sa 10:00-06:00, Su 11:00-16:00",
-    "category": "LocalBusiness",
+    "category": "restaurant",
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:42.451Z",
-    "last_enriched": "2026-04-21T06:25:42.451Z"
+    "last_enriched": "2026-04-21T06:25:42.451Z",
+    "category_group": "food"
   },
   {
     "name": "Discount Groceries and More",
@@ -624,10 +665,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:42.454Z",
-    "last_enriched": "2026-04-21T06:25:42.454Z"
+    "last_enriched": "2026-04-21T06:25:42.454Z",
+    "category_group": "services"
   },
   {
     "name": "Lil' Champ Food Stores",
@@ -639,10 +681,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 60,
+    "confidence": 56,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:46.293Z",
-    "last_enriched": "2026-04-21T06:25:46.293Z"
+    "last_enriched": "2026-04-21T06:25:46.293Z",
+    "category_group": "services"
   },
   {
     "name": "BP",
@@ -654,10 +697,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 60,
+    "confidence": 56,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:49.691Z",
-    "last_enriched": "2026-04-21T06:25:49.691Z"
+    "last_enriched": "2026-04-21T06:25:49.691Z",
+    "category_group": "services"
   },
   {
     "name": "A1A Discount Beverages",
@@ -669,10 +713,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:51.583Z",
-    "last_enriched": "2026-04-21T06:25:51.583Z"
+    "last_enriched": "2026-04-21T06:25:51.583Z",
+    "category_group": "services"
   },
   {
     "name": "Gate",
@@ -684,10 +729,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 60,
+    "confidence": 56,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:51.585Z",
-    "last_enriched": "2026-04-21T06:25:51.585Z"
+    "last_enriched": "2026-04-21T06:25:51.585Z",
+    "category_group": "services"
   },
   {
     "name": "7-Eleven",
@@ -699,10 +745,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:25:51.586Z",
-    "last_enriched": "2026-04-21T06:25:51.586Z"
+    "last_enriched": "2026-04-21T06:25:51.586Z",
+    "category_group": "services"
   },
   {
     "name": "Island Family Pharmacy",
@@ -714,10 +761,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:06.184Z",
-    "last_enriched": "2026-04-21T06:26:06.184Z"
+    "last_enriched": "2026-04-21T06:26:06.184Z",
+    "category_group": "health"
   },
   {
     "name": "Eckerd Express Photo",
@@ -725,14 +773,15 @@
     "website": "https://www.yellowpages.com/saint-augustine-fl/mip/eckerd-express-photo-472157925",
     "address": "1920 A1a S, Saint Augustine, FL, 32080",
     "hours": "",
-    "category": "LocalBusiness",
+    "category": "restaurant",
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 60,
+    "confidence": 56,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:06.184Z",
-    "last_enriched": "2026-04-21T06:26:06.184Z"
+    "last_enriched": "2026-04-21T06:26:06.184Z",
+    "category_group": "food"
   },
   {
     "name": "CVS Pharmacy",
@@ -744,10 +793,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 68,
+    "confidence": 64,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:06.185Z",
-    "last_enriched": "2026-04-21T06:26:06.185Z"
+    "last_enriched": "2026-04-21T06:26:06.185Z",
+    "category_group": "health"
   },
   {
     "name": "Summer Lloyd-turne",
@@ -759,10 +809,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 60,
+    "confidence": 56,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:08.049Z",
-    "last_enriched": "2026-04-21T06:26:08.049Z"
+    "last_enriched": "2026-04-21T06:26:08.049Z",
+    "category_group": "services"
   },
   {
     "name": "Dioneda, Nathaniel D",
@@ -774,10 +825,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 60,
+    "confidence": 56,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:08.051Z",
-    "last_enriched": "2026-04-21T06:26:08.051Z"
+    "last_enriched": "2026-04-21T06:26:08.051Z",
+    "category_group": "services"
   },
   {
     "name": "Murphy, Todd",
@@ -789,10 +841,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 60,
+    "confidence": 56,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:08.051Z",
-    "last_enriched": "2026-04-21T06:26:08.051Z"
+    "last_enriched": "2026-04-21T06:26:08.051Z",
+    "category_group": "services"
   },
   {
     "name": "Christy Longo",
@@ -804,10 +857,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 60,
+    "confidence": 56,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:08.052Z",
-    "last_enriched": "2026-04-21T06:26:08.052Z"
+    "last_enriched": "2026-04-21T06:26:08.052Z",
+    "category_group": "services"
   },
   {
     "name": "St Augustine Oral & Facial Surgical Center",
@@ -819,10 +873,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:13.506Z",
-    "last_enriched": "2026-04-21T06:26:13.506Z"
+    "last_enriched": "2026-04-21T06:26:13.506Z",
+    "category_group": "services"
   },
   {
     "name": "Hucke, Ronald DMD",
@@ -834,10 +889,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:13.509Z",
-    "last_enriched": "2026-04-21T06:26:13.509Z"
+    "last_enriched": "2026-04-21T06:26:13.509Z",
+    "category_group": "services"
   },
   {
     "name": "Anastasia Dental Associates",
@@ -849,10 +905,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:13.511Z",
-    "last_enriched": "2026-04-21T06:26:13.511Z"
+    "last_enriched": "2026-04-21T06:26:13.511Z",
+    "category_group": "health"
   },
   {
     "name": "Coast Dental",
@@ -864,10 +921,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:13.512Z",
-    "last_enriched": "2026-04-21T06:26:13.512Z"
+    "last_enriched": "2026-04-21T06:26:13.512Z",
+    "category_group": "health"
   },
   {
     "name": "Micheal W Domingoes, DMD",
@@ -879,10 +937,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 60,
+    "confidence": 56,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:13.513Z",
-    "last_enriched": "2026-04-21T06:26:13.513Z"
+    "last_enriched": "2026-04-21T06:26:13.513Z",
+    "category_group": "services"
   },
   {
     "name": "Tavary Bert A Dds",
@@ -894,10 +953,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:13.514Z",
-    "last_enriched": "2026-04-21T06:26:13.514Z"
+    "last_enriched": "2026-04-21T06:26:13.514Z",
+    "category_group": "health"
   },
   {
     "name": "Frank Diaz, DMD",
@@ -909,10 +969,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:13.519Z",
-    "last_enriched": "2026-04-21T06:26:13.519Z"
+    "last_enriched": "2026-04-21T06:26:13.519Z",
+    "category_group": "services"
   },
   {
     "name": "Littles Smiles",
@@ -924,10 +985,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:13.521Z",
-    "last_enriched": "2026-04-21T06:26:13.521Z"
+    "last_enriched": "2026-04-21T06:26:13.521Z",
+    "category_group": "health"
   },
   {
     "name": "Gordon Dental Associates",
@@ -939,10 +1001,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:15.402Z",
-    "last_enriched": "2026-04-21T06:26:15.402Z"
+    "last_enriched": "2026-04-21T06:26:15.402Z",
+    "category_group": "health"
   },
   {
     "name": "Zita Narvaez, D.D.S.",
@@ -954,10 +1017,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 70,
+    "confidence": 66,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:15.404Z",
-    "last_enriched": "2026-04-21T06:26:15.404Z"
+    "last_enriched": "2026-04-21T06:26:15.404Z",
+    "category_group": "services"
   },
   {
     "name": "Salt Run Family Dentistry",
@@ -969,10 +1033,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 78,
+    "confidence": 74,
     "source": "yellowpages",
     "added_at": "2026-04-21T06:26:15.405Z",
-    "last_enriched": "2026-04-21T06:26:15.405Z"
+    "last_enriched": "2026-04-21T06:26:15.405Z",
+    "category_group": "health"
   },
   {
     "name": "Energy Seal Foam Insulation",
@@ -984,10 +1049,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 53,
+    "confidence": 49,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "High Tide Roofing & Waterproofing Inc",
@@ -999,10 +1065,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 73,
+    "confidence": 69,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "Atlantic Surf Construction and Home Inspection Inc",
@@ -1014,10 +1081,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 63,
+    "confidence": 59,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "Pinch A Penny",
@@ -1029,10 +1097,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 68,
+    "confidence": 64,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "St. Augustine Beach Pool Service",
@@ -1044,10 +1113,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 68,
+    "confidence": 64,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "Welton Pool & Spa Service Inc",
@@ -1059,10 +1129,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 68,
+    "confidence": 64,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "All Trades Of North Florida",
@@ -1074,10 +1145,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 63,
+    "confidence": 59,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "Weather Engineers Inc",
@@ -1089,10 +1161,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 68,
+    "confidence": 64,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "J&M Roofing",
@@ -1104,10 +1177,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 53,
+    "confidence": 49,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "Charles Bradley Building & Home Inspection",
@@ -1119,10 +1193,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 63,
+    "confidence": 59,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "Southern Evaluations LLC",
@@ -1134,10 +1209,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 63,
+    "confidence": 59,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "Terra Home Inspections LLC",
@@ -1149,10 +1225,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 63,
+    "confidence": 59,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "KC Inspections Inc",
@@ -1164,10 +1241,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 63,
+    "confidence": 59,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "Precise Home Inspections LLC",
@@ -1179,10 +1257,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 63,
+    "confidence": 59,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "Nu Element Home Inspection LLC",
@@ -1194,10 +1273,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 63,
+    "confidence": 59,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "Bluebird Home Inspections LLC",
@@ -1209,10 +1289,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 63,
+    "confidence": 59,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "Pointer Home Inspections",
@@ -1224,10 +1305,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 63,
+    "confidence": 59,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "Inspectz Jax",
@@ -1239,10 +1321,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 63,
+    "confidence": 59,
     "source": "gap_fill_construction",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "construction"
   },
   {
     "name": "Millennium Physician Group – St. Augustine Beach",
@@ -1254,10 +1337,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 73,
+    "confidence": 69,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "Crescent Beach Care",
@@ -1269,10 +1353,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 73,
+    "confidence": 69,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "St. Augustine Center For Dental Excellence",
@@ -1284,10 +1369,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 73,
+    "confidence": 69,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "Coast Dental – Anastasia Island",
@@ -1299,10 +1385,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 73,
+    "confidence": 69,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "Seabreeze Dental Group – St. Augustine",
@@ -1314,10 +1401,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 73,
+    "confidence": 69,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "Walgreens Pharmacy – A1A South",
@@ -1329,10 +1417,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 73,
+    "confidence": 69,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "CVS Pharmacy – A1A South",
@@ -1344,10 +1433,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 73,
+    "confidence": 69,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "LabCorp – St. Augustine A1A",
@@ -1359,10 +1449,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 58,
+    "confidence": 54,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "Maetozo Total Woman's Care",
@@ -1374,10 +1465,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 73,
+    "confidence": 69,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "Elase Med Spa – St. Augustine",
@@ -1389,10 +1481,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 73,
+    "confidence": 69,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "MyEyeDr – St. Augustine A1A",
@@ -1404,10 +1497,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 58,
+    "confidence": 54,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "CORA Physical Therapy – St. Augustine Beach",
@@ -1419,10 +1513,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 73,
+    "confidence": 69,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "Allegro St. Augustine",
@@ -1434,10 +1529,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 53,
+    "confidence": 49,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "Paediatric Associates – St. Augustine",
@@ -1449,10 +1545,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 53,
+    "confidence": 49,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "FM Medical Urgent Care – St. Augustine Beach",
@@ -1464,10 +1561,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 68,
+    "confidence": 64,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "Crescent Beach Care – Urgent Care",
@@ -1479,10 +1577,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 73,
+    "confidence": 69,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "Optometry Care 32080 – Plantation Island",
@@ -1494,10 +1593,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 68,
+    "confidence": 64,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "Millennium Physician Group – Anastasia Island",
@@ -1509,10 +1609,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 73,
+    "confidence": 69,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "Pediatric Associates – St. Augustine Beach",
@@ -1524,10 +1625,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 68,
+    "confidence": 64,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "Seabreeze Dental Group – A1A Beach",
@@ -1539,10 +1641,11 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 68,
+    "confidence": 64,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   },
   {
     "name": "CVS Pharmacy – A1A Beach",
@@ -1554,9 +1657,10 @@
     "zip": "32080",
     "lat": null,
     "lon": null,
-    "confidence": 53,
+    "confidence": 49,
     "source": "gap_fill_healthcare",
     "added_at": "2026-04-21T15:23:55.686Z",
-    "last_enriched": "2026-04-21T15:23:55.686Z"
+    "last_enriched": "2026-04-21T15:23:55.686Z",
+    "category_group": "health"
   }
 ]

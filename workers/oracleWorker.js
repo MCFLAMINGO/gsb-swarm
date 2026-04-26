@@ -18,6 +18,7 @@
 
 const path = require('path');
 const fs   = require('fs');
+const { stamp } = require('../lib/categoryNormalizer');
 
 // flZipRegistry — Census ACS population + income fallback when no zone/ocean data
 let _flRegistry = null;
@@ -209,7 +210,14 @@ function loadBusinesses(zip) {
   const zipFile = path.join(DATA_DIR, 'zips', `${zip}.json`);
   if (fs.existsSync(zipFile)) {
     const d = readJson(zipFile);
-    return Array.isArray(d) ? d : (d?.businesses || []);
+    const arr = Array.isArray(d) ? d : (d?.businesses || []);
+    // Self-heal: stamp any record missing category_group and write back
+    let healed = 0;
+    for (const b of arr) { if (stamp(b)) healed++; }
+    if (healed > 0) {
+      try { fs.writeFileSync(zipFile, JSON.stringify(arr, null, 2)); } catch (_) {}
+    }
+    return arr;
   }
   // Fall back to scanning localIntel.json
   const main = path.join(DATA_DIR, 'localIntel.json');
@@ -532,19 +540,13 @@ function computeOracle(zip, name) {
         health:       businesses.filter(b => b.category_group === 'health').length,
         retail:       businesses.filter(b => b.category_group === 'retail').length,
         construction: businesses.filter(b => b.category_group === 'construction').length,
-        auto:         businesses.filter(b => b.category_group === 'auto').length,
-        banking:      businesses.filter(b => b.category_group === 'banking').length,
+        automotive:   businesses.filter(b => b.category_group === 'automotive').length,
+        finance:      businesses.filter(b => b.category_group === 'finance').length,
         fitness:      businesses.filter(b => b.category_group === 'fitness').length,
         hospitality:  businesses.filter(b => b.category_group === 'hospitality').length,
-        real_estate:  businesses.filter(b => b.category_group === 'real_estate').length,
         legal:        businesses.filter(b => b.category_group === 'legal').length,
-        beauty:       businesses.filter(b => b.category_group === 'beauty').length,
-        grocery:      businesses.filter(b => b.category_group === 'grocery').length,
-        fuel:         businesses.filter(b => b.category_group === 'fuel').length,
-        pets:         businesses.filter(b => b.category_group === 'pets').length,
-        professional: businesses.filter(b => b.category_group === 'professional').length,
-        services:     businesses.filter(b => b.category_group === 'services').length,
         civic:        businesses.filter(b => b.category_group === 'civic').length,
+        services:     businesses.filter(b => b.category_group === 'services').length,
       },
       dominant_sector: (() => {
         const groups = {};

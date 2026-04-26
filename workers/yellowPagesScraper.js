@@ -19,6 +19,7 @@ const fs     = require('fs');
 
 const DATA_DIR  = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const { computeConfidence } = require('../lib/computeConfidence');
+const { stamp } = require('../lib/categoryNormalizer');
 const ZIPS_DIR  = path.join(DATA_DIR, 'zips');  // flat-array format, matches zipAgent + MCP
 
 // Infer OSM-style category from business name when schema.org type is generic 'LocalBusiness'
@@ -225,6 +226,8 @@ function mergeIntoZipFile(zipCode, biz) {
     if (!existing.phone   && biz.phone)   { existing.phone   = biz.phone;   changed = true; }
     if (!existing.website && biz.website) { existing.website = biz.website; changed = true; }
     if (!existing.hours   && biz.hours)   { existing.hours   = biz.hours;   changed = true; }
+    // Stamp category_group if missing — heals older records on every enrichment pass
+    if (stamp(existing)) changed = true;
     if (changed) {
       existing.last_enriched = now;
       existing.yp_source = true;
@@ -248,6 +251,7 @@ function mergeIntoZipFile(zipCode, biz) {
       added_at:     now,
       last_enriched: now,
     };
+    stamp(newBiz); // always stamp on creation
     newBiz.confidence = computeConfidence(newBiz);
     data.push(newBiz);
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
