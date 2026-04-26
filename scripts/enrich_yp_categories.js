@@ -24,7 +24,7 @@ const https  = require('https');
 const { Pool } = require('pg');
 const pool = new Pool({
   connectionString: process.env.LOCAL_INTEL_DB_URL
-    || 'postgresql://postgres:myufFnkSigImGnSylwyIjYmLCvkthQUr@turntable.proxy.rlwy.net:25739/railway',
+    // DB URL must be set via LOCAL_INTEL_DB_URL environment variable
   ssl: { rejectUnauthorized: false },
   max: 5,
 });
