@@ -27,8 +27,21 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const ACS_DIR  = path.join(DATA_DIR, 'acs');
 const ZIPS_DIR = path.join(DATA_DIR, 'zips');
 
-// All ZIPs we cover — read dynamically from zips/ directory
-function getAllZips() {
+// All ZIPs we cover — Postgres first (durable), flat file fallback for local dev
+async function getAllZips() {
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const { getDistinctZips } = require('../lib/pgStore');
+      const zips = await getDistinctZips();
+      if (zips.length > 0) {
+        console.log(`[acsWorker] ZIP discovery: ${zips.length} ZIPs from Postgres`);
+        return zips;
+      }
+    } catch (e) {
+      console.warn('[acsWorker] Postgres ZIP discovery failed, falling back to flat files:', e.message);
+    }
+  }
+  // Local dev fallback
   if (!fs.existsSync(ZIPS_DIR)) return [];
   return fs.readdirSync(ZIPS_DIR)
     .filter(f => f.endsWith('.json') && f !== '_index.json')
@@ -180,7 +193,7 @@ async function processZip(zip) {
 
 // ── Main run ─────────────────────────────────────────────────────────────────
 async function run() {
-  const zips = getAllZips();
+  const zips = await getAllZips();
   console.log(`[acsWorker] Starting ACS pull for ${zips.length} ZIPs`);
   let ok = 0, fail = 0;
 

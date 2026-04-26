@@ -152,7 +152,7 @@ function ensureDirs() {
 // Employment + establishment count by NAICS sector, per ZIP
 // Vintage 2018 — pulled once on startup, never re-fetched (data doesn't change)
 
-async function ingestZBP() {
+async function ingestZBP(targetZips = ALL_ZIPS) {
   const stateFile = path.join(LAYER_DIR, '_zbp_ingested.json');
   if (fs.existsSync(stateFile)) {
     const s = readJson(stateFile);
@@ -161,7 +161,7 @@ async function ingestZBP() {
   }
 
   console.log('[censusLayer] ZBP: fetching 2018 ZIP Business Patterns for all ZIPs...');
-  const ZIP_LIST = ALL_ZIPS.map(z => z.zip).join(',');
+  const ZIP_LIST = targetZips.map(z => z.zip).join(',');
 
   // Fetch all sectors for all ZIPs in one call
   const raw = await fetchJson(
@@ -178,7 +178,7 @@ async function ingestZBP() {
     byZip[zip].push(row);
   }
 
-  const zipMeta = Object.fromEntries(ALL_ZIPS.map(z => [z.zip, z]));
+  const zipMeta = Object.fromEntries(targetZips.map(z => [z.zip, z]));
 
   for (const [zip, zipRows] of Object.entries(byZip)) {
     const total    = zipRows.find(r => r.NAICS2017 === '00') || {};
@@ -248,7 +248,7 @@ async function ingestZBP() {
 // Current (2023) sector health at county level
 // Pulled monthly — data updates annually, but monthly check catches the update
 
-async function ingestCBP() {
+async function ingestCBP(targetZips = ALL_ZIPS) {
   console.log('[censusLayer] CBP: fetching 2023 County Business Patterns...');
 
   const countySectors = {};
@@ -295,7 +295,7 @@ async function ingestCBP() {
       console.log(`[censusLayer] CBP: ${name} — ${toN(total.ESTAB)} estab, ${toN(total.EMP).toLocaleString()} emp`);
 
       // Merge county share into each ZIP's census layer file
-      const countyZips = ALL_ZIPS.filter(z => z.county === name);
+      const countyZips = targetZips.filter(z => z.county === name);
       for (const { zip } of countyZips) {
         const file     = path.join(LAYER_DIR, `${zip}.json`);
         const existing = readJson(file) || { zip };
@@ -390,7 +390,7 @@ const SJC_TRACT_ZIP = {
   '12109022000': [{ zip: '32095', w: 1.0 }],
 };
 
-async function ingestPDB() {
+async function ingestPDB(targetZips = ALL_ZIPS) {
   console.log('[censusLayer] PDB: fetching 2024 Planning Database (SJC + Duval + Clay + Nassau)...');
 
   // Accumulators for weighted averages per ZIP
@@ -614,6 +614,27 @@ function shouldRun(key, intervalMs) {
 
 // ── Main run ───────────────────────────────────────────────────────────────────
 
+// Returns the working ZIP list: Postgres-discovered ZIPs enriched with county metadata
+// from the hardcoded ALL_ZIPS registry. Falls back to ALL_ZIPS if Postgres unavailable.
+async function getTargetZips() {
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const { getDistinctZips } = require('../lib/pgStore');
+      const pgZips = await getDistinctZips();
+      if (pgZips.length > 0) {
+        // Enrich with county/state metadata from ALL_ZIPS where known
+        const metaIndex = Object.fromEntries(ALL_ZIPS.map(z => [z.zip, z]));
+        const result = pgZips.map(zip => metaIndex[zip] || { zip, name: zip, county: 'Unknown', state: '12', countyFips: '000' });
+        console.log(`[censusLayer] ZIP discovery: ${result.length} ZIPs from Postgres (${ALL_ZIPS.length} had county metadata)`);
+        return result;
+      }
+    } catch (e) {
+      console.warn('[censusLayer] Postgres ZIP discovery failed, using hardcoded ALL_ZIPS:', e.message);
+    }
+  }
+  return ALL_ZIPS;
+}
+
 async function runCensusLayer() {
   ensureDirs();
   console.log('[censusLayer] Starting census layer update...');
@@ -623,7 +644,8 @@ async function runCensusLayer() {
 
   // ZBP: once only (state file controls this internally)
   try {
-    await ingestZBP();
+    const targetZips = await getTargetZips();
+    await ingestZBP(targetZips);
   } catch (err) {
     console.error('[censusLayer] ZBP error:', err.message);
   }
@@ -631,7 +653,8 @@ async function runCensusLayer() {
   // CBP: monthly
   if (shouldRun('cbp_last_run', MS_MONTHLY)) {
     try {
-      await ingestCBP();
+      const targetZips2 = await getTargetZips();
+      await ingestCBP(targetZips2);
       writeSchedule({ cbp_last_run: new Date().toISOString() });
     } catch (err) {
       console.error('[censusLayer] CBP error:', err.message);
@@ -643,7 +666,8 @@ async function runCensusLayer() {
   // PDB: quarterly
   if (shouldRun('pdb_last_run', MS_QUARTERLY)) {
     try {
-      await ingestPDB();
+      const targetZips3 = await getTargetZips();
+      await ingestPDB(targetZips3);
       writeSchedule({ pdb_last_run: new Date().toISOString() });
       stampOracleConfidence();
     } catch (err) {

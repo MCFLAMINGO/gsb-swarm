@@ -238,23 +238,45 @@ function needsRebuild(zip) {
 
 // ── Run one pass — build/rebuild all stale briefs ─────────────────────────────
 async function runBriefPass() {
-  if (!fs.existsSync(ZIPS_DIR)) {
-    console.log('[zip-brief] data/zips/ not found — skipping');
-    return;
-  }
   fs.mkdirSync(BRIEFS_DIR, { recursive: true });
 
-  const zipFiles = fs.readdirSync(ZIPS_DIR).filter(f => f.endsWith('.json'));
+  // ZIP discovery: Postgres first, flat file fallback
+  let allZips = [];
+  let usePostgres = false;
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const { getDistinctZips } = require('../lib/pgStore');
+      allZips = await getDistinctZips();
+      if (allZips.length > 0) {
+        usePostgres = true;
+        console.log(`[zip-brief] ZIP discovery: ${allZips.length} ZIPs from Postgres`);
+      }
+    } catch (e) {
+      console.warn('[zip-brief] Postgres ZIP discovery failed, falling back:', e.message);
+    }
+  }
+  if (!usePostgres) {
+    if (!fs.existsSync(ZIPS_DIR)) {
+      console.log('[zip-brief] data/zips/ not found — skipping');
+      return;
+    }
+    allZips = fs.readdirSync(ZIPS_DIR).filter(f => f.endsWith('.json')).map(f => f.replace('.json', ''));
+  }
   let built = 0, skipped = 0, errors = 0;
 
-  console.log(`[zip-brief] Checking ${zipFiles.length} ZIPs for stale briefs`);
+  console.log(`[zip-brief] Checking ${allZips.length} ZIPs for stale briefs`);
 
-  for (const file of zipFiles) {
-    const zip = file.replace('.json', '');
+  for (const zip of allZips) {
     if (!needsRebuild(zip)) { skipped++; continue; }
 
     try {
-      const businesses = JSON.parse(fs.readFileSync(path.join(ZIPS_DIR, file), 'utf8'));
+      let businesses;
+      if (usePostgres) {
+        const { getBusinessesByZip } = require('../lib/pgStore');
+        businesses = await getBusinessesByZip(zip);
+      } else {
+        businesses = JSON.parse(fs.readFileSync(path.join(ZIPS_DIR, `${zip}.json`), 'utf8'));
+      }
       if (!Array.isArray(businesses)) { errors++; continue; }
 
       const brief = buildBrief(zip, businesses);
@@ -262,7 +284,7 @@ async function runBriefPass() {
       built++;
 
       if (built % 20 === 0) {
-        console.log(`[zip-brief] Built ${built}/${zipFiles.length} briefs`);
+        console.log(`[zip-brief] Built ${built}/${allZips.length} briefs`);
       }
     } catch (err) {
       console.warn(`[zip-brief] Error building brief for ${zip}:`, err.message);

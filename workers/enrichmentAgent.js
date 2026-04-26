@@ -612,28 +612,54 @@ async function enrichmentCycle() {
   stats.running = true;
   stats.lastRun = new Date().toISOString();
 
-  if (!fs.existsSync(ZIPS_DIR)) {
-    console.log('[EnrichmentAgent] No zips dir yet — waiting for ZipAgent');
-    stats.running = false;
-    return;
+  // ZIP discovery: Postgres first, flat file fallback for local dev
+  let allZips = [];
+  let usePostgres = false;
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const { getDistinctZips } = require('../lib/pgStore');
+      allZips = await getDistinctZips();
+      if (allZips.length > 0) {
+        usePostgres = true;
+        console.log(`[EnrichmentAgent] ZIP discovery: ${allZips.length} ZIPs from Postgres`);
+      }
+    } catch (e) {
+      console.warn('[EnrichmentAgent] Postgres ZIP discovery failed, falling back to flat files:', e.message);
+    }
   }
-
-  const zipFiles = fs.readdirSync(ZIPS_DIR).filter(f => f.endsWith('.json'));
-  console.log(`[EnrichmentAgent] Scanning ${zipFiles.length} zip files`);
+  if (!usePostgres) {
+    if (!fs.existsSync(ZIPS_DIR)) {
+      console.log('[EnrichmentAgent] No zips dir yet — waiting for ZipAgent');
+      stats.running = false;
+      return;
+    }
+    allZips = fs.readdirSync(ZIPS_DIR)
+      .filter(f => f.endsWith('.json'))
+      .map(f => f.replace('.json', ''));
+    console.log(`[EnrichmentAgent] ZIP discovery: ${allZips.length} ZIPs from flat files`);
+  }
 
   const log = loadLog();
   let totalEnriched = 0;
   const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
 
-  for (const file of zipFiles) {
+  for (const zip of allZips) {
     let businesses;
-    try { businesses = JSON.parse(fs.readFileSync(path.join(ZIPS_DIR, file))); }
-    catch (e) { continue; }
-    // Guard: skip files that aren't business arrays (e.g. OSM single-object files)
-    if (!Array.isArray(businesses)) {
-      console.warn(`[EnrichmentAgent] Skipping ${file} — not an array (type: ${typeof businesses})`);
-      continue;
+    // Business reads: Postgres first, flat file fallback
+    if (usePostgres) {
+      try {
+        const { getBusinessesByZip } = require('../lib/pgStore');
+        businesses = await getBusinessesByZip(zip);
+      } catch (e) {
+        console.warn(`[EnrichmentAgent] Postgres read failed for ${zip}:`, e.message);
+        continue;
+      }
+    } else {
+      const file = path.join(ZIPS_DIR, `${zip}.json`);
+      try { businesses = JSON.parse(fs.readFileSync(file)); }
+      catch (e) { continue; }
     }
+    if (!Array.isArray(businesses)) continue;
 
     // Candidates: needs enrichment OR is STALE/COLD (re-enrichment due)
     // Never re-run within 24h regardless of tier
@@ -673,12 +699,26 @@ async function enrichmentCycle() {
     }
 
     if (fileChanged) {
-      fs.writeFileSync(path.join(ZIPS_DIR, file), JSON.stringify(businesses, null, 2));
-      console.log(`[EnrichmentAgent] Updated ${file}`);
+      // Write back to Postgres (individual upserts for enriched businesses)
+      if (usePostgres) {
+        const db2 = require('../lib/db');
+        for (const biz of businesses) {
+          try {
+            await db2.upsertBusiness({
+              ...biz,
+              source_id: biz.primary_source || 'enrichment',
+            });
+          } catch (_) { /* best effort */ }
+        }
+        console.log(`[EnrichmentAgent] Postgres updated for ZIP ${zip}`);
+      } else {
+        fs.writeFileSync(path.join(ZIPS_DIR, `${zip}.json`), JSON.stringify(businesses, null, 2));
+        console.log(`[EnrichmentAgent] Flat file updated for ZIP ${zip}`);
+      }
     }
   }
 
-  stats.total   += zipFiles.length;
+  stats.total   += allZips.length;
   stats.enriched += totalEnriched;
   stats.running  = false;
   console.log(`[EnrichmentAgent] Cycle done — enriched ${totalEnriched} businesses`);

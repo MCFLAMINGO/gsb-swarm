@@ -306,27 +306,32 @@ async function runBedrock(mode = 'incremental') {
   console.log(`[bedrockWorker] Starting ${mode} run at ${new Date().toISOString()}`);
   ensureDirs();
 
+  // ZIP discovery: Postgres first (all ZIPs we have businesses for),
+  // fall back to hardcoded SJC_ZIPS so bedrock always runs something.
+  // processZip needs {zip, lat, lon, name} — we pull lat/lon from flZipRegistry.
   let targetZips = SJC_ZIPS;
-  const queueFile    = path.join(DATA_DIR, 'zipQueue.json');
-  const coverageFile = path.join(DATA_DIR, 'zipCoverage.json');
-
-  try {
-    const queue = JSON.parse(fs.readFileSync(queueFile, 'utf8'));
-    if (Array.isArray(queue) && queue.length > 0) {
-      const queueZips = queue.map(z => typeof z === 'string' ? z : z.zip).filter(Boolean);
-      const filtered = SJC_ZIPS.filter(z => queueZips.includes(z.zip));
-      if (filtered.length > 0) targetZips = filtered;
-    }
-  } catch (_) {
+  if (process.env.LOCAL_INTEL_DB_URL) {
     try {
-      const coverage = JSON.parse(fs.readFileSync(coverageFile, 'utf8'));
-      const coveredZips = Array.isArray(coverage)
-        ? coverage.map(z => typeof z === 'string' ? z : z.zip).filter(Boolean)
-        : Object.keys(coverage);
-      const filtered = SJC_ZIPS.filter(z => coveredZips.includes(z.zip));
-      if (filtered.length > 0) targetZips = filtered;
-    } catch (_2) {
-      // Use hardcoded SJC_ZIPS
+      const { getDistinctZips } = require('../lib/pgStore');
+      const { getAllZips: flGetAll } = require('./flZipRegistry');
+      const pgZips = await getDistinctZips();
+      if (pgZips.length > 0) {
+        const flIndex = Object.fromEntries(flGetAll().map(z => [z.zip, z]));
+        // SJC_ZIPS index for lat/lon on known ZIPs
+        const sjcIndex = Object.fromEntries(SJC_ZIPS.map(z => [z.zip, z]));
+        targetZips = pgZips.map(zip => {
+          const known = sjcIndex[zip] || flIndex[zip];
+          return {
+            zip,
+            lat:  known?.lat  || known?.centroid?.lat  || 0,
+            lon:  known?.lon  || known?.centroid?.lon  || 0,
+            name: known?.name || known?.label          || zip,
+          };
+        }).filter(z => z.lat !== 0 || z.lon !== 0); // skip ZIPs with no centroid data
+        console.log(`[bedrockWorker] ZIP discovery: ${targetZips.length} ZIPs from Postgres`);
+      }
+    } catch (e) {
+      console.warn('[bedrockWorker] Postgres ZIP discovery failed, using SJC_ZIPS:', e.message);
     }
   }
 

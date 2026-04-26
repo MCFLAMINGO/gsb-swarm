@@ -151,17 +151,33 @@ async function computeSurfaceCurrent() {
 
   ensureDir(SURFACE_CURRENT_DIR);
 
-  // Discover all ZIP files
-  let zipFiles;
-  try {
-    zipFiles = fs.readdirSync(ZIPS_DIR).filter(f => f.endsWith('.json'));
-  } catch (e) {
-    console.log('[surfaceCurrentWorker] No zips directory found or empty:', e.message);
-    zipFiles = [];
+  // ZIP discovery: Postgres first, flat file fallback for local dev
+  let allZips = [];
+  let usePostgres = false;
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const { getDistinctZips } = require('../lib/pgStore');
+      allZips = await getDistinctZips();
+      if (allZips.length > 0) {
+        usePostgres = true;
+        console.log(`[surfaceCurrentWorker] ZIP discovery: ${allZips.length} ZIPs from Postgres`);
+      }
+    } catch (e) {
+      console.warn('[surfaceCurrentWorker] Postgres ZIP discovery failed, falling back to flat files:', e.message);
+    }
+  }
+  if (!usePostgres) {
+    try {
+      allZips = fs.readdirSync(ZIPS_DIR)
+        .filter(f => f.endsWith('.json'))
+        .map(f => f.replace('.json', ''));
+    } catch (e) {
+      console.log('[surfaceCurrentWorker] No zips directory found or empty:', e.message);
+    }
   }
 
-  if (zipFiles.length === 0) {
-    console.log('[surfaceCurrentWorker] No ZIP files to process.');
+  if (allZips.length === 0) {
+    console.log('[surfaceCurrentWorker] No ZIPs to process.');
     return;
   }
 
@@ -169,22 +185,31 @@ async function computeSurfaceCurrent() {
   const month = now.getMonth() + 1; // 1-based
   const index = {};
 
-  for (const file of zipFiles) {
-    const zip = file.replace('.json', '');
-    const zipFilePath = path.join(ZIPS_DIR, file);
+  for (const zip of allZips) {
+    const zipFilePath = path.join(ZIPS_DIR, `${zip}.json`);
 
     // ── Read businesses ──────────────────────────────────────────────────────
+    // ── Read businesses — Postgres first, flat file fallback ──────────────────
     let businesses = [];
-    let fileMtimeMs = Date.now();
-    try {
-      const stat = fs.statSync(zipFilePath);
-      fileMtimeMs = stat.mtimeMs;
-      const raw = fs.readFileSync(zipFilePath, 'utf8');
-      businesses = JSON.parse(raw);
-      if (!Array.isArray(businesses)) businesses = [];
-    } catch (e) {
-      console.log(`[surfaceCurrentWorker] Could not read ${file}: ${e.message}`);
-      continue;
+    const fileMtimeMs = Date.now();
+    if (usePostgres) {
+      try {
+        const { getBusinessesByZip } = require('../lib/pgStore');
+        const rows = await getBusinessesByZip(zip);
+        businesses = Array.isArray(rows) ? rows : [];
+      } catch (e) {
+        console.log(`[surfaceCurrentWorker] Postgres read failed for ${zip}: ${e.message}`);
+        continue;
+      }
+    } else {
+      try {
+        const raw = fs.readFileSync(zipFilePath, 'utf8');
+        businesses = JSON.parse(raw);
+        if (!Array.isArray(businesses)) businesses = [];
+      } catch (e) {
+        console.log(`[surfaceCurrentWorker] Could not read flat file for ${zip}: ${e.message}`);
+        continue;
+      }
     }
 
     const currentCount = businesses.length;
@@ -192,11 +217,20 @@ async function computeSurfaceCurrent() {
     // ── Apply confidence decay ───────────────────────────────────────────────
     businesses = applyConfidenceDecay(businesses);
 
-    // Write updated businesses back to the zip file (atomic)
-    try {
-      atomicWrite(zipFilePath, businesses);
-    } catch (e) {
-      console.log(`[surfaceCurrentWorker] Could not write back ${file}: ${e.message}`);
+    // Write updated businesses back — Postgres if available, flat file fallback
+    if (usePostgres) {
+      try {
+        const db2 = require('../lib/db');
+        for (const biz of businesses) {
+          await db2.upsertBusiness({ ...biz, source_id: biz.primary_source || 'surface' }).catch(() => {});
+        }
+      } catch (e) {
+        console.log(`[surfaceCurrentWorker] Postgres write-back failed for ${zip}: ${e.message}`);
+      }
+    } else {
+      try { atomicWrite(zipFilePath, businesses); } catch (e) {
+        console.log(`[surfaceCurrentWorker] Could not write back flat file for ${zip}: ${e.message}`);
+      }
     }
 
     // ── Load previous snapshot ───────────────────────────────────────────────

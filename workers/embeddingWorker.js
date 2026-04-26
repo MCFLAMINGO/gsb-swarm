@@ -156,7 +156,19 @@ function needsEmbed(zip) {
 
 // ── Embed one ZIP ─────────────────────────────────────────────────────────────
 async function embedZip(zip) {
-  const businesses = JSON.parse(fs.readFileSync(path.join(ZIPS_DIR, `${zip}.json`), 'utf8'));
+  let businesses;
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const { getBusinessesByZip } = require('../lib/pgStore');
+      businesses = await getBusinessesByZip(zip);
+    } catch (e) {
+      console.warn(`[embedding] Postgres read failed for ${zip}:`, e.message);
+    }
+  }
+  if (!businesses) {
+    try { businesses = JSON.parse(fs.readFileSync(path.join(ZIPS_DIR, `${zip}.json`), 'utf8')); }
+    catch (_) { return; }
+  }
   if (!Array.isArray(businesses) || !businesses.length) return;
 
   const texts = businesses.map(businessToText);
@@ -234,11 +246,24 @@ async function runEmbedPass() {
     return;
   }
 
-  const zipFiles = fs.readdirSync(ZIPS_DIR).filter(f => f.endsWith('.json'));
+  // ZIP discovery: Postgres first, flat file fallback
+  let allZips = [];
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const { getDistinctZips } = require('../lib/pgStore');
+      allZips = await getDistinctZips();
+      if (allZips.length > 0) console.log(`[embedding] ZIP discovery: ${allZips.length} ZIPs from Postgres`);
+    } catch (e) {
+      console.warn('[embedding] Postgres ZIP discovery failed, falling back:', e.message);
+    }
+  }
+  if (allZips.length === 0) {
+    try { allZips = fs.readdirSync(ZIPS_DIR).filter(f => f.endsWith('.json')).map(f => f.replace('.json', '')); }
+    catch (_) {}
+  }
   let built = 0, skipped = 0;
 
-  for (const file of zipFiles) {
-    const zip = file.replace('.json', '');
+  for (const zip of allZips) {
     if (!needsEmbed(zip)) { skipped++; continue; }
     try {
       await embedZip(zip);
