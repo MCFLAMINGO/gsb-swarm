@@ -243,6 +243,7 @@ router.post('/', async (req, res) => {
   const { zip, query, category, group, limit = 50, minConfidence = 0 } = req.body || {};
 
   try {
+    const db = require('./lib/db');
     // ── Resolve NL intent ────────────────────────────────────────────────────
     const nlIntent = (!group && !category) ? resolveNlIntent(query) : { group: null, tags: null };
     const effectiveGroup = group || nlIntent.group;
