@@ -474,14 +474,16 @@ process.on('unhandledRejection', (reason) => {
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 (async () => {
-  // Initial run on start
-  await runOceanFloor();
-
-  // Weekly recurring
+  const hb = require('../lib/workerHeartbeat');
+  if (await hb.isFresh('oceanFloorWorker', WEEKLY_MS)) {
+    console.log('[oceanFloorWorker] Fresh — skipping startup run');
+  } else {
+    await runOceanFloor();
+    await hb.ping('oceanFloorWorker');
+  }
   setInterval(async () => {
-    try { await runOceanFloor(); }
+    try { await runOceanFloor(); await hb.ping('oceanFloorWorker'); }
     catch (err) { logError('weeklyInterval', err); }
   }, WEEKLY_MS);
-
   console.log(`[oceanFloorWorker] Scheduled: weekly (${WEEKLY_MS}ms)`);
 })();

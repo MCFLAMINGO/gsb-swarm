@@ -807,9 +807,21 @@ async function runOracle() {
   console.log(`[oracleWorker] Done — ${allZips.length} ZIPs computed.`);
 }
 
-// Run immediately, then every 6 hours
-runOracle().catch(err => console.error('[oracleWorker] Fatal:', err.message));
-setInterval(() => runOracle().catch(err => console.error('[oracleWorker] Scheduled error:', err.message)), 6 * 60 * 60 * 1000);
+// Run immediately, then every 6 hours — skip startup if ran within 6h
+const hb = require('../lib/workerHeartbeat');
+const ORACLE_INTERVAL = 6 * 60 * 60 * 1000;
+(async () => {
+  if (await hb.isFresh('oracleWorker', ORACLE_INTERVAL)) {
+    console.log('[oracleWorker] Fresh — skipping startup run');
+  } else {
+    await runOracle().catch(err => console.error('[oracleWorker] Fatal:', err.message));
+    await hb.ping('oracleWorker');
+  }
+  setInterval(async () => {
+    await runOracle().catch(err => console.error('[oracleWorker] Scheduled error:', err.message));
+    await hb.ping('oracleWorker');
+  }, ORACLE_INTERVAL);
+})();
 
 process.on('uncaughtException',  err => console.error('[oracleWorker] Uncaught:', err.message));
 process.on('unhandledRejection', r   => console.error('[oracleWorker] Rejection:', r));

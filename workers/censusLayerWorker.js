@@ -653,12 +653,20 @@ async function runCensusLayer() {
 // The schedule file controls whether each sub-layer actually re-fetches —
 // daily check is cheap, actual Census fetches only happen on their cadence.
 
-runCensusLayer().catch(err => console.error('[censusLayer] Fatal on startup:', err.message));
-
-setInterval(
-  () => runCensusLayer().catch(err => console.error('[censusLayer] Scheduled error:', err.message)),
-  24 * 60 * 60 * 1000
-);
+const CENSUS_INTERVAL = 24 * 60 * 60 * 1000;
+(async () => {
+  const hb = require('../lib/workerHeartbeat');
+  if (await hb.isFresh('censusLayerWorker', CENSUS_INTERVAL)) {
+    console.log('[censusLayer] Fresh — skipping startup run');
+  } else {
+    await runCensusLayer().catch(err => console.error('[censusLayer] Fatal on startup:', err.message));
+    await hb.ping('censusLayerWorker');
+  }
+  setInterval(async () => {
+    await runCensusLayer().catch(err => console.error('[censusLayer] Scheduled error:', err.message));
+    await hb.ping('censusLayerWorker');
+  }, CENSUS_INTERVAL);
+})();
 
 console.log('[censusLayer] Worker started. ZBP=once, CBP=monthly, PDB=quarterly.');
 

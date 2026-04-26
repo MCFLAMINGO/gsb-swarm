@@ -5956,6 +5956,7 @@ app.use((req, res, next) => {
     { name: 'ZIP Brief Worker',           file: 'workers/zipBriefWorker.js'        },
     { name: 'Embedding Worker',           file: 'workers/embeddingWorker.js'       },
     { name: 'ACS Demographics Worker',    file: 'workers/acsWorker.js'             },
+    { name: 'Sunbiz Import Worker',        file: 'workers/sunbizWorker.js'          },
   ];
 
   function spawnLocalIntelWorker(w, attempt = 0) {

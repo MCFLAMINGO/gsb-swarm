@@ -342,14 +342,17 @@ process.on('unhandledRejection', (reason) => {
 console.log('[surfaceCurrentWorker] Starting — Layer 2 Surface Current worker');
 ensureDir(SURFACE_CURRENT_DIR);
 
-// Run immediately on start
-computeSurfaceCurrent().catch(err => {
-  console.error('[surfaceCurrentWorker] Initial run error:', err.message);
-});
-
-// Then every 24 hours
-setInterval(() => {
-  computeSurfaceCurrent().catch(err => {
-    console.error('[surfaceCurrentWorker] Scheduled run error:', err.message);
-  });
-}, INTERVAL_MS);
+// Run immediately on start — skip if ran within 24h
+(async () => {
+  const hb = require('../lib/workerHeartbeat');
+  if (await hb.isFresh('surfaceCurrentWorker', INTERVAL_MS)) {
+    console.log('[surfaceCurrentWorker] Fresh — skipping startup run');
+  } else {
+    await computeSurfaceCurrent().catch(err => console.error('[surfaceCurrentWorker] Initial run error:', err.message));
+    await hb.ping('surfaceCurrentWorker');
+  }
+  setInterval(async () => {
+    await computeSurfaceCurrent().catch(err => console.error('[surfaceCurrentWorker] Scheduled run error:', err.message));
+    await hb.ping('surfaceCurrentWorker');
+  }, INTERVAL_MS);
+})();

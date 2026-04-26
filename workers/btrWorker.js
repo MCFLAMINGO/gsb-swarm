@@ -473,11 +473,19 @@ if (require.main === module) {
       return;
     }
   }
+  const BTR_INTERVAL = 24 * 60 * 60 * 1000;
+  const hb = require('../lib/workerHeartbeat');
   console.log('[BTRWorker] Starting BTR import...');
-  runBTR().catch(e => console.error('[BTRWorker] Initial run error:', e.message));
-  setInterval(() => {
-    runBTR().catch(e => console.error('[BTRWorker] Scheduled run error:', e.message));
-  }, 24 * 60 * 60 * 1000);
+  if (await hb.isFresh('btrWorker', BTR_INTERVAL)) {
+    console.log('[BTRWorker] Fresh — skipping startup run');
+  } else {
+    await runBTR().catch(e => console.error('[BTRWorker] Initial run error:', e.message));
+    await hb.ping('btrWorker');
+  }
+  setInterval(async () => {
+    await runBTR().catch(e => console.error('[BTRWorker] Scheduled run error:', e.message));
+    await hb.ping('btrWorker');
+  }, BTR_INTERVAL);
 }
 
 module.exports = { runBTR, mergeIntoZip, router };
