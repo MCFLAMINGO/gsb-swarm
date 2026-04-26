@@ -846,76 +846,118 @@ app.post('/api/acp/webhook/thread-writer', express.json(), async (req, res) => {
 });
 
 // ── ACP Webhook health check — Virtuals can ping this to verify all 5 are live
-app.get('/api/acp/webhook/health', (req, res) => {
+app.get('/api/acp/webhook/health', async (req, res) => {
+  const AGENTS = [
+    { name: 'GSB CEO Agent',                    acpV2AgentId: 40779, endpoint: '/api/acp/webhook/ceo',             wallet: '0xb165a3b019eb1922f5dcda97b83be75484b30d27', key: 'ceo' },
+    { name: 'GSB Token Analyst',                acpV2AgentId: 40781, endpoint: '/api/acp/webhook/token-analyst',   wallet: '0x489a9d6c79957906540491a493a7a4d13ad0701a', key: 'token_analyst' },
+    { name: 'GSB Alpha Scanner',                acpV2AgentId: 40790, endpoint: '/api/acp/webhook/alpha-scanner',   wallet: '0x9d23bf7e4084e278a06c85e299a8ed5db3d663b5', key: 'alpha_scanner' },
+    { name: 'GSB Wallet Profiler & DCA Engine', acpV2AgentId: 40786, endpoint: '/api/acp/webhook/wallet-profiler', wallet: '0xeb6447a8b44837458f391e2bac39990daf6bd522', key: 'wallet_profiler' },
+    { name: 'GSB Thread Writer',                acpV2AgentId: 40734, endpoint: '/api/acp/webhook/thread-writer',   wallet: '0x2c281b4ba71e79dd91e3a9d78ed5348bc5774df9', key: 'thread_writer' },
+  ];
+
+  // Pull live heartbeat data from Postgres worker_heartbeat table
+  let heartbeats = {};
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const db2 = require('./lib/db');
+      const rows = await db2.query(`SELECT worker_name, last_run, run_count FROM worker_heartbeat`).catch(() => []);
+      for (const r of rows) heartbeats[r.worker_name] = r;
+    } catch (_) {}
+  }
+
+  const agents = AGENTS.map(a => {
+    const hb = heartbeats[a.key] || heartbeats[a.name] || null;
+    return {
+      ...a,
+      status:   hb ? 'active' : 'idle',
+      lastRun:  hb?.last_run || null,
+      jobCount: hb?.run_count || 0,
+    };
+  });
+
   res.json({
     status: 'live',
-    agents: [
-      { name: 'GSB CEO Agent',                   acpV2AgentId: 40779, endpoint: '/api/acp/webhook/ceo',            wallet: '0xb165a3b019eb1922f5dcda97b83be75484b30d27' },
-      { name: 'GSB Token Analyst',               acpV2AgentId: 40781, endpoint: '/api/acp/webhook/token-analyst',  wallet: '0x489a9d6c79957906540491a493a7a4d13ad0701a' },
-      { name: 'GSB Alpha Scanner',               acpV2AgentId: 40790, endpoint: '/api/acp/webhook/alpha-scanner',  wallet: '0x9d23bf7e4084e278a06c85e299a8ed5db3d663b5' },
-      { name: 'GSB Wallet Profiler & DCA Engine',acpV2AgentId: 40786, endpoint: '/api/acp/webhook/wallet-profiler',wallet: '0xeb6447a8b44837458f391e2bac39990daf6bd522' },
-      { name: 'GSB Thread Writer',               acpV2AgentId: 40734, endpoint: '/api/acp/webhook/thread-writer',  wallet: '0x2c281b4ba71e79dd91e3a9d78ed5348bc5774df9' },
-    ],
-    baseUrl: 'https://gsb-swarm-production.up.railway.app',
+    agents,
+    baseUrl:           'https://gsb-swarm-production.up.railway.app',
     secret_configured: !!ACP_WEBHOOK_SECRET,
-    ts: new Date().toISOString(),
+    ts:                new Date().toISOString(),
   });
 });
 
 // ── MCP Registry server card — lets Smithery + PulseMCP scan without auth issues
 // GET /api/sector-gap/feed — top sector gaps across all covered ZIPs (FREE, no payment required)
 // Discovery hook for agents and LLMs — shows what LocalIntel knows without paying
-app.get('/api/sector-gap/feed', (req, res) => {
-  const layerDir  = path.join(__dirname, 'data', 'census_layer');
-  const zonesFile = path.join(__dirname, 'data', 'spendingZones.json');
-
-  if (!fs.existsSync(layerDir)) {
-    return res.json({ status: 'not_yet_computed', message: 'Census layer not yet built. Redeploy or wait for next startup cycle.', feed: [] });
+app.get('/api/sector-gap/feed', async (req, res) => {
+  // Postgres first — census_layer table has layer_json with sector_gaps[]
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const db2 = require('./lib/db');
+      const rows = await db2.query(
+        `SELECT zip, layer_json, confidence FROM census_layer
+         WHERE layer_json IS NOT NULL
+           AND layer_json->'sector_gaps' IS NOT NULL
+           AND jsonb_array_length(layer_json->'sector_gaps') > 0
+         ORDER BY (confidence->>'data_confidence_score')::float DESC NULLS LAST
+         LIMIT 200`
+      );
+      const feed = [];
+      for (const r of rows) {
+        const layer  = r.layer_json || {};
+        const conf   = r.confidence || {};
+        const gaps   = layer.sector_gaps || [];
+        if (!gaps.length) continue;
+        const topGap = gaps[0];
+        feed.push({
+          zip:              r.zip,
+          name:             layer.name || r.zip,
+          county:           layer.county || '',
+          top_gap_naics:    topGap.naics,
+          top_gap_sector:   topGap.label,
+          county_emp_share: topGap.county_emp_share,
+          gap_count:        gaps.length,
+          population:       layer.population || 0,
+          median_hhi:       layer.median_household_income || 0,
+          confidence_tier:  conf.confidence_tier || 'UNKNOWN',
+          confidence_score: conf.data_confidence_score || 0,
+          oracle_vertical:  topGap.oracle_vertical || null,
+        });
+      }
+      return res.json({
+        generated_at: new Date().toISOString(),
+        total_zips:   feed.length,
+        source:       'postgres',
+        note:         'Free discovery feed. Call local_intel_sector_gap (MCP) with any zip for full ranked analysis with demand estimates.',
+        mcp_endpoint: 'https://gsb-swarm-production.up.railway.app/mcp',
+        feed,
+      });
+    } catch (e) {
+      console.warn('[sector-gap/feed] Postgres failed, falling back to flat files:', e.message);
+    }
   }
 
-  let zones = {};
-  try { zones = JSON.parse(fs.readFileSync(zonesFile, 'utf8'))?.zones || {}; } catch (_) {}
-
+  // Flat file fallback (local dev)
+  const layerDir = path.join(__dirname, 'data', 'census_layer');
+  if (!fs.existsSync(layerDir)) {
+    return res.json({ status: 'not_yet_computed', message: 'Census layer not yet built.', feed: [] });
+  }
   const feed = [];
-  const files = fs.readdirSync(layerDir).filter(f => /^\d{5}\.json$/.test(f));
-
-  for (const file of files) {
+  for (const file of fs.readdirSync(layerDir).filter(f => /^\d{5}\.json$/.test(f))) {
     try {
       const layer = JSON.parse(fs.readFileSync(path.join(layerDir, file), 'utf8'));
-      if (!layer.sector_gaps || layer.sector_gaps.length === 0) continue;
-
-      const zip    = layer.zip || file.replace('.json', '');
-      const demo   = zones[zip] || {};
-      const topGap = layer.sector_gaps[0]; // already sorted by county_emp_share
-      const conf   = layer.confidence || {};
-
+      if (!layer.sector_gaps?.length) continue;
+      const topGap = layer.sector_gaps[0];
       feed.push({
-        zip,
-        name:              layer.name || zip,
-        county:            layer.county || '',
-        top_gap_naics:     topGap.naics,
-        top_gap_sector:    topGap.label,
-        county_emp_share:  topGap.county_emp_share,
-        gap_count:         layer.sector_gaps.length,
-        population:        demo.population || 0,
-        median_hhi:        demo.median_household_income || 0,
-        confidence_tier:   conf.confidence_tier || 'UNKNOWN',
-        confidence_score:  conf.data_confidence_score || 0,
-        oracle_vertical:   topGap.oracle_vertical || null,
+        zip: layer.zip || file.replace('.json',''), name: layer.name || '', county: layer.county || '',
+        top_gap_naics: topGap.naics, top_gap_sector: topGap.label,
+        county_emp_share: topGap.county_emp_share, gap_count: layer.sector_gaps.length,
+        confidence_tier: layer.confidence?.confidence_tier || 'UNKNOWN',
+        confidence_score: layer.confidence?.data_confidence_score || 0,
+        oracle_vertical: topGap.oracle_vertical || null,
       });
     } catch (_) {}
   }
-
-  // Sort by confidence score desc, then gap_count desc
-  feed.sort((a, b) => (b.confidence_score - a.confidence_score) || (b.gap_count - a.gap_count));
-
-  res.json({
-    generated_at:  new Date().toISOString(),
-    total_zips:    feed.length,
-    note:          'Free discovery feed. Call local_intel_sector_gap (MCP) with any zip for full ranked analysis with demand estimates. Cost: $0.03 pathUSD.',
-    mcp_endpoint:  'https://gsb-swarm-production.up.railway.app/api/local-intel/mcp',
-    feed,
-  });
+  feed.sort((a,b) => (b.confidence_score - a.confidence_score) || (b.gap_count - a.gap_count));
+  res.json({ generated_at: new Date().toISOString(), total_zips: feed.length, source: 'flat_file', feed });
 });
 
 app.get('/.well-known/mcp/server-card.json', (req, res) => {
