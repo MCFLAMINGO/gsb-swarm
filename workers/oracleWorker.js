@@ -246,7 +246,18 @@ function loadCensusLayer(zip) {
   return readJson(path.join(DATA_DIR, 'census_layer', `${zip}.json`));
 }
 
-function loadAcs(zip) {
+// loadAcs — Postgres first (durable), null if no row found, throws on DB error
+// Throwing on DB error is intentional: the ZIP-level try/catch in runOracle
+// will log it and skip that ZIP, keeping the rest of the cycle intact.
+async function loadAcs(zip) {
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    const { getAcsDemographics } = require('../lib/pgStore');
+    const row = await getAcsDemographics(zip);
+    if (row !== null) return row;  // found — use it (may be undefined fields, that's honest)
+    // No row = ACS hasn't run for this ZIP yet — return null (has_acs: false is correct)
+    return null;
+  }
+  // No DB configured — flat file fallback for local dev only
   return readJson(path.join(DATA_DIR, 'acs', `${zip}.json`));
 }
 
@@ -273,13 +284,13 @@ function loadGapsForZip(zip) {
 
 // ── Core oracle computation ───────────────────────────────────────────────────
 
-function computeOracle(zip, name) {
+async function computeOracle(zip, name) {
   const businesses  = loadBusinesses(zip);
   const zone        = loadSpendingZone(zip);
   const bedrock     = loadBedrock(zip);
   const ocean       = loadOceanFloor(zip);
   const censusLayer = loadCensusLayer(zip);
-  const acs         = loadAcs(zip);
+  const acs         = await loadAcs(zip);  // async: reads from Postgres, throws on DB error
   const verticalGaps = loadGapsForZip(zip);
 
   // ── Data quality gate ─────────────────────────────────────────────────────
@@ -767,7 +778,7 @@ async function runOracle() {
 
   for (const zip of allZips) {
     try {
-      const result = computeOracle(zip, nameMap[zip]);
+      const result = await computeOracle(zip, nameMap[zip]);
 
       // Skip ZIPs that failed the data quality gate
       if (result.skip) {
