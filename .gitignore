@@ -5,3 +5,23 @@ data/agentMemory/
 data/sourceLog.json
 data/zipCoverage.json
 houston-chamber-import-result.json
+
+# Computed runtime data — all owned by Postgres now, not git
+data/oracle/
+data/acs/
+data/bedrock/
+data/ocean_floor/
+data/census_layer/
+data/surface_current/
+data/wave_surface/
+data/evolution/
+data/btr/
+data/osm/
+data/sunbiz/
+data/gaps/
+data/briefs/
+data/embeddings/
+data/.seeded
+data/irs_soi_2022.csv
+data/localIntel.json
+data/spendingZones.json
