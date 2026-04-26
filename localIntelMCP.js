@@ -136,18 +136,20 @@ async function handleOracle(params) {
     } catch (_) {}
   }
 
-  // 2. Fall back to flat file (warm after local oracle run)
-  const oracleDir = path.join(__dirname, 'data', 'oracle');
-  const file = path.join(oracleDir, `${zip}.json`);
-  if (!require('fs').existsSync(file)) {
-    return { error: `Oracle not yet computed for ${zip}. The oracle worker runs every 6h — try again shortly.` };
+  // 2. Flat file fallback (local dev only — Railway always has LOCAL_INTEL_DB_URL)
+  if (!process.env.LOCAL_INTEL_DB_URL) {
+    const oracleDir = path.join(__dirname, 'data', 'oracle');
+    const file = path.join(oracleDir, `${zip}.json`);
+    if (require('fs').existsSync(file)) {
+      const raw = JSON.parse(require('fs').readFileSync(file, 'utf8'));
+      return cleanOracleResponse(raw);
+    }
   }
-  const raw = JSON.parse(require('fs').readFileSync(file, 'utf8'));
-  return cleanOracleResponse(raw);
+  return { error: `Oracle not yet computed for ${zip}. The oracle worker runs every 6h — try again shortly.` };
 }
 
 
-function handleSectorGap(params) {
+async function handleSectorGap(params) {
   const zip = (params.zip || '').replace(/\D/g, '').slice(0, 5);
   if (!zip) return JSON.stringify({ error: 'zip required' });
 
@@ -178,13 +180,24 @@ function handleSectorGap(params) {
   }
 
   let demo = {}, oracle = {};
+  // Oracle: Postgres first (durable), flat file fallback for local dev
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const { getZipIntelligenceRow } = require('./lib/pgStore');
+      const row = await getZipIntelligenceRow(zip);
+      if (row) oracle = row;
+    } catch (_) {}
+  }
+  if (!oracle || Object.keys(oracle).length === 0) {
+    try {
+      const oracleFile = path.join(oracleDir, zip + '.json');
+      if (fsLib.existsSync(oracleFile)) oracle = JSON.parse(fsLib.readFileSync(oracleFile, 'utf8'));
+    } catch (_) {}
+  }
+  // Demographics: prefer ACS/oracle Postgres fields, fall back to spendingZones flat file
   try {
     const zones = JSON.parse(fsLib.readFileSync(zonesFile, 'utf8'));
     demo = (zones && zones.zones && zones.zones[zip]) ? zones.zones[zip] : {};
-  } catch (_) {}
-  try {
-    const oracleFile = path.join(oracleDir, zip + '.json');
-    if (fsLib.existsSync(oracleFile)) oracle = JSON.parse(fsLib.readFileSync(oracleFile, 'utf8'));
   } catch (_) {}
 
   const population   = demo.population   || (oracle.demographics && oracle.demographics.population) || 0;

@@ -565,18 +565,52 @@ async function ingestPDB(targetZips = ALL_ZIPS) {
 // Called after PDB ingest — stamps confidence tier onto existing oracle files
 // so that MCP callers see it without needing a separate fetch
 
-function stampOracleConfidence() {
+async function stampOracleConfidence() {
   const confFile = path.join(LAYER_DIR, '_confidence.json');
   const conf     = readJson(confFile);
   if (!conf?.zips) return;
 
   let stamped = 0;
+
+  // Postgres: batch-update zip_intelligence with confidence scores (durable)
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const db2 = require('../lib/db');
+      for (const [zip, c] of Object.entries(conf.zips)) {
+        const confidenceBlock = {
+          score:         c.score,
+          tier:          c.tier,
+          oracle_cycles: c.oracle_cycles,
+          lrs:           c.lrs,
+          note: c.tier === 'SPARSE'    ? 'Low signal density — treat signals as directional only'
+              : c.tier === 'PROXY'     ? 'Moderate confidence — demographic data estimated from proxies'
+              : c.tier === 'ESTIMATED' ? 'Good confidence — Census-backed with growing oracle history'
+              : 'High confidence — Census-verified with validated oracle signal history',
+        };
+        // Merge confidence into the stored oracle_json blob
+        await db2.query(
+          `UPDATE zip_intelligence
+           SET oracle_json = jsonb_set(COALESCE(oracle_json, '{}'), '{data_confidence}', $2::jsonb),
+               updated_at  = NOW()
+           WHERE zip = $1`,
+          [zip, JSON.stringify(confidenceBlock)]
+        ).catch(() => {});
+        stamped++;
+      }
+      console.log(`[censusLayer] Stamped confidence scores on ${stamped} ZIPs in Postgres`);
+      return;
+    } catch (e) {
+      console.warn('[censusLayer] Postgres confidence stamp failed, falling back to flat files:', e.message);
+    }
+  }
+
+  // Flat file fallback (local dev)
+  stamped = 0;
   for (const [zip, c] of Object.entries(conf.zips)) {
     const oracleFile = path.join(ORACLE_DIR, `${zip}.json`);
     if (!fs.existsSync(oracleFile)) continue;
     const oracle = readJson(oracleFile);
     if (!oracle) continue;
-
     oracle.data_confidence = {
       score:           c.score,
       tier:            c.tier,
@@ -590,7 +624,7 @@ function stampOracleConfidence() {
     atomicWrite(oracleFile, oracle);
     stamped++;
   }
-  console.log(`[censusLayer] Stamped confidence scores on ${stamped} oracle files`);
+  console.log(`[censusLayer] Stamped confidence scores on ${stamped} oracle flat files`);
 }
 
 // ── Refresh schedule management ────────────────────────────────────────────────
@@ -669,7 +703,7 @@ async function runCensusLayer() {
       const targetZips3 = await getTargetZips();
       await ingestPDB(targetZips3);
       writeSchedule({ pdb_last_run: new Date().toISOString() });
-      stampOracleConfidence();
+      await stampOracleConfidence();
     } catch (err) {
       console.error('[censusLayer] PDB error:', err.message);
     }

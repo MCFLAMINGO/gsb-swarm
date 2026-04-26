@@ -100,14 +100,24 @@ function ensureDirs() {
 
 // ── Step 1: AUDIT — classify every known ZIP by signal quality ─────────────────
 
-function auditZips() {
+async function auditZips() {
   const audit = {};
 
   for (const { zip, name, county } of ALL_KNOWN_ZIPS) {
     const historyFile = path.join(HISTORY_DIR, `${zip}.json`);
     const history     = readJson(historyFile) || [];
-    const oracleFile  = path.join(ORACLE_DIR, `${zip}.json`);
-    const oracle      = readJson(oracleFile)  || null;
+    // Oracle: Postgres first, flat file fallback
+    let oracle = null;
+    if (process.env.LOCAL_INTEL_DB_URL) {
+      try {
+        const { getZipIntelligenceRow } = require('../lib/pgStore');
+        oracle = await getZipIntelligenceRow(zip);
+      } catch (_) {}
+    }
+    if (!oracle) {
+      const oracleFile = path.join(ORACLE_DIR, `${zip}.json`);
+      oracle = readJson(oracleFile) || null;
+    }
 
     // Data layer availability
     const hasDemoData  = oracle?.data_sources?.has_spending_zone || oracle?.data_sources?.has_ocean_floor || false;
@@ -572,7 +582,7 @@ async function runEvolution() {
   ensureDirs();
 
   // Step 1: Audit
-  const audit = auditZips();
+  const audit = await auditZips();
 
   // Step 2: Diagnose gaps
   const dispatchQueue = diagnosGaps(audit);

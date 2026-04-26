@@ -1556,19 +1556,30 @@ Return ONLY a JSON object with these fields. No explanation.`;
 
 // ── GET /api/local-intel/oracle?zip=XXXXX ───────────────────────────────────
 // Returns pre-baked economic narrative for a ZIP: restaurant capacity, market gaps, growth
-router.get('/oracle', (req, res) => {
+router.get('/oracle', async (req, res) => {
   try {
     const zip = (req.query.zip || '').replace(/\D/g, '').slice(0, 5);
     logUsage(getCallerId(req), 'oracle', zip || 'all', 1);
     const oracleDir = path.join(DATA_DIR_AGENT, 'oracle');
 
     if (zip) {
-      // Single ZIP
-      const file = path.join(oracleDir, `${zip}.json`);
-      if (!fs.existsSync(file)) {
+      // Single ZIP — Postgres first, flat file fallback for local dev
+      let oracleData = null;
+      if (process.env.LOCAL_INTEL_DB_URL) {
+        try {
+          const { getZipIntelligenceRow } = require('./lib/pgStore');
+          oracleData = await getZipIntelligenceRow(zip);
+        } catch (_) {}
+      }
+      if (!oracleData) {
+        const file = path.join(oracleDir, `${zip}.json`);
+        if (fs.existsSync(file)) {
+          try { oracleData = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) {}
+        }
+      }
+      if (!oracleData) {
         return res.status(404).json({ error: `No oracle data for ${zip}. Oracle worker may still be computing.` });
       }
-      const oracleData = JSON.parse(fs.readFileSync(file, 'utf8'));
 
       // ── Notify claimed businesses in this ZIP about the market query ──
       // Fire-and-forget — never block the oracle response
@@ -1600,7 +1611,31 @@ router.get('/oracle', (req, res) => {
       return res.json(oracleData);
     }
 
-    // No ZIP specified — return index
+    // No ZIP specified — build index from Postgres (durable), flat file fallback
+    if (process.env.LOCAL_INTEL_DB_URL) {
+      try {
+        const db2 = require('./lib/db');
+        const rows = await db2.query(
+          `SELECT zip, name, saturation_status, growth_state, consumer_profile, computed_at, oracle_json
+           FROM zip_intelligence WHERE oracle_json IS NOT NULL ORDER BY zip`
+        );
+        const zips = {};
+        for (const r of rows) {
+          const oj = r.oracle_json || {};
+          zips[r.zip] = {
+            name:             r.name,
+            saturation_status: r.saturation_status || oj.restaurant_capacity?.saturation_status,
+            capture_rate_pct: oj.restaurant_capacity?.capture_rate_pct,
+            growth_state:     r.growth_state || oj.growth_trajectory?.state,
+            consumer_profile: r.consumer_profile,
+            top_gap:          oj.market_gaps?.top_gap?.tier || null,
+            computed_at:      r.computed_at,
+          };
+        }
+        return res.json({ generated_at: new Date().toISOString(), source: 'postgres', zips });
+      } catch (_) {}
+    }
+    // Flat file fallback (local dev)
     const indexFile = path.join(oracleDir, '_index.json');
     if (!fs.existsSync(indexFile)) {
       return res.status(404).json({ error: 'Oracle index not ready yet. Check back in 60 seconds.' });
