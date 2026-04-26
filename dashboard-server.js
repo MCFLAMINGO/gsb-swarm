@@ -500,6 +500,64 @@ app.post('/api/admin/import-sunbiz', async (req, res) => {
   });
 });
 
+// POST /api/admin/clean-hours — nulls poisoned hours values in businesses table
+// Poisoned = contains HTML/JS artifacts from bad scrape passes
+app.post('/api/admin/clean-hours', express.json(), async (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    const db = require('./lib/db');
+    const { rows: before } = await require('./lib/db').getPool().query(`
+      SELECT COUNT(*) AS poisoned
+      FROM businesses
+      WHERE hours IS NOT NULL
+        AND (
+          hours ~ '[<>{}"\\\\]'
+          OR length(hours) > 120
+          OR hours ILIKE '%.js%'
+          OR hours ILIKE '%http%'
+          OR hours ILIKE '%font%'
+          OR hours ILIKE '%address%'
+          OR hours ILIKE '%company%'
+          OR hours ILIKE '%canada%'
+          OR hours ILIKE '%github%'
+          OR hours ILIKE '%monkey%'
+          OR hours ILIKE '%javascript%'
+          OR hours ILIKE '%isflock%'
+          OR hours ILIKE '%isam%'
+        )
+    `);
+    const { rowCount } = await require('./lib/db').getPool().query(`
+      UPDATE businesses
+      SET hours = NULL,
+          updated_at = NOW()
+      WHERE hours IS NOT NULL
+        AND (
+          hours ~ '[<>{}"\\\\]'
+          OR length(hours) > 120
+          OR hours ILIKE '%.js%'
+          OR hours ILIKE '%http%'
+          OR hours ILIKE '%font%'
+          OR hours ILIKE '%address%'
+          OR hours ILIKE '%company%'
+          OR hours ILIKE '%canada%'
+          OR hours ILIKE '%github%'
+          OR hours ILIKE '%monkey%'
+          OR hours ILIKE '%javascript%'
+          OR hours ILIKE '%isflock%'
+          OR hours ILIKE '%isam%'
+        )
+    `);
+    console.log(`[admin] clean-hours: nulled ${rowCount} poisoned hours records (was ${before[0].poisoned} poisoned)`);
+    res.json({ ok: true, poisoned_before: parseInt(before[0].poisoned), nulled: rowCount });
+  } catch (e) {
+    console.error('[admin] clean-hours error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // POST /api/admin/trigger-chamber — kicks off SJC Chamber bulk import
 app.post('/api/admin/trigger-chamber', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;

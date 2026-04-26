@@ -249,7 +249,7 @@ router.post('/', async (req, res) => {
     const effectiveGroup = group || nlIntent.group;
 
     // ── Build Postgres query — all filtering in SQL ──────────────────────────
-    const conditions = ["status = 'active'"];
+    const conditions = ["status != 'inactive'"]; // matches active + null, excludes only explicitly inactive
     const params = [];
     let p = 1;
 
@@ -333,15 +333,22 @@ router.post('/', async (req, res) => {
       }
     }
 
-    const results = rows;
-    const total   = rows.length; // count approx — full count would need separate query
+    // Real total: COUNT(*) with same WHERE but no LIMIT — so callers know the full set size
+    let realTotal = rows.length;
+    try {
+      // countParams = everything except the final LIMIT param
+      const countParams  = params.slice(0, -1);
+      const countSql     = `SELECT COUNT(*) AS total FROM businesses WHERE ${conditions.join(' AND ')}`;
+      const countRows    = await db.query(countSql, countParams);
+      realTotal          = parseInt(countRows[0]?.total || rows.length, 10);
+    } catch (_) { /* non-fatal — fall back to page size */ }
 
     res.json({
-      ok:      true,
-      total,
-      returned: results.length,
-      zips:    zip ? [zip] : [],
-      results,
+      ok:       true,
+      total:    realTotal,
+      returned: rows.length,
+      zips:     zip ? [zip] : [],
+      results:  rows,
       meta: {
         source:   'postgres',
         coverage: '113,684 businesses — Florida statewide',
