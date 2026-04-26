@@ -46,6 +46,73 @@ const REGION_EXPANSIONS = {
 // Default ZIPs when no region or ZIP detected (richest data coverage)
 const FALLBACK_ZIPS = ['32082','32081','32084'];
 
+// ── Intent detection — lookup vs market question ────────────────────────────
+// "lookup" intent: user wants to FIND specific businesses/providers/people
+//   → always resolves to local_intel_search regardless of vertical
+// "market" intent: user wants MARKET INTELLIGENCE (gaps, saturation, opportunity)
+//   → resolves to vertical tool or oracle
+// If neither fires clearly, we fall through to vertical tool selection.
+
+const INTENT_SIGNALS = {
+  // Lookup intent — user wants a list of existing businesses / providers
+  lookup: [
+    /\bfind\b.*\bnear\b/i,
+    /\bare there\b/i,
+    /\bhow many\b/i,
+    /\blist of\b/i,
+    /\bwho (is|are|operates|runs|has)\b/i,
+    /\bwhat (businesses|providers|offices|clinics|shops|contractors|agents)\b/i,
+    /\bshow me\b/i,
+    /\bnearby\b/i,
+    /\bin (the area|this zip|this area|my area|32\d{3})\b/i,
+    /\blocal\b.*\b(list|directory|options)\b/i,
+    /\bwhere (can i find|do i find|is there a)\b/i,
+    /\boperating in\b/i,
+    /\bopen (in|near|around)\b/i,
+  ],
+  // Market / opportunity intent — user wants gap analysis, saturation, demand
+  market: [
+    /\bgap\b/i,
+    /\bsaturated\b/i,
+    /\bsaturation\b/i,
+    /\bopportunity\b/i,
+    /\bopportunities\b/i,
+    /\bdemand\b/i,
+    /\bundersupplied\b/i,
+    /\boversupplied\b/i,
+    /\bwhitespace\b/i,
+    /\bunderserved\b/i,
+    /\bunmet\b/i,
+    /\bpotential\b/i,
+    /\bwhere should i open\b/i,
+    /\bshould i open\b/i,
+    /\bviable\b/i,
+    /\bfeasib\b/i,
+    /\bmarket.*(signal|momentum|trend)/i,
+    /\bpermit.*(velocity|pull|pipeline)/i,
+    /\bhousing starts\b/i,
+    /\bnew construction\b/i,
+    /\bgrowth (corridor|area|pocket)/i,
+    /\bexpansion (opportunity|target)/i,
+    /\bwhat.*(missing|lacking|needed)/i,
+    /\bis.*(there|a).*(need|demand|room)/i,
+  ],
+};
+
+/**
+ * detectIntent(query) → 'lookup' | 'market' | null
+ * Lookup always wins over market if both match — the user wants a list, not analysis.
+ */
+function detectIntent(query) {
+  for (const pattern of INTENT_SIGNALS.lookup) {
+    if (pattern.test(query)) return 'lookup';
+  }
+  for (const pattern of INTENT_SIGNALS.market) {
+    if (pattern.test(query)) return 'market';
+  }
+  return null;
+}
+
 // ── Tool selection within vertical ───────────────────────────────────────────
 // Intent signals → best tool override within a vertical
 const TOOL_OVERRIDES = {
@@ -56,10 +123,18 @@ const TOOL_OVERRIDES = {
     { pattern: /permit|build|lease|location|corridor|street/i,                                   tool: 'local_intel_bedrock' },
   ],
   healthcare: [
-    { pattern: /gap|missing|undersupplied|need|demand|provider.ratio|unmet/i,                    tool: 'local_intel_healthcare' },
-    { pattern: /signal|momentum|trend/i,                                                          tool: 'local_intel_signal' },
-    { pattern: /demographic|senior|age|income|population/i,                                       tool: 'local_intel_zone' },
-    { pattern: /permit|build|clinic.space|facility/i,                                             tool: 'local_intel_bedrock' },
+    // Lookup: user wants to find existing providers
+    { pattern: /\bfind\b|\bare there\b|\blist\b|\bshow me\b|\bhow many\b|operating in|open (in|near)/i, tool: 'local_intel_search' },
+    // Gap / demand analysis — includes specialist gaps, med spa, chiro, etc.
+    { pattern: /gap|missing|undersupplied|need|demand|provider.ratio|unmet|specialist.gap|physician.shortage|medical.desert|healthcare.gap/i, tool: 'local_intel_healthcare' },
+    // Saturation
+    { pattern: /saturat|too.many|oversupplied|crowded|compet/i,                                   tool: 'local_intel_oracle' },
+    // Signal / trends
+    { pattern: /signal|momentum|trend|growing|declining/i,                                        tool: 'local_intel_signal' },
+    // Demographics — senior, age-banded, income cohort, population
+    { pattern: /demographic|senior|elder|age|income|population|household/i,                       tool: 'local_intel_zone' },
+    // Infrastructure — clinic space, facility build-out, permits
+    { pattern: /permit|build|clinic.space|facility|real estate|location|lease/i,                  tool: 'local_intel_bedrock' },
   ],
   retail: [
     { pattern: /gap|missing|undersupplied|need|demand|spending.capture/i,                         tool: 'local_intel_retail' },
@@ -68,10 +143,18 @@ const TOOL_OVERRIDES = {
     { pattern: /signal|momentum/i,                                                                 tool: 'local_intel_signal' },
   ],
   construction: [
-    { pattern: /permit|active|pipeline|project/i,                                                 tool: 'local_intel_bedrock' },
-    { pattern: /gap|demand|opportunity|need/i,                                                    tool: 'local_intel_construction' },
-    { pattern: /demographic|growth|population|household/i,                                        tool: 'local_intel_zone' },
-    { pattern: /signal|momentum/i,                                                                 tool: 'local_intel_signal' },
+    // Lookup: find existing contractors / trade businesses
+    { pattern: /\bfind\b|\bare there\b|\blist\b|\bshow me\b|\bhow many\b|operating in|open (in|near)/i, tool: 'local_intel_search' },
+    // Permit velocity / active pipeline — includes specific trades: roofer, plumber, pool, solar, masonry, pavers
+    { pattern: /permit|active|pipeline|project|velocity|pull|housing starts|new construction/i,   tool: 'local_intel_bedrock' },
+    // Trade gaps / demand — includes all expanded trades
+    { pattern: /gap|demand|opportunity|need|undersupplied|trade.shortage|subcontractor.gap/i,     tool: 'local_intel_construction' },
+    // Saturation / competition
+    { pattern: /saturat|too.many|oversupplied|crowded|compet/i,                                   tool: 'local_intel_oracle' },
+    // Demographics — household growth, population, new development
+    { pattern: /demographic|growth|population|household|development.activity|infrastructure/i,    tool: 'local_intel_zone' },
+    // Signal / momentum
+    { pattern: /signal|momentum|trend/i,                                                          tool: 'local_intel_signal' },
   ],
   realtor: [
     { pattern: /gap|opportunity|undervalued|whitespace/i,                                         tool: 'local_intel_oracle' },
@@ -155,11 +238,25 @@ function detectRegion(query) {
 }
 
 // ── Tool picker ───────────────────────────────────────────────────────────────
+// Resolution order:
+//   1. Intent = lookup → always local_intel_search (find me X, are there X, how many X)
+//   2. Intent = market → check TOOL_OVERRIDES for best market tool within vertical
+//   3. No intent signal → check TOOL_OVERRIDES by pattern, fall back to vertical default
 function pickTool(query, vertical) {
+  const intent = detectIntent(query);
+
+  // Lookup intent always wins — user wants a list, not market analysis
+  if (intent === 'lookup') return 'local_intel_search';
+
+  // Market intent + no vertical → oracle (general market question)
+  if (intent === 'market' && !vertical) return 'local_intel_oracle';
+
+  // Check TOOL_OVERRIDES for this vertical
   const overrides = TOOL_OVERRIDES[vertical] || [];
   for (const o of overrides) {
     if (o.pattern.test(query)) return o.tool;
   }
+
   return VERTICAL_DEFAULT_TOOL[vertical] || 'local_intel_ask';
 }
 
@@ -222,12 +319,15 @@ function route(query) {
     reasoning.push('no geo signal — using default coverage ZIPs');
   }
 
+  const intent = detectIntent(query);
+
   if (vertical) {
     reasoning.push(`vertical: ${vertical}`);
   } else {
     reasoning.push('no vertical detected — routing to ask tool');
   }
 
+  if (intent) reasoning.push(`intent: ${intent}`);
   reasoning.push(`tool: ${tool}`);
 
   const primaryZip = zips[0];
@@ -242,7 +342,8 @@ function route(query) {
     route_confidence: conf,
     reasoning:        reasoning.join(' · '),
     multi_zip:        isMulti,
+    intent:           intent || null,
   };
 }
 
-module.exports = { route, detectVertical, detectZip, detectRegion, rankZipsForVertical };
+module.exports = { route, detectVertical, detectZip, detectRegion, rankZipsForVertical, detectIntent };
