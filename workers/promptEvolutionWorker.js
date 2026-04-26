@@ -539,7 +539,7 @@ function evolvePrompts(audit) {
 
 // ── Step 5: REPORT — write visibility artifact for dashboard ───────────────────
 
-function writeReport(audit, dispatchResults, promptCounts, startedAt) {
+async function writeReport(audit, dispatchResults, promptCounts, startedAt) {
   const qualityCounts = { RICH: 0, THIN: 0, BLIND: 0, CONTRADICTED: 0 };
   const gapCounts     = {};
   const trending      = { improving: [], declining: [], stable: [] };
@@ -570,7 +570,18 @@ function writeReport(audit, dispatchResults, promptCounts, startedAt) {
 
   atomicWrite(REPORT_FILE, report);
   atomicWrite(GAPS_FILE, audit);
-  console.log('[promptEvolution] REPORT written:', REPORT_FILE);
+  // Mirror to Postgres — survives volume wipes
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const { upsertEvolutionReport } = require('../lib/pgStore');
+      await upsertEvolutionReport(report);
+      console.log('[promptEvolution] REPORT written to Postgres + flat file');
+    } catch (e) {
+      console.warn('[promptEvolution] Postgres report write failed (flat file still written):', e.message);
+    }
+  } else {
+    console.log('[promptEvolution] REPORT written:', REPORT_FILE);
+  }
   return report;
 }
 
@@ -601,7 +612,7 @@ async function runEvolution() {
 
   // Step 5: Report
   const promptCounts = Object.fromEntries(Object.entries(evolved).map(([k, v]) => [k, v.length]));
-  const report = writeReport(audit, dispatchResults, promptCounts, startedAt);
+  const report = await writeReport(audit, dispatchResults, promptCounts, startedAt);
 
   const totalPrompts = Object.values(evolved).reduce((a, b) => a + b.length, 0);
   console.log(`[promptEvolution] Done. ${totalPrompts} total prompts. ${report.signal_quality.RICH} RICH / ${report.signal_quality.BLIND} BLIND ZIPs.`);

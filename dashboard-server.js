@@ -570,9 +570,20 @@ app.get('/api/local-intel/usage', async (req, res) => {
 // GET  /api/evolution/report  — latest audit report (signal quality, gaps, prompt counts)
 // GET  /api/evolution/gaps    — full per-ZIP gap audit
 // POST /api/evolution/run     — manually trigger an evolution cycle
-app.get('/api/evolution/report', (req, res) => {
+app.get('/api/evolution/report', async (req, res) => {
+  // Postgres first — survives volume wipes
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const { getEvolutionReport } = require('./lib/pgStore');
+      const report = await getEvolutionReport();
+      if (report) return res.json(report);
+    } catch (e) {
+      console.warn('[evolution/report] Postgres read failed, trying flat file:', e.message);
+    }
+  }
+  // Flat file fallback (local dev)
   const file = path.join(__dirname, 'data', 'evolution', '_report.json');
-  if (!fs.existsSync(file)) return res.json({ status: 'not_yet_run', message: 'First evolution cycle runs at 2am or next restart.' });
+  if (!fs.existsSync(file)) return res.json({ status: 'not_yet_run', message: 'Evolution cycle has not run yet — triggers daily at 2am.' });
   res.json(JSON.parse(fs.readFileSync(file, 'utf8')));
 });
 app.get('/api/evolution/gaps', (req, res) => {
