@@ -18,9 +18,10 @@
  * Runs once on startup, then every 24 hours.
  */
 
-const fs    = require('fs');
-const path  = require('path');
-const https = require('https');
+const fs      = require('fs');
+const path    = require('path');
+const https   = require('https');
+const pgStore = require('../lib/pgStore');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const ACS_DIR  = path.join(DATA_DIR, 'acs');
@@ -172,6 +173,8 @@ async function processZip(zip) {
 
   fs.mkdirSync(ACS_DIR, { recursive: true });
   fs.writeFileSync(path.join(ACS_DIR, `${zip}.json`), JSON.stringify(result, null, 2));
+  // Mirror to Postgres (fire-and-forget)
+  pgStore.upsertAcsDemographics(zip, result).catch(() => {});
   return result;
 }
 

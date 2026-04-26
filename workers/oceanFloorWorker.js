@@ -20,8 +20,9 @@
  * Schedule: immediate on start, then weekly (~7 days)
  */
 
-const path = require('path');
-const fs   = require('fs');
+const path    = require('path');
+const fs      = require('fs');
+const pgStore = require('../lib/pgStore');
 
 const DATA_DIR       = path.join(__dirname, '..', 'data');
 const OCEAN_DIR      = path.join(DATA_DIR, 'ocean_floor');
@@ -418,6 +419,8 @@ async function processZip(zipEntry, cbpData) {
   const outPath = path.join(OCEAN_DIR, `${zip}.json`);
   atomicWrite(outPath, result);
   console.log(`[oceanFloorWorker] Wrote ${outPath} — profile: ${consumer_profile}, score: ${carrying_capacity_score}`);
+  // Mirror to Postgres (fire-and-forget)
+  pgStore.upsertOceanFloor(zip, result).catch(() => {});
   return result;
 }
 

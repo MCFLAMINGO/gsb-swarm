@@ -33,9 +33,10 @@
  *   - data_confidence_score (how much to trust oracle signals)
  */
 
-const fs   = require('fs');
-const path = require('path');
-const https = require('https');
+const fs      = require('fs');
+const path    = require('path');
+const https   = require('https');
+const pgStore = require('../lib/pgStore');
 
 const DATA_DIR    = path.join(__dirname, '..', 'data');
 const LAYER_DIR   = path.join(DATA_DIR, 'census_layer');
@@ -226,14 +227,17 @@ async function ingestZBP() {
       zbp_note:             'ZBP 2018 is the most recent ZIP-level vintage. Use as structural baseline, not current count.',
     };
 
-    atomicWrite(path.join(LAYER_DIR, `${zip}.json`), {
+    const zbpLayerData = {
       ...existing,
       zip,
       name:   zipMeta[zip]?.name || zip,
       county: zipMeta[zip]?.county || '',
       zbp:    zbpData,
       updated_at: new Date().toISOString(),
-    });
+    };
+    atomicWrite(path.join(LAYER_DIR, `${zip}.json`), zbpLayerData);
+    // Mirror to Postgres (fire-and-forget)
+    pgStore.upsertCensusLayer(zip, zbpLayerData, null).catch(() => {});
   }
 
   atomicWrite(stateFile, { ingested_at: new Date().toISOString(), zips: Object.keys(byZip).length });
@@ -529,12 +533,15 @@ async function ingestPDB() {
     // Merge into census layer file
     const layerFile = path.join(LAYER_DIR, `${zip}.json`);
     const existing  = readJson(layerFile) || { zip };
-    atomicWrite(layerFile, {
+    const pdbLayerData = {
       ...existing,
       pdb:        pdbData,
       confidence,
       updated_at: new Date().toISOString(),
-    });
+    };
+    atomicWrite(layerFile, pdbLayerData);
+    // Mirror to Postgres with confidence (fire-and-forget)
+    pgStore.upsertCensusLayer(zip, pdbLayerData, confidence).catch(() => {});
 
     confidenceIndex[zip] = {
       score:           dataConfidenceScore,

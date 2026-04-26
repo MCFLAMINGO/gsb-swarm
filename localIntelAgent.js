@@ -1441,6 +1441,23 @@ Return ONLY a JSON object with these fields. No explanation.`;
     const censusDir = path.join(DATA_DIR_NL, 'census_layer');
     const limit = Math.min(filters.limit || 5, 10);
 
+    // ── Postgres pre-load: bulk fetch oracle + census for all ZIPs ──────────
+    // Primary source = Postgres; flat files are fallback only
+    const pgStore = require('./lib/pgStore');
+    const oraclePgMap  = new Map(); // zip -> oracle_json
+    const censusPgMap  = new Map(); // zip -> layer_json
+    try {
+      const dbMod = require('./lib/db');
+      if (dbMod.isReady()) {
+        const [oracleRows, censusRows] = await Promise.all([
+          dbMod.query('SELECT zip, oracle_json FROM zip_intelligence').catch(() => ({ rows: [] })),
+          dbMod.query('SELECT zip, layer_json FROM census_layer').catch(() => ({ rows: [] })),
+        ]);
+        for (const r of (oracleRows.rows || [])) if (r.oracle_json) oraclePgMap.set(r.zip, r.oracle_json);
+        for (const r of (censusRows.rows || [])) if (r.layer_json) censusPgMap.set(r.zip, r.layer_json);
+      }
+    } catch (_pgErr) { /* DB not ready — fall through to flat files */ }
+
     // Proximity center
     const cityKey = (filters.near_city || '').toLowerCase().trim();
     const cityCenter = CITY_COORDS[cityKey] || null;
@@ -1466,18 +1483,22 @@ Return ONLY a JSON object with these fields. No explanation.`;
       // Population filter
       if (filters.min_population && (population || 0) < filters.min_population) continue;
 
-      // Load oracle data if available
-      const oracleFile = path.join(oracleDir, `${zip}.json`);
-      let oracle = null;
-      if (fs.existsSync(oracleFile)) {
-        try { oracle = JSON.parse(fs.readFileSync(oracleFile, 'utf8')); } catch {}
+      // Load oracle data — Postgres first, flat file fallback
+      let oracle = oraclePgMap.get(zip) || null;
+      if (!oracle) {
+        const oracleFile = path.join(oracleDir, `${zip}.json`);
+        if (fs.existsSync(oracleFile)) {
+          try { oracle = JSON.parse(fs.readFileSync(oracleFile, 'utf8')); } catch {}
+        }
       }
 
-      // Load census layer for WFH + extended signals
-      const censusFile = path.join(censusDir, `${zip}.json`);
-      let census = null;
-      if (fs.existsSync(censusFile)) {
-        try { census = JSON.parse(fs.readFileSync(censusFile, 'utf8')); } catch {}
+      // Load census layer — Postgres first, flat file fallback
+      let census = censusPgMap.get(zip) || null;
+      if (!census) {
+        const censusFile = path.join(censusDir, `${zip}.json`);
+        if (fs.existsSync(censusFile)) {
+          try { census = JSON.parse(fs.readFileSync(censusFile, 'utf8')); } catch {}
+        }
       }
 
       const wfhPct = census?.wfh_pct || oracle?.demographics?.wfh_pct || null;

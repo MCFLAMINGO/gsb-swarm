@@ -18,8 +18,9 @@
  *   - monthly full refresh (~30 days)
  */
 
-const path = require('path');
-const fs   = require('fs');
+const path    = require('path');
+const fs      = require('fs');
+const pgStore = require('../lib/pgStore');
 
 const DATA_DIR    = path.join(__dirname, '..', 'data');
 const BEDROCK_DIR = path.join(DATA_DIR, 'bedrock');
@@ -294,6 +295,8 @@ async function processZip(zipEntry, mode = 'incremental') {
 
   const outPath = path.join(BEDROCK_DIR, `${zip}.json`);
   atomicWrite(outPath, result);
+  // Mirror to Postgres (fire-and-forget — never block the flat-file write)
+  pgStore.upsertBedrockScore(zip, result).catch(() => {});
   return result;
 }
 
