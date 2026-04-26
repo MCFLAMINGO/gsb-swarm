@@ -53,6 +53,39 @@ if (globalThis.__ACP_SDK__) {
 const { runMigration } = require('./lib/dbMigrate');
 runMigration().catch(e => console.warn('[db-migrate] Non-fatal:', e.message));
 
+// u2500u2500 One-time startup: clean poisoned hours in businesses table u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500
+// Nulls HTML/JS artifacts scraped into hours field from bad ingest passes.
+// Safe on every boot -- idempotent, only touches poisoned records.
+(async () => {
+  try {
+    if (!process.env.LOCAL_INTEL_DB_URL) return;
+    const db = require('./lib/db');
+    const result = await db.getPool().query(`
+      UPDATE businesses
+      SET hours = NULL, updated_at = NOW()
+      WHERE hours IS NOT NULL
+        AND (
+          hours ~ '[<>{}"\\\\]'
+          OR length(hours) > 120
+          OR hours ILIKE '%.js%'
+          OR hours ILIKE '%http%'
+          OR hours ILIKE '%font%'
+          OR hours ILIKE '%address%'
+          OR hours ILIKE '%company%'
+          OR hours ILIKE '%canada%'
+          OR hours ILIKE '%github%'
+          OR hours ILIKE '%monkey%'
+          OR hours ILIKE '%javascript%'
+          OR hours ILIKE '%isflock%'
+          OR hours ILIKE '%isam%'
+        )
+    `);
+    if (result.rowCount > 0) console.log('[startup] Cleaned ' + result.rowCount + ' poisoned hours records');
+  } catch (e) {
+    console.warn('[startup] hours cleanup non-fatal:', e.message);
+  }
+})();
+
 const nvim = require('./lib/nvim');
 const anthropic = null; // kept for unused-reference safety — all calls now use nvim
 if (nvim.isReady()) {
