@@ -351,7 +351,7 @@ function handleBedrock(params) {
  * Output: { zip, agent_type, intent, ranked_signals, signal_block,
  *            context_block, suggested_next_tool, delta }
  */
-function handleForAgent(params) {
+async function handleForAgent(params) {
   try {
     const zip       = resolveZip(params);
     const agentType = params.agent_type || 'default';
@@ -636,7 +636,7 @@ function handleForAgent(params) {
       try {
         const agentMemoryWorker = require('./workers/agentMemoryWorker');
         if (typeof agentMemoryWorker.getDelta === 'function') {
-          delta = agentMemoryWorker.getDelta(agentId, zip);
+          delta = await agentMemoryWorker.getDelta(agentId, zip);
         }
       } catch {
         // agentMemoryWorker not yet available

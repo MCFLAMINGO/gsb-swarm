@@ -325,7 +325,8 @@ function wrapMCPHandler(toolName, handler) {
         try {
           const agentMemoryWorker = require('./agentMemoryWorker');
           if (typeof agentMemoryWorker.recordQuery === 'function') {
-            agentMemoryWorker.recordQuery(agentId, zip, toolName, agentType);
+            // recordQuery is async — fire-and-forget, errors silently swallowed
+            Promise.resolve(agentMemoryWorker.recordQuery(agentId, zip, toolName, agentType)).catch(() => {});
           }
         } catch {
           // agentMemoryWorker not yet available — silently continue

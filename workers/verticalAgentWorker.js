@@ -507,7 +507,7 @@ async function handleVerticalQuery(verticalKey, query, zip) {
   const resolvedZip = zip || config.defaultZips[0];
 
   // ── 1. Cache check ───────────────────────────────────────────────────────────
-  const cached = inferenceCache.get(query, verticalKey, resolvedZip);
+  const cached = await inferenceCache.get(query, verticalKey, resolvedZip);
   if (cached) {
     return {
       vertical:         verticalKey,
@@ -528,7 +528,7 @@ async function handleVerticalQuery(verticalKey, query, zip) {
   const score  = scoreAnswer(tool, result);
 
   // ── 3. Store in cache (all results, any confidence) ───────────────────────────
-  inferenceCache.set(query, verticalKey, resolvedZip, tool, result, score);
+  await inferenceCache.set(query, verticalKey, resolvedZip, tool, result, score);
 
   // ── 4. Low confidence: log gap + dispatch scout ──────────────────────────────
   if (score < 40) {

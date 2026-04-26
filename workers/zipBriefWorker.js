@@ -225,7 +225,20 @@ function briefPath(zip) {
   return path.join(BRIEFS_DIR, `${zip}.json`);
 }
 
-function needsRebuild(zip) {
+async function needsRebuild(zip) {
+  // Check Postgres first: if no brief row exists, always rebuild
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const { getZipBrief } = require('../lib/pgStore');
+      const existing = await getZipBrief(zip);
+      // If no brief in Postgres, rebuild
+      if (!existing) return true;
+      // If brief exists but is older than 4 hours, rebuild
+      const age = Date.now() - new Date(existing._stored_at || 0).getTime();
+      return age > 4 * 60 * 60 * 1000;
+    } catch (_) {}
+  }
+  // Flat-file fallback (local dev without DB)
   const zipFile   = path.join(ZIPS_DIR, `${zip}.json`);
   const briefFile = briefPath(zip);
   if (!fs.existsSync(briefFile)) return true;
@@ -267,7 +280,7 @@ async function runBriefPass() {
   console.log(`[zip-brief] Checking ${allZips.length} ZIPs for stale briefs`);
 
   for (const zip of allZips) {
-    if (!needsRebuild(zip)) { skipped++; continue; }
+    if (!(await needsRebuild(zip))) { skipped++; continue; }
 
     try {
       let businesses;
@@ -281,6 +294,15 @@ async function runBriefPass() {
 
       const brief = buildBrief(zip, businesses);
       fs.writeFileSync(briefPath(zip), JSON.stringify(brief, null, 2));
+      // Mirror to Postgres so briefValidator + any agent can read without flat files
+      if (process.env.LOCAL_INTEL_DB_URL) {
+        try {
+          const { upsertZipBrief } = require('../lib/pgStore');
+          await upsertZipBrief(zip, brief);
+        } catch (pgErr) {
+          console.warn(`[zip-brief] Postgres brief write failed for ${zip}:`, pgErr.message);
+        }
+      }
       built++;
 
       if (built % 20 === 0) {
@@ -296,7 +318,7 @@ async function runBriefPass() {
   }
 
   console.log(`[zip-brief] Pass complete — built:${built} skipped:${skipped} errors:${errors}`);
-  return { built, skipped, errors, total: zipFiles.length };
+  return { built, skipped, errors, total: allZips.length };
 }
 
 // ── Daemon ────────────────────────────────────────────────────────────────────
@@ -312,7 +334,7 @@ async function runBriefPass() {
       // Validate every built brief — flag failures before next cycle
       if (passResult && passResult.built > 0) {
         console.log('[zip-brief] Running validation pass on all briefs');
-        const report = validateAll();
+        const report = await validateAll();
         if (report) {
           const failedZips = report.failed_zips || [];
           if (failedZips.length > 0) {

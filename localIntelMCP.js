@@ -53,7 +53,7 @@ async function handleQuery(params) {
 
   // Cache check
   if (r.vertical) {
-    const cached = inferenceCache.get(query, r.vertical, zip);
+    const cached = await inferenceCache.get(query, r.vertical, zip);
     if (cached) {
       return {
         query,

@@ -2,76 +2,26 @@
 /**
  * agentMemoryWorker.js — LocalIntel Per-Agent Memory
  *
- * Manages per-agent memory files stored in data/agentMemory/{agentId}.json
+ * Postgres-backed. Previously used data/agentMemory/{agentId}.json which was
+ * wiped on every Railway restart — agents started from zero every deploy.
+ * Now all memory survives in the agent_memory table.
  *
  * Exports:
  *   recordQuery(agentId, zip, tool, agentType)  — log a query event to agent memory
  *   getDelta(agentId, zip)                       — business count delta since last visit
  *   getAgentContext(agentId)                     — summarise agent's query patterns
- *   clearOldMemory()                             — prune entries older than 90 days
+ *   clearOldMemory()                             — prune visit log entries older than 90 days
  *
  * Schema: { agentId, total_queries, member_since, last_seen, zip_visit_log: [],
  *           zip_frequency: {}, zip_last_count: {}, corridor_detected: bool }
  */
 
-const path = require('path');
-const fs   = require('fs');
-
-const DATA_DIR    = path.join(__dirname, '..', 'data');
-const MEMORY_DIR  = path.join(DATA_DIR, 'agentMemory');
-const ZIPS_DIR    = path.join(DATA_DIR, 'zips');
-const MAX_LOG     = 100;          // keep last N visit log entries
-const RETENTION_D = 90;          // prune entries older than this many days
-
-// ── Ensure memory directory exists ───────────────────────────────────────────
-try {
-  if (!fs.existsSync(MEMORY_DIR)) fs.mkdirSync(MEMORY_DIR, { recursive: true });
-} catch {}
-
-// ── Run prune on module load ──────────────────────────────────────────────────
-// (deferred via setImmediate so module.exports is set before any IO)
-setImmediate(() => { try { clearOldMemory(); } catch {} });
-
-// ── Safe JSON reader ──────────────────────────────────────────────────────────
-function readJson(filePath) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
-// ── Atomic write (write .tmp, rename) ────────────────────────────────────────
-function writeAtomic(filePath, data) {
-  const tmp = filePath + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, filePath);
-}
-
-// ── Load or initialise agent memory ──────────────────────────────────────────
-function loadMemory(agentId) {
-  const filePath = path.join(MEMORY_DIR, `${agentId}.json`);
-  const existing = readJson(filePath);
-  if (existing) return { filePath, mem: existing };
-
-  const now = new Date().toISOString();
-  const mem = {
-    agentId,
-    total_queries:      0,
-    member_since:       now,
-    last_seen:          now,
-    zip_visit_log:      [],
-    zip_frequency:      {},
-    zip_last_count:     {},
-    corridor_detected:  false,
-  };
-  return { filePath, mem };
-}
+const MAX_LOG     = 100;   // keep last N visit log entries in memory
+const RETENTION_D = 90;    // prune entries older than this many days
 
 // ── Corridor detection: are the last 3+ unique ZIPs numerically sequential? ──
 function detectCorridor(zipVisitLog) {
   try {
-    // Collect last 3 unique ZIPs in order of visit
     const seen = [];
     for (let i = zipVisitLog.length - 1; i >= 0 && seen.length < 5; i--) {
       const z = zipVisitLog[i].zip;
@@ -79,14 +29,12 @@ function detectCorridor(zipVisitLog) {
     }
     if (seen.length < 3) return false;
 
-    // Check if at least 3 consecutive ZIPs are numerically sequential (differ by ≤2)
     const nums = seen.map(z => parseInt(z, 10)).filter(n => !isNaN(n));
     if (nums.length < 3) return false;
 
-    // Check any 3-window for sequential pattern
     for (let i = 0; i <= nums.length - 3; i++) {
       const sorted = [...nums.slice(i, i + 3)].sort((a, b) => a - b);
-      if (sorted[2] - sorted[0] <= 4) return true; // within 4 ZIP numbers = corridor
+      if (sorted[2] - sorted[0] <= 4) return true;
     }
     return false;
   } catch {
@@ -94,20 +42,56 @@ function detectCorridor(zipVisitLog) {
   }
 }
 
+// ── Load or initialise agent memory from Postgres ────────────────────────────
+async function loadMemory(agentId) {
+  try {
+    if (process.env.LOCAL_INTEL_DB_URL) {
+      const pgStore = require('../lib/pgStore');
+      const mem = await pgStore.getAgentMemory(agentId);
+      if (mem) return mem;
+    }
+  } catch (_) {}
+
+  // Default empty memory for first-time agents
+  const now = new Date().toISOString();
+  return {
+    agentId,
+    total_queries:     0,
+    member_since:      now,
+    last_seen:         now,
+    zip_visit_log:     [],
+    zip_frequency:     {},
+    zip_last_count:    {},
+    corridor_detected: false,
+  };
+}
+
+// ── Write memory back to Postgres ────────────────────────────────────────────
+async function writeMem(mem) {
+  try {
+    if (process.env.LOCAL_INTEL_DB_URL) {
+      const pgStore = require('../lib/pgStore');
+      await pgStore.upsertAgentMemory(mem);
+    }
+  } catch (_) {
+    // Never throw — memory writes are best-effort
+  }
+}
+
 // ── recordQuery ───────────────────────────────────────────────────────────────
 /**
- * Log a query event to the agent's memory file.
+ * Log a query event to the agent's memory.
  *
  * @param {string} agentId
  * @param {string} zip
  * @param {string} tool
  * @param {string} agentType
  */
-function recordQuery(agentId, zip, tool, agentType) {
+async function recordQuery(agentId, zip, tool, agentType) {
   try {
     if (!agentId) return;
 
-    const { filePath, mem } = loadMemory(agentId);
+    const mem = await loadMemory(agentId);
     const now = new Date().toISOString();
 
     // Append to visit log
@@ -130,7 +114,7 @@ function recordQuery(agentId, zip, tool, agentType) {
     mem.total_queries += 1;
     mem.last_seen      = now;
 
-    writeAtomic(filePath, mem);
+    await writeMem(mem);
   } catch {
     // Never throw
   }
@@ -139,14 +123,15 @@ function recordQuery(agentId, zip, tool, agentType) {
 // ── getDelta ──────────────────────────────────────────────────────────────────
 /**
  * Returns the business count delta since this agent last queried a ZIP.
+ * Current count is read from Postgres (businesses table).
  *
  * @param {string} agentId
  * @param {string} zip
  * @returns {object|null}
  */
-function getDelta(agentId, zip) {
+async function getDelta(agentId, zip) {
   try {
-    const { mem } = loadMemory(agentId);
+    const mem = await loadMemory(agentId);
 
     // Find most recent visit log entry for this ZIP
     const visits = mem.zip_visit_log.filter(e => e.zip === zip);
@@ -158,22 +143,24 @@ function getDelta(agentId, zip) {
       ? Math.round((Date.now() - new Date(lastTs).getTime()) / (1000 * 60 * 60 * 24))
       : null;
 
-    // Current business count
+    // Current business count from Postgres
     let currentCount = 0;
     try {
-      const zipData = JSON.parse(fs.readFileSync(path.join(ZIPS_DIR, `${zip}.json`), 'utf8'));
-      currentCount  = Array.isArray(zipData) ? zipData.length : 0;
-    } catch {}
+      if (process.env.LOCAL_INTEL_DB_URL) {
+        const pgStore = require('../lib/pgStore');
+        const rows = await pgStore.getBusinessesByZip(zip);
+        currentCount = Array.isArray(rows) ? rows.length : 0;
+      }
+    } catch (_) {}
 
     // Previous snapshot from memory
     const prevCount = mem.zip_last_count[zip] || currentCount;
 
     // Update snapshot for next call
     try {
-      const { filePath, mem: freshMem } = loadMemory(agentId);
-      freshMem.zip_last_count[zip] = currentCount;
-      writeAtomic(filePath, freshMem);
-    } catch {}
+      mem.zip_last_count[zip] = currentCount;
+      await writeMem(mem);
+    } catch (_) {}
 
     const netChange = currentCount - prevCount;
     return {
@@ -196,9 +183,9 @@ function getDelta(agentId, zip) {
  * @param {string} agentId
  * @returns {object}
  */
-function getAgentContext(agentId) {
+async function getAgentContext(agentId) {
   try {
-    const { mem } = loadMemory(agentId);
+    const mem = await loadMemory(agentId);
 
     // Top 3 most queried ZIPs
     const topZips = Object.entries(mem.zip_frequency || {})
@@ -206,8 +193,7 @@ function getAgentContext(agentId) {
       .slice(0, 3)
       .map(([zip, count]) => ({ zip, query_count: count }));
 
-    // Infer preferred categories from tool params in visit log
-    // (visit log entries may carry a category field if enriched by caller)
+    // Infer preferred categories from visit log entries
     const catCounts = {};
     for (const entry of (mem.zip_visit_log || [])) {
       if (entry.category) {
@@ -221,7 +207,7 @@ function getAgentContext(agentId) {
 
     // Suggested tool based on query patterns
     let suggestedTool = null;
-    const totalQ = mem.total_queries || 0;
+    const totalQ    = mem.total_queries || 0;
     const uniqueZips = Object.keys(mem.zip_frequency || {}).length;
 
     if (uniqueZips >= 3) {
@@ -233,7 +219,7 @@ function getAgentContext(agentId) {
     }
 
     return {
-      top_zips:            topZips,
+      top_zips:             topZips,
       preferred_categories: preferredCategories,
       suggested_tool:       suggestedTool,
       corridor_detected:    mem.corridor_detected || false,
@@ -256,37 +242,27 @@ function getAgentContext(agentId) {
 
 // ── clearOldMemory ────────────────────────────────────────────────────────────
 /**
- * Prunes zip_visit_log entries older than RETENTION_D days across all agent
- * memory files. Safe to run at any time.
+ * Prunes zip_visit_log entries older than RETENTION_D days across all agents
+ * stored in Postgres. Safe to run at any time.
  */
-function clearOldMemory() {
+async function clearOldMemory() {
   try {
-    if (!fs.existsSync(MEMORY_DIR)) return;
-
-    const cutoff = Date.now() - RETENTION_D * 24 * 60 * 60 * 1000;
-    const files  = fs.readdirSync(MEMORY_DIR).filter(f => f.endsWith('.json') && !f.endsWith('.tmp'));
-
-    for (const file of files) {
-      try {
-        const filePath = path.join(MEMORY_DIR, file);
-        const mem      = readJson(filePath);
-        if (!mem || !Array.isArray(mem.zip_visit_log)) continue;
-
-        const before = mem.zip_visit_log.length;
-        mem.zip_visit_log = mem.zip_visit_log.filter(e => {
-          try { return new Date(e.ts).getTime() >= cutoff; } catch { return true; }
-        });
-
-        if (mem.zip_visit_log.length !== before) {
-          writeAtomic(filePath, mem);
-        }
-      } catch {
-        // skip individual file errors
-      }
+    if (!process.env.LOCAL_INTEL_DB_URL) return;
+    const pgStore  = require('../lib/pgStore');
+    const cutoffIso = new Date(Date.now() - RETENTION_D * 24 * 60 * 60 * 1000).toISOString();
+    const agents   = await pgStore.listAgentMemories();
+    for (const agent of agents) {
+      await pgStore.deleteOldAgentMemoryEntries(agent.agent_id, cutoffIso);
+    }
+    if (agents.length > 0) {
+      console.log(`[agentMemory] Pruned visit logs older than ${RETENTION_D}d for ${agents.length} agents`);
     }
   } catch {
     // Never throw
   }
 }
+
+// Run prune on module load (deferred so module.exports is set first)
+setImmediate(() => { clearOldMemory().catch(() => {}); });
 
 module.exports = { recordQuery, getDelta, getAgentContext, clearOldMemory };
