@@ -5958,7 +5958,7 @@ app.use((req, res, next) => {
     { name: 'ACS Demographics Worker',    file: 'workers/acsWorker.js'             },
   ];
 
-  function spawnLocalIntelWorker(w) {
+  function spawnLocalIntelWorker(w, attempt = 0) {
     const workerPath = path.join(__dirname, w.file);
     if (!fs.existsSync(workerPath)) {
       console.warn(`[local-intel-workers] Skipping ${w.name} — file not found: ${workerPath}`);
@@ -5967,8 +5967,11 @@ app.use((req, res, next) => {
     const child = fork(workerPath, [], { silent: false, env: process.env });
     child.on('error', err => console.error(`[local-intel-workers] ${w.name} error:`, err.message));
     child.on('exit', (code, signal) => {
-      console.warn(`[local-intel-workers] ${w.name} exited (code=${code}, signal=${signal}) — restarting in 5s`);
-      setTimeout(() => spawnLocalIntelWorker(w), 5000);
+      // Exponential backoff: 5s, 30s, 2m, 10m, 30m — cap at 30 min
+      const delays = [5000, 30000, 120000, 600000, 1800000];
+      const delay = delays[Math.min(attempt, delays.length - 1)];
+      console.warn(`[local-intel-workers] ${w.name} exited (code=${code}, signal=${signal}) — restarting in ${delay/1000}s (attempt ${attempt + 1})`);
+      setTimeout(() => spawnLocalIntelWorker(w, attempt + 1), delay);
     });
     console.log(`[local-intel-workers] Started ${w.name} (PID ${child.pid})`);
   }
