@@ -2339,6 +2339,35 @@ async function handleRPC(req, callerInfo) {
       // Extract zip + intent for observability
       const parsed = (typeof result === 'object' && result !== null) ? result : {};
 
+      // ── Probe log — feeds routerLearningWorker with real query data ──────────────
+      if (process.env.LOCAL_INTEL_DB_URL) {
+        try {
+          const { appendProbeLog } = require('./lib/pgStore');
+          let score = 70;
+          if (parsed?.error) score = 0;
+          else if (!parsed || Object.keys(parsed).length < 2) score = 10;
+          else if (parsed?.data?.length > 5 || parsed?.biz_count > 50 || parsed?.investment_score) score = 90;
+          const vertical = toolName.replace('local_intel_', '');
+          appendProbeLog({
+            ts:                new Date().toISOString(),
+            tool:              toolName,
+            zip:               toolArgs?.zip || parsed?.zip || 'unknown',
+            name:              parsed?.name || parsed?.zip_label || null,
+            query:             toolArgs?.query || toolArgs?.question || '',
+            score,
+            latency_ms:        latency,
+            answer_length:     JSON.stringify(result).length,
+            answer_snippet:    JSON.stringify(parsed).slice(0, 200),
+            http_status:       parsed?.error ? 400 : 200,
+            error:             parsed?.error || null,
+            detected_vertical: vertical,
+            persona:           _ci?.agentId || 'anonymous',
+            role:              callerTier || 'free',
+          }).catch(() => {});  // never block a tool call for logging
+        } catch (_) {}
+      }
+      // ───────────────────────────────────────────────────────────────────────────────
+
       // ── Tempo sponsor-tx payment for paid-tier local_intel_compare ──────────
       let txHash = _ci.paymentTxHash || null; // x402 path already has a hash
       let paidAmt = 0;

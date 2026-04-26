@@ -35,35 +35,52 @@ const REPORT_FILE   = path.join(EVOLUTION_DIR, '_report.json');
 const GAPS_FILE     = path.join(EVOLUTION_DIR, '_gaps.json');
 
 // ── ZIP registry (all known ZIPs across the platform) ─────────────────────────
-const ALL_KNOWN_ZIPS = [
-  { zip: '32081', name: 'Nocatee',                   county: 'St. Johns' },
-  { zip: '32082', name: 'Ponte Vedra Beach',          county: 'St. Johns' },
-  { zip: '32092', name: 'World Golf Village',         county: 'St. Johns' },
-  { zip: '32084', name: 'St. Augustine',              county: 'St. Johns' },
-  { zip: '32086', name: 'St. Augustine South',        county: 'St. Johns' },
-  { zip: '32095', name: 'Palm Valley',                county: 'St. Johns' },
-  { zip: '32080', name: 'St. Augustine Beach',        county: 'St. Johns' },
-  { zip: '32259', name: 'Fruit Cove / Saint Johns',   county: 'St. Johns' },
-  { zip: '32250', name: 'Jacksonville Beach',         county: 'Duval'     },
-  { zip: '32266', name: 'Neptune Beach',              county: 'Duval'     },
-  { zip: '32258', name: 'Bartram Park',               county: 'Duval'     },
-  { zip: '32226', name: 'North Jacksonville',         county: 'Duval'     },
-  { zip: '32003', name: 'Fleming Island',             county: 'Clay'      },
-  { zip: '32034', name: 'Fernandina Beach',           county: 'Nassau'    },
-  { zip: '32065', name: 'Orange Park / Oakleaf',      county: 'Clay'      },
-  { zip: '32097', name: 'Yulee',                      county: 'Nassau'    },
-  { zip: '32256', name: 'Baymeadows / Tinseltown',    county: 'Duval'     },
-  { zip: '32257', name: 'Mandarin South',             county: 'Duval'     },
-  { zip: '32224', name: 'Jacksonville Intracoastal',  county: 'Duval'     },
-  { zip: '32225', name: 'Jacksonville Arlington',     county: 'Duval'     },
-  { zip: '32246', name: 'Jacksonville Regency',       county: 'Duval'     },
-  { zip: '32233', name: 'Atlantic Beach',             county: 'Duval'     },
-  { zip: '32211', name: 'Jacksonville East',          county: 'Duval'     },
-  { zip: '32216', name: 'Southside Blvd',             county: 'Duval'     },
-  { zip: '32217', name: 'San Jose',                   county: 'Duval'     },
-  { zip: '32207', name: 'Jacksonville Southbank',     county: 'Duval'     },
-  { zip: '32073', name: 'Orange Park',                county: 'Clay'      },
+// SJC_FALLBACK — used only when Postgres is unavailable (local dev)
+const SJC_FALLBACK_ZIPS = [
+  { zip: '32081', name: 'Nocatee',                  county: 'St. Johns' },
+  { zip: '32082', name: 'Ponte Vedra Beach',         county: 'St. Johns' },
+  { zip: '32092', name: 'World Golf Village',        county: 'St. Johns' },
+  { zip: '32084', name: 'St. Augustine',             county: 'St. Johns' },
+  { zip: '32086', name: 'St. Augustine South',       county: 'St. Johns' },
+  { zip: '32095', name: 'Palm Valley',               county: 'St. Johns' },
+  { zip: '32080', name: 'St. Augustine Beach',       county: 'St. Johns' },
+  { zip: '32259', name: 'Fruit Cove / Saint Johns',  county: 'St. Johns' },
+  { zip: '32250', name: 'Jacksonville Beach',        county: 'Duval'     },
+  { zip: '32266', name: 'Neptune Beach',             county: 'Duval'     },
+  { zip: '32258', name: 'Bartram Park',              county: 'Duval'     },
+  { zip: '32073', name: 'Orange Park',               county: 'Clay'      },
 ];
+
+// getAuditZips — Postgres first, fallback to SJC_FALLBACK_ZIPS
+// Returns [{zip, name, county}] for every ZIP that has business data
+async function getAuditZips() {
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const { getDistinctZips } = require('../lib/pgStore');
+      const db2 = require('../lib/db');
+      const pgZips = await getDistinctZips();
+      if (pgZips.length > 0) {
+        // Enrich with name/county from zip_intelligence where available
+        const metaRows = await db2.query(
+          'SELECT zip, name FROM zip_intelligence WHERE zip = ANY($1)', [pgZips]
+        ).catch(() => []);
+        const metaIndex = Object.fromEntries(metaRows.map(r => [r.zip, r.name]));
+        // Also pull from SJC_FALLBACK for known names
+        const sjcIndex  = Object.fromEntries(SJC_FALLBACK_ZIPS.map(z => [z.zip, z]));
+        const result = pgZips.map(zip => ({
+          zip,
+          name:   metaIndex[zip] || sjcIndex[zip]?.name   || zip,
+          county: sjcIndex[zip]?.county || 'Unknown',
+        }));
+        console.log(`[promptEvolution] Audit scope: ${result.length} ZIPs from Postgres`);
+        return result;
+      }
+    } catch (e) {
+      console.warn('[promptEvolution] Postgres ZIP discovery failed, using fallback:', e.message);
+    }
+  }
+  return SJC_FALLBACK_ZIPS;
+}
 
 // ── Signal quality thresholds ──────────────────────────────────────────────────
 const RICH_CYCLES        = 10;   // 10+ cycles with demo data = RICH
@@ -103,7 +120,7 @@ function ensureDirs() {
 async function auditZips() {
   const audit = {};
 
-  for (const { zip, name, county } of ALL_KNOWN_ZIPS) {
+  for (const { zip, name, county } of auditList) {
     const historyFile = path.join(HISTORY_DIR, `${zip}.json`);
     const history     = readJson(historyFile) || [];
     // Oracle: Postgres first, flat file fallback
