@@ -287,6 +287,28 @@ router.post('/', (req, res) => {
   const total = results.length;
   results = results.slice(0, Math.min(limit, 200));
 
+  // ── Notify claimed businesses when their ZIP + category is queried ──
+  if (zip && effectiveGroup) {
+    try {
+      const nq = require('./lib/notificationQueue');
+      const subject = `Market query in your area — ${zip}`;
+      const payload = {
+        body: `An agent queried the ${effectiveGroup} market in ZIP ${zip}.`,
+        zip,
+        category_group: effectiveGroup,
+        cta_url: 'https://thelocalintel.com',
+        cta_label: 'View Details',
+      };
+      setImmediate(() =>
+        nq.enqueueForZipCategory(zip, effectiveGroup, subject, payload)
+          .then(n => { if (n > 0) return nq.processQueue(20); })
+          .catch(e => console.error('[query-notify]', e.message))
+      );
+    } catch (notifyErr) {
+      console.error('[query-notify-init]', notifyErr.message);
+    }
+  }
+
   res.json({
     ok:      true,
     total,
@@ -308,23 +330,143 @@ router.get('/zones', (req, res) => {
   res.json({ ok: true, ...zones });
 });
 
-// ── POST /api/local-intel/claim — forward to worker on port 3003 ────────────
-router.post('/claim', express.json(), async (req, res) => {
+
+// ─── CLAIM ENDPOINTS ──────────────────────────────────────────────────────────
+
+// GET /api/local-intel/claim/lookup?name=&zip=
+router.get('/claim/lookup', async (req, res) => {
+  const { name, zip } = req.query;
+  if (!name && !zip) return res.status(400).json({ error: 'name or zip required' });
   try {
-    const body = JSON.stringify(req.body || {});
-    const response = await fetch('http://localhost:3003/claim', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-    });
-    const data = await response.json();
-    res.status(response.status).json(data);
-  } catch (e) {
-    res.status(503).json({ ok: false, error: 'Local Intel Worker unavailable: ' + e.message });
+    const db = require('./lib/db');
+    const rows = await db.query(
+      `SELECT business_id, name, address, city, zip, phone, website,
+              category, category_group, status,
+              (claimed_at IS NOT NULL) as is_claimed
+         FROM businesses
+        WHERE status = 'active'
+          AND ($1::text IS NULL OR name ILIKE '%' || $1 || '%')
+          AND ($2::text IS NULL OR zip = $2)
+        ORDER BY
+          CASE WHEN claimed_at IS NOT NULL THEN 0 ELSE 1 END,
+          name ASC
+        LIMIT 10`,
+      [name || null, zip || null]
+    );
+    res.json({ results: rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/local-intel/claim/start
+router.post('/claim/start', express.json(), async (req, res) => {
+  const { business_id, contact_email, contact_phone, carrier,
+          notify_sms, notify_email, notify_push, notify_web, wallet } = req.body || {};
+  if (!business_id) return res.status(400).json({ error: 'business_id required' });
+  if (!contact_email && !contact_phone) return res.status(400).json({ error: 'email or phone required' });
+  try {
+    const db     = require('./lib/db');
+    const crypto = require('crypto');
+    const nq     = require('./lib/notificationQueue');
+
+    const [biz] = await db.query(
+      `SELECT business_id, name, claimed_at FROM businesses WHERE business_id = $1 AND status = 'active'`,
+      [business_id]
+    );
+    if (!biz)           return res.status(404).json({ error: 'business not found' });
+    if (biz.claimed_at) return res.status(409).json({ error: 'already claimed', claimed: true });
+
+    const token    = String(Math.floor(100000 + Math.random() * 900000));
+    const tokenExp = new Date(Date.now() + 30 * 60 * 1000);
+
+    await db.query(
+      `UPDATE businesses SET
+         claim_token        = $1, claim_token_exp   = $2,
+         notification_phone = $3, notification_email = $4,
+         notify_sms = $5, notify_email = $6, notify_push = $7, notify_web = $8,
+         wallet = COALESCE($9, wallet)
+       WHERE business_id = $10`,
+      [token, tokenExp, contact_phone||null, contact_email||null,
+       !!notify_sms, !!notify_email, !!notify_push, !!notify_web,
+       wallet||null, business_id]
+    );
+
+    const verifyChannel = contact_email ? 'email' : 'sms';
+    await nq.enqueue(business_id,
+      `Your LocalIntel code: ${token}`,
+      { body: `Verification code: ${token}. Expires in 30 minutes.`, code: token, carrier: carrier||'verizon' },
+      [verifyChannel]
+    );
+    setImmediate(() => nq.processQueue(5).catch(e => console.error('[notify]', e.message)));
+    res.json({ ok: true, channel: verifyChannel, expires_in: 30 });
+  } catch (err) {
+    console.error('[claim/start]', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ── POST /api/local-intel/ingest — proxy to DataIngestWorker on port 3005 ──────
+// POST /api/local-intel/claim/verify
+router.post('/claim/verify', express.json(), async (req, res) => {
+  const { business_id, token } = req.body || {};
+  if (!business_id || !token) return res.status(400).json({ error: 'business_id and token required' });
+  try {
+    const db  = require('./lib/db');
+    const nq  = require('./lib/notificationQueue');
+    const [biz] = await db.query(
+      `SELECT business_id, name, claim_token, claim_token_exp, claimed_at,
+              notify_sms, notify_email, notify_push, notify_web
+         FROM businesses WHERE business_id = $1 AND status = 'active'`,
+      [business_id]
+    );
+    if (!biz)             return res.status(404).json({ error: 'business not found' });
+    if (biz.claimed_at)   return res.status(409).json({ error: 'already claimed' });
+    if (!biz.claim_token) return res.status(400).json({ error: 'no pending claim' });
+    if (biz.claim_token !== String(token)) return res.status(401).json({ error: 'invalid code' });
+    if (new Date(biz.claim_token_exp) < new Date()) return res.status(401).json({ error: 'code expired' });
+
+    await db.query(
+      `UPDATE businesses SET claimed_at = NOW(), claim_token = NULL, claim_token_exp = NULL WHERE business_id = $1`,
+      [business_id]
+    );
+
+    const channels = ['web'];
+    if (biz.notify_sms)   channels.push('sms');
+    if (biz.notify_email) channels.push('email');
+    await nq.enqueue(business_id,
+      `Welcome to LocalIntel, ${biz.name}`,
+      { body: `Your listing is claimed. You'll receive market intelligence when agents query your area.`, cta_url: 'https://thelocalintel.com', cta_label: 'View Dashboard' },
+      channels
+    );
+    setImmediate(() => nq.processQueue(5).catch(() => {}));
+    res.json({ ok: true, claimed: true, business_id, name: biz.name });
+  } catch (err) {
+    console.error('[claim/verify]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/local-intel/claim/notifications?business_id=&since=
+router.get('/claim/notifications', async (req, res) => {
+  const { business_id, since } = req.query;
+  if (!business_id) return res.status(400).json({ error: 'business_id required' });
+  try {
+    const db   = require('./lib/db');
+    const rows = await db.query(
+      `SELECT id, channel, subject, payload, status, created_at, sent_at
+         FROM notification_queue
+        WHERE business_id = $1
+          AND ($2::timestamptz IS NULL OR created_at > $2)
+        ORDER BY created_at DESC LIMIT 50`,
+      [business_id, since || null]
+    );
+    res.json({ notifications: rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/local-intel/claim (legacy — same as /claim/start)
+router.post('/claim', express.json(), async (req, res) => {
+  res.redirect(307, '/api/local-intel/claim/start');
+});
+
 router.post('/ingest', express.json({ limit: '50mb' }), async (req, res) => {
   try {
     const body = JSON.stringify(req.body || {});
@@ -1376,7 +1518,36 @@ router.get('/oracle', (req, res) => {
       if (!fs.existsSync(file)) {
         return res.status(404).json({ error: `No oracle data for ${zip}. Oracle worker may still be computing.` });
       }
-      return res.json(JSON.parse(fs.readFileSync(file, 'utf8')));
+      const oracleData = JSON.parse(fs.readFileSync(file, 'utf8'));
+
+      // ── Notify claimed businesses in this ZIP about the market query ──
+      // Fire-and-forget — never block the oracle response
+      try {
+        const nq = require('./lib/notificationQueue');
+        // Determine top gap category group from oracle, fallback to 'services'
+        const topGroup = oracleData?.market_gaps?.top_gap?.category_group
+          || oracleData?.restaurant_capacity?.top_gap_group
+          || null;
+        if (topGroup) {
+          const subject = `Market query in your area — ${zip}`;
+          const payload = {
+            body: `An agent queried the ${topGroup} market in ZIP ${zip}. Check LocalIntel for full details.`,
+            zip,
+            category_group: topGroup,
+            cta_url: `https://thelocalintel.com/claim.html?business_id=`,
+            cta_label: 'View Market Intelligence',
+          };
+          setImmediate(() =>
+            nq.enqueueForZipCategory(zip, topGroup, subject, payload)
+              .then(n => { if (n > 0) return nq.processQueue(20); })
+              .catch(e => console.error('[oracle-notify]', e.message))
+          );
+        }
+      } catch (notifyErr) {
+        console.error('[oracle-notify-init]', notifyErr.message);
+      }
+
+      return res.json(oracleData);
     }
 
     // No ZIP specified — return index
