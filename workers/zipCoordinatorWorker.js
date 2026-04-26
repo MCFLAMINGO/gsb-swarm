@@ -113,7 +113,10 @@ function checkBudgetGate() {
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
+const pgStore = require('../lib/pgStore');
+
 function loadCoverage() {
+  // Try local file first for speed, Postgres is source of truth
   if (fs.existsSync(COVERAGE_FILE)) {
     return JSON.parse(fs.readFileSync(COVERAGE_FILE));
   }
@@ -121,7 +124,32 @@ function loadCoverage() {
 }
 
 function saveCoverage(coverage) {
+  // Write to file for local speed
   fs.writeFileSync(COVERAGE_FILE, JSON.stringify(coverage, null, 2));
+  // Also persist completed ZIPs to Postgres so they survive restarts
+  const completed = coverage.completed || {};
+  Object.entries(completed).forEach(([zip, info]) => {
+    pgStore.markZipProcessed(zip, info?.worker || 'zipCoordinator', info?.count || 0)
+      .catch(() => {});
+  });
+}
+
+// Restore coverage from Postgres on cold start (Railway restart)
+async function restoreCoverageFromPostgres() {
+  if (fs.existsSync(COVERAGE_FILE)) return; // already have local copy
+  try {
+    const pgCoverage = await pgStore.getZipCoverage();
+    if (!Object.keys(pgCoverage).length) return;
+    const coverage = { completed: {}, inProgress: {}, failed: {}, lastRun: null };
+    for (const [zip, info] of Object.entries(pgCoverage)) {
+      if (info.status === 'done') coverage.completed[zip] = { worker: info.worker, count: info.record_count };
+    }
+    fs.mkdirSync(path.dirname(COVERAGE_FILE), { recursive: true });
+    fs.writeFileSync(COVERAGE_FILE, JSON.stringify(coverage, null, 2));
+    console.log(`[ZipCoordinator] Restored ${Object.keys(coverage.completed).length} completed ZIPs from Postgres`);
+  } catch (e) {
+    console.warn('[ZipCoordinator] Could not restore coverage from Postgres:', e.message);
+  }
 }
 
 function getFlCoveragePct(queue) {
@@ -490,10 +518,12 @@ app.get('/budget-status', (req, res) => {
 
 const CYCLE_INTERVAL_MS = 2 * 60 * 1000; // Every 2 minutes
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`[ZipCoordinator] Running on port ${PORT}`);
   // Ensure zips dir exists
   if (!fs.existsSync(ZIPS_DIR)) fs.mkdirSync(ZIPS_DIR, { recursive: true });
+  // Restore coverage from Postgres on cold start (Railway restart wipes local files)
+  await restoreCoverageFromPostgres();
   // Run first cycle immediately, then on interval
   coordinatorCycle().catch(err => console.error('[ZipCoordinator] Init cycle error:', err));
   setInterval(() => {

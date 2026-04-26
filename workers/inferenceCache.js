@@ -76,10 +76,27 @@ const STOP = new Set([
 let _learnedSignals   = {};  // { vertical: Set<string> }
 let _lastLearnedLoad  = 0;
 
+async function loadLearnedSignalsFromPostgres() {
+  try {
+    const pgStore = require('../lib/pgStore');
+    const patches = await pgStore.getRouterPatches();
+    const next = {};
+    for (const [vertical, terms] of Object.entries(patches)) {
+      if (!Array.isArray(terms)) continue;
+      next[vertical] = new Set(terms.map(t => t.toLowerCase()));
+    }
+    if (Object.keys(next).length) {
+      _learnedSignals = next;
+      console.log('[inferenceCache] Loaded', Object.values(next).reduce((s,v) => s + v.size, 0), 'learned terms from Postgres');
+    }
+  } catch (_) {}
+}
+
 function loadLearnedSignals() {
   const now = Date.now();
   if (now - _lastLearnedLoad < LEARNED_RELOAD_MS) return; // throttle
   _lastLearnedLoad = now;
+  // Try local file first (fast path), then Postgres
   try {
     const raw = JSON.parse(fs.readFileSync(ROUTER_LEARNING, 'utf8'));
     const next = {};
@@ -90,12 +107,15 @@ function loadLearnedSignals() {
     }
     _learnedSignals = next;
   } catch (_) {
-    // file may not exist yet — that's fine
+    // file doesn't exist — load from Postgres
+    loadLearnedSignalsFromPostgres().catch(() => {});
   }
 }
 
 // Kick off first load immediately
 loadLearnedSignals();
+// Also load from Postgres on boot (Railway restart wipes local file)
+loadLearnedSignalsFromPostgres().catch(() => {});
 // Refresh on interval so the module stays current without a restart
 setInterval(loadLearnedSignals, LEARNED_RELOAD_MS).unref();
 

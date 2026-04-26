@@ -27,8 +27,9 @@ const path = require('path');
 const http = require('http');
 
 const BASE_DIR  = path.join(__dirname, '..');
-const LOG_PATH  = path.join(BASE_DIR, 'data', 'mcp_probe_log.json');
+const LOG_PATH  = path.join(BASE_DIR, 'data', 'mcp_probe_log.json'); // fallback only
 const ZIPS_PATH = path.join(__dirname, 'flZipData.json');
+const pgStore   = require('../lib/pgStore');
 
 const CYCLE_MS      = 20 * 60 * 1000;  // 20 min
 const STAGGER_MS    =  2 * 60 * 1000;  // 2 min startup delay
@@ -186,21 +187,13 @@ function scoreResponse(body, toolName) {
 }
 
 // ── Log management ────────────────────────────────────────────────────────────
-function loadLog() {
-  try { return JSON.parse(fs.readFileSync(LOG_PATH, 'utf8')); }
-  catch { return []; }
+// Postgres-backed log — survives Railway restarts
+async function appendLog(entry) {
+  await pgStore.appendProbeLog(entry);
 }
 
-function saveLog(entries) {
-  const trimmed = entries.slice(-MAX_LOG);
-  fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
-  fs.writeFileSync(LOG_PATH, JSON.stringify(trimmed, null, 2));
-}
-
-function appendLog(entry) {
-  const log = loadLog();
-  log.push(entry);
-  saveLog(log);
+async function loadLog() {
+  return await pgStore.getProbeLog(MAX_LOG);
 }
 
 // ── Run one persona probe cycle ───────────────────────────────────────────────
@@ -258,14 +251,14 @@ async function runPersona(persona, zipPool, cycleIndex) {
       console.warn(`[mcp-probe] ${persona.id} | ${zip} | ERROR: ${err.message}`);
     }
 
-    appendLog(entry);
+    await appendLog(entry);
     await new Promise(r => setTimeout(r, 3000));
   }
 }
 
 // ── Summary stats for morning review ─────────────────────────────────────────
-function printSummary() {
-  const log = loadLog();
+async function printSummary() {
+  const log = await loadLog();
   if (!log.length) return;
 
   const byPersona = {};
@@ -297,7 +290,7 @@ function printSummary() {
   let   cycleIndex = 0;
 
   // Summary every 2 hours
-  setInterval(printSummary, 2 * 60 * 60 * 1000);
+  setInterval(() => printSummary().catch(e => console.error('[mcp-probe] Summary error:', e.message)), 2 * 60 * 60 * 1000);
 
   while (true) {
     console.log(`[mcp-probe] Cycle ${cycleIndex + 1} — ${zipPool.length} ZIPs in pool`);

@@ -26,12 +26,14 @@
  *   - All patches logged with before/after and query evidence
  */
 
-const fs   = require('fs');
-const path = require('path');
+const fs      = require('fs');
+const path    = require('path');
+const http    = require('http');
+const pgStore = require('../lib/pgStore');
 
 const BASE_DIR      = path.join(__dirname, '..');
-const LOG_PATH      = path.join(BASE_DIR, 'data', 'mcp_probe_log.json');
-const LEARNING_PATH = path.join(BASE_DIR, 'data', 'router_learning.json');
+const LOG_PATH      = path.join(BASE_DIR, 'data', 'mcp_probe_log.json'); // fallback only
+const LEARNING_PATH = path.join(BASE_DIR, 'data', 'router_learning.json'); // fallback only
 const CACHE_FILE    = path.join(__dirname, 'inferenceCache.js');
 
 const CYCLE_MS   = 30 * 60 * 1000; // 30 min
@@ -86,35 +88,30 @@ function tokenize(query) {
     .filter(t => t.length > 3 && !STOP.has(t) && !/^\d+$/.test(t));
 }
 
-// ── Load probe log ────────────────────────────────────────────────────────────
-function loadLog() {
-  try { return JSON.parse(fs.readFileSync(LOG_PATH, 'utf8')); }
-  catch { return []; }
+// ── Load probe log — Postgres-backed ─────────────────────────────────────────
+async function loadLog() {
+  return await pgStore.getProbeLogForLearning(200);
 }
 
-// ── Load learning history ─────────────────────────────────────────────────────
-function loadLearning() {
-  try { return JSON.parse(fs.readFileSync(LEARNING_PATH, 'utf8')); }
-  catch {
-    return {
-      runs: [],
-      patches: [],
-      score_trend: [],
-      total_patches_applied: 0,
-      verticals: {
-        restaurant: { patches: [], avg_score_before: [], avg_score_after: [] },
-        healthcare: { patches: [], avg_score_before: [], avg_score_after: [] },
-        retail:     { patches: [], avg_score_before: [], avg_score_after: [] },
-        construction:{ patches: [], avg_score_before: [], avg_score_after: [] },
-        realtor:    { patches: [], avg_score_before: [], avg_score_after: [] },
-      },
-    };
-  }
+// ── Load learning history — Postgres-backed ──────────────────────────────────
+async function loadLearning() {
+  const pg = await pgStore.getRouterLearning();
+  if (pg) return pg;
+  return {
+    runs: [], patches: [], score_trend: [], total_patches_applied: 0,
+    verticals: {
+      restaurant:   { patches: [], avg_score_before: [], avg_score_after: [] },
+      healthcare:   { patches: [], avg_score_before: [], avg_score_after: [] },
+      retail:       { patches: [], avg_score_before: [], avg_score_after: [] },
+      construction: { patches: [], avg_score_before: [], avg_score_after: [] },
+      realtor:      { patches: [], avg_score_before: [], avg_score_after: [] },
+    },
+  };
 }
 
-function saveLearning(data) {
-  fs.mkdirSync(path.dirname(LEARNING_PATH), { recursive: true });
-  fs.writeFileSync(LEARNING_PATH, JSON.stringify(data, null, 2));
+async function saveLearning(data) {
+  const lastRun = data.runs?.[data.runs.length - 1];
+  if (lastRun) await pgStore.saveRouterRun(lastRun);
 }
 
 // ── Analyze failures ──────────────────────────────────────────────────────────
@@ -302,8 +299,8 @@ function verticalScoreTrend(log, vertical) {
 async function runLearningCycle(cycleIndex) {
   console.log(`[router-learning] Cycle ${cycleIndex + 1} — reading probe log`);
 
-  const log      = loadLog();
-  const learning = loadLearning();
+  const log      = await loadLog();
+  const learning = await loadLearning();
 
   if (log.length === 0) {
     console.log('[router-learning] No probe log entries yet — skipping');
@@ -341,6 +338,8 @@ async function runLearningCycle(cycleIndex) {
 
     const applied = patchRouterFile(vertical, candidates);
     if (applied && applied.length) {
+      // Save patches to Postgres so they survive deploys
+      await pgStore.saveRouterPatch(vertical, applied, vFailures.slice(0,3).map(f => ({ query: f.query, score: f.score })), 0, 0);
       console.log(`[router-learning]   ✓ Patched ${vertical} with: ${applied.join(', ')} — running confirmation probes...`);
 
       // Before/after confirmation loop — re-score the same failing queries post-patch
@@ -397,7 +396,7 @@ async function runLearningCycle(cycleIndex) {
   learning.runs.push(runRecord);
   if (learning.runs.length > 100) learning.runs = learning.runs.slice(-100);
 
-  saveLearning(learning);
+  await saveLearning(learning);
 
   const patchCount = runRecord.patches.reduce((s, p) => s + p.terms.length, 0);
   console.log(`[router-learning] Cycle ${cycleIndex + 1} complete — ${patchCount} terms patched across ${runRecord.patches.length} verticals`);
