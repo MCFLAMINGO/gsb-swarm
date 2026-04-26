@@ -1702,76 +1702,43 @@ router.post('/job/complete', express.json(), async (req, res) => {
 // ─── PIPELINE CRON ENDPOINT ──────────────────────────────────────────────────
 // POST /api/local-intel/admin/pipeline/reclassify
 // Triggered by Railway cron (nightly 2am ET) or manually.
-// Runs classification pipeline + sector_counts backfill.
+// Runs full self-healing pipeline: classify → enrich → validate → consolidate.
+// Self-improves until health_score >= 80. Detects stalls and flags them.
 // Protected by PIPELINE_SECRET env var.
 router.post('/admin/pipeline/reclassify', express.json(), async (req, res) => {
   const secret = req.headers['x-pipeline-secret'] || req.body?.secret;
   if (process.env.PIPELINE_SECRET && secret !== process.env.PIPELINE_SECRET) {
     return res.status(401).json({ error: 'unauthorized' });
   }
-  // Respond immediately so Railway cron doesn't time out
+  // Respond immediately — pipeline runs async, can take 15-30min for full YP enrich
   res.json({ status: 'pipeline started', timestamp: new Date().toISOString() });
 
-  // Run async — errors logged but don't crash the process
   setImmediate(async () => {
     try {
-      console.log('[pipeline] reclassify_categories starting...');
-      const { runClassificationPipeline } = require('./scripts/reclassify_categories');
-      const stats = await runClassificationPipeline();
-      console.log('[pipeline] reclassify done:', stats);
-
-      // Backfill sector_counts for all affected ZIPs
-      console.log('[pipeline] backfilling sector_counts...');
-      const db = require('./lib/db');
-      await db.query(`
-        INSERT INTO zip_intelligence (zip, sector_counts, updated_at)
-        SELECT
-          b.zip,
-          jsonb_build_object(
-            'food',          COUNT(*) FILTER (WHERE b.category_group='food'),
-            'construction',  COUNT(*) FILTER (WHERE b.category_group='construction'),
-            'health',        COUNT(*) FILTER (WHERE b.category_group='health'),
-            'banking',       COUNT(*) FILTER (WHERE b.category_group='banking'),
-            'retail',        COUNT(*) FILTER (WHERE b.category_group='retail'),
-            'hospitality',   COUNT(*) FILTER (WHERE b.category_group='hospitality'),
-            'beauty',        COUNT(*) FILTER (WHERE b.category_group='beauty'),
-            'grocery',       COUNT(*) FILTER (WHERE b.category_group='grocery'),
-            'auto',          COUNT(*) FILTER (WHERE b.category_group='auto'),
-            'real_estate',   COUNT(*) FILTER (WHERE b.category_group='real_estate'),
-            'legal',         COUNT(*) FILTER (WHERE b.category_group='legal'),
-            'fuel',          COUNT(*) FILTER (WHERE b.category_group='fuel'),
-            'fitness',       COUNT(*) FILTER (WHERE b.category_group='fitness'),
-            'pets',          COUNT(*) FILTER (WHERE b.category_group='pets'),
-            'professional',  COUNT(*) FILTER (WHERE b.category_group='professional'),
-            'civic',         COUNT(*) FILTER (WHERE b.category_group='civic'),
-            'services',      COUNT(*) FILTER (WHERE b.category_group='services')
-          ) AS sector_counts,
-          NOW()
-        FROM businesses b
-        WHERE b.status='active'
-        GROUP BY b.zip
-        ON CONFLICT (zip) DO UPDATE
-          SET sector_counts = EXCLUDED.sector_counts,
-              updated_at    = NOW()
-      `);
-      console.log('[pipeline] sector_counts backfill complete');
+      const { runPipeline } = require('./scripts/pipeline_runner');
+      const result = await runPipeline();
+      console.log('[cron] pipeline complete. health_score:', result.health?.health_score, '| stall:', result.stall);
     } catch (err) {
-      console.error('[pipeline] ERROR:', err.message);
+      console.error('[cron] pipeline FATAL:', err.message);
     }
   });
 });
 
-// GET /api/local-intel/admin/pipeline/runs — view pipeline history
+// GET /api/local-intel/admin/pipeline/runs — view pipeline history + health trend
 router.get('/admin/pipeline/runs', async (req, res) => {
   try {
     const db = require('./lib/db');
     const runs = await db.query(
       `SELECT run_id, pipeline, started_at, finished_at, total_scanned, matched, unmatched, downgraded, notes
-         FROM pipeline_runs
-        ORDER BY started_at DESC
-        LIMIT 20`
+         FROM pipeline_runs ORDER BY started_at DESC LIMIT 20`
     );
-    res.json({ runs });
+    const health = await db.query(
+      `SELECT health_id, run_at, health_score, pct_classified, pct_confident,
+              avg_confidence, local_business_cnt, uncategorized_cnt,
+              duplicate_cnt, shell_candidate_cnt, needs_review_cnt, stall_flag, notes
+         FROM pipeline_health ORDER BY run_at DESC LIMIT 10`
+    );
+    res.json({ runs, health_trend: health });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
