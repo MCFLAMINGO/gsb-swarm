@@ -199,9 +199,31 @@ async function run() {
   }
 
   console.log(`[acsWorker] Done: ${ok} populated, ${fail} empty/failed`);
+  // Write heartbeat so restarts skip if fresh
+  try {
+    if (process.env.LOCAL_INTEL_DB_URL) {
+      const db = require('../lib/db');
+      await db.query(`INSERT INTO worker_heartbeat (worker_name, last_run) VALUES ('acsWorker', NOW()) ON CONFLICT (worker_name) DO UPDATE SET last_run = NOW()`);
+    }
+  } catch (_) {}
 }
 
 // ── Schedule ──────────────────────────────────────────────────────────────────
 const CYCLE_MS = 24 * 60 * 60 * 1000; // 24 hours
-run().catch(e => console.error('[acsWorker] Fatal:', e.message));
-setInterval(() => run().catch(e => console.error('[acsWorker] Interval error:', e.message)), CYCLE_MS);
+const SKIP_FRESH_MS = 6 * 60 * 60 * 1000;
+(async () => {
+  try {
+    if (process.env.LOCAL_INTEL_DB_URL) {
+      const db = require('../lib/db');
+      await db.query(`CREATE TABLE IF NOT EXISTS worker_heartbeat (worker_name TEXT PRIMARY KEY, last_run TIMESTAMPTZ)`);
+      const row = await db.queryOne(`SELECT last_run FROM worker_heartbeat WHERE worker_name = 'acsWorker'`);
+      if (row && row.last_run && (Date.now() - new Date(row.last_run).getTime()) < SKIP_FRESH_MS) {
+        console.log(`[acsWorker] Last run ${row.last_run} — skipping startup`);
+        setInterval(() => run().catch(e => console.error('[acsWorker] Interval error:', e.message)), CYCLE_MS);
+        return;
+      }
+    }
+  } catch (_) {}
+  run().catch(e => console.error('[acsWorker] Fatal:', e.message));
+  setInterval(() => run().catch(e => console.error('[acsWorker] Interval error:', e.message)), CYCLE_MS);
+})();

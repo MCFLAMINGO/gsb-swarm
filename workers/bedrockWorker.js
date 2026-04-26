@@ -351,6 +351,16 @@ async function runBedrock(mode = 'incremental') {
 
   atomicWrite(INDEX_FILE, index);
   console.log(`[bedrockWorker] ${mode} run complete — ${scores.join(', ')}`);
+  // Write heartbeat to Postgres so restarts skip if fresh
+  try {
+    if (process.env.LOCAL_INTEL_DB_URL) {
+      const db = require('../lib/db');
+      await db.query(
+        `INSERT INTO worker_heartbeat (worker_name, last_run) VALUES ('bedrockWorker', NOW())
+         ON CONFLICT (worker_name) DO UPDATE SET last_run = NOW()`
+      );
+    }
+  } catch (_) {}
 }
 
 // ── Scheduling ────────────────────────────────────────────────────────────────
@@ -373,7 +383,26 @@ process.on('unhandledRejection', (reason) => {
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 (async () => {
-  await runBedrock('full');
+  // Skip startup run if last full run was within 6 hours (checked via Postgres)
+  const SKIP_IF_FRESH_MS = 6 * 60 * 60 * 1000;
+  let skipStartup = false;
+  try {
+    if (process.env.LOCAL_INTEL_DB_URL) {
+      const db = require('../lib/db');
+      await db.query(`CREATE TABLE IF NOT EXISTS worker_heartbeat (
+        worker_name TEXT PRIMARY KEY, last_run TIMESTAMPTZ
+      )`);
+      const row = await db.queryOne(
+        `SELECT last_run FROM worker_heartbeat WHERE worker_name = 'bedrockWorker'`
+      );
+      if (row && row.last_run && (Date.now() - new Date(row.last_run).getTime()) < SKIP_IF_FRESH_MS) {
+        console.log(`[bedrockWorker] Last run was ${row.last_run} — skipping startup run`);
+        skipStartup = true;
+      }
+    }
+  } catch (_) {}
+
+  if (!skipStartup) await runBedrock('full');
 
   setInterval(async () => {
     try { await runBedrock('incremental'); }
