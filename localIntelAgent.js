@@ -239,89 +239,117 @@ function resolveNlIntent(query) {
   return { group: null, tags: null };
 }
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { zip, query, category, group, limit = 50, minConfidence = 0 } = req.body || {};
 
-  let results = loadData();
+  try {
+    // ── Resolve NL intent ────────────────────────────────────────────────────
+    const nlIntent = (!group && !category) ? resolveNlIntent(query) : { group: null, tags: null };
+    const effectiveGroup = group || nlIntent.group;
 
-  if (!results.length) {
-    return res.status(503).json({ ok: false, error: 'Local intel dataset not loaded. Run data pull first.' });
-  }
+    // ── Build Postgres query — all filtering in SQL ──────────────────────────
+    const conditions = ["status = 'active'"];
+    const params = [];
+    let p = 1;
 
-  // Resolve NL intent from query when no explicit group/category given
-  const nlIntent = (!group && !category) ? resolveNlIntent(query) : { group: null, tags: null };
-  const effectiveGroup = group || nlIntent.group;
+    if (zip) {
+      conditions.push(`zip = $${p++}`);
+      params.push(zip);
+    }
+    if (category) {
+      conditions.push(`category = $${p++}`);
+      params.push(category);
+    }
+    if (effectiveGroup) {
+      // Use the CATEGORY_GROUPS mapping — pass the categories that belong to this group
+      const groupCats = CATEGORY_GROUPS[effectiveGroup];
+      if (groupCats && groupCats.length) {
+        conditions.push(`category = ANY($${p++})`);
+        params.push(groupCats);
+      }
+    }
+    if (minConfidence) {
+      conditions.push(`confidence_score >= $${p++}`);
+      params.push(minConfidence);
+    }
 
-  // Filter
-  if (zip)            results = results.filter(b => b.zip === zip);
-  if (category)       results = results.filter(b => b.category === category);
-  if (effectiveGroup) results = results.filter(b => getGroup(b.category) === effectiveGroup);
-  if (minConfidence)  results = results.filter(b => b.confidence >= minConfidence);
+    // Name/address text search
+    let orderBy = 'confidence_score DESC, name ASC';
+    if (query && !effectiveGroup) {
+      conditions.push(`(
+        name ILIKE $${p} OR
+        category ILIKE $${p} OR
+        address ILIKE $${p} OR
+        description ILIKE $${p}
+      )`);
+      params.push(`%${query}%`);
+      p++;
+    }
 
-  // Tag-based boosting for semantic queries like "healthy food"
-  // Tags in records get score boost; non-tagged results filtered to bottom
-  if (nlIntent.tags) {
-    results.sort((a, b) => {
-      const aTagged = nlIntent.tags.some(t => (a.tags || []).includes(t) || (a.name || '').toLowerCase().includes(t) || (a.description || '').toLowerCase().includes(t));
-      const bTagged = nlIntent.tags.some(t => (b.tags || []).includes(t) || (b.name || '').toLowerCase().includes(t) || (b.description || '').toLowerCase().includes(t));
-      if (aTagged && !bTagged) return -1;
-      if (bTagged && !aTagged) return 1;
-      return b.confidence - a.confidence;
+    // Tag boost for semantic queries (e.g. "healthy food")
+    let tagBoost = '';
+    if (nlIntent.tags && nlIntent.tags.length) {
+      tagBoost = `, CASE WHEN tags && $${p++}::text[] THEN 1 ELSE 0 END AS tag_score`;
+      params.push(nlIntent.tags);
+      orderBy = 'tag_score DESC, confidence_score DESC';
+    }
+
+    const lim = Math.min(Number(limit) || 50, 200);
+    params.push(lim);
+
+    const sql = `
+      SELECT
+        business_id, name, address, city, zip, phone, website,
+        hours, category, category_group, tags, description,
+        confidence_score AS confidence, lat, lon, sunbiz_doc_number,
+        claimed_at IS NOT NULL AS claimed
+        ${tagBoost}
+      FROM businesses
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY ${orderBy}
+      LIMIT $${p}
+    `;
+
+    const rows = await db.query(sql, params);
+
+    // ── Notify claimed businesses ────────────────────────────────────────────
+    if (zip && effectiveGroup) {
+      try {
+        const nq = require('./lib/notificationQueue');
+        const subject = `Market query in your area — ${zip}`;
+        const payload = {
+          body: `An agent queried the ${effectiveGroup} market in ZIP ${zip}.`,
+          zip, category_group: effectiveGroup,
+          cta_url: 'https://thelocalintel.com', cta_label: 'View Details',
+        };
+        setImmediate(() =>
+          nq.enqueueForZipCategory(zip, effectiveGroup, subject, payload)
+            .then(n => { if (n > 0) return nq.processQueue(20); })
+            .catch(e => console.error('[query-notify]', e.message))
+        );
+      } catch (notifyErr) {
+        console.error('[query-notify-init]', notifyErr.message);
+      }
+    }
+
+    const results = rows;
+    const total   = rows.length; // count approx — full count would need separate query
+
+    res.json({
+      ok:      true,
+      total,
+      returned: results.length,
+      zips:    zip ? [zip] : [],
+      results,
+      meta: {
+        source:   'postgres',
+        coverage: '113,684 businesses — Florida statewide',
+      },
     });
-  } else if (query) {
-    // Text match on name/category/address only when no semantic group resolved
-    if (!effectiveGroup) {
-      const q = query.toLowerCase();
-      results = results.filter(b =>
-        b.name.toLowerCase().includes(q) ||
-        b.category.toLowerCase().includes(q) ||
-        b.address.toLowerCase().includes(q)
-      );
-    }
-    results.sort((a, b) => b.confidence - a.confidence);
-  } else {
-    results.sort((a, b) => b.confidence - a.confidence);
+  } catch (e) {
+    console.error('[local-intel query]', e.message);
+    res.status(500).json({ ok: false, error: e.message });
   }
-
-  // Apply limit
-  const total = results.length;
-  results = results.slice(0, Math.min(limit, 200));
-
-  // ── Notify claimed businesses when their ZIP + category is queried ──
-  if (zip && effectiveGroup) {
-    try {
-      const nq = require('./lib/notificationQueue');
-      const subject = `Market query in your area — ${zip}`;
-      const payload = {
-        body: `An agent queried the ${effectiveGroup} market in ZIP ${zip}.`,
-        zip,
-        category_group: effectiveGroup,
-        cta_url: 'https://thelocalintel.com',
-        cta_label: 'View Details',
-      };
-      setImmediate(() =>
-        nq.enqueueForZipCategory(zip, effectiveGroup, subject, payload)
-          .then(n => { if (n > 0) return nq.processQueue(20); })
-          .catch(e => console.error('[query-notify]', e.message))
-      );
-    } catch (notifyErr) {
-      console.error('[query-notify-init]', notifyErr.message);
-    }
-  }
-
-  res.json({
-    ok:      true,
-    total,
-    returned: results.length,
-    zips:    zip ? [zip] : ['32081','32082'],
-    results,
-    meta: {
-      sources:      ['OSM','Census ACS 2022'],
-      coverage:     '32081 (Nocatee) + 32082 (Ponte Vedra Beach)',
-      lastSync:     '2026-04-20',
-      pendingSources: ['FL Sunbiz','SJC BTR','SJC Permits'],
-    },
-  });
 });
 
 // ── GET /api/local-intel/zones — spending zone summary ────────────────────────
