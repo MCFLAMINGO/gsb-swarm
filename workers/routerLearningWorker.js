@@ -167,6 +167,8 @@ function findCandidateTerms(failures, vertical) {
 
 // ── Patch inferenceCache.js ───────────────────────────────────────────────────
 // ── Lightweight MCP probe (no daemon) ────────────────────────────────────────
+const MCP_URL = process.env.MCP_URL || 'http://localhost:8080/api/local-intel/mcp';
+
 function probeMcp(query) {
   return new Promise((resolve) => {
     const body = JSON.stringify({
