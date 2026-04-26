@@ -1,37 +1,52 @@
 /**
  * reclassify_categories.js
- * Deterministic name-pattern reclassification for all businesses.
- * Zero LLM calls. Pure string matching.
- * Run: node scripts/reclassify_categories.js
+ * ─────────────────────────────────────────────────────────────────────────────
+ * LocalIntel classification pipeline step 1.
+ * Runs deterministically against ALL active businesses:
+ *   - Matches 100+ name-pattern rules → sets category + category_group
+ *   - Marks classification_attempted_at on every record touched
+ *   - Downgrades records stuck as 'LocalBusiness' for >48h to 'uncategorized'
+ *   - Logs run stats to pipeline_runs table
+ *
+ * Designed to run on a schedule (Railway cron via POST /admin/pipeline/reclassify)
+ * and also on-demand: node scripts/reclassify_categories.js
+ *
+ * Zero LLM calls. Pure deterministic string matching.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 
+'use strict';
 const { Pool } = require('pg');
-const pool = new Pool({ connectionString: process.env.LOCAL_INTEL_DB_URL || 'postgresql://postgres:myufFnkSigImGnSylwyIjYmLCvkthQUr@turntable.proxy.rlwy.net:25739/railway' });
+const pool = new Pool({
+  connectionString: process.env.LOCAL_INTEL_DB_URL
+    || 'postgresql://postgres:myufFnkSigImGnSylwyIjYmLCvkthQUr@turntable.proxy.rlwy.net:25739/railway',
+  ssl: { rejectUnauthorized: false },
+});
 
 // ─── RULES ────────────────────────────────────────────────────────────────────
-// Each rule: { pattern (regex on name, case-insensitive), category, category_group }
-// Rules are applied IN ORDER — first match wins per business.
-// More specific rules must come before general ones.
+// Applied IN ORDER — first match wins per business.
+// More specific patterns must come before general ones.
+// Each rule: { p: /regex/i, category: string, group: string }
 
 const RULES = [
 
-  // ── FOOD: Fine Dining ──
+  // ── FINE DINING (before generic restaurant) ──
   { p: /inn\s*&\s*club|country\s*club|yacht\s*club|city\s*club|supper\s*club/i,       category: 'fine_dining',        group: 'food' },
   { p: /ruth'?s\s*chris|capital\s*grille|ocean\s*prime|flemings|eddie\s*v'?s|truluck|bonefish\s*grill/i, category: 'fine_dining', group: 'food' },
   { p: /medure|black\s*pearl|st\.?\s*tropez\s*bistro|estiatorio\s*milos|timo\s*italian/i, category: 'fine_dining',   group: 'food' },
   { p: /steakhouse|steak\s*house|chophouse|chop\s*house/i,                              category: 'steakhouse',        group: 'food' },
 
-  // ── FOOD: Fast Food chains ──
+  // ── FAST FOOD CHAINS ──
   { p: /mcdonald'?s|burger\s*king|wendy'?s|taco\s*bell|chick-?fil-?a|popeyes|kfc|sonic\s*drive|jack\s*in\s*the\s*box|five\s*guys|whataburger|checkers|rallys|hardee'?s|carl'?s\s*jr/i, category: 'fast_food', group: 'food' },
   { p: /domino'?s|pizza\s*hut|papa\s*john'?s|little\s*caesars|papa\s*murphy/i,          category: 'pizza',             group: 'food' },
   { p: /subway|jimmy\s*john'?s|jersey\s*mike|firehouse\s*subs|quiznos|potbelly/i,       category: 'sandwich',          group: 'food' },
   { p: /chipotle|moe'?s\s*south|qdoba|willy'?s\s*mex|tijuana\s*flats/i,                category: 'fast_casual_mexican',group: 'food' },
 
-  // ── FOOD: Casual Dining chains ──
+  // ── CASUAL / CHAIN DINING ──
   { p: /applebee'?s|chili'?s|t\.?g\.?i\.?\s*friday|olive\s*garden|outback|longhorn|red\s*lobster|cracker\s*barrel|denny'?s|ihop|waffle\s*house|bob\s*evans/i, category: 'casual_dining', group: 'food' },
   { p: /bahama\s*breeze|yard\s*house|buffalo\s*wild\s*wings|bj'?s\s*restaurant|red\s*robin|hooters|twin\s*peaks/i, category: 'casual_dining', group: 'food' },
 
-  // ── FOOD: Subcategories ──
+  // ── CUISINE / SPECIALTY FOOD ──
   { p: /sushi|hibachi|ramen|pho\b|dim\s*sum|boba|bubble\s*tea/i,                        category: 'asian',             group: 'food' },
   { p: /thai\b|chinese\b|vietnamese|korean\s*bbq|indian\s*cuisine|curry\s*house/i,      category: 'asian',             group: 'food' },
   { p: /seafood|fish\s*camp|fish\s*house|crab\s*shack|oyster\s*bar|lobster/i,           category: 'seafood',           group: 'food' },
@@ -50,219 +65,351 @@ const RULES = [
   { p: /wingstop|wing\s*stop|wing\s*house|wing\s*zone/i,                               category: 'fast_food',         group: 'food' },
   { p: /deli\b|delicatessen|sandwich|sub\s*shop/i,                                     category: 'deli',              group: 'food' },
   { p: /brewery|brew\s*pub|brewhouse|craft\s*beer|taproom/i,                           category: 'brewery',           group: 'food' },
-  { p: /bar\b|lounge|nightclub|night\s*club|saloon/i,                                  category: 'bar',               group: 'food' },
+  { p: /\bbar\b|lounge|nightclub|night\s*club|saloon/i,                                category: 'bar',               group: 'food' },
+  { p: /restaurant|eatery|grill\b|grille\b|kitchen\b|bistro|brasserie/i,               category: 'restaurant',        group: 'food' },
 
-  // ── HEALTH: Subcategories ──
-  { p: /urgent\s*care|emergi|fastcare|minuteclinic|cvs\s*minute\s*clinic/i,             category: 'urgent_care',       group: 'health' },
-  { p: /emergency\s*room|er\b|emergency\s*dept|emergency\s*center/i,                   category: 'emergency',         group: 'health' },
-  { p: /pediatric|children'?s\s*(?:hospital|clinic|health)/i,                          category: 'pediatrics',        group: 'health' },
-  { p: /cardiol|heart\s*(?:center|clinic|specialist)/i,                                category: 'cardiology',        group: 'health' },
-  { p: /orthoped|sports\s*medicine|spine\s*center|joint\s*(?:center|clinic)/i,         category: 'orthopedics',       group: 'health' },
-  { p: /dermatol|skin\s*(?:care|clinic|center)/i,                                      category: 'dermatology',       group: 'health' },
-  { p: /mental\s*health|psychiatr|psycholog|counseling|therapist|behavioral\s*health/i,category: 'mental_health',     group: 'health' },
-  { p: /physical\s*therap|pt\s*clinic|rehab(?:ilitation)?\s*center/i,                 category: 'physical_therapy',  group: 'health' },
-  { p: /chiropractic|chiropractor/i,                                                   category: 'chiropractic',      group: 'health' },
-  { p: /optometr|vision\s*care|eye\s*care|eye\s*doctor|optician/i,                    category: 'optometry',         group: 'health' },
-  { p: /oncolog|cancer\s*center|cancer\s*care/i,                                      category: 'oncology',          group: 'health' },
-  { p: /obgyn|ob\/gyn|obstetric|gynecolog|women'?s\s*health/i,                        category: 'obgyn',             group: 'health' },
-  { p: /medical\s*spa|medspa|med\s*spa|aesthetic|botox|laser\s*(?:hair|skin)/i,       category: 'medical_spa',       group: 'health' },
-  { p: /assisted\s*living|memory\s*care|senior\s*living|skilled\s*nursing|nursing\s*home/i, category: 'senior_care',  group: 'health' },
-  { p: /home\s*health|home\s*care|in-?home\s*care/i,                                  category: 'home_health',       group: 'health' },
-  { p: /imaging|radiol|mri\b|x-?ray|diagnostic/i,                                     category: 'diagnostic_imaging',group: 'health' },
-  { p: /pharmacy|drug\s*store|walgreen|cvs|rite\s*aid|publix\s*pharmacy/i,            category: 'pharmacy',          group: 'health' },
-  { p: /lab(?:oratory)?\b|quest\s*diagnostic|labcorp|blood\s*draw/i,                  category: 'lab',               group: 'health' },
-  { p: /dentist|dental|orthodont|endodont|periodont|oral\s*surgery|dmd|dds/i,         category: 'dental',            group: 'health' },
+  // ── GROCERY / CONVENIENCE ──
+  { p: /publix|winn-?dixie|aldi|whole\s*foods|trader\s*joe|sprouts|kroger|safeway|food\s*lion|iga\b/i, category: 'grocery', group: 'grocery' },
+  { p: /grocery|supermarket|food\s*mart|food\s*store|market\b/i,                       category: 'grocery',           group: 'grocery' },
+  { p: /dollar\s*general|dollar\s*tree|family\s*dollar|five\s*below/i,                 category: 'discount_store',    group: 'retail' },
+  { p: /7-?eleven|circle\s*k|wawa\b|kangaroo\s*express|racetrac|speedway|sunoco\s*express|convenience\s*store/i, category: 'convenience', group: 'grocery' },
 
-  // ── LEGAL: Subcategories ──
-  { p: /personal\s*injury|accident\s*(?:attorney|lawyer)|car\s*accident\s*(?:attorney|lawyer)/i, category: 'personal_injury', group: 'legal' },
-  { p: /criminal\s*(?:defense|attorney|lawyer)|dui\s*(?:attorney|lawyer)/i,           category: 'criminal_defense',  group: 'legal' },
-  { p: /family\s*law|divorce|custody|adoption/i,                                      category: 'family_law',        group: 'legal' },
-  { p: /real\s*estate\s*(?:attorney|law)|title\s*company|closing\s*(?:attorney|agent)/i, category: 'real_estate_law', group: 'legal' },
-  { p: /immigration\s*(?:attorney|law)|visa\s*attorney/i,                             category: 'immigration_law',   group: 'legal' },
-  { p: /estate\s*planning|probate|trust\s*(?:attorney|law)|will\s*attorney/i,        category: 'estate_planning',   group: 'legal' },
-  { p: /business\s*(?:attorney|law)|corporate\s*(?:attorney|law)/i,                  category: 'business_law',      group: 'legal' },
-  { p: /bankruptcy|debt\s*relief/i,                                                   category: 'bankruptcy',        group: 'legal' },
-  { p: /cpa\b|certified\s*public\s*accountant|tax\s*(?:firm|accountant|service|prep)|accounting\s*firm/i, category: 'accounting', group: 'legal' },
-  { p: /notary/i,                                                                      category: 'notary',            group: 'legal' },
+  // ── FUEL / GAS ──
+  { p: /texaco|shell\b|bp\b|exxon|mobil\b|chevron|sunoco|hess\b|marathon\b|speedway\b|citgo|murphy\s*usa|gate\s*petroleum|race\s*trac|gas\s*station|fuel\s*stop/i, category: 'gas_station', group: 'fuel' },
 
-  // ── HOSPITALITY: Subcategories ──
-  { p: /marriott|hilton|hyatt|wyndham|ihg|intercontinental|westin|sheraton|ritz.?carlton|four\s*seasons|st\.?\s*regis/i, category: 'luxury_hotel', group: 'hospitality' },
+  // ── HEALTH — HOSPITALS / EMERGENCY ──
+  { p: /memorial\s*hospital|baptist\s*medical|mayo\s*clinic|uf\s*health|st\.?\s*vincent|flagler\s*hospital|wolfson\s*children|ascension|hca\s*florida|advent\s*health|nemours/i, category: 'hospital', group: 'health' },
+  { p: /emergency\s*room|\ber\b.*hospital|level\s*[i1]\s*trauma|trauma\s*center/i,     category: 'emergency_room',    group: 'health' },
+
+  // ── HEALTH — URGENT CARE ──
+  { p: /urgent\s*care|carespot|nextcare|medexpress|concentra|patient\s*first|fast\s*med|statcare/i, category: 'urgent_care', group: 'health' },
+
+  // ── HEALTH — SPECIALTY CLINICS ──
+  { p: /mental\s*health|behavioral\s*health|counseling|therapist|psychiatr|psycholog|addiction\s*(?:treatment|recovery)|substance\s*abuse/i, category: 'mental_health', group: 'health' },
+  { p: /physical\s*therap|pt\s*clinic|rehab\s*(?:center|clinic)|sports\s*rehab/i,      category: 'physical_therapy',  group: 'health' },
+  { p: /chiropractic|chiropractor/i,                                                    category: 'chiropractic',      group: 'health' },
+  { p: /optometr|ophthalmolog|vision\s*center|eye\s*care|eye\s*clinic|eyeglass|lenscrafters|for\s*eyes/i, category: 'optometry', group: 'health' },
+  { p: /obgyn|ob-?gyn|obstetrics|gynecolog|women'?s\s*(?:health|care)\s*(?:center|clinic)/i, category: 'obgyn', group: 'health' },
+  { p: /cardiology|cardiologist|heart\s*(?:care|center|clinic)/i,                      category: 'cardiology',        group: 'health' },
+  { p: /orthoped|orthopaedic|bone\s*&\s*joint|spine\s*(?:center|clinic)|joint\s*replacement/i, category: 'orthopedics', group: 'health' },
+  { p: /dermatolog|skin\s*(?:care|clinic|center)/i,                                    category: 'dermatology',       group: 'health' },
+  { p: /neurolog|neuroscience\s*center/i,                                              category: 'neurology',         group: 'health' },
+  { p: /dentist|dental|orthodont|endodont|periodont|oral\s*surgery|smile\s*design/i,   category: 'dental',            group: 'health' },
+  { p: /pharmacy|drug\s*store|walgreens|cvs\b|rite\s*aid|pill\s*pack/i,               category: 'pharmacy',          group: 'health' },
+  { p: /assisted\s*living|memory\s*care|senior\s*living|nursing\s*home|skilled\s*nursing/i, category: 'senior_care', group: 'health' },
+  { p: /home\s*health|home\s*care\s*(?:agency|services)|visiting\s*nurse/i,            category: 'home_health',       group: 'health' },
+  { p: /medical\s*lab|clinical\s*lab|laboratory\b|quest\s*diagnostics|labcorp/i,       category: 'lab',               group: 'health' },
+  { p: /pediatric|children'?s\s*(?:clinic|medical)/i,                                  category: 'pediatrics',        group: 'health' },
+  { p: /plastic\s*surgery|cosmetic\s*surgery|aesthetic\s*(?:center|clinic)|med\s*spa|medspa/i, category: 'aesthetics', group: 'health' },
+  { p: /veterinar|animal\s*(?:hospital|clinic|care)|pet\s*(?:clinic|hospital)/i,       category: 'veterinary',        group: 'pets' },
+  { p: /physician|doctor'?s?\s*office|medical\s*(?:center|associates|group|clinic)|family\s*(?:medicine|practice|health)|primary\s*care|internal\s*medicine/i, category: 'clinic', group: 'health' },
+
+  // ── FITNESS ──
+  { p: /planet\s*fitness|anytime\s*fitness|la\s*fitness|gold'?s\s*gym|crunch\s*fitness|24\s*hour\s*fitness|lifetime\s*fitness|orangetheory|f45|solidcore/i, category: 'gym_chain', group: 'fitness' },
+  { p: /crossfit\b/i,                                                                   category: 'crossfit',          group: 'fitness' },
+  { p: /yoga\b|yoga\s*studio|hot\s*yoga|yoga\s*works|corepower/i,                      category: 'yoga_studio',       group: 'fitness' },
+  { p: /pilates/i,                                                                      category: 'pilates',           group: 'fitness' },
+  { p: /\bbarre\b(?!.*(?:barrel|barrel|cracker))/i,                                    category: 'barre_studio',      group: 'fitness' },
+  { p: /martial\s*arts|karate|judo|jiu-?jitsu|taekwondo|mma\s*(?:gym|training)|boxing\s*(?:gym|club)/i, category: 'martial_arts', group: 'fitness' },
+  { p: /swim\s*(?:school|lesson|club|academy)|aquatic\s*center/i,                      category: 'swim_school',       group: 'fitness' },
+  { p: /dance\s*(?:studio|academy|school|center)|ballet|ballroom/i,                    category: 'dance_studio',      group: 'fitness' },
+  { p: /gym\b|fitness\s*(?:center|studio|club)|athletic\s*club|health\s*club|workout/i,category: 'gym',               group: 'fitness' },
+  { p: /fyzical|physical\s*fitness\s*(?:center|studio)/i,                              category: 'gym',               group: 'fitness' },
+
+  // ── AUTO ──
+  { p: /auto\s*(?:repair|service|shop|care|fix)|car\s*(?:repair|service|care)|mechanic|tire\s*(?:center|shop|store)|midas|jiffy\s*lube|pep\s*boys|firestone|goodyear|mavis|valvoline/i, category: 'auto_repair', group: 'auto' },
+  { p: /auto\s*(?:sales|dealer)|car\s*dealer|used\s*cars?|new\s*cars?|toyota|honda|ford\b|chevy|chevrolet|nissan|hyundai|kia\b|bmw\b|mercedes|audi\b|volkswagen|subaru|mazda|jeep\b/i, category: 'auto_dealer', group: 'auto' },
+  { p: /auto\s*glass|windshield\s*(?:repair|replacement)/i,                            category: 'auto_glass',        group: 'auto' },
+  { p: /auto\s*body|collision\s*(?:center|repair)|body\s*shop/i,                       category: 'auto_body',         group: 'auto' },
+  { p: /towing|roadside\s*assistance|wrecker/i,                                        category: 'towing',            group: 'auto' },
+  { p: /rv\b|recreational\s*vehicle|motorhome|boat\s*(?:dealer|repair|service)|marine\b/i, category: 'rv_marine', group: 'auto' },
+  { p: /automotive|automotor|autoshop/i,                                               category: 'auto_repair',       group: 'auto' },
+
+  // ── REAL ESTATE ──
+  { p: /keller\s*williams|re\/max|coldwell\s*banker|century\s*21|berkshire\s*hathaway|exp\s*realty|sotheby'?s|compass\s*real/i, category: 'real_estate_agency', group: 'real_estate' },
+  { p: /pulte\s*homes|lennar|kb\s*home|dr\s*horton|meritage|toll\s*brothers|ryan\s*homes|richmond\s*american/i, category: 'home_builder', group: 'real_estate' },
+  { p: /apartments?|at\s+(?:the\s+)?(?:oakleaf|nocatee|palms|landings|commons|reserve|crossing|village|pointe|lakes|springs|cove|grove|pines|oaks|villas|ridge|place|park|court|manor|terrace|gardens|heights|point)\b/i, category: 'apartment_complex', group: 'real_estate' },
+  { p: /real\s*estate|realty|realtor|property\s*management|liz\s*buys|sell\s*my\s*house|sell\s*your\s*home|we\s*buy\s*houses|cash\s*for\s*homes?/i, category: 'real_estate', group: 'real_estate' },
+  { p: /home\s*inspection|property\s*inspection/i,                                     category: 'home_inspection',   group: 'construction' },
+  { p: /mortgage|home\s*loan|refinanc|lending\s*(?:group|corp)|loan\s*officer/i,       category: 'mortgage',          group: 'banking' },
+
+  // ── BANKING / FINANCIAL ──
+  { p: /bank\s*of\s*america|wells\s*fargo|chase\s*bank|citibank|suntrust|bb&t|regions\s*bank|truist|td\s*bank|fifth\s*third|pnc\s*bank|capital\s*one\s*bank/i, category: 'bank_branch', group: 'banking' },
+  { p: /credit\s*union|federal\s*credit|community\s*bank|savings\s*bank|state\s*bank/i,category: 'credit_union',      group: 'banking' },
+  { p: /aflac|blue\s*cross|united\s*health|aetna|cigna|humana|florida\s*blue|nationwide\s*insurance|allstate|state\s*farm|progressive\s*insurance|geico|liberty\s*mutual|farmers\s*insurance|travelers\s*insurance/i, category: 'insurance', group: 'banking' },
+  { p: /insurance\s*(?:agency|group|company|broker)|farm\s*bureau\b/i,                 category: 'insurance',         group: 'banking' },
+  { p: /financial\s*(?:planning|advisor|services|group)|wealth\s*management|investment\s*advisor|thrivent|primerica|edward\s*jones|ameriprise|vanguard\s*advisor/i, category: 'financial_advisor', group: 'banking' },
+  { p: /tax\s*(?:preparation|service|relief|advisor)|h&r\s*block|jackson\s*hewitt|liberty\s*tax|cpa\s*firm|accounting\s*firm|bookkeeping/i, category: 'accounting', group: 'professional' },
+
+  // ── LEGAL ──
+  { p: /attorney|law\s*(?:firm|office|group)|lawyer|legal\s*(?:services|aid|shield)|legalshield/i, category: 'law_firm', group: 'legal' },
+
+  // ── CONSTRUCTION — TRADES (expanded) ──
+  { p: /roofing|roofer|roof\s*(?:repair|replacement|install)/i,                        category: 'roofing',           group: 'construction' },
+  { p: /electrician|electrical\s*(?:services|contractor|company)|electric\s*(?:repair|install)|wiring\s*(?:service|company)/i, category: 'electrician', group: 'construction' },
+  { p: /plumb(?:er|ing)|sewer\s*(?:repair|service)|drain\s*(?:cleaning|service)|water\s*heater|pipe\s*(?:repair|install)/i, category: 'plumber', group: 'construction' },
+  { p: /hvac|air\s*(?:conditioning|condition|handler|cool)|heating\s*(?:&|and)\s*(?:cooling|air)|heat\s*pump|furnace\s*repair|ac\s*(?:repair|install|service)|cooling\s*(?:service|system)/i, category: 'hvac', group: 'construction' },
+  // "air home services", "air services", "air systems" — catch generic "air" trade names
+  { p: /\bair\s+(?:home\s+)?services?\b|\bair\s+systems?\b|\bair\s+(?:tech|solutions|pro|plus|one|works?)\b/i, category: 'hvac', group: 'construction' },
+  { p: /pest\s*control|exterminator|termite|bug\s*(?:control|man)|orkin|massey\s*services/i, category: 'pest_control', group: 'construction' },
+  { p: /landscap|lawn\s*(?:care|service|mowing|maintenance)|sod\s*(?:install|farm)|tree\s*(?:service|trim|removal|surgery)|arborist|treemasters?|grounds?\s*(?:keeping|maintenance)/i, category: 'landscaping', group: 'construction' },
+  { p: /painting\s*(?:company|contractor|service)|house\s*painter|interior\s*(?:&|and)\s*exterior\s*paint|paint\s*(?:pro|plus|works?|masters?)/i, category: 'painting', group: 'construction' },
+  { p: /pool\s*(?:service|cleaning|repair|build|install|company)|swimming\s*pool|spa\s*(?:repair|service)|pool\s*contractor/i, category: 'pool_service', group: 'construction' },
+  { p: /pool\s*enclosure|screen\s*enclosure|lanai\s*(?:screen|enclosure|build|install|repair)|screen\s*room|patio\s*enclosure|florida\s*room/i, category: 'screen_enclosure', group: 'construction' },
+  { p: /flooring|tile\s*(?:installation|contractor|work)|hardwood\s*floor|laminate\s*floor|carpet\s*install/i, category: 'flooring', group: 'construction' },
+  { p: /fence\s*(?:company|contractor|installation|builder)|fencing\b|vinyl\s*fence|wood\s*fence|iron\s*fence/i, category: 'fencing', group: 'construction' },
+  { p: /solar\s*(?:panel|energy|power|installation|company|system)|photovoltaic/i,     category: 'solar',             group: 'construction' },
+  { p: /irrigation\s*(?:system|install|repair|service)|sprinkler\s*(?:system|repair|install)|lawn\s*irrigation/i, category: 'irrigation', group: 'construction' },
+  { p: /masonry|brick\s*(?:work|layer|mason)|stone\s*(?:work|mason|contractor)|block\s*(?:work|mason)/i, category: 'masonry', group: 'construction' },
+  { p: /concrete\s*(?:contractor|company|work|pour|repair)|above\s*average\s*concrete|stamped\s*concrete|driveway\s*(?:paving|install)/i, category: 'concrete', group: 'construction' },
+  { p: /window\s*(?:repair|replacement|install)|door\s*(?:repair|replacement|install)|window\s*&\s*door|windows?\s*(?:and|&)\s*doors?/i, category: 'window_door', group: 'construction' },
+  { p: /drywall|sheetrock|plaster\s*(?:repair|contractor)/i,                           category: 'drywall',           group: 'construction' },
+  { p: /handyman|honey-?do|home\s*(?:repair\s*services|fix-?it)|odd\s*jobs/i,          category: 'handyman',          group: 'construction' },
+  { p: /home\s*theater|home\s*theatre|home\s*cinema|av\s*installation|audio\s*video\s*install|media\s*room|custom\s*av|smart\s*home\s*install/i, category: 'home_theater', group: 'construction' },
+  { p: /interior\s*design(?:er|s)?|interior\s*decorator|space\s*planning|home\s*stag/i, category: 'interior_design',  group: 'construction' },
+  { p: /land\s*surveyor|surveying\s*(?:company|services)|survey\s*(?:group|associates)/i, category: 'surveying',      group: 'construction' },
+  { p: /pressure\s*wash|power\s*wash|soft\s*wash/i,                                   category: 'pressure_washing',  group: 'construction' },
+  { p: /septic\s*(?:tank|service|pump|install)|drain\s*field/i,                        category: 'septic',            group: 'construction' },
+  { p: /gutter\s*(?:install|clean|repair|guard)|leaf\s*guard/i,                        category: 'gutters',           group: 'construction' },
+  { p: /insulation\s*(?:contractor|install|company)/i,                                 category: 'insulation',        group: 'construction' },
+  // Catch-all contracting patterns LAST in construction block
+  { p: /cnstrctn|contracting\b|contractor\b|construction\b|remodel|renovation|home\s*improvement/i, category: 'general_contractor', group: 'construction' },
+
+  // ── RETAIL ──
+  { p: /walmart|target\b|costco|sam'?s\s*club|bjs\b|big\s*lots|ross\b|tj\s*maxx|marshalls|burlington\s*coat|tuesday\s*morning/i, category: 'big_box', group: 'retail' },
+  { p: /home\s*depot|lowe'?s|ace\s*hardware|true\s*value|menards/i,                   category: 'hardware_store',    group: 'retail' },
+  { p: /best\s*buy|apple\s*store|microsoft\s*store|b&h\s*photo|fry'?s\s*electronics/i, category: 'electronics_store', group: 'retail' },
+  { p: /wig\s*shop|beauty\s*supply|sally\s*beauty|ulta\b|sephora/i,                   category: 'beauty_supply',     group: 'retail' },
+  { p: /furniture\s*(?:store|gallery|outlet)|ashley\s*furniture|rooms?\s*to\s*go|ikea|wayfair\s*store/i, category: 'furniture', group: 'retail' },
+  { p: /mattress\s*(?:firm|one|store)|sleep\s*number|tempurpedic\s*store/i,           category: 'mattress',          group: 'retail' },
+  { p: /thrift\s*(?:store|shop)|goodwill|salvation\s*army|consignment/i,              category: 'thrift_store',      group: 'retail' },
+  { p: /pawn\s*shop|pawnbroker/i,                                                      category: 'pawn',              group: 'retail' },
+  { p: /boutique|clothing\s*(?:store|boutique)|apparel|fashion\s*(?:store|boutique)/i, category: 'clothing',          group: 'retail' },
+  { p: /sporting\s*goods|dick'?s\s*sporting|bass\s*pro|cabela'?s|academy\s*sports|rei\b/i, category: 'sporting_goods', group: 'retail' },
+  { p: /nursery\b|garden\s*center|plant\s*(?:nursery|shop)|greenhouse/i,              category: 'nursery',           group: 'retail' },
+
+  // ── BEAUTY / PERSONAL CARE ──
+  { p: /great\s*clips|sport\s*clips|supercuts|cost\s*cutters|fantastic\s*sams|floyd'?s\s*barbershop/i, category: 'hair_chain', group: 'beauty' },
+  { p: /barber\s*(?:shop|salon)|barbershop/i,                                          category: 'barbershop',        group: 'beauty' },
+  { p: /hair\s*salon|salon\b|beauty\s*salon|blow\s*dry|extensions\b|great\s*extensions/i, category: 'hair_salon',    group: 'beauty' },
+  { p: /nail\s*(?:salon|studio|spa)|manicure|pedicure/i,                               category: 'nail_salon',        group: 'beauty' },
+  { p: /massage\s*(?:therapy|therapist|envy|heights)|day\s*spa|full\s*service\s*spa/i, category: 'massage_spa',       group: 'beauty' },
+  { p: /tattoo|piercing\s*studio/i,                                                    category: 'tattoo',            group: 'beauty' },
+  { p: /tanning\s*(?:salon|bed|studio)|spray\s*tan/i,                                  category: 'tanning',           group: 'beauty' },
+
+  // ── HOSPITALITY ──
+  { p: /marriott|hilton|hyatt|sheraton|westin|four\s*seasons|ritz-?carlton|mandarin\s*oriental/i, category: 'upscale_hotel', group: 'hospitality' },
   { p: /hampton\s*inn|courtyard|fairfield|residence\s*inn|springhill|towneplace|homewood|embassy\s*suites|doubletree/i, category: 'upscale_hotel', group: 'hospitality' },
-  { p: /holiday\s*inn|best\s*western|comfort\s*inn|quality\s*inn|sleep\s*inn|days\s*inn|super\s*8|motel\s*6|econo|la\s*quinta|red\s*roof|budget/i, category: 'midscale_hotel', group: 'hospitality' },
-  { p: /extended\s*stay|woodspring|candlewood|staybridge|homegate|value\s*place/i,    category: 'extended_stay',     group: 'hospitality' },
-  { p: /resort\b|spa\s*resort|beach\s*resort|golf\s*resort|island\s*resort/i,        category: 'resort',            group: 'hospitality' },
-  { p: /airbnb|vacation\s*rental|vrbo/i,                                              category: 'vacation_rental',   group: 'hospitality' },
-  { p: /bed\s*&?\s*breakfast|b&b\b|inn\b/i,                                           category: 'inn_bnb',           group: 'hospitality' },
+  { p: /holiday\s*inn|best\s*western|comfort\s*inn|days\s*inn|motel\s*6|super\s*8|quality\s*inn|la\s*quinta/i, category: 'budget_hotel', group: 'hospitality' },
+  { p: /hotel|resort\b|inn\b|motel\b|suites\b|bed\s*&\s*breakfast|b&b\b/i,            category: 'hotel',             group: 'hospitality' },
+  { p: /vacation\s*rental|airbnb\s*property|short\s*term\s*rental/i,                  category: 'vacation_rental',   group: 'hospitality' },
 
-  // ── FITNESS: Subcategories ──
-  { p: /planet\s*fitness|la\s*fitness|anytime\s*fitness|crunch\s*fitness|snap\s*fitness|24\s*hour\s*fitness|equinox|lifetime\s*fitness/i, category: 'gym_chain', group: 'fitness' },
-  { p: /crossfit/i,                                                                    category: 'crossfit',          group: 'fitness' },
-  { p: /pilates/i,                                                                     category: 'pilates',           group: 'fitness' },
-  { p: /yoga/i,                                                                        category: 'yoga',              group: 'fitness' },
-  { p: /orangetheory|f45|barry'?s\s*bootcamp|9round/i,                               category: 'boutique_fitness',  group: 'fitness' },
-  { p: /martial\s*arts|karate|taekwondo|jiu.?jitsu|mma\b|boxing\s*gym|kickboxing/i,  category: 'martial_arts',      group: 'fitness' },
-  { p: /cycling|spin\s*(?:class|studio)|solidcore/i,                                  category: 'cycling_studio',    group: 'fitness' },
-  { p: /personal\s*train|personal\s*trainer/i,                                        category: 'personal_training', group: 'fitness' },
+  // ── EDUCATION ──
+  { p: /preschool|pre-?k\b|kindergarten|daycare|day\s*care|child\s*care|learning\s*center\s*(?:for\s*kids)?|little\s*gym|kumon|sylvan\s*learning/i, category: 'childcare', group: 'civic' },
+  { p: /elementary\s*school|middle\s*school|high\s*school|charter\s*school|private\s*school|academy\b/i, category: 'school', group: 'civic' },
+  { p: /college\b|university|community\s*college|vocational\s*school|trade\s*school/i, category: 'college',           group: 'civic' },
+  { p: /tutoring|test\s*prep|sat\s*prep|learning\s*center|huntington\s*learning/i,    category: 'tutoring',          group: 'civic' },
 
-  // ── RETAIL: Subcategories ──
-  { p: /home\s*depot|lowe'?s|ace\s*hardware|true\s*value|menards/i,                  category: 'home_improvement',  group: 'retail' },
-  { p: /furniture|ashley\s*home|rooms?\s*to\s*go|havertys|bob'?s\s*furniture|ikea|pottery\s*barn/i, category: 'furniture', group: 'retail' },
-  { p: /best\s*buy|apple\s*store|microsoft\s*store|gamestop|electronics/i,           category: 'electronics',       group: 'retail' },
-  { p: /target|walmart|kmart|costco|sam'?s\s*club|bj'?s\s*wholesale/i,               category: 'mass_retail',       group: 'retail' },
-  { p: /dick'?s\s*sporting|bass\s*pro|cabela'?s|academy\s*sports/i,                  category: 'sporting_goods',    group: 'retail' },
-  { p: /pet(?:co|smart|\s*supplies|\s*store)\b/i,                                     category: 'pet_store',         group: 'retail' },
-  { p: /auto\s*zone|o'?reilly\s*auto|advance\s*auto|napa\s*auto/i,                   category: 'auto_parts',        group: 'auto' },
-  { p: /bookstore|book\s*shop|barnes\s*&?\s*noble/i,                                 category: 'bookstore',         group: 'retail' },
-  { p: /boutique|women'?s\s*(?:clothing|fashion|apparel)|men'?s\s*(?:clothing|fashion|apparel)/i, category: 'clothing_boutique', group: 'retail' },
-  { p: /victoria'?s\s*secret|bath\s*&\s*body|lush|sephora|ulta/i,                   category: 'beauty_retail',     group: 'retail' },
-  { p: /thrift|goodwill|salvation\s*army|consignment/i,                               category: 'thrift',            group: 'retail' },
-  { p: /vape|smoke\s*shop|tobacco/i,                                                  category: 'tobacco',           group: 'retail' },
-  { p: /liquor\s*store|wine\s*shop|beer\s*store|total\s*wine/i,                      category: 'liquor_store',      group: 'retail' },
+  // ── CIVIC / GOVERNMENT / NONPROFIT ──
+  { p: /church|chapel|cathedral|parish|ministry|baptist\b.*(?:church|fellowship)|methodist|presbyterian|pentecostal|evangelical|congregation/i, category: 'church', group: 'civic' },
+  { p: /mosque|islamic\s*center|masjid/i,                                              category: 'mosque',            group: 'civic' },
+  { p: /synagogue|jewish\s*center|temple\b(?!.*fitness)/i,                            category: 'synagogue',         group: 'civic' },
+  { p: /fire\s*(?:station|department|rescue)|ems\b|emergency\s*services\s*(?:dept|station)/i, category: 'fire_station', group: 'civic' },
+  { p: /police\s*(?:dept|department|station)|sheriff'?s?\s*office/i,                  category: 'police_station',    group: 'civic' },
+  { p: /library\b|public\s*library/i,                                                  category: 'library',           group: 'civic' },
+  { p: /post\s*office|usps\s*(?:branch|location)/i,                                   category: 'post_office',       group: 'civic' },
+  { p: /community\s*center|rec(?:reation)?\s*center|ymca|ywca/i,                      category: 'community_center',  group: 'civic' },
+  { p: /against\s*pedophiles|victims\s*advocacy|food\s*bank|homeless\s*shelter|habitat\s*for\s*humanity/i, category: 'nonprofit', group: 'civic' },
 
-  // ── BANKING: Subcategories ──
-  { p: /wells\s*fargo|bank\s*of\s*america|chase\s*bank|jpmorgan|citibank|suntrust|truist|regions\s*bank|td\s*bank|pnc\s*bank|us\s*bank|fifth\s*third|bb&t|boa\b/i, category: 'national_bank', group: 'banking' },
-  { p: /credit\s*union|federal\s*credit/i,                                            category: 'credit_union',      group: 'banking' },
-  { p: /community\s*bank|local\s*bank|savings\s*bank|savings\s*&\s*loan/i,           category: 'community_bank',    group: 'banking' },
-  { p: /state\s*farm|allstate|geico|progressive|farmers\s*insurance|nationwide|usaa|liberty\s*mutual/i, category: 'insurance_national', group: 'banking' },
-  { p: /insurance\s*agency|insurance\s*group|insurance\s*broker/i,                   category: 'insurance_agency',  group: 'banking' },
-  { p: /financial\s*advisor|wealth\s*management|merrill\s*lynch|edward\s*jones|raymond\s*james|fidelity\s*investment|vanguard\s*advisor/i, category: 'financial_advisor', group: 'banking' },
-  { p: /mortgage|home\s*loan|refinanc/i,                                              category: 'mortgage',          group: 'banking' },
-  { p: /payday\s*loan|title\s*loan|cash\s*advance|check\s*cashing/i,                category: 'payday_lending',    group: 'banking' },
-  { p: /atm\b/i,                                                                      category: 'atm',               group: 'banking' },
+  // ── PETS ──
+  { p: /petco|petsmart|pet\s*supermarket|pet\s*supplies/i,                             category: 'pet_store',         group: 'pets' },
+  { p: /pet\s*(?:grooming|groomer)|dog\s*grooming|cat\s*grooming/i,                   category: 'pet_grooming',      group: 'pets' },
+  { p: /dog\s*(?:training|trainer)|puppy\s*(?:training|class)|obedience\s*school/i,   category: 'dog_training',      group: 'pets' },
+  { p: /pet\s*(?:boarding|hotel|resort)|doggy\s*day\s*care|kennel\b/i,               category: 'pet_boarding',      group: 'pets' },
 
-  // ── AUTO: Fix the healthcare/childcare misclassification ──
-  { p: /hospital|medical\s*center|health\s*system|health\s*network|clinic|urgent\s*care|physician|doctor\s*office/i, category: 'clinic', group: 'health' },
-  { p: /childcare|child\s*care|daycare|day\s*care|preschool|pre-?school|head\s*start|kiddie|kinder\s*care/i, category: 'childcare', group: 'civic' },
-  { p: /car\s*(?:wash|detail)|auto\s*(?:wash|detail)|wash\s*(?:&|and)\s*detail/i,   category: 'car_wash',          group: 'auto' },
-  { p: /auto\s*(?:repair|service|shop)|car\s*(?:repair|service)|mechanic|tire\s*(?:center|shop|store)|midas|jiffy\s*lube|pep\s*boys|firestone|goodyear|mavis/i, category: 'auto_repair', group: 'auto' },
-  { p: /car\s*dealer|auto\s*dealer|ford\s*dealer|toyota\s*dealer|honda\s*dealer|chevrolet|nissan\s*dealer|used\s*car/i, category: 'car_dealer', group: 'auto' },
-  { p: /towing|tow\s*truck|roadside\s*assist/i,                                      category: 'towing',            group: 'auto' },
+  // ── PROFESSIONAL SERVICES ──
+  { p: /staffing|temp\s*agency|employment\s*agency|recruiting\s*(?:firm|agency)/i,    category: 'staffing',          group: 'professional' },
+  { p: /marketing\s*(?:agency|firm|group)|advertising\s*(?:agency|firm)|seo\s*(?:agency|company)|digital\s*marketing/i, category: 'marketing_agency', group: 'professional' },
+  { p: /it\s*(?:support|services|consulting)|managed\s*service|tech\s*support|computer\s*repair|network\s*(?:install|support)/i, category: 'it_services', group: 'professional' },
+  { p: /printing\s*(?:company|service)|print\s*shop|sign\s*(?:company|shop)|signage/i,category: 'printing',          group: 'professional' },
+  { p: /funeral\s*home|mortuary|cremation\s*(?:service|center)/i,                     category: 'funeral_home',      group: 'professional' },
+  { p: /moving\s*(?:company|service)|mover\b|relocation\s*service|transport\s*(?:company|inc)|moving\s*&\s*storage/i, category: 'moving', group: 'services' },
+  { p: /storage\s*(?:facility|unit|center)|self\s*storage|mini\s*storage/i,           category: 'storage',           group: 'services' },
+  { p: /cleaning\s*(?:service|company)|maid\s*service|janitorial|housekeeping|commercial\s*clean/i, category: 'cleaning', group: 'services' },
+  { p: /security\s*(?:system|company|service|guard|patrol)|alarm\s*system/i,          category: 'security',          group: 'professional' },
+  { p: /photography|photographer|photo\s*studio|videography|videographer/i,           category: 'photography',       group: 'professional' },
+  { p: /telematics|fleet\s*management|gps\s*tracking|logistics\s*(?:company|tech)/i, category: 'logistics_tech',    group: 'professional' },
+  { p: /charter\s*(?:boat|fishing|tour)|fishing\s*charter|boat\s*tour/i,              category: 'charter',           group: 'services' },
+  { p: /land\s*(?:company|co\b)|property\s*(?:co\b|company)|land\s*(?:holdings|group)/i, category: 'land_company',  group: 'real_estate' },
 
-  // ── BEAUTY: Subcategories ──
-  { p: /salon|hair\s*salon|hair\s*studio|beauty\s*salon|great\s*clips|sport\s*clips|fantastic\s*sams|supercuts|ulta\s*beauty\s*salon/i, category: 'hair_salon', group: 'beauty' },
-  { p: /barber|barbershop|barber\s*shop/i,                                            category: 'barbershop',        group: 'beauty' },
-  { p: /nail\s*(?:salon|bar|studio)|manicure|pedicure/i,                             category: 'nail_salon',        group: 'beauty' },
-  { p: /spa\b|day\s*spa|massage|massage\s*envy|hand\s*&\s*stone/i,                  category: 'spa_massage',       group: 'beauty' },
-  { p: /wax|threading|eyebrow|lash\s*(?:studio|bar)|european\s*wax/i,               category: 'waxing_threading',  group: 'beauty' },
-  { p: /dry\s*clean|laundry|laundromat|cleaners/i,                                   category: 'dry_cleaning',      group: 'beauty' },
-  { p: /tattoo|piercing|ink\s*studio/i,                                               category: 'tattoo',            group: 'beauty' },
-  { p: /tanning|spray\s*tan/i,                                                        category: 'tanning',           group: 'beauty' },
+  // ── SERVICES (catch-all trades) ──
+  { p: /preservation\s*(?:company|services)|property\s*preservation/i,                category: 'property_services', group: 'services' },
+  { p: /transport(?:ation)?\s*(?:inc|co|company|group|services?)|trucking\b|freight\b|logistics\b(?!\s*tech)/i, category: 'transport', group: 'services' },
+  { p: /auction\s*(?:house|company)|auctioneer/i,                                     category: 'auction',           group: 'services' },
 
-  // ── REAL ESTATE: Subcategories ──
-  { p: /keller\s*williams|re\s*max|coldwell\s*banker|century\s*21|compass\s*real|exp\s*realty|berkshire\s*hathaway\s*home/i, category: 'real_estate_brokerage', group: 'real_estate' },
-  { p: /property\s*management|hoa\s*management|community\s*management/i,             category: 'property_management',group: 'real_estate' },
-  { p: /apartment|apartments\b|luxury\s*apt|flats\b/i,                               category: 'apartments',        group: 'real_estate' },
-  { p: /self\s*storage|storage\s*unit|public\s*storage|extra\s*space|life\s*storage|cubesmart/i, category: 'self_storage', group: 'real_estate' },
+  // ── HIGH-FREQUENCY WORD CATCH-ALLS (run last — broad signals) ──
+  // Hair: any name containing "hair" is almost always a salon
+  { p: /hair/i,                                                                        category: 'hair_salon',        group: 'beauty' },
+  // Pharmacy: pharm prefix covers pharmacy, pharmaceuticals, pharmD
+  { p: /\bpharm/i,                                                                     category: 'pharmacy',          group: 'health' },
+  // Garage: standalone garage = auto service
+  { p: /\bgarage\b/i,                                                                  category: 'auto_repair',       group: 'auto' },
+  // Mart: food mart, super mart, etc.
+  { p: /\bmart\b/i,                                                                    category: 'grocery',           group: 'grocery' },
+  // Foods: "XYZ Foods" → grocery
+  { p: /\bfoods\b/i,                                                                   category: 'grocery',           group: 'grocery' },
+  // Attorney abbreviation: Atty
+  { p: /\batty\b/i,                                                                    category: 'law_firm',          group: 'legal' },
+  // Shear / ShearMadness type names → hair salon
+  { p: /shear/i,                                                                       category: 'hair_salon',        group: 'beauty' },
+  // Kids care / child care variants
+  { p: /\bkids?\s*care\b|\bchild\s*care\b|\bchildcare\b/i,                            category: 'childcare',         group: 'civic' },
+  // Repair (generic) → handyman unless already matched above
+  { p: /\brepair\b/i,                                                                  category: 'handyman',          group: 'construction' },
+  // Wellness / nutrition standalone → health clinic
+  { p: /\bwellness\b|\bnutrition\s*(?:center|clinic|studio)\b/i,                      category: 'clinic',            group: 'health' },
+  // Energy solutions → solar/construction
+  { p: /\benergy\s*(?:solutions?|services?|group|systems?)\b/i,                        category: 'solar',             group: 'construction' },
+  // Auto (standalone) → auto repair
+  { p: /\bauto\b/i,                                                                    category: 'auto_repair',       group: 'auto' },
 
-  // ── PROFESSIONAL SERVICES: Rescue from LocalBusiness black hole ──
-  { p: /cpa\b|accountant|bookkeeping|tax\s*(?:prep|service|advisor)/i,               category: 'accounting',        group: 'legal' },
-  { p: /staffing|recruiting|headhunter|talent\s*agency/i,                            category: 'staffing',          group: 'professional' },
-  { p: /marketing\s*agency|digital\s*marketing|seo\s*agency|ad\s*agency|media\s*agency/i, category: 'marketing_agency', group: 'professional' },
-  { p: /it\s*(?:support|services|consulting)|managed\s*service|tech\s*support|computer\s*repair/i, category: 'it_services', group: 'professional' },
-  { p: /insurance\b/i,                                                                category: 'insurance_agency',  group: 'banking' },
-  { p: /printing|print\s*shop|signs?\s*(?:&|and)|signage|fedex\s*office|ups\s*store/i, category: 'printing_signs', group: 'services' },
-  { p: /moving\s*company|movers?\b|moving\s*&\s*storage|relocation/i,               category: 'moving',            group: 'services' },
-  { p: /cleaning\s*service|maid\s*service|janitorial|commercial\s*cleaning|molly\s*maid|merry\s*maids/i, category: 'cleaning_service', group: 'services' },
-  { p: /security\s*(?:company|service|systems)|alarm\s*(?:company|systems)|adt\b/i, category: 'security',          group: 'services' },
-  { p: /funeral\s*home|mortuary|cremation/i,                                          category: 'funeral_home',      group: 'services' },
-  { p: /church\b|chapel\b|cathedral\b|ministry\b|gospel\b|baptist\b|methodist\b|lutheran\b|presbyterian\b|catholic\b|synagogue\b|mosque\b|temple\b/i, category: 'place_of_worship', group: 'civic' },
-  { p: /school\b|academy\b|elementary\b|middle\s*school\b|high\s*school\b|k-?12\b/i,  category: 'school',           group: 'civic' },
-  { p: /university\b|college\b|community\s*college\b/i,                               category: 'college',           group: 'civic' },
-  { p: /gas\s*station|fuel\s*station|shell\b|chevron\b|exxon\b|bp\b|marathon\s*gas|circle\s*k|wawa\b|speedway\b|racetrac\b|murphy\s*usa/i, category: 'gas_station', group: 'fuel' },
-  { p: /cvs\b|walgreen|rite\s*aid/i,                                                  category: 'pharmacy',          group: 'health' },
-  { p: /grocery|supermarket|publix|winn.?dixie|aldi|trader\s*joe|whole\s*foods|sprouts|fresh\s*market|food\s*lion/i, category: 'grocery', group: 'grocery' },
-  { p: /convenience\s*store|7-?eleven|circle\s*k|quicktrip|qt\b|wawa\b|buc-?ee/i,   category: 'convenience',       group: 'grocery' },
-  { p: /veterinar|animal\s*hospital|animal\s*clinic|pet\s*(?:hospital|clinic|care)|banfield|vca\s*animal/i, category: 'veterinary', group: 'pets' },
-  { p: /pet\s*(?:grooming|groomers?)\b|grooming\s*salon/i,                           category: 'pet_grooming',      group: 'pets' },
-  { p: /construction|builder|general\s*contractor|home\s*builder|development\s*corp/i, category: 'general_contractor', group: 'construction' },
-  { p: /electrician|electrical\s*(?:services|contractor)|wiring/i,                   category: 'electrician',       group: 'construction' },
-  { p: /plumb|plumbing/i,                                                              category: 'plumber',           group: 'construction' },
-  { p: /hvac|air\s*condition|heating\s*&\s*cooling|ac\s*repair|furnace/i,            category: 'hvac',              group: 'construction' },
-  { p: /landscap|lawn\s*(?:care|service|mowing)|tree\s*(?:service|trim|removal)|sod\b/i, category: 'landscaping', group: 'construction' },
-  { p: /pest\s*control|termite|exterminator|orkin|rollins|massey/i,                 category: 'pest_control',      group: 'construction' },
-  { p: /painting\s*(?:company|contractor)|house\s*painter|interior\s*paint/i,       category: 'painting',          group: 'construction' },
-  { p: /pool\s*(?:service|cleaning|repair|installation)|swimming\s*pool\s*company/i, category: 'pool_service',     group: 'construction' },
-  { p: /flooring|tile\s*(?:installation|contractor)|hardwood\s*floor/i,             category: 'flooring',          group: 'construction' },
-  { p: /fence\s*(?:company|contractor|installation)|fencing\b/i,                    category: 'fencing',           group: 'construction' },
-  { p: /solar\s*(?:panel|energy|installation|company)/i,                             category: 'solar',             group: 'construction' },
+  // ── NAMED ENTITY CATCH-ALLS (known chains/brands not caught above) ──
+  { p: /\bmd\b|\bdo\b|\bdds\b|\brph\b|\bpa\b.*(?:medicine|medical|health)|\bm\.d\.|\bd\.o\./i, category: 'clinic', group: 'health' },
+  { p: /childtime|learning\s*care\s*group|kindercare|bright\s*horizons|la\s*petite|primrose/i, category: 'childcare', group: 'civic' },
+  { p: /first\s*watch|first\s*watch\s*restaurant/i,                                  category: 'restaurant',        group: 'food' },
+  { p: /puppy\s*play|doggy\s*day|dog\s*day/i,                                        category: 'pet_boarding',      group: 'pets' },
+  { p: /\blaw\b.*(?:group|firm|office|pllc|llp)|pllc$|\bllp\b|\bp\.c\.$|esq\b/i,    category: 'law_firm',          group: 'legal' },
+  { p: /development\s*(?:corp|llc|group|co|company)|land\s*development/i,            category: 'real_estate',       group: 'real_estate' },
+  { p: /organic(?:als?|s)?\s*(?:market|store|shop|cafe)|natural\s*(?:market|foods?|health)/i, category: 'health_food', group: 'food' },
+  { p: /maintenance\s*(?:services?|company|group)/i,                                  category: 'handyman',          group: 'construction' },
+  { p: /india\s*(?:restaurant|cuisine|kitchen|grill|bistro)|gateway\s*to\s*india|taste\s*of\s*india/i, category: 'asian', group: 'food' },
+  { p: /studio\s*(?:plus|suites?|apartments?)/i,                                      category: 'apartment_complex', group: 'real_estate' },
+
 ];
 
-async function reclassify() {
-  // Pull all active businesses
+// ─── PIPELINE FUNCTION ────────────────────────────────────────────────────────
+/**
+ * runClassificationPipeline()
+ * Can be called from cron endpoint or CLI.
+ * Returns a stats object for logging.
+ */
+async function runClassificationPipeline() {
+  const startedAt = new Date();
+  console.log(`[reclassify] Pipeline start: ${startedAt.toISOString()}`);
+
+  // 1. Pull all active businesses
   const { rows: businesses } = await pool.query(
     `SELECT business_id, name, category, category_group FROM businesses WHERE status='active'`
   );
-
-  console.log(`Total businesses to classify: ${businesses.length}`);
+  console.log(`[reclassify] Total active businesses: ${businesses.length}`);
 
   let updates = [];
   let matched = 0;
+  let alreadyCorrect = 0;
 
   for (const biz of businesses) {
     const name = biz.name || '';
     for (const rule of RULES) {
       if (rule.p.test(name)) {
-        // Only update if something actually changes
         if (biz.category !== rule.category || biz.category_group !== rule.group) {
-          updates.push({ business_id: biz.business_id, category: rule.category, group: rule.group });
+          updates.push({
+            business_id: biz.business_id,
+            category: rule.category,
+            group: rule.group,
+          });
           matched++;
+        } else {
+          alreadyCorrect++;
         }
         break; // first match wins
       }
     }
   }
 
-  console.log(`Matched and need update: ${matched}`);
-  console.log(`Unmatched (staying as-is): ${businesses.length - matched}`);
+  console.log(`[reclassify] Matched (need update): ${matched}`);
+  console.log(`[reclassify] Already correct: ${alreadyCorrect}`);
+  console.log(`[reclassify] Unmatched (no rule hit): ${businesses.length - matched - alreadyCorrect}`);
 
-  // Batch update in chunks of 500
+  // 2. Batch update matched records + stamp classification_attempted_at
   const CHUNK = 500;
   let updated = 0;
   for (let i = 0; i < updates.length; i += CHUNK) {
     const chunk = updates.slice(i, i + CHUNK);
-    // Build bulk update using unnest
-    const ids     = chunk.map(u => u.business_id);
-    const cats    = chunk.map(u => u.category);
-    const groups  = chunk.map(u => u.group);
+    const ids    = chunk.map(u => u.business_id);
+    const cats   = chunk.map(u => u.category);
+    const groups = chunk.map(u => u.group);
     await pool.query(
-      `UPDATE businesses SET category = vals.cat, category_group = vals.grp
-       FROM (SELECT unnest($1::uuid[]) as business_id, unnest($2::text[]) as cat, unnest($3::text[]) as grp) vals
-       WHERE businesses.business_id = vals.business_id`,
+      `UPDATE businesses
+         SET category = vals.cat,
+             category_group = vals.grp,
+             classification_attempted_at = NOW()
+         FROM (SELECT unnest($1::uuid[]) as business_id,
+                      unnest($2::text[])  as cat,
+                      unnest($3::text[])  as grp) vals
+        WHERE businesses.business_id = vals.business_id`,
       [ids, cats, groups]
     );
     updated += chunk.length;
-    process.stdout.write(`\rUpdated: ${updated}/${updates.length}`);
+    process.stdout.write(`\r[reclassify] Updated: ${updated}/${updates.length}`);
   }
-  console.log('\nDone.');
+  if (updates.length > 0) console.log('');
 
-  // Show before/after breakdown
-  const after = await pool.query(
-    `SELECT category_group, category, COUNT(*) as cnt
-     FROM businesses WHERE status='active'
-     GROUP BY category_group, category
-     ORDER BY category_group, cnt DESC`
+  // 3. Stamp classification_attempted_at on ALL active businesses
+  //    (even unmatched ones — so we know we tried)
+  await pool.query(
+    `UPDATE businesses
+        SET classification_attempted_at = NOW()
+      WHERE status='active' AND classification_attempted_at IS NULL`
   );
 
-  let cur = '';
-  after.rows.forEach(r => {
-    if (r.category_group !== cur) { cur = r.category_group; console.log('\n=== ' + cur.toUpperCase() + ' ==='); }
-    console.log('  ' + (r.category || 'NULL') + ': ' + r.cnt);
-  });
+  // 4. Downgrade records stuck as 'LocalBusiness' for >48h → 'uncategorized'
+  const downgrade = await pool.query(
+    `UPDATE businesses
+        SET category = 'uncategorized',
+            category_group = 'services'
+      WHERE status='active'
+        AND category = 'LocalBusiness'
+        AND classification_attempted_at < NOW() - INTERVAL '48 hours'
+      RETURNING business_id`
+  );
+  const downgraded = downgrade.rows.length;
+  console.log(`[reclassify] Downgraded stale LocalBusiness→uncategorized: ${downgraded}`);
 
-  // Collapse risk after
-  const collapse = await pool.query(`
-    WITH top AS (
-      SELECT category_group, MAX(cnt) as top_cnt, SUM(cnt) as total_cnt
-      FROM (SELECT category_group, category, COUNT(*) as cnt FROM businesses WHERE status='active' GROUP BY category_group, category) sub
-      GROUP BY category_group
-    )
-    SELECT category_group, ROUND(top_cnt::numeric/total_cnt*100,1) as pct_in_top, top_cnt, total_cnt
-    FROM top ORDER BY pct_in_top DESC
-  `);
-  console.log('\n=== COLLAPSE RISK AFTER ===');
-  collapse.rows.forEach(r => console.log(r.category_group + ': ' + r.pct_in_top + '% (' + r.top_cnt + '/' + r.total_cnt + ')'));
+  // 5. Log run to pipeline_runs
+  const finishedAt = new Date();
+  await pool.query(
+    `INSERT INTO pipeline_runs
+       (pipeline, started_at, finished_at, total_scanned, matched, unmatched, downgraded, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [
+      'reclassify_categories',
+      startedAt,
+      finishedAt,
+      businesses.length,
+      matched,
+      businesses.length - matched - alreadyCorrect,
+      downgraded,
+      `Rules: ${RULES.length} | Runtime: ${Math.round((finishedAt - startedAt) / 1000)}s`,
+    ]
+  );
 
-  await pool.end();
+  const stats = {
+    total_scanned: businesses.length,
+    matched,
+    already_correct: alreadyCorrect,
+    unmatched: businesses.length - matched - alreadyCorrect,
+    downgraded,
+    runtime_ms: finishedAt - startedAt,
+  };
+  console.log('[reclassify] Done.', stats);
+  return stats;
 }
 
-reclassify().catch(e => { console.error(e.message); process.exit(1); });
+// ─── CLI ENTRY POINT ─────────────────────────────────────────────────────────
+if (require.main === module) {
+  runClassificationPipeline()
+    .then(() => process.exit(0))
+    .catch(err => { console.error(err); process.exit(1); });
+}
+
+module.exports = { runClassificationPipeline, RULES };
