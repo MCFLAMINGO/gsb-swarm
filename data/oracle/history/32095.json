@@ -1,0 +1,14 @@
+[
+  {
+    "t": "2026-04-24T11:34:53.635Z",
+    "capture_rate": 6,
+    "saturation": "undersupplied",
+    "restaurant_count": 2,
+    "total_businesses": 12,
+    "growth_state": "stable",
+    "infra_score": 0,
+    "top_gap": "midrange",
+    "owner_occ_pct": 90.7,
+    "school_count": 0
+  }
+]

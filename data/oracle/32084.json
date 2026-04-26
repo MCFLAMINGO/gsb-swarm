@@ -1,0 +1,149 @@
+{
+  "zip": "32084",
+  "name": "St. Augustine",
+  "computed_at": "2026-04-24T11:34:53.631Z",
+  "demographics": {
+    "population": 36998,
+    "median_household_income": 72965,
+    "median_home_value": 295000,
+    "owner_occupied_pct": 65.3,
+    "total_households": 14514,
+    "consumer_profile": "mixed",
+    "wfh_pct": 14,
+    "daytime_pop_multiplier": 1.08,
+    "daytime_demand_population": 39958,
+    "retiree_index": 0,
+    "vacancy_rate_pct": 18.6,
+    "family_hh_pct": 60,
+    "affluence_pct": 49,
+    "ultra_affluence_pct": 15,
+    "renovation_wave": "moderate",
+    "housing_age_profile": "active_growth",
+    "new_build_pct": 22
+  },
+  "restaurant_capacity": {
+    "restaurant_count": 49,
+    "total_businesses": 319,
+    "estimated_daily_meal_demand": 15983,
+    "market_capacity_meals_day": 15141,
+    "capture_rate_pct": 95,
+    "saturation_status": "balanced",
+    "restaurants_market_can_support": 52,
+    "gap_count": 3,
+    "tier_breakdown": {
+      "budget": 6,
+      "midrange": 43,
+      "upscale": 0,
+      "fine": 0,
+      "unknown": 0
+    },
+    "meals_out_per_person_per_day": 0.4
+  },
+  "market_gaps": {
+    "price_tier_gaps": [
+      {
+        "tier": "upscale",
+        "demand_pct": 20,
+        "expected_count": 10,
+        "actual_count": 0,
+        "gap": 10,
+        "status": "undersupplied",
+        "description": "$25–$60 — full service, bar"
+      },
+      {
+        "tier": "budget",
+        "demand_pct": 25,
+        "expected_count": 13,
+        "actual_count": 6,
+        "gap": 7,
+        "status": "undersupplied",
+        "description": "Under $12 — fast casual / counter service"
+      },
+      {
+        "tier": "fine",
+        "demand_pct": 5,
+        "expected_count": 3,
+        "actual_count": 0,
+        "gap": 3,
+        "status": "undersupplied",
+        "description": "$60+ — fine dining / tasting menu"
+      },
+      {
+        "tier": "midrange",
+        "demand_pct": 50,
+        "expected_count": 26,
+        "actual_count": 43,
+        "gap": -17,
+        "status": "oversupplied",
+        "description": "$12–$25 — casual dining"
+      }
+    ],
+    "school_count": 0,
+    "top_gap": {
+      "tier": "upscale",
+      "demand_pct": 20,
+      "expected_count": 10,
+      "actual_count": 0,
+      "gap": 10,
+      "status": "undersupplied",
+      "description": "$25–$60 — full service, bar"
+    }
+  },
+  "growth_trajectory": {
+    "state": "stable",
+    "label": "Stable Mixed",
+    "confidence": "low",
+    "school_count": 0,
+    "owner_occupied_pct": 65.3,
+    "infrastructure_momentum": 0,
+    "active_construction": 0,
+    "active_road_projects": 0,
+    "flood_zone_pct": 0
+  },
+  "top_questions": [
+    {
+      "question": "Is there room for another restaurant in St. Augustine?",
+      "answer": "Yes — St. Augustine is undersupplied. 49 restaurants cover only ~95% of daily meal demand. Biggest gap: upscale dining ($25–$60 — full service, bar).",
+      "signal_strength": "moderate",
+      "category": "restaurant_gap"
+    },
+    {
+      "question": "Is St. Augustine growing, stable, or becoming empty nest?",
+      "answer": "Stable established suburb. Predictable demand, lower risk, but also slower upside. Proven concepts outperform experimental ones here.",
+      "signal_strength": "low",
+      "category": "growth_trajectory"
+    },
+    {
+      "question": "What category is most missing in St. Augustine?",
+      "answer": "Upscale dining is the biggest gap — income distribution suggests 20% of meals should be in that tier, but only 0 of the expected 10 spots exist. $25–$60 — full service, bar.",
+      "signal_strength": "moderate",
+      "category": "category_gap"
+    }
+  ],
+  "oracle_narrative": "St. Augustine (pop. 36,998, median HHI $72,965) is stable mixed. With 49 food businesses serving an estimated 15983 meals/day demand, the market is balanced (95% capture rate). Biggest price-tier gap: upscale dining — 0 exist vs. 10 expected at this income level.",
+  "vertical_gaps": [
+    {
+      "vertical": "realtor",
+      "prompt": "What is the household income and consumer profile for this area?",
+      "zip": "32084",
+      "tool": "local_intel_zone",
+      "industry": "realtor",
+      "score": 0,
+      "needs": "data missing",
+      "ts": "2026-04-21T13:48:26.096Z"
+    }
+  ],
+  "data_sources": {
+    "businesses_indexed": 319,
+    "has_spending_zone": true,
+    "has_bedrock": false,
+    "has_ocean_floor": false,
+    "has_census_layer": false,
+    "has_acs": false,
+    "has_zbp": false,
+    "has_cbp": false,
+    "vertical_gap_count": 1
+  },
+  "economic_layer": null,
+  "trend": null
+}

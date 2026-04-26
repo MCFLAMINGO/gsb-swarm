@@ -1,0 +1,56 @@
+[
+  {
+    "prompt": "What is the demographic profile and income level of buyers in this ZIP?",
+    "zip": "32082",
+    "tool": "local_intel_zone",
+    "industry": "realtor",
+    "score": 0,
+    "needs": "data missing",
+    "ts": "2026-04-21T13:48:18.682Z"
+  },
+  {
+    "prompt": "What is the owner-occupancy rate and home value median?",
+    "zip": "32081",
+    "tool": "local_intel_zone",
+    "industry": "realtor",
+    "score": 0,
+    "needs": "data missing",
+    "ts": "2026-04-21T13:48:21.227Z"
+  },
+  {
+    "prompt": "What growth trajectory is this ZIP on — growing, stable, or transitioning?",
+    "zip": "32082",
+    "tool": "local_intel_zone",
+    "industry": "realtor",
+    "score": 0,
+    "needs": "data missing",
+    "ts": "2026-04-21T13:48:25.124Z"
+  },
+  {
+    "prompt": "What construction or remodeling contractors operate in this ZIP?",
+    "zip": "32082",
+    "tool": "local_intel_bedrock",
+    "industry": "realtor",
+    "score": 20,
+    "needs": "low confidence",
+    "ts": "2026-04-21T13:48:25.548Z"
+  },
+  {
+    "prompt": "What is the household income and consumer profile for this area?",
+    "zip": "32084",
+    "tool": "local_intel_zone",
+    "industry": "realtor",
+    "score": 0,
+    "needs": "data missing",
+    "ts": "2026-04-21T13:48:26.096Z"
+  },
+  {
+    "prompt": "What restaurants are on the A1A corridor?",
+    "zip": "32082",
+    "tool": "local_intel_corridor",
+    "industry": "realtor",
+    "score": 10,
+    "needs": "low confidence",
+    "ts": "2026-04-21T13:48:23.005Z"
+  }
+]

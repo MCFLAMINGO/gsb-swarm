@@ -1,0 +1,132 @@
+{
+  "zip": "32216",
+  "name": "Jacksonville Southside",
+  "computed_at": "2026-04-24T11:34:53.638Z",
+  "demographics": {
+    "population": 41323,
+    "median_household_income": 63253,
+    "median_home_value": 244800,
+    "owner_occupied_pct": 47.1,
+    "total_households": 18286,
+    "consumer_profile": "mixed",
+    "wfh_pct": 17,
+    "daytime_pop_multiplier": 1.1,
+    "daytime_demand_population": 45455,
+    "retiree_index": 0,
+    "vacancy_rate_pct": 7.6,
+    "family_hh_pct": 51,
+    "affluence_pct": 44,
+    "ultra_affluence_pct": 10,
+    "renovation_wave": "moderate",
+    "housing_age_profile": "mixed_vintage",
+    "new_build_pct": 10
+  },
+  "restaurant_capacity": {
+    "restaurant_count": 0,
+    "total_businesses": 68,
+    "estimated_daily_meal_demand": 18182,
+    "market_capacity_meals_day": 0,
+    "capture_rate_pct": 0,
+    "saturation_status": "undersupplied",
+    "restaurants_market_can_support": 65,
+    "gap_count": 65,
+    "tier_breakdown": {
+      "budget": 0,
+      "midrange": 0,
+      "upscale": 0,
+      "fine": 0,
+      "unknown": 0
+    },
+    "meals_out_per_person_per_day": 0.4
+  },
+  "market_gaps": {
+    "price_tier_gaps": [
+      {
+        "tier": "budget",
+        "demand_pct": 45,
+        "expected_count": 29,
+        "actual_count": 0,
+        "gap": 29,
+        "status": "undersupplied",
+        "description": "Under $12 — fast casual / counter service"
+      },
+      {
+        "tier": "midrange",
+        "demand_pct": 40,
+        "expected_count": 26,
+        "actual_count": 0,
+        "gap": 26,
+        "status": "undersupplied",
+        "description": "$12–$25 — casual dining"
+      },
+      {
+        "tier": "upscale",
+        "demand_pct": 13,
+        "expected_count": 8,
+        "actual_count": 0,
+        "gap": 8,
+        "status": "undersupplied",
+        "description": "$25–$60 — full service, bar"
+      },
+      {
+        "tier": "fine",
+        "demand_pct": 2,
+        "expected_count": 1,
+        "actual_count": 0,
+        "gap": 1,
+        "status": "undersupplied",
+        "description": "$60+ — fine dining / tasting menu"
+      }
+    ],
+    "school_count": 0,
+    "top_gap": {
+      "tier": "budget",
+      "demand_pct": 45,
+      "expected_count": 29,
+      "actual_count": 0,
+      "gap": 29,
+      "status": "undersupplied",
+      "description": "Under $12 — fast casual / counter service"
+    }
+  },
+  "growth_trajectory": {
+    "state": "transient",
+    "label": "High Renter Turnover",
+    "confidence": "medium",
+    "school_count": 0,
+    "owner_occupied_pct": 47.1,
+    "infrastructure_momentum": 0,
+    "active_construction": 0,
+    "active_road_projects": 0,
+    "flood_zone_pct": 0
+  },
+  "top_questions": [
+    {
+      "question": "Is Jacksonville Southside growing, stable, or becoming empty nest?",
+      "answer": "High renter turnover — 52.9% renter-occupied. Customer acquisition cost is higher here; businesses that capture the local market fast win.",
+      "signal_strength": "medium",
+      "category": "growth_trajectory"
+    },
+    {
+      "question": "What category is most missing in Jacksonville Southside?",
+      "answer": "Budget dining is the biggest gap — income distribution suggests 45% of meals should be in that tier, but only 0 of the expected 29 spots exist. Under $12 — fast casual / counter service.",
+      "signal_strength": "moderate",
+      "category": "category_gap"
+    }
+  ],
+  "oracle_narrative": "Jacksonville Southside (pop. 41,323, median HHI $63,253) is high renter turnover. The food sector has minimal coverage — significant white space. Biggest price-tier gap: budget dining — 0 exist vs. 29 expected at this income level.",
+  "vertical_gaps": [],
+  "data_sources": {
+    "businesses_indexed": 68,
+    "has_spending_zone": true,
+    "has_bedrock": false,
+    "has_ocean_floor": false,
+    "has_census_layer": false,
+    "has_acs": false,
+    "has_zbp": false,
+    "has_cbp": false,
+    "vertical_gap_count": 0
+  },
+  "economic_layer": null,
+  "trend": null
+}

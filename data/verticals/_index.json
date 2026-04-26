@@ -1,0 +1,30 @@
+{
+  "updated_at": "2026-04-21T13:41:58.965Z",
+  "verticals": [
+    {
+      "vertical": "realtor",
+      "pass_rate_pct": 75,
+      "gaps": 5
+    },
+    {
+      "vertical": "healthcare",
+      "pass_rate_pct": 47,
+      "gaps": 8
+    },
+    {
+      "vertical": "retail",
+      "pass_rate_pct": 93,
+      "gaps": 1
+    },
+    {
+      "vertical": "construction",
+      "pass_rate_pct": 60,
+      "gaps": 6
+    },
+    {
+      "vertical": "restaurant",
+      "pass_rate_pct": 100,
+      "gaps": 0
+    }
+  ]
+}

@@ -1,0 +1,204 @@
+{
+  "vertical": "construction",
+  "name": "Construction & Home Services",
+  "run_id": "construction-1776778900823",
+  "ran_at": "2026-04-21T13:41:49.424Z",
+  "total_prompts": 15,
+  "answered": 9,
+  "gap_count": 6,
+  "pass_rate_pct": 60,
+  "results": [
+    {
+      "prompt": "What general contractors operate in Ponte Vedra Beach?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "contractor",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "13 results",
+      "ts": "2026-04-21T13:41:41.156Z"
+    },
+    {
+      "prompt": "What roofing companies serve this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "roofing",
+        "zip": "32082"
+      },
+      "score": 0,
+      "answered": false,
+      "result_summary": "0 results",
+      "ts": "2026-04-21T13:41:41.735Z"
+    },
+    {
+      "prompt": "What plumbing businesses are in this area?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What plumbing businesses are in this area?",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "291 results",
+      "ts": "2026-04-21T13:41:42.402Z"
+    },
+    {
+      "prompt": "What HVAC or air conditioning companies operate here?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "hvac",
+        "zip": "32082"
+      },
+      "score": 0,
+      "answered": false,
+      "result_summary": "0 results",
+      "ts": "2026-04-21T13:41:42.980Z"
+    },
+    {
+      "prompt": "What electricians serve Nocatee and surrounding ZIPs?",
+      "zip": "32081",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "electrician",
+        "zip": "32081"
+      },
+      "score": 0,
+      "answered": false,
+      "result_summary": "0 results",
+      "ts": "2026-04-21T13:41:43.553Z"
+    },
+    {
+      "prompt": "What landscaping companies operate in St Johns County?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "landscaping",
+        "zip": "32082"
+      },
+      "score": 65,
+      "answered": true,
+      "result_summary": "6 results",
+      "ts": "2026-04-21T13:41:44.129Z"
+    },
+    {
+      "prompt": "What is the infrastructure momentum score — are there active permits?",
+      "zip": "32082",
+      "tool": "local_intel_bedrock",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 20,
+      "answered": false,
+      "result_summary": "score:0",
+      "ts": "2026-04-21T13:41:44.547Z"
+    },
+    {
+      "prompt": "What new construction or development projects are active in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_bedrock",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 20,
+      "answered": false,
+      "result_summary": "score:0",
+      "ts": "2026-04-21T13:41:44.967Z"
+    },
+    {
+      "prompt": "What pool builders or outdoor construction companies are nearby?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "construction",
+        "zip": "32082"
+      },
+      "score": 70,
+      "answered": true,
+      "result_summary": "7 results",
+      "ts": "2026-04-21T13:41:45.554Z"
+    },
+    {
+      "prompt": "What is the population growth rate that drives construction demand?",
+      "zip": "32081",
+      "tool": "local_intel_bedrock",
+      "args": {
+        "zip": "32081"
+      },
+      "score": 20,
+      "answered": false,
+      "result_summary": "score:0",
+      "ts": "2026-04-21T13:41:45.974Z"
+    },
+    {
+      "prompt": "What painting or interior finishing contractors operate here?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "contractor",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "13 results",
+      "ts": "2026-04-21T13:41:46.690Z"
+    },
+    {
+      "prompt": "What flooring or tile companies serve this market?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What flooring or tile companies serve this market?",
+        "zip": "32082"
+      },
+      "score": 40,
+      "answered": true,
+      "result_summary": "1 results",
+      "ts": "2026-04-21T13:41:47.266Z"
+    },
+    {
+      "prompt": "What home inspection services are available in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What home inspection services are available in this ZIP?",
+        "zip": "32082"
+      },
+      "score": 75,
+      "answered": true,
+      "result_summary": "8 results",
+      "ts": "2026-04-21T13:41:47.826Z"
+    },
+    {
+      "prompt": "What window or door replacement companies serve this area?",
+      "zip": "32084",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What window or door replacement companies serve this area?",
+        "zip": "32084"
+      },
+      "score": 51,
+      "answered": true,
+      "result_summary": "3 results",
+      "ts": "2026-04-21T13:41:48.469Z"
+    },
+    {
+      "prompt": "What pest control or remediation businesses operate in 32086?",
+      "zip": "32086",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What pest control or remediation businesses operate in 32086?",
+        "zip": "32086"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "264 results",
+      "ts": "2026-04-21T13:41:49.123Z"
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+[
+  {
+    "prompt": "What roofing companies serve this ZIP?",
+    "zip": "32082",
+    "tool": "local_intel_search",
+    "industry": "construction",
+    "score": 0,
+    "needs": "data missing",
+    "ts": "2026-04-21T13:41:41.735Z"
+  },
+  {
+    "prompt": "What HVAC or air conditioning companies operate here?",
+    "zip": "32082",
+    "tool": "local_intel_search",
+    "industry": "construction",
+    "score": 0,
+    "needs": "data missing",
+    "ts": "2026-04-21T13:41:42.980Z"
+  },
+  {
+    "prompt": "What electricians serve Nocatee and surrounding ZIPs?",
+    "zip": "32081",
+    "tool": "local_intel_search",
+    "industry": "construction",
+    "score": 0,
+    "needs": "data missing",
+    "ts": "2026-04-21T13:41:43.553Z"
+  },
+  {
+    "prompt": "What is the infrastructure momentum score — are there active permits?",
+    "zip": "32082",
+    "tool": "local_intel_bedrock",
+    "industry": "construction",
+    "score": 20,
+    "needs": "low confidence",
+    "ts": "2026-04-21T13:41:44.547Z"
+  },
+  {
+    "prompt": "What new construction or development projects are active in this ZIP?",
+    "zip": "32082",
+    "tool": "local_intel_bedrock",
+    "industry": "construction",
+    "score": 20,
+    "needs": "low confidence",
+    "ts": "2026-04-21T13:41:44.967Z"
+  },
+  {
+    "prompt": "What is the population growth rate that drives construction demand?",
+    "zip": "32081",
+    "tool": "local_intel_bedrock",
+    "industry": "construction",
+    "score": 20,
+    "needs": "low confidence",
+    "ts": "2026-04-21T13:41:45.974Z"
+  }
+]

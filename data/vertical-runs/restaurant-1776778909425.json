@@ -1,0 +1,207 @@
+{
+  "vertical": "restaurant",
+  "name": "Food Services & Restaurants",
+  "run_id": "restaurant-1776778909425",
+  "ran_at": "2026-04-21T13:41:58.964Z",
+  "total_prompts": 15,
+  "answered": 15,
+  "gap_count": 0,
+  "pass_rate_pct": 100,
+  "results": [
+    {
+      "prompt": "What restaurants are in Ponte Vedra Beach?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "restaurant",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "49 results",
+      "ts": "2026-04-21T13:41:49.770Z"
+    },
+    {
+      "prompt": "Is the upscale dining market undersupplied in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "restaurant",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "49 results",
+      "ts": "2026-04-21T13:41:50.403Z"
+    },
+    {
+      "prompt": "What is the restaurant saturation status — room for more or oversupplied?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "restaurant",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "49 results",
+      "ts": "2026-04-21T13:41:51.046Z"
+    },
+    {
+      "prompt": "What fast casual restaurants operate in Nocatee?",
+      "zip": "32081",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "restaurant",
+        "zip": "32081"
+      },
+      "score": 78,
+      "answered": true,
+      "result_summary": "10 results",
+      "ts": "2026-04-21T13:41:51.617Z"
+    },
+    {
+      "prompt": "What is the food and beverage capture rate for this market?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "restaurant",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "49 results",
+      "ts": "2026-04-21T13:41:52.265Z"
+    },
+    {
+      "prompt": "What fine dining options exist in 32082?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "restaurant",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "49 results",
+      "ts": "2026-04-21T13:41:52.901Z"
+    },
+    {
+      "prompt": "What bars or nightlife venues operate in this area?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "bar",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "19 results",
+      "ts": "2026-04-21T13:41:53.621Z"
+    },
+    {
+      "prompt": "What breakfast or brunch spots are in Ponte Vedra?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "food",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "57 results",
+      "ts": "2026-04-21T13:41:54.259Z"
+    },
+    {
+      "prompt": "How many restaurants are on the A1A corridor?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "restaurant",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "49 results",
+      "ts": "2026-04-21T13:41:54.909Z"
+    },
+    {
+      "prompt": "What is the estimated daily meal demand vs. current capacity?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What is the estimated daily meal demand vs. current capacity?",
+        "zip": "32082"
+      },
+      "score": 40,
+      "answered": true,
+      "result_summary": "1 results",
+      "ts": "2026-04-21T13:41:55.499Z"
+    },
+    {
+      "prompt": "What coffee shops or cafes serve this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "cafe",
+        "zip": "32082"
+      },
+      "score": 64,
+      "answered": true,
+      "result_summary": "6 results",
+      "ts": "2026-04-21T13:41:56.069Z"
+    },
+    {
+      "prompt": "What food trucks or pop-up food businesses operate here?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "restaurant",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "49 results",
+      "ts": "2026-04-21T13:41:56.713Z"
+    },
+    {
+      "prompt": "What is the median household income that determines restaurant price tier demand?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "restaurant",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "49 results",
+      "ts": "2026-04-21T13:41:57.353Z"
+    },
+    {
+      "prompt": "What sushi or Asian cuisine restaurants are in St Augustine?",
+      "zip": "32084",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "restaurant",
+        "zip": "32084"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "135 results",
+      "ts": "2026-04-21T13:41:57.997Z"
+    },
+    {
+      "prompt": "What is the tidal momentum for food and beverage investment in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "restaurant",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "49 results",
+      "ts": "2026-04-21T13:41:58.663Z"
+    }
+  ]
+}

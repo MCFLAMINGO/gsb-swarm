@@ -1,0 +1,11 @@
+[
+  {
+    "prompt": "What is the consumer spending profile — affluent or budget-conscious?",
+    "zip": "32082",
+    "tool": "local_intel_zone",
+    "industry": "retail",
+    "score": 0,
+    "needs": "data missing",
+    "ts": "2026-04-21T13:41:32.529Z"
+  }
+]

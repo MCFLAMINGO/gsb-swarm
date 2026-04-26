@@ -1,0 +1,202 @@
+{
+  "vertical": "healthcare",
+  "name": "Healthcare",
+  "run_id": "healthcare-1776779298115",
+  "ran_at": "2026-04-21T13:48:27.221Z",
+  "total_prompts": 15,
+  "answered": 9,
+  "gap_count": 6,
+  "pass_rate_pct": 60,
+  "results": [
+    {
+      "prompt": "What dentists operate in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What dentists operate in this ZIP?",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "28 results",
+      "ts": "2026-04-21T13:48:18.743Z"
+    },
+    {
+      "prompt": "What pharmacies are accessible in this area?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What pharmacies are accessible in this area?",
+        "zip": "32082"
+      },
+      "score": 53,
+      "answered": true,
+      "result_summary": "4 results",
+      "ts": "2026-04-21T13:48:19.453Z"
+    },
+    {
+      "prompt": "How many physicians or clinics are in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "doctor",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "23 results",
+      "ts": "2026-04-21T13:48:20.205Z"
+    },
+    {
+      "prompt": "What is the median household income of patients in this area?",
+      "zip": "32082",
+      "tool": "local_intel_zone",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 0,
+      "answered": false,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:48:20.736Z"
+    },
+    {
+      "prompt": "What healthcare services are undersupplied relative to population?",
+      "zip": "32082",
+      "tool": "local_intel_zone",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 0,
+      "answered": false,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:48:21.155Z"
+    },
+    {
+      "prompt": "What is the senior population percentage that drives home health demand?",
+      "zip": "32082",
+      "tool": "local_intel_zone",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 0,
+      "answered": false,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:48:21.574Z"
+    },
+    {
+      "prompt": "What mental health or counseling services exist in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "healthcare",
+        "zip": "32082"
+      },
+      "score": 0,
+      "answered": false,
+      "result_summary": "0 results",
+      "ts": "2026-04-21T13:48:22.155Z"
+    },
+    {
+      "prompt": "What fitness or wellness businesses operate here?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What fitness or wellness businesses operate here?",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "297 results",
+      "ts": "2026-04-21T13:48:22.832Z"
+    },
+    {
+      "prompt": "What healthcare businesses are within 3 miles of Ponte Vedra Beach?",
+      "zip": "32082",
+      "tool": "local_intel_nearby",
+      "args": {
+        "lat": 30.1893,
+        "lon": -81.3815,
+        "radius_miles": 3
+      },
+      "score": 50,
+      "answered": true,
+      "result_summary": "15 results",
+      "ts": "2026-04-21T13:48:23.506Z"
+    },
+    {
+      "prompt": "What is the consumer profile — does it skew toward affluent established patients?",
+      "zip": "32082",
+      "tool": "local_intel_zone",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 0,
+      "answered": false,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:48:23.927Z"
+    },
+    {
+      "prompt": "What optometrists or vision care providers are in this area?",
+      "zip": "32084",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "healthcare",
+        "zip": "32084"
+      },
+      "score": 75,
+      "answered": true,
+      "result_summary": "7 results",
+      "ts": "2026-04-21T13:48:24.521Z"
+    },
+    {
+      "prompt": "What physical therapy or rehab centers operate in St Johns County?",
+      "zip": "32092",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "healthcare",
+        "zip": "32092"
+      },
+      "score": 57,
+      "answered": true,
+      "result_summary": "4 results",
+      "ts": "2026-04-21T13:48:25.100Z"
+    },
+    {
+      "prompt": "What is the population growth trend that affects patient demand?",
+      "zip": "32081",
+      "tool": "local_intel_zone",
+      "args": {
+        "zip": "32081"
+      },
+      "score": 0,
+      "answered": false,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:48:25.519Z"
+    },
+    {
+      "prompt": "What are new healthcare businesses recently added to this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_changes",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 50,
+      "answered": true,
+      "result_summary": "1 results",
+      "ts": "2026-04-21T13:48:26.097Z"
+    },
+    {
+      "prompt": "What urgent care or walk-in clinics are in this market?",
+      "zip": "32086",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "doctor",
+        "zip": "32086"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "66 results",
+      "ts": "2026-04-21T13:48:26.921Z"
+    }
+  ]
+}

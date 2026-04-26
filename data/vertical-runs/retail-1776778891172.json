@@ -1,0 +1,206 @@
+{
+  "vertical": "retail",
+  "name": "Retail & Grocery",
+  "run_id": "retail-1776778891172",
+  "ran_at": "2026-04-21T13:41:40.822Z",
+  "total_prompts": 15,
+  "answered": 14,
+  "gap_count": 1,
+  "pass_rate_pct": 93,
+  "results": [
+    {
+      "prompt": "What grocery stores or supermarkets operate in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "grocery",
+        "zip": "32082"
+      },
+      "score": 55,
+      "answered": true,
+      "result_summary": "1 results",
+      "ts": "2026-04-21T13:41:31.453Z"
+    },
+    {
+      "prompt": "What retail categories are undersupplied for the income level here?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "retail",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "18 results",
+      "ts": "2026-04-21T13:41:32.108Z"
+    },
+    {
+      "prompt": "What is the consumer spending profile — affluent or budget-conscious?",
+      "zip": "32082",
+      "tool": "local_intel_zone",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 0,
+      "answered": false,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:41:32.529Z"
+    },
+    {
+      "prompt": "What specialty retail shops operate on A1A in Ponte Vedra?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "retail",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "18 results",
+      "ts": "2026-04-21T13:41:33.253Z"
+    },
+    {
+      "prompt": "What hardware or home improvement stores are nearby?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "retail",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "18 results",
+      "ts": "2026-04-21T13:41:33.900Z"
+    },
+    {
+      "prompt": "What clothing or apparel retailers serve this market?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "retail",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "18 results",
+      "ts": "2026-04-21T13:41:34.545Z"
+    },
+    {
+      "prompt": "How many retail businesses are in this ZIP total?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "retail",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "18 results",
+      "ts": "2026-04-21T13:41:35.187Z"
+    },
+    {
+      "prompt": "What pet supply or pet service businesses exist here?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What pet supply or pet service businesses exist here?",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "288 results",
+      "ts": "2026-04-21T13:41:35.829Z"
+    },
+    {
+      "prompt": "What convenience stores operate in Nocatee?",
+      "zip": "32081",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "retail",
+        "zip": "32081"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "20 results",
+      "ts": "2026-04-21T13:41:36.469Z"
+    },
+    {
+      "prompt": "What is the capture rate for retail spending in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "retail",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "18 results",
+      "ts": "2026-04-21T13:41:37.194Z"
+    },
+    {
+      "prompt": "What businesses have recently opened in this retail market?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "retail",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "18 results",
+      "ts": "2026-04-21T13:41:37.931Z"
+    },
+    {
+      "prompt": "What wine or liquor stores operate in Ponte Vedra Beach?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "retail",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "18 results",
+      "ts": "2026-04-21T13:41:38.579Z"
+    },
+    {
+      "prompt": "What florists or gift shops are in this area?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "retail",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "18 results",
+      "ts": "2026-04-21T13:41:39.220Z"
+    },
+    {
+      "prompt": "What is the household income that determines retail price tier demand?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "retail",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "18 results",
+      "ts": "2026-04-21T13:41:39.864Z"
+    },
+    {
+      "prompt": "What bookstores or stationery shops exist in St Johns County?",
+      "zip": "32084",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "retail",
+        "zip": "32084"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "73 results",
+      "ts": "2026-04-21T13:41:40.521Z"
+    }
+  ]
+}

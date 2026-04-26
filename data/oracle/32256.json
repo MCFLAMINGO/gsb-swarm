@@ -1,0 +1,132 @@
+{
+  "zip": "32256",
+  "name": "Jacksonville SW",
+  "computed_at": "2026-04-24T11:34:53.647Z",
+  "demographics": {
+    "population": 55510,
+    "median_household_income": 73203,
+    "median_home_value": 360200,
+    "owner_occupied_pct": 39.6,
+    "total_households": 25681,
+    "consumer_profile": "mixed",
+    "wfh_pct": 15,
+    "daytime_pop_multiplier": 1.09,
+    "daytime_demand_population": 60506,
+    "retiree_index": 0,
+    "vacancy_rate_pct": 7.4,
+    "family_hh_pct": 51,
+    "affluence_pct": 49,
+    "ultra_affluence_pct": 17,
+    "renovation_wave": "moderate",
+    "housing_age_profile": "active_growth",
+    "new_build_pct": 25
+  },
+  "restaurant_capacity": {
+    "restaurant_count": 0,
+    "total_businesses": 92,
+    "estimated_daily_meal_demand": 24202,
+    "market_capacity_meals_day": 0,
+    "capture_rate_pct": 0,
+    "saturation_status": "undersupplied",
+    "restaurants_market_can_support": 86,
+    "gap_count": 86,
+    "tier_breakdown": {
+      "budget": 0,
+      "midrange": 0,
+      "upscale": 0,
+      "fine": 0,
+      "unknown": 0
+    },
+    "meals_out_per_person_per_day": 0.4
+  },
+  "market_gaps": {
+    "price_tier_gaps": [
+      {
+        "tier": "midrange",
+        "demand_pct": 50,
+        "expected_count": 43,
+        "actual_count": 0,
+        "gap": 43,
+        "status": "undersupplied",
+        "description": "$12–$25 — casual dining"
+      },
+      {
+        "tier": "budget",
+        "demand_pct": 25,
+        "expected_count": 22,
+        "actual_count": 0,
+        "gap": 22,
+        "status": "undersupplied",
+        "description": "Under $12 — fast casual / counter service"
+      },
+      {
+        "tier": "upscale",
+        "demand_pct": 20,
+        "expected_count": 17,
+        "actual_count": 0,
+        "gap": 17,
+        "status": "undersupplied",
+        "description": "$25–$60 — full service, bar"
+      },
+      {
+        "tier": "fine",
+        "demand_pct": 5,
+        "expected_count": 4,
+        "actual_count": 0,
+        "gap": 4,
+        "status": "undersupplied",
+        "description": "$60+ — fine dining / tasting menu"
+      }
+    ],
+    "school_count": 0,
+    "top_gap": {
+      "tier": "midrange",
+      "demand_pct": 50,
+      "expected_count": 43,
+      "actual_count": 0,
+      "gap": 43,
+      "status": "undersupplied",
+      "description": "$12–$25 — casual dining"
+    }
+  },
+  "growth_trajectory": {
+    "state": "transient",
+    "label": "High Renter Turnover",
+    "confidence": "medium",
+    "school_count": 0,
+    "owner_occupied_pct": 39.6,
+    "infrastructure_momentum": 0,
+    "active_construction": 0,
+    "active_road_projects": 0,
+    "flood_zone_pct": 0
+  },
+  "top_questions": [
+    {
+      "question": "Is Jacksonville SW growing, stable, or becoming empty nest?",
+      "answer": "High renter turnover — 60.4% renter-occupied. Customer acquisition cost is higher here; businesses that capture the local market fast win.",
+      "signal_strength": "medium",
+      "category": "growth_trajectory"
+    },
+    {
+      "question": "What category is most missing in Jacksonville SW?",
+      "answer": "Midrange dining is the biggest gap — income distribution suggests 50% of meals should be in that tier, but only 0 of the expected 43 spots exist. $12–$25 — casual dining.",
+      "signal_strength": "moderate",
+      "category": "category_gap"
+    }
+  ],
+  "oracle_narrative": "Jacksonville SW (pop. 55,510, median HHI $73,203) is high renter turnover. The food sector has minimal coverage — significant white space. Biggest price-tier gap: midrange dining — 0 exist vs. 43 expected at this income level.",
+  "vertical_gaps": [],
+  "data_sources": {
+    "businesses_indexed": 92,
+    "has_spending_zone": true,
+    "has_bedrock": false,
+    "has_ocean_floor": false,
+    "has_census_layer": false,
+    "has_acs": false,
+    "has_zbp": false,
+    "has_cbp": false,
+    "vertical_gap_count": 0
+  },
+  "economic_layer": null,
+  "trend": null
+}

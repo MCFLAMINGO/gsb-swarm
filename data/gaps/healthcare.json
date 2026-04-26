@@ -1,0 +1,56 @@
+[
+  {
+    "prompt": "What is the median household income of patients in this area?",
+    "zip": "32082",
+    "tool": "local_intel_zone",
+    "industry": "healthcare",
+    "score": 0,
+    "needs": "data missing",
+    "ts": "2026-04-21T13:48:20.736Z"
+  },
+  {
+    "prompt": "What healthcare services are undersupplied relative to population?",
+    "zip": "32082",
+    "tool": "local_intel_zone",
+    "industry": "healthcare",
+    "score": 0,
+    "needs": "data missing",
+    "ts": "2026-04-21T13:48:21.155Z"
+  },
+  {
+    "prompt": "What is the senior population percentage that drives home health demand?",
+    "zip": "32082",
+    "tool": "local_intel_zone",
+    "industry": "healthcare",
+    "score": 0,
+    "needs": "data missing",
+    "ts": "2026-04-21T13:48:21.574Z"
+  },
+  {
+    "prompt": "What mental health or counseling services exist in this ZIP?",
+    "zip": "32082",
+    "tool": "local_intel_search",
+    "industry": "healthcare",
+    "score": 0,
+    "needs": "data missing",
+    "ts": "2026-04-21T13:48:22.155Z"
+  },
+  {
+    "prompt": "What is the consumer profile — does it skew toward affluent established patients?",
+    "zip": "32082",
+    "tool": "local_intel_zone",
+    "industry": "healthcare",
+    "score": 0,
+    "needs": "data missing",
+    "ts": "2026-04-21T13:48:23.927Z"
+  },
+  {
+    "prompt": "What is the population growth trend that affects patient demand?",
+    "zip": "32081",
+    "tool": "local_intel_zone",
+    "industry": "healthcare",
+    "score": 0,
+    "needs": "data missing",
+    "ts": "2026-04-21T13:48:25.519Z"
+  }
+]

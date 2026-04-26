@@ -1,0 +1,132 @@
+{
+  "zip": "32226",
+  "name": "32226",
+  "computed_at": "2026-04-24T11:34:53.643Z",
+  "demographics": {
+    "population": 20396,
+    "median_household_income": 109375,
+    "median_home_value": 340500,
+    "owner_occupied_pct": 91.9,
+    "total_households": 7161,
+    "consumer_profile": "affluent_established",
+    "wfh_pct": 13,
+    "daytime_pop_multiplier": 1.08,
+    "daytime_demand_population": 22028,
+    "retiree_index": 0,
+    "vacancy_rate_pct": 7.1,
+    "family_hh_pct": 77,
+    "affluence_pct": 67,
+    "ultra_affluence_pct": 29,
+    "renovation_wave": "moderate",
+    "housing_age_profile": "active_growth",
+    "new_build_pct": 27
+  },
+  "restaurant_capacity": {
+    "restaurant_count": 0,
+    "total_businesses": 0,
+    "estimated_daily_meal_demand": 13657,
+    "market_capacity_meals_day": 0,
+    "capture_rate_pct": 0,
+    "saturation_status": "undersupplied",
+    "restaurants_market_can_support": 49,
+    "gap_count": 49,
+    "tier_breakdown": {
+      "budget": 0,
+      "midrange": 0,
+      "upscale": 0,
+      "fine": 0,
+      "unknown": 0
+    },
+    "meals_out_per_person_per_day": 0.62
+  },
+  "market_gaps": {
+    "price_tier_gaps": [
+      {
+        "tier": "midrange",
+        "demand_pct": 45,
+        "expected_count": 22,
+        "actual_count": 0,
+        "gap": 22,
+        "status": "undersupplied",
+        "description": "$12–$25 — casual dining"
+      },
+      {
+        "tier": "upscale",
+        "demand_pct": 30,
+        "expected_count": 15,
+        "actual_count": 0,
+        "gap": 15,
+        "status": "undersupplied",
+        "description": "$25–$60 — full service, bar"
+      },
+      {
+        "tier": "budget",
+        "demand_pct": 15,
+        "expected_count": 7,
+        "actual_count": 0,
+        "gap": 7,
+        "status": "undersupplied",
+        "description": "Under $12 — fast casual / counter service"
+      },
+      {
+        "tier": "fine",
+        "demand_pct": 10,
+        "expected_count": 5,
+        "actual_count": 0,
+        "gap": 5,
+        "status": "undersupplied",
+        "description": "$60+ — fine dining / tasting menu"
+      }
+    ],
+    "school_count": 0,
+    "top_gap": {
+      "tier": "midrange",
+      "demand_pct": 45,
+      "expected_count": 22,
+      "actual_count": 0,
+      "gap": 22,
+      "status": "undersupplied",
+      "description": "$12–$25 — casual dining"
+    }
+  },
+  "growth_trajectory": {
+    "state": "stable",
+    "label": "Stable Mixed",
+    "confidence": "low",
+    "school_count": 0,
+    "owner_occupied_pct": 91.9,
+    "infrastructure_momentum": 0,
+    "active_construction": 0,
+    "active_road_projects": 0,
+    "flood_zone_pct": 0
+  },
+  "top_questions": [
+    {
+      "question": "Is 32226 growing, stable, or becoming empty nest?",
+      "answer": "Stable established suburb. Predictable demand, lower risk, but also slower upside. Proven concepts outperform experimental ones here.",
+      "signal_strength": "low",
+      "category": "growth_trajectory"
+    },
+    {
+      "question": "What category is most missing in 32226?",
+      "answer": "Midrange dining is the biggest gap — income distribution suggests 45% of meals should be in that tier, but only 0 of the expected 22 spots exist. $12–$25 — casual dining.",
+      "signal_strength": "moderate",
+      "category": "category_gap"
+    }
+  ],
+  "oracle_narrative": "32226 (pop. 20,396, median HHI $109,375) is stable mixed. The food sector has minimal coverage — significant white space. Biggest price-tier gap: midrange dining — 0 exist vs. 22 expected at this income level.",
+  "vertical_gaps": [],
+  "data_sources": {
+    "businesses_indexed": 0,
+    "has_spending_zone": true,
+    "has_bedrock": false,
+    "has_ocean_floor": false,
+    "has_census_layer": false,
+    "has_acs": false,
+    "has_zbp": false,
+    "has_cbp": false,
+    "vertical_gap_count": 0
+  },
+  "economic_layer": null,
+  "trend": null
+}

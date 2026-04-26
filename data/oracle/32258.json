@@ -1,0 +1,132 @@
+{
+  "zip": "32258",
+  "name": "Mandarin South",
+  "computed_at": "2026-04-24T11:34:53.649Z",
+  "demographics": {
+    "population": 40545,
+    "median_household_income": 99764,
+    "median_home_value": 347500,
+    "owner_occupied_pct": 61.5,
+    "total_households": 15773,
+    "consumer_profile": "mixed",
+    "wfh_pct": 21,
+    "daytime_pop_multiplier": 1.13,
+    "daytime_demand_population": 45816,
+    "retiree_index": 0,
+    "vacancy_rate_pct": 3,
+    "family_hh_pct": 65,
+    "affluence_pct": 63,
+    "ultra_affluence_pct": 23,
+    "renovation_wave": "moderate",
+    "housing_age_profile": "active_growth",
+    "new_build_pct": 34
+  },
+  "restaurant_capacity": {
+    "restaurant_count": 0,
+    "total_businesses": 21,
+    "estimated_daily_meal_demand": 18326,
+    "market_capacity_meals_day": 0,
+    "capture_rate_pct": 0,
+    "saturation_status": "undersupplied",
+    "restaurants_market_can_support": 65,
+    "gap_count": 65,
+    "tier_breakdown": {
+      "budget": 0,
+      "midrange": 0,
+      "upscale": 0,
+      "fine": 0,
+      "unknown": 0
+    },
+    "meals_out_per_person_per_day": 0.4
+  },
+  "market_gaps": {
+    "price_tier_gaps": [
+      {
+        "tier": "midrange",
+        "demand_pct": 50,
+        "expected_count": 33,
+        "actual_count": 0,
+        "gap": 33,
+        "status": "undersupplied",
+        "description": "$12–$25 — casual dining"
+      },
+      {
+        "tier": "budget",
+        "demand_pct": 25,
+        "expected_count": 16,
+        "actual_count": 0,
+        "gap": 16,
+        "status": "undersupplied",
+        "description": "Under $12 — fast casual / counter service"
+      },
+      {
+        "tier": "upscale",
+        "demand_pct": 20,
+        "expected_count": 13,
+        "actual_count": 0,
+        "gap": 13,
+        "status": "undersupplied",
+        "description": "$25–$60 — full service, bar"
+      },
+      {
+        "tier": "fine",
+        "demand_pct": 5,
+        "expected_count": 3,
+        "actual_count": 0,
+        "gap": 3,
+        "status": "undersupplied",
+        "description": "$60+ — fine dining / tasting menu"
+      }
+    ],
+    "school_count": 0,
+    "top_gap": {
+      "tier": "midrange",
+      "demand_pct": 50,
+      "expected_count": 33,
+      "actual_count": 0,
+      "gap": 33,
+      "status": "undersupplied",
+      "description": "$12–$25 — casual dining"
+    }
+  },
+  "growth_trajectory": {
+    "state": "stable",
+    "label": "Stable Mixed",
+    "confidence": "low",
+    "school_count": 0,
+    "owner_occupied_pct": 61.5,
+    "infrastructure_momentum": 0,
+    "active_construction": 0,
+    "active_road_projects": 0,
+    "flood_zone_pct": 0
+  },
+  "top_questions": [
+    {
+      "question": "Is Mandarin South growing, stable, or becoming empty nest?",
+      "answer": "Stable established suburb. Predictable demand, lower risk, but also slower upside. Proven concepts outperform experimental ones here.",
+      "signal_strength": "low",
+      "category": "growth_trajectory"
+    },
+    {
+      "question": "What category is most missing in Mandarin South?",
+      "answer": "Midrange dining is the biggest gap — income distribution suggests 50% of meals should be in that tier, but only 0 of the expected 33 spots exist. $12–$25 — casual dining.",
+      "signal_strength": "moderate",
+      "category": "category_gap"
+    }
+  ],
+  "oracle_narrative": "Mandarin South (pop. 40,545, median HHI $99,764) is stable mixed. The food sector has minimal coverage — significant white space. Biggest price-tier gap: midrange dining — 0 exist vs. 33 expected at this income level.",
+  "vertical_gaps": [],
+  "data_sources": {
+    "businesses_indexed": 21,
+    "has_spending_zone": true,
+    "has_bedrock": false,
+    "has_ocean_floor": false,
+    "has_census_layer": false,
+    "has_acs": false,
+    "has_zbp": false,
+    "has_cbp": false,
+    "vertical_gap_count": 0
+  },
+  "economic_layer": null,
+  "trend": null
+}

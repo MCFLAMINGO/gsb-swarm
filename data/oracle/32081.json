@@ -1,0 +1,179 @@
+{
+  "zip": "32081",
+  "name": "Nocatee",
+  "computed_at": "2026-04-24T11:34:53.627Z",
+  "demographics": {
+    "population": 27365,
+    "median_household_income": 128316,
+    "median_home_value": 590200,
+    "owner_occupied_pct": 82.7,
+    "total_households": 9526,
+    "consumer_profile": "affluent_established",
+    "wfh_pct": 39,
+    "daytime_pop_multiplier": 1.23,
+    "daytime_demand_population": 33659,
+    "retiree_index": 0,
+    "vacancy_rate_pct": 5.9,
+    "family_hh_pct": 84,
+    "affluence_pct": 73,
+    "ultra_affluence_pct": 44,
+    "renovation_wave": "low",
+    "housing_age_profile": "new_construction_dominant",
+    "new_build_pct": 84
+  },
+  "restaurant_capacity": {
+    "restaurant_count": 17,
+    "total_businesses": 283,
+    "estimated_daily_meal_demand": 20869,
+    "market_capacity_meals_day": 6443,
+    "capture_rate_pct": 31,
+    "saturation_status": "undersupplied",
+    "restaurants_market_can_support": 55,
+    "gap_count": 38,
+    "tier_breakdown": {
+      "budget": 7,
+      "midrange": 10,
+      "upscale": 0,
+      "fine": 0,
+      "unknown": 0
+    },
+    "meals_out_per_person_per_day": 0.62
+  },
+  "market_gaps": {
+    "price_tier_gaps": [
+      {
+        "tier": "upscale",
+        "demand_pct": 30,
+        "expected_count": 17,
+        "actual_count": 0,
+        "gap": 17,
+        "status": "undersupplied",
+        "description": "$25–$60 — full service, bar"
+      },
+      {
+        "tier": "midrange",
+        "demand_pct": 45,
+        "expected_count": 25,
+        "actual_count": 10,
+        "gap": 15,
+        "status": "undersupplied",
+        "description": "$12–$25 — casual dining"
+      },
+      {
+        "tier": "fine",
+        "demand_pct": 10,
+        "expected_count": 6,
+        "actual_count": 0,
+        "gap": 6,
+        "status": "undersupplied",
+        "description": "$60+ — fine dining / tasting menu"
+      },
+      {
+        "tier": "budget",
+        "demand_pct": 15,
+        "expected_count": 8,
+        "actual_count": 7,
+        "gap": 1,
+        "status": "undersupplied",
+        "description": "Under $12 — fast casual / counter service"
+      }
+    ],
+    "school_count": 4,
+    "top_gap": {
+      "tier": "upscale",
+      "demand_pct": 30,
+      "expected_count": 17,
+      "actual_count": 0,
+      "gap": 17,
+      "status": "undersupplied",
+      "description": "$25–$60 — full service, bar"
+    }
+  },
+  "growth_trajectory": {
+    "state": "growing",
+    "label": "Active Family Formation",
+    "confidence": "high",
+    "school_count": 4,
+    "owner_occupied_pct": 82.7,
+    "infrastructure_momentum": 0,
+    "active_construction": 0,
+    "active_road_projects": 0,
+    "flood_zone_pct": 0
+  },
+  "top_questions": [
+    {
+      "question": "Is there room for another restaurant in Nocatee?",
+      "answer": "Yes — Nocatee is undersupplied. 17 restaurants cover only ~31% of daily meal demand. Biggest gap: upscale dining ($25–$60 — full service, bar).",
+      "signal_strength": "strong",
+      "category": "restaurant_gap"
+    },
+    {
+      "question": "Is Nocatee growing, stable, or becoming empty nest?",
+      "answer": "Growing. 82.7% owner-occupied with 4 schools nearby signals active family formation. New businesses targeting families, children's services, and convenience will have a natural customer base being built for them.",
+      "signal_strength": "high",
+      "category": "growth_trajectory"
+    },
+    {
+      "question": "What category is most missing in Nocatee?",
+      "answer": "Upscale dining is the biggest gap — income distribution suggests 30% of meals should be in that tier, but only 0 of the expected 17 spots exist. $25–$60 — full service, bar.",
+      "signal_strength": "moderate",
+      "category": "category_gap"
+    }
+  ],
+  "oracle_narrative": "Nocatee (pop. 27,365, median HHI $128,316) is active family formation. With 17 food businesses serving an estimated 20869 meals/day demand, the market is undersupplied (31% capture rate). Biggest price-tier gap: upscale dining — 0 exist vs. 17 expected at this income level. Owner-occupied rate of 82.7% with 4 schools signals household formation — demand is being built.",
+  "vertical_gaps": [
+    {
+      "vertical": "construction",
+      "prompt": "What electricians serve Nocatee and surrounding ZIPs?",
+      "zip": "32081",
+      "tool": "local_intel_search",
+      "industry": "construction",
+      "score": 0,
+      "needs": "data missing",
+      "ts": "2026-04-21T13:41:43.553Z"
+    },
+    {
+      "vertical": "construction",
+      "prompt": "What is the population growth rate that drives construction demand?",
+      "zip": "32081",
+      "tool": "local_intel_bedrock",
+      "industry": "construction",
+      "score": 20,
+      "needs": "low confidence",
+      "ts": "2026-04-21T13:41:45.974Z"
+    },
+    {
+      "vertical": "healthcare",
+      "prompt": "What is the population growth trend that affects patient demand?",
+      "zip": "32081",
+      "tool": "local_intel_zone",
+      "industry": "healthcare",
+      "score": 0,
+      "needs": "data missing",
+      "ts": "2026-04-21T13:48:25.519Z"
+    },
+    {
+      "vertical": "realtor",
+      "prompt": "What is the owner-occupancy rate and home value median?",
+      "zip": "32081",
+      "tool": "local_intel_zone",
+      "industry": "realtor",
+      "score": 0,
+      "needs": "data missing",
+      "ts": "2026-04-21T13:48:21.227Z"
+    }
+  ],
+  "data_sources": {
+    "businesses_indexed": 283,
+    "has_spending_zone": true,
+    "has_bedrock": false,
+    "has_ocean_floor": false,
+    "has_census_layer": false,
+    "has_acs": false,
+    "has_zbp": false,
+    "has_cbp": false,
+    "vertical_gap_count": 4
+  },
+  "economic_layer": null,
+  "trend": null
+}

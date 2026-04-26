@@ -1,0 +1,261 @@
+{
+  "vertical": "realtor",
+  "name": "Real Estate",
+  "run_id": "realtor-1776778870756",
+  "ran_at": "2026-04-21T13:41:21.899Z",
+  "total_prompts": 20,
+  "answered": 15,
+  "gap_count": 5,
+  "pass_rate_pct": 75,
+  "results": [
+    {
+      "prompt": "What is the demographic profile and income level of buyers in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_zone",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 0,
+      "answered": false,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:41:11.111Z"
+    },
+    {
+      "prompt": "Are there commercial gaps that signal neighborhood appreciation potential?",
+      "zip": "32082",
+      "tool": "local_intel_oracle",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 80,
+      "answered": true,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:41:11.608Z"
+    },
+    {
+      "prompt": "What is the flood zone risk percentage for this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_oracle",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 80,
+      "answered": true,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:41:12.104Z"
+    },
+    {
+      "prompt": "What infrastructure projects are active near this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_oracle",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 80,
+      "answered": true,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:41:12.518Z"
+    },
+    {
+      "prompt": "What businesses are opening or recently added in this area?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What businesses are opening or recently added in this area?",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "286 results",
+      "ts": "2026-04-21T13:41:13.333Z"
+    },
+    {
+      "prompt": "What is the owner-occupancy rate and home value median?",
+      "zip": "32081",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What is the owner-occupancy rate and home value median?",
+        "zip": "32081"
+      },
+      "score": 0,
+      "answered": false,
+      "result_summary": "0 results",
+      "ts": "2026-04-21T13:41:13.945Z"
+    },
+    {
+      "prompt": "What upscale dining or retail is undersupplied in this market?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What upscale dining or retail is undersupplied in this market?",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "67 results",
+      "ts": "2026-04-21T13:41:14.625Z"
+    },
+    {
+      "prompt": "What is the investment signal score for this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_signal",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 70,
+      "answered": true,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:41:15.037Z"
+    },
+    {
+      "prompt": "What restaurants are on the A1A corridor?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What restaurants are on the A1A corridor?",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "230 results",
+      "ts": "2026-04-21T13:41:15.718Z"
+    },
+    {
+      "prompt": "What healthcare providers are accessible in this neighborhood?",
+      "zip": "32082",
+      "tool": "local_intel_oracle",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 80,
+      "answered": true,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:41:16.138Z"
+    },
+    {
+      "prompt": "What is the tidal momentum direction for buyer activity in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_signal",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 70,
+      "answered": true,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:41:16.555Z"
+    },
+    {
+      "prompt": "What school-related businesses or services are in this area?",
+      "zip": "32082",
+      "tool": "local_intel_oracle",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 80,
+      "answered": true,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:41:16.982Z"
+    },
+    {
+      "prompt": "What is the market saturation status for food and beverage?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What is the market saturation status for food and beverage?",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "60 results",
+      "ts": "2026-04-21T13:41:17.655Z"
+    },
+    {
+      "prompt": "What growth trajectory is this ZIP on — growing, stable, or transitioning?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What growth trajectory is this ZIP on — growing, stable, or transitioning?",
+        "zip": "32082"
+      },
+      "score": 0,
+      "answered": false,
+      "result_summary": "0 results",
+      "ts": "2026-04-21T13:41:18.218Z"
+    },
+    {
+      "prompt": "What construction or remodeling contractors operate in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_bedrock",
+      "args": {
+        "zip": "32082"
+      },
+      "score": 20,
+      "answered": false,
+      "result_summary": "score:0",
+      "ts": "2026-04-21T13:41:18.645Z"
+    },
+    {
+      "prompt": "What is the household income and consumer profile for this area?",
+      "zip": "32084",
+      "tool": "local_intel_zone",
+      "args": {
+        "zip": "32084"
+      },
+      "score": 0,
+      "answered": false,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:41:19.058Z"
+    },
+    {
+      "prompt": "How many businesses are in this ZIP and what categories dominate?",
+      "zip": "32086",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "How many businesses are in this ZIP and what categories dominate?",
+        "zip": "32086"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "264 results",
+      "ts": "2026-04-21T13:41:19.702Z"
+    },
+    {
+      "prompt": "What is the capture rate for food spending in this market?",
+      "zip": "32092",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What is the capture rate for food spending in this market?",
+        "zip": "32092"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "33 results",
+      "ts": "2026-04-21T13:41:20.433Z"
+    },
+    {
+      "prompt": "What businesses are near latitude 30.189 longitude -81.38?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "args": {
+        "query": "What businesses are near latitude 30.189 longitude -81.38?",
+        "zip": "32082"
+      },
+      "score": 100,
+      "answered": true,
+      "result_summary": "286 results",
+      "ts": "2026-04-21T13:41:21.081Z"
+    },
+    {
+      "prompt": "What are the top market opportunity signals for a residential buyer?",
+      "zip": "32081",
+      "tool": "local_intel_signal",
+      "args": {
+        "zip": "32081"
+      },
+      "score": 70,
+      "answered": true,
+      "result_summary": "data present",
+      "ts": "2026-04-21T13:41:21.599Z"
+    }
+  ]
+}

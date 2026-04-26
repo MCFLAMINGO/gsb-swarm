@@ -1,0 +1,279 @@
+{
+  "zip": "32082",
+  "name": "Ponte Vedra Beach",
+  "computed_at": "2026-04-24T11:34:53.629Z",
+  "demographics": {
+    "population": 28964,
+    "median_household_income": 122807,
+    "median_home_value": 732700,
+    "owner_occupied_pct": 81.6,
+    "total_households": 12602,
+    "consumer_profile": "affluent_established",
+    "wfh_pct": 24,
+    "daytime_pop_multiplier": 1.14,
+    "daytime_demand_population": 33019,
+    "retiree_index": 0,
+    "vacancy_rate_pct": 16.1,
+    "family_hh_pct": 66,
+    "affluence_pct": 67,
+    "ultra_affluence_pct": 42,
+    "renovation_wave": "high",
+    "housing_age_profile": "mature_established",
+    "new_build_pct": 4
+  },
+  "restaurant_capacity": {
+    "restaurant_count": 37,
+    "total_businesses": 557,
+    "estimated_daily_meal_demand": 20472,
+    "market_capacity_meals_day": 10841,
+    "capture_rate_pct": 53,
+    "saturation_status": "undersupplied",
+    "restaurants_market_can_support": 70,
+    "gap_count": 33,
+    "tier_breakdown": {
+      "budget": 2,
+      "midrange": 35,
+      "upscale": 0,
+      "fine": 0,
+      "unknown": 0
+    },
+    "meals_out_per_person_per_day": 0.62
+  },
+  "market_gaps": {
+    "price_tier_gaps": [
+      {
+        "tier": "upscale",
+        "demand_pct": 30,
+        "expected_count": 21,
+        "actual_count": 0,
+        "gap": 21,
+        "status": "undersupplied",
+        "description": "$25–$60 — full service, bar"
+      },
+      {
+        "tier": "budget",
+        "demand_pct": 15,
+        "expected_count": 11,
+        "actual_count": 2,
+        "gap": 9,
+        "status": "undersupplied",
+        "description": "Under $12 — fast casual / counter service"
+      },
+      {
+        "tier": "fine",
+        "demand_pct": 10,
+        "expected_count": 7,
+        "actual_count": 0,
+        "gap": 7,
+        "status": "undersupplied",
+        "description": "$60+ — fine dining / tasting menu"
+      },
+      {
+        "tier": "midrange",
+        "demand_pct": 45,
+        "expected_count": 32,
+        "actual_count": 35,
+        "gap": -3,
+        "status": "oversupplied",
+        "description": "$12–$25 — casual dining"
+      }
+    ],
+    "school_count": 0,
+    "top_gap": {
+      "tier": "upscale",
+      "demand_pct": 30,
+      "expected_count": 21,
+      "actual_count": 0,
+      "gap": 21,
+      "status": "undersupplied",
+      "description": "$25–$60 — full service, bar"
+    }
+  },
+  "growth_trajectory": {
+    "state": "transitioning",
+    "label": "Empty Nest Transition",
+    "confidence": "medium",
+    "school_count": 0,
+    "owner_occupied_pct": 81.6,
+    "infrastructure_momentum": 0,
+    "active_construction": 0,
+    "active_road_projects": 0,
+    "flood_zone_pct": 0
+  },
+  "top_questions": [
+    {
+      "question": "Is there room for another restaurant in Ponte Vedra Beach?",
+      "answer": "Yes — Ponte Vedra Beach is undersupplied. 37 restaurants cover only ~53% of daily meal demand. Biggest gap: upscale dining ($25–$60 — full service, bar).",
+      "signal_strength": "strong",
+      "category": "restaurant_gap"
+    },
+    {
+      "question": "Is Ponte Vedra Beach growing, stable, or becoming empty nest?",
+      "answer": "Transitioning to empty nest. 81.6% owner-occupied but only 0 school nearby, with median home value $732,700. Residents are aging in place. Think healthcare, leisure, higher-end casual dining over family chains.",
+      "signal_strength": "medium",
+      "category": "growth_trajectory"
+    },
+    {
+      "question": "What category is most missing in Ponte Vedra Beach?",
+      "answer": "Upscale dining is the biggest gap — income distribution suggests 30% of meals should be in that tier, but only 0 of the expected 21 spots exist. $25–$60 — full service, bar.",
+      "signal_strength": "moderate",
+      "category": "category_gap"
+    }
+  ],
+  "oracle_narrative": "Ponte Vedra Beach (pop. 28,964, median HHI $122,807) is empty nest transition. With 37 food businesses serving an estimated 20472 meals/day demand, the market is undersupplied (53% capture rate). Biggest price-tier gap: upscale dining — 0 exist vs. 21 expected at this income level. Aging-in-place dynamics mean the customer profile is shifting toward healthcare and leisure over family services.",
+  "vertical_gaps": [
+    {
+      "vertical": "construction",
+      "prompt": "What roofing companies serve this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "industry": "construction",
+      "score": 0,
+      "needs": "data missing",
+      "ts": "2026-04-21T13:41:41.735Z"
+    },
+    {
+      "vertical": "construction",
+      "prompt": "What HVAC or air conditioning companies operate here?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "industry": "construction",
+      "score": 0,
+      "needs": "data missing",
+      "ts": "2026-04-21T13:41:42.980Z"
+    },
+    {
+      "vertical": "construction",
+      "prompt": "What is the infrastructure momentum score — are there active permits?",
+      "zip": "32082",
+      "tool": "local_intel_bedrock",
+      "industry": "construction",
+      "score": 20,
+      "needs": "low confidence",
+      "ts": "2026-04-21T13:41:44.547Z"
+    },
+    {
+      "vertical": "construction",
+      "prompt": "What new construction or development projects are active in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_bedrock",
+      "industry": "construction",
+      "score": 20,
+      "needs": "low confidence",
+      "ts": "2026-04-21T13:41:44.967Z"
+    },
+    {
+      "vertical": "healthcare",
+      "prompt": "What is the median household income of patients in this area?",
+      "zip": "32082",
+      "tool": "local_intel_zone",
+      "industry": "healthcare",
+      "score": 0,
+      "needs": "data missing",
+      "ts": "2026-04-21T13:48:20.736Z"
+    },
+    {
+      "vertical": "healthcare",
+      "prompt": "What healthcare services are undersupplied relative to population?",
+      "zip": "32082",
+      "tool": "local_intel_zone",
+      "industry": "healthcare",
+      "score": 0,
+      "needs": "data missing",
+      "ts": "2026-04-21T13:48:21.155Z"
+    },
+    {
+      "vertical": "healthcare",
+      "prompt": "What is the senior population percentage that drives home health demand?",
+      "zip": "32082",
+      "tool": "local_intel_zone",
+      "industry": "healthcare",
+      "score": 0,
+      "needs": "data missing",
+      "ts": "2026-04-21T13:48:21.574Z"
+    },
+    {
+      "vertical": "healthcare",
+      "prompt": "What mental health or counseling services exist in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_search",
+      "industry": "healthcare",
+      "score": 0,
+      "needs": "data missing",
+      "ts": "2026-04-21T13:48:22.155Z"
+    },
+    {
+      "vertical": "healthcare",
+      "prompt": "What is the consumer profile — does it skew toward affluent established patients?",
+      "zip": "32082",
+      "tool": "local_intel_zone",
+      "industry": "healthcare",
+      "score": 0,
+      "needs": "data missing",
+      "ts": "2026-04-21T13:48:23.927Z"
+    },
+    {
+      "vertical": "realtor",
+      "prompt": "What is the demographic profile and income level of buyers in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_zone",
+      "industry": "realtor",
+      "score": 0,
+      "needs": "data missing",
+      "ts": "2026-04-21T13:48:18.682Z"
+    },
+    {
+      "vertical": "realtor",
+      "prompt": "What growth trajectory is this ZIP on — growing, stable, or transitioning?",
+      "zip": "32082",
+      "tool": "local_intel_zone",
+      "industry": "realtor",
+      "score": 0,
+      "needs": "data missing",
+      "ts": "2026-04-21T13:48:25.124Z"
+    },
+    {
+      "vertical": "realtor",
+      "prompt": "What construction or remodeling contractors operate in this ZIP?",
+      "zip": "32082",
+      "tool": "local_intel_bedrock",
+      "industry": "realtor",
+      "score": 20,
+      "needs": "low confidence",
+      "ts": "2026-04-21T13:48:25.548Z"
+    },
+    {
+      "vertical": "realtor",
+      "prompt": "What restaurants are on the A1A corridor?",
+      "zip": "32082",
+      "tool": "local_intel_corridor",
+      "industry": "realtor",
+      "score": 10,
+      "needs": "low confidence",
+      "ts": "2026-04-21T13:48:23.005Z"
+    },
+    {
+      "vertical": "retail",
+      "prompt": "What is the consumer spending profile — affluent or budget-conscious?",
+      "zip": "32082",
+      "tool": "local_intel_zone",
+      "industry": "retail",
+      "score": 0,
+      "needs": "data missing",
+      "ts": "2026-04-21T13:41:32.529Z"
+    }
+  ],
+  "data_sources": {
+    "businesses_indexed": 557,
+    "has_spending_zone": true,
+    "has_bedrock": false,
+    "has_ocean_floor": false,
+    "has_census_layer": false,
+    "has_acs": false,
+    "has_zbp": false,
+    "has_cbp": false,
+    "vertical_gap_count": 14
+  },
+  "economic_layer": null,
+  "trend": null
+}
