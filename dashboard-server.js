@@ -667,6 +667,35 @@ app.post('/api/admin/trigger-acs', (req, res) => {
   });
 });
 
+// POST /api/admin/trigger-geocoder — runs geocodingWorker (Census batch → Nominatim → Photon)
+// Accepts optional ?zip=32082 or body {zip:'32082'} to limit scope
+app.post('/api/admin/trigger-geocoder', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const zip = req.query.zip || req.body?.zip || null;
+  const msg = zip
+    ? `Geocoding worker triggered for ZIP ${zip} — Census batch → Nominatim → Photon fallbacks`
+    : 'Geocoding worker triggered for ALL ZIPs with missing lat/lon — Census batch → Nominatim → Photon fallbacks';
+  res.json({ status: 'started', message: msg });
+  setImmediate(async () => {
+    try {
+      const args = ['workers/geocodingWorker.js'];
+      if (zip) args.push('--zip', zip);
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, args, {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[geocoder-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[geocoder-trigger] ' + d));
+      child.on('close', code => console.log(`[admin] ✅ Geocoding worker done (exit ${code})`));
+    } catch (e) {
+      console.error('[admin] ❌ Geocoding trigger failed:', e.message);
+    }
+  });
+});
+
 // POST /api/admin/trigger-census — clears heartbeat + runs censusLayerWorker immediately
 app.post('/api/admin/trigger-census', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
