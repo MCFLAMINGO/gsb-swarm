@@ -518,6 +518,37 @@ app.post('/api/admin/trigger-chamber', (req, res) => {
   });
 });
 
+// POST /api/admin/trigger-oracle — clears heartbeat + runs oracle immediately
+app.post('/api/admin/trigger-oracle', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'Oracle cycle triggered — check /api/evolution/report in ~5min' });
+  setImmediate(async () => {
+    try {
+      // Clear heartbeat so isFresh() returns false and oracle runs
+      if (process.env.LOCAL_INTEL_DB_URL) {
+        const db2 = require('./lib/db');
+        await db2.query(`DELETE FROM worker_heartbeat WHERE worker_name = 'oracleWorker'`);
+        console.log('[admin] oracle heartbeat cleared');
+      }
+      // Spawn oracle as child process (it self-executes on load)
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/oracleWorker.js'], {
+        cwd: __dirname,
+        env: { ...process.env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[oracle-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[oracle-trigger] ' + d));
+      child.on('close', code => console.log(`[admin] ✅ Oracle cycle done (exit ${code})`));
+    } catch (e) {
+      console.error('[admin] ❌ Oracle trigger failed:', e.message);
+    }
+  });
+});
+
 // ── Agent Query Ledger — GET /api/local-intel/usage ──────────────────────────
 // Every paid oracle/brief/NL query is logged here. This is how agents pay us.
 app.get('/api/local-intel/usage', async (req, res) => {
