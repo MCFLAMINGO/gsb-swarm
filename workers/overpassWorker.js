@@ -45,6 +45,27 @@ function loadZipFile(zip) {
 function saveZipFile(zip, data) {
   ensureDir(DATA_DIR);
   fs.writeFileSync(path.join(DATA_DIR, `${zip}.json`), JSON.stringify(data));
+  // Mirror OSM POIs to Postgres zip_enrichment (non-blocking)
+  if (process.env.LOCAL_INTEL_DB_URL && Array.isArray(data.osm_pois)) {
+    const { upsertOsmEnrichment } = require('../lib/pgStore');
+    upsertOsmEnrichment(zip, {
+      osm_pois:       data.osm_pois,
+      osm_updated_at: data.osm_updated_at,
+      poi_count:      data.osm_pois.length,
+    }).catch(e => console.warn('[overpass] Postgres write failed:', e.message));
+  }
+}
+
+// Check Postgres first for freshness before re-fetching from Overpass
+async function alreadyFreshPg(zip) {
+  if (!process.env.LOCAL_INTEL_DB_URL) return false;
+  try {
+    const { getZipEnrichment } = require('../lib/pgStore');
+    const row = await getZipEnrichment(zip);
+    if (!row?.osm_json?.osm_pois?.length) return false;
+    const age = Date.now() - new Date(row.osm_updated_at || 0).getTime();
+    return age < 20 * 60 * 60 * 1000;
+  } catch { return false; }
 }
 
 function alreadyFresh(zip) {
@@ -125,7 +146,7 @@ function normalisePois(elements) {
 
 // ── Process one ZIP ───────────────────────────────────────────────────────────
 async function processZip(zip) {
-  if (alreadyFresh(zip)) {
+  if (await alreadyFreshPg(zip) || alreadyFresh(zip)) {
     return { zip, skipped: true };
   }
 

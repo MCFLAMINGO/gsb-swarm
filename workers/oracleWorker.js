@@ -261,8 +261,23 @@ async function loadAcs(zip) {
   return readJson(path.join(DATA_DIR, 'acs', `${zip}.json`));
 }
 
-// Load all vertical gap entries for this ZIP from data/gaps/{vertical}.json
-function loadGapsForZip(zip) {
+// Load vertical gap entries for this ZIP — census_layer Postgres table first,
+// flat file fallback for local dev. Returns [{vertical, ...gapData}].
+async function loadGapsForZip(zip) {
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const pgStore = require('../lib/pgStore');
+      const row = await pgStore.getCensusLayer(zip);
+      if (row && Array.isArray(row.sector_gaps) && row.sector_gaps.length > 0) {
+        return row.sector_gaps.map(g => ({ vertical: g.oracle_vertical || 'general', ...g }));
+      }
+      // No gaps found in Postgres — not an error, ZIP just has no gaps yet
+      return [];
+    } catch (e) {
+      console.warn(`[oracleWorker] Postgres gap load failed for ${zip}: ${e.message}`);
+    }
+  }
+  // Flat file fallback (local dev)
   const GAPS_DIR = path.join(DATA_DIR, 'gaps');
   if (!fs.existsSync(GAPS_DIR)) return [];
   const results = [];
@@ -273,9 +288,7 @@ function loadGapsForZip(zip) {
       if (!Array.isArray(entries)) continue;
       const vertical = file.replace('.json', '');
       for (const entry of entries) {
-        if (String(entry.zip) === String(zip)) {
-          results.push({ vertical, ...entry });
-        }
+        if (String(entry.zip) === String(zip)) results.push({ vertical, ...entry });
       }
     } catch { /* skip bad file */ }
   }
@@ -291,7 +304,7 @@ async function computeOracle(zip, name) {
   const ocean       = loadOceanFloor(zip);
   const censusLayer = loadCensusLayer(zip);
   const acs         = await loadAcs(zip);  // async: reads from Postgres, throws on DB error
-  const verticalGaps = loadGapsForZip(zip);
+  const verticalGaps = await loadGapsForZip(zip);
 
   // ── Data quality gate ─────────────────────────────────────────────────────
   // Reject ZIPs with no demographic data AND insufficient business coverage.

@@ -164,6 +164,16 @@ function loadZipFile(zip) {
 function saveZipFile(zip, data) {
   ensureDir(ZIPS_DIR);
   fs.writeFileSync(path.join(ZIPS_DIR, `${zip}.json`), JSON.stringify(data));
+  // Mirror IRS enrichment fields to Postgres (non-blocking)
+  if (process.env.LOCAL_INTEL_DB_URL && data.irs_agi_median !== undefined) {
+    const { upsertIrsEnrichment } = require('../lib/pgStore');
+    upsertIrsEnrichment(zip, {
+      irs_agi_median:  data.irs_agi_median,
+      irs_returns:     data.irs_returns,
+      irs_wage_share:  data.irs_wage_share,
+      irs_updated_at:  data.irs_updated_at,
+    }).catch(e => console.warn('[irsSoi] Postgres write failed:', e.message));
+  }
 }
 
 function loadSpendingZones() {

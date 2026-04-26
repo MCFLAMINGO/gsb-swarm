@@ -549,6 +549,82 @@ app.post('/api/admin/trigger-oracle', (req, res) => {
   });
 });
 
+// POST /api/admin/trigger-acs — clears heartbeat + runs ACS worker immediately
+app.post('/api/admin/trigger-acs', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'ACS worker triggered — fetches Census demographics for all Postgres ZIPs' });
+  setImmediate(async () => {
+    try {
+      if (process.env.LOCAL_INTEL_DB_URL) {
+        const db2 = require('./lib/db');
+        await db2.query(`DELETE FROM worker_heartbeat WHERE worker_name = 'acsWorker'`);
+        console.log('[admin] ACS heartbeat cleared');
+      }
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/acsWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[acs-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[acs-trigger] ' + d));
+      child.on('close', code => console.log(`[admin] ✅ ACS worker done (exit ${code})`));
+    } catch (e) {
+      console.error('[admin] ❌ ACS trigger failed:', e.message);
+    }
+  });
+});
+
+// POST /api/admin/trigger-census — clears heartbeat + runs censusLayerWorker immediately
+app.post('/api/admin/trigger-census', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'Census layer worker triggered — rebuilds sector gaps for all Postgres ZIPs' });
+  setImmediate(async () => {
+    try {
+      if (process.env.LOCAL_INTEL_DB_URL) {
+        const db2 = require('./lib/db');
+        await db2.query(`DELETE FROM worker_heartbeat WHERE worker_name = 'censusLayerWorker'`);
+        console.log('[admin] Census heartbeat cleared');
+      }
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/censusLayerWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[census-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[census-trigger] ' + d));
+      child.on('close', code => console.log(`[admin] ✅ Census layer done (exit ${code})`));
+    } catch (e) {
+      console.error('[admin] ❌ Census trigger failed:', e.message);
+    }
+  });
+});
+
+// GET /api/local-intel/probe-log — live MCP call log for routerLearningWorker
+app.get('/api/local-intel/probe-log', async (req, res) => {
+  if (!process.env.LOCAL_INTEL_DB_URL) return res.json({ error: 'no_db' });
+  try {
+    const db2 = require('./lib/db');
+    const limit = Math.min(parseInt(req.query.limit) || 50, 500);
+    const rows = await db2.query(
+      `SELECT ts, tool, zip, query, score, latency_ms, detected_vertical, error, persona
+       FROM mcp_probe_log ORDER BY ts DESC LIMIT $1`, [limit]
+    );
+    const totals = await db2.queryOne(
+      `SELECT COUNT(*) as total,
+              ROUND(AVG(score),1) as avg_score,
+              COUNT(*) FILTER (WHERE score < 40) as low_score_count,
+              COUNT(DISTINCT zip) as unique_zips,
+              COUNT(DISTINCT tool) as unique_tools
+       FROM mcp_probe_log`
+    );
+    res.json({ entries: rows, totals });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Agent Query Ledger — GET /api/local-intel/usage ──────────────────────────
 // Every paid oracle/brief/NL query is logged here. This is how agents pay us.
 app.get('/api/local-intel/usage', async (req, res) => {

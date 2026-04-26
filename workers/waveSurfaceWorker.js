@@ -133,7 +133,7 @@ function appendEvent(event) {
 
 // ── Main aggregation ──────────────────────────────────────────────────────────
 
-function aggregateWaveSurface() {
+async function aggregateWaveSurface() {
   console.log('[waveSurfaceWorker] Starting wave surface aggregation...');
 
   ensureDir(WAVE_DIR);
@@ -266,13 +266,17 @@ function aggregateWaveSurface() {
       hotspot_rank:           hotspotRank,
     };
 
-    // Write per-ZIP file
-    const outPath = path.join(WAVE_DIR, `${zip}.json`);
-    try {
-      atomicWrite(outPath, record);
-    } catch (e) {
-      console.log(`[waveSurfaceWorker] Could not write ${zip}.json: ${e.message}`);
+    // Write per-ZIP — Postgres first, flat file fallback
+    if (process.env.LOCAL_INTEL_DB_URL) {
+      try {
+        const { upsertWaveSurface } = require('../lib/pgStore');
+        await upsertWaveSurface(zip, record);
+      } catch (e) {
+        console.log(`[waveSurfaceWorker] Postgres write failed for ${zip}: ${e.message}`);
+      }
     }
+    const outPath = path.join(WAVE_DIR, `${zip}.json`);
+    try { atomicWrite(outPath, record); } catch (_) {}
 
     indexZips[zip] = {
       zip,
@@ -330,10 +334,10 @@ function scheduleNextRun() {
   })();
 
   setTimeout(() => {
-    aggregateWaveSurface();
+    aggregateWaveSurface().catch(e => console.error("[waveSurface] run error:", e.message));
     // After first :05 hit, run every hour
     setInterval(() => {
-      aggregateWaveSurface();
+      aggregateWaveSurface().catch(e => console.error("[waveSurface] run error:", e.message));
     }, INTERVAL_MS);
   }, msUntil05);
 
@@ -346,7 +350,7 @@ console.log('[waveSurfaceWorker] Starting — Layer 3 Wave Surface worker');
 ensureDir(WAVE_DIR);
 
 // Run immediately on start
-aggregateWaveSurface();
+aggregateWaveSurface().catch(e => console.error("[waveSurface] run error:", e.message));
 
 // Then schedule recurring runs at :05 each hour
 scheduleNextRun();
