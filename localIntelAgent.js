@@ -377,14 +377,16 @@ router.get('/claim/lookup', async (req, res) => {
     const db = require('./lib/db');
     const rows = await db.query(
       `SELECT business_id, name, address, city, zip, phone, website,
-              category, category_group, status,
+              category, category_group, status, lat, lon,
+              sunbiz_doc_number,
               (claimed_at IS NOT NULL) as is_claimed
          FROM businesses
-        WHERE status = 'active'
+        WHERE status != 'inactive'
           AND ($1::text IS NULL OR name ILIKE '%' || $1 || '%')
           AND ($2::text IS NULL OR zip = $2)
         ORDER BY
           CASE WHEN claimed_at IS NOT NULL THEN 0 ELSE 1 END,
+          CASE WHEN lat IS NOT NULL THEN 0 ELSE 1 END,
           name ASC
         LIMIT 10`,
       [name || null, zip || null]
