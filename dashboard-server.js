@@ -84,6 +84,20 @@ runMigration().catch(e => console.warn('[db-migrate] Non-fatal:', e.message));
   } catch (e) {
     console.warn('[startup] hours cleanup non-fatal:', e.message);
   }
+
+  // Auto-start deposit listener — polls Tempo + Base for inbound pathUSD/USDC
+  try {
+    const { spawn } = require('child_process');
+    const dlWorker = spawn(process.execPath, ['workers/depositListenerWorker.js'], {
+      cwd: __dirname, env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    dlWorker.stdout.on('data', d => process.stdout.write('[deposit-listener] ' + d));
+    dlWorker.stderr.on('data', d => process.stderr.write('[deposit-listener] ' + d));
+    dlWorker.on('close', code => console.log('[startup] deposit listener exited (' + code + ')'));
+    console.log('[startup] Deposit listener spawned (pid ' + dlWorker.pid + ')');
+  } catch (e) {
+    console.warn('[startup] deposit listener non-fatal:', e.message);
+  }
 })();
 
 const nvim = require('./lib/nvim');
@@ -692,6 +706,28 @@ app.post('/api/admin/trigger-geocoder', (req, res) => {
       child.on('close', code => console.log(`[admin] ✅ Geocoding worker done (exit ${code})`));
     } catch (e) {
       console.error('[admin] ❌ Geocoding trigger failed:', e.message);
+    }
+  });
+});
+
+// POST /api/admin/trigger-deposit-listener — (re)starts the deposit listener worker
+app.post('/api/admin/trigger-deposit-listener', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'Deposit listener started — polling Tempo (pathUSD) + Base (USDC) every 30s' });
+  setImmediate(() => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/depositListenerWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[deposit-listener] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[deposit-listener] ' + d));
+      child.on('close', code => console.log(`[admin] deposit listener exited (${code})`));
+    } catch (e) {
+      console.error('[admin] ❌ deposit listener start failed:', e.message);
     }
   });
 });
