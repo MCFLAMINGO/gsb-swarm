@@ -29,9 +29,103 @@ const fetch    = (...a) => import('node-fetch').then(m => m.default(...a));
 const CENSUS_URL    = 'https://geocoding.geo.census.gov/geocoder/locations/addressbatch';
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const PHOTON_URL    = 'https://photon.komoot.io/api';
+const OVERPASS_URL  = 'https://overpass-api.de/api/interpreter';
 const BATCH_SIZE    = 9000; // Census hard limit is 10k — stay safely under
 const CHUNK_WRITE   = 100;  // rows per UPDATE batch to avoid giant transactions
 const NOMINATIM_DELAY_MS = 1100; // Nominatim ToS: max 1 req/sec
+
+// Bounding boxes [south, west, north, east] for known NE Florida ZIPs
+// For unknown ZIPs we derive a 0.15° buffer from the ZIP centroid
+const ZIP_BBOX = {
+  '32082': [30.10, -81.45, 30.27, -81.32], // Ponte Vedra Beach
+  '32081': [30.06, -81.44, 30.18, -81.33], // Nocatee
+  '32034': [30.55, -81.55, 30.72, -81.40], // Fernandina Beach
+  '32250': [30.24, -81.44, 30.32, -81.36], // Jacksonville Beach
+  '32256': [30.13, -81.52, 30.22, -81.44], // Jacksonville south
+  '32259': [30.05, -81.59, 30.18, -81.48], // St Johns
+  '32092': [29.97, -81.62, 30.10, -81.50], // St Augustine
+};
+
+/**
+ * Pass 0 — Overpass bulk fetch for a ZIP
+ * Downloads ALL named OSM nodes/ways within the ZIP bounding box in one call,
+ * then does fuzzy name matching locally. Returns map of business_id → {lat,lon}.
+ */
+async function geocodeOverpass(bizList, zip) {
+  // Get bounding box for this ZIP
+  let bbox = ZIP_BBOX[zip];
+  if (!bbox) {
+    // Generic NE Florida fallback — better than nothing
+    bbox = [29.80, -81.70, 30.80, -81.20];
+    console.log(`[geocoder/overpass] No bbox for ZIP ${zip}, using NE Florida fallback`);
+  }
+  const [s, w, n, e] = bbox;
+
+  // One bulk query — all named nodes + ways in bbox
+  const query = `[out:json][timeout:30];
+(
+  node["name"](${s},${w},${n},${e});
+  way["name"](${s},${w},${n},${e});
+);
+out center;`;
+
+  console.log(`[geocoder/overpass] ZIP ${zip}: fetching all named OSM features in bbox...`);
+  let osmFeatures = [];
+  try {
+    const res = await fetch(OVERPASS_URL, {
+      method: 'POST',
+      body: `data=${encodeURIComponent(query)}`,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'LocalIntel-Geocoder/1.0' },
+      timeout: 35000,
+    });
+    if (!res.ok) {
+      console.warn(`[geocoder/overpass] HTTP ${res.status} — skipping Pass 0 for ${zip}`);
+      return {};
+    }
+    const data = await res.json();
+    osmFeatures = data.elements || [];
+    console.log(`[geocoder/overpass] Got ${osmFeatures.length} OSM features for ZIP ${zip}`);
+  } catch (e) {
+    console.warn(`[geocoder/overpass] Fetch failed: ${e.message} — skipping Pass 0 for ${zip}`);
+    return {};
+  }
+
+  // Build a lookup: normalised_name → {lat, lon}
+  const normalize = s => s.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+  const osmMap = {};
+  for (const el of osmFeatures) {
+    const name = el.tags?.name;
+    if (!name) continue;
+    const lat = el.lat ?? el.center?.lat;
+    const lon = el.lon ?? el.center?.lon;
+    if (!lat || !lon) continue;
+    osmMap[normalize(name)] = { lat, lon };
+  }
+
+  // Match each business by normalised name
+  const matched = {};
+  for (const biz of bizList) {
+    if (!biz.name) continue;
+    const key = normalize(biz.name);
+    // Exact match
+    if (osmMap[key]) {
+      matched[biz.business_id] = { ...osmMap[key], source: 'osm_overpass' };
+      continue;
+    }
+    // Partial match — OSM name contains our name or vice versa
+    for (const [osmName, coords] of Object.entries(osmMap)) {
+      if (osmName.includes(key) || key.includes(osmName)) {
+        if (key.length >= 5 && osmName.length >= 5) { // avoid short false matches
+          matched[biz.business_id] = { ...coords, source: 'osm_overpass' };
+          break;
+        }
+      }
+    }
+  }
+
+  console.log(`[geocoder/overpass] Matched ${Object.keys(matched).length}/${bizList.length} businesses via OSM names`);
+  return matched; // { business_id: { lat, lon, source } }
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -277,19 +371,42 @@ async function run() {
     process.exit(0);
   }
 
-  // 2. Census batch pass — all records in one shot
-  let totalMatched = 0;
-  let totalWritten = 0;
-  const unmatchedBizIds = new Set();
-
-  // Track which business objects failed Census for fallback
+  // Track all business objects by id for fallback passes
   const bizById = Object.fromEntries(rows.map(r => [r.business_id, r]));
 
-  for (let start = 0; start < rows.length; start += BATCH_SIZE) {
-    const chunk    = rows.slice(start, start + BATCH_SIZE);
+  let totalMatched = 0;
+  let totalWritten = 0;
+  const unmatchedBizIds = new Set(rows.map(r => r.business_id));
+
+  // ── Pass 0: Overpass OSM bulk fetch (one call per ZIP, exact OSM pin coords) ──
+  const zipGroups = {};
+  for (const biz of rows) zipGroups[biz.zip] = (zipGroups[biz.zip] || []).concat(biz);
+
+  for (const [zipCode, bizList] of Object.entries(zipGroups)) {
+    const overpassMatched = await geocodeOverpass(bizList, zipCode);
+    const overpassResults = Object.entries(overpassMatched).map(([bid, coords]) => ({
+      business_id: bid, lat: coords.lat, lon: coords.lon, matched: true,
+    }));
+    if (overpassResults.length > 0) {
+      const written = await writeToDB(db, overpassResults);
+      totalWritten += written;
+      totalMatched += overpassResults.length;
+      for (const r of overpassResults) unmatchedBizIds.delete(r.business_id);
+      console.log(`[geocoder] Pass 0 (OSM): wrote ${written} records for ZIP ${zipCode}`);
+    }
+    await sleep(2000); // be polite to Overpass between ZIPs
+  }
+
+  // Rebuild rows to only include unmatched after Pass 0
+  const remainingRows = [...unmatchedBizIds].map(id => bizById[id]).filter(Boolean);
+  console.log(`[geocoder] After Pass 0: ${totalMatched} matched, ${remainingRows.length} remaining for Census/fallback`);
+
+  // ── Pass 1: Census batch — all remaining records ──
+  for (let start = 0; start < remainingRows.length; start += BATCH_SIZE) {
+    const chunk    = remainingRows.slice(start, start + BATCH_SIZE);
     const csvRows  = chunk.map(toCsvRow);
     const chunkNum = Math.floor(start / BATCH_SIZE) + 1;
-    const numChunks = Math.ceil(rows.length / BATCH_SIZE);
+    const numChunks = Math.ceil(remainingRows.length / BATCH_SIZE);
 
     console.log(`[geocoder] Census chunk ${chunkNum}/${numChunks} — sending ${chunk.length} addresses...`);
 
@@ -318,6 +435,7 @@ async function run() {
 
   // 3. Fallback pass — Nominatim then Photon on Census misses
   const unmatchedRows = [...unmatchedBizIds].map(id => bizById[id]).filter(Boolean);
+  // (unmatchedBizIds was pruned by Pass 0 and updated by Census pass above)
   if (unmatchedRows.length > 0) {
     const fallbackResults = await geocodeFallback(unmatchedRows);
     const fallbackMatched = fallbackResults.filter(r => r.matched);
