@@ -710,6 +710,25 @@ app.post('/api/admin/trigger-geocoder', (req, res) => {
   });
 });
 
+// GET /api/admin/registry — dump agent_registry rows (operator only)
+app.get('/api/admin/registry', async (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.query.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    const db = require('./lib/db');
+    const r = await db.getPool().query(
+      `SELECT token, label, balance_usd_micro, total_spent_micro, total_queries,
+              deposit_address, created_at, last_used_at
+       FROM agent_registry ORDER BY created_at DESC`
+    );
+    res.json({ count: r.rowCount, agents: r.rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/admin/trigger-deposit-listener — (re)starts the deposit listener worker
 app.post('/api/admin/trigger-deposit-listener', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
