@@ -30,6 +30,11 @@ const { base } = require('viem/chains');
 const { privateKeyToAccount } = require('viem/accounts');
 const { exact } = require('x402/schemes');
 
+// ── API key middleware (pathUSD + USDC, Postgres-backed) ─────────────────────
+const { createApiKeyMiddleware } = require('./lib/apiKeyMiddleware');
+const db = require('./lib/db');
+const apiKeyMiddleware = createApiKeyMiddleware(db);
+
 // ── x402 payment config ───────────────────────────────────────────────
 // TREASURY receives USDC on Base mainnet.
 // Agents without a Base wallet still use the Tempo/pathUSD endpoint (/api/local-intel/mcp).
@@ -704,7 +709,8 @@ function detectSource(req) {
 // ── POST /api/mcp — proxy to MCP server on port 3004 ───────────────────────
 // This is the public MCP endpoint agents call from outside Railway.
 // Full URL: https://gsb-swarm-production.up.railway.app/api/mcp
-router.post('/mcp', express.json(), async (req, res) => {
+// Payment: X-LocalIntel-Key required. pathUSD (Tempo) or USDC (Base). Free: tools/list, notifications.
+router.post('/mcp', express.json(), apiKeyMiddleware, async (req, res) => {
   try {
     const body = req.body || {};
     // MCP notifications have no "id" — return 204 immediately, never proxy
