@@ -475,6 +475,32 @@ router.post('/claim/verify', express.json(), async (req, res) => {
       [business_id, dispatchToken]
     );
 
+    // Register business in agent_registry so deposit listener can credit their wallet
+    // Each business gets a unique deposit address derived deterministically
+    const pool = db.getPool ? db.getPool() : db;
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS agent_registry (
+        token              TEXT PRIMARY KEY,
+        label              TEXT,
+        type               TEXT NOT NULL DEFAULT 'agent',
+        balance_usd_micro  BIGINT NOT NULL DEFAULT 0,
+        total_spent_micro  BIGINT NOT NULL DEFAULT 0,
+        total_queries      BIGINT NOT NULL DEFAULT 0,
+        deposit_address    TEXT,
+        created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_used_at       TIMESTAMPTZ
+      )
+    `);
+    await pool.query(`ALTER TABLE agent_registry ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'agent'`);
+    // Generate a deterministic deposit address placeholder — real address assigned by Treasury in v2
+    const depositAddr = '0x' + Buffer.from(business_id + dispatchToken).toString('hex').slice(0, 40);
+    await pool.query(
+      `INSERT INTO agent_registry (token, label, type, deposit_address)
+       VALUES ($1, $2, 'business', $3)
+       ON CONFLICT (token) DO UPDATE SET label = EXCLUDED.label, deposit_address = EXCLUDED.deposit_address`,
+      [dispatchToken, biz.name, depositAddr]
+    );
+
     const channels = ['web'];
     if (biz.notify_sms)   channels.push('sms');
     if (biz.notify_email) channels.push('email');
@@ -486,6 +512,7 @@ router.post('/claim/verify', express.json(), async (req, res) => {
     setImmediate(() => nq.processQueue(5).catch(() => {}));
     res.json({ ok: true, claimed: true, business_id, name: biz.name,
       dispatch_token: dispatchToken,
+      deposit_address: depositAddr,
       inbox_url: `https://www.thelocalintel.com/inbox?token=${dispatchToken}` });
   } catch (err) {
     console.error('[claim/verify]', err.message);
@@ -529,7 +556,8 @@ router.get('/inbox', async (req, res) => {
     const rfqService = require('./lib/rfqService');
     // Look up by dispatch_token (set during claim flow or migration)
     const [biz] = await db.query(
-      `SELECT business_id, name, zip, category, notification_email
+      `SELECT business_id, name, zip, category, notification_email,
+              notify_push, claimed_at, has_hours
          FROM businesses
         WHERE dispatch_token = $1
           AND status != 'inactive'
@@ -538,13 +566,26 @@ router.get('/inbox', async (req, res) => {
     );
     if (!biz) return res.status(401).json({ error: 'invalid token' });
 
+    // Fetch wallet balance from agent_registry
+    const pool = db.getPool ? db.getPool() : db;
+    const { rows: [reg] } = await pool.query(
+      `SELECT balance_usd_micro, deposit_address FROM agent_registry WHERE token = $1`,
+      [token]
+    ).catch(() => ({ rows: [null] }));
+
     const open_rfqs = await rfqService.getOpenRfqs(biz.zip, biz.category);
 
     res.json({
-      business_name: biz.name,
-      zip:           biz.zip,
-      category:      biz.category,
-      business_id:   biz.business_id,
+      business_name:     biz.name,
+      zip:               biz.zip,
+      category:          biz.category,
+      business_id:       biz.business_id,
+      notify_push:       biz.notify_push || false,
+      claimed_at:        biz.claimed_at || null,
+      has_hours:         biz.has_hours  || false,
+      balance_usd_micro: reg ? reg.balance_usd_micro : 0,
+      wallet_funded:     reg ? (reg.balance_usd_micro || 0) > 0 : false,
+      deposit_address:   reg ? reg.deposit_address : null,
       open_rfqs,
     });
   } catch (err) {
@@ -605,6 +646,90 @@ router.post('/inbox/book', express.json(), async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[inbox/book POST]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/local-intel/push/vapid-public-key — return VAPID public key for subscription ──
+router.get('/push/vapid-public-key', (req, res) => {
+  const key = process.env.VAPID_PUBLIC_KEY;
+  if (!key) return res.status(503).json({ error: 'Push not configured' });
+  res.json({ publicKey: key });
+});
+
+// ── POST /api/local-intel/push/subscribe — save push subscription for a business ──
+router.post('/push/subscribe', express.json(), async (req, res) => {
+  const { token, subscription } = req.body || {};
+  if (!token)        return res.status(401).json({ error: 'token required' });
+  if (!subscription) return res.status(400).json({ error: 'subscription required' });
+  try {
+    const pool = db.getPool ? db.getPool() : db;
+    // Ensure push_subscriptions table exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        business_id  TEXT NOT NULL,
+        endpoint     TEXT NOT NULL UNIQUE,
+        p256dh       TEXT,
+        auth         TEXT,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_used_at TIMESTAMPTZ
+      )
+    `);
+    await pool.query(`
+      ALTER TABLE businesses ADD COLUMN IF NOT EXISTS notify_push BOOLEAN DEFAULT false
+    `);
+    // Look up business by dispatch_token
+    const { rows: [biz] } = await pool.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+    // Upsert subscription
+    await pool.query(
+      `INSERT INTO push_subscriptions (business_id, endpoint, p256dh, auth)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (endpoint) DO UPDATE
+         SET business_id = EXCLUDED.business_id,
+             p256dh = EXCLUDED.p256dh,
+             auth = EXCLUDED.auth,
+             last_used_at = NOW()`,
+      [biz.business_id, subscription.endpoint,
+       subscription.keys?.p256dh || null, subscription.keys?.auth || null]
+    );
+    // Mark business as push-enabled
+    await pool.query(
+      `UPDATE businesses SET notify_push = true WHERE business_id = $1`,
+      [biz.business_id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[push/subscribe]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/local-intel/push/unsubscribe — remove push subscription ──
+router.post('/push/unsubscribe', express.json(), async (req, res) => {
+  const { token, endpoint } = req.body || {};
+  if (!token || !endpoint) return res.status(400).json({ error: 'token and endpoint required' });
+  try {
+    const pool = db.getPool ? db.getPool() : db;
+    const { rows: [biz] } = await pool.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 LIMIT 1`, [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+    await pool.query(`DELETE FROM push_subscriptions WHERE endpoint = $1 AND business_id = $2`,
+      [endpoint, biz.business_id]);
+    // Check if any subs remain
+    const { rows } = await pool.query(
+      `SELECT id FROM push_subscriptions WHERE business_id = $1 LIMIT 1`, [biz.business_id]
+    );
+    if (rows.length === 0) {
+      await pool.query(`UPDATE businesses SET notify_push = false WHERE business_id = $1`, [biz.business_id]);
+    }
+    res.json({ ok: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
