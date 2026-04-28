@@ -6276,6 +6276,49 @@ app.post('/api/run-app-test', requireOperator, async (req, res) => {
   res.end();
 });
 
+// ── Voice Intake — Twilio webhook ───────────────────────────────────────────
+// One number handles everything: homeowners get RFQ posted, businesses get
+// a claim link. No menus, no press-1. Natural language only.
+// Twilio env vars: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
+// Webhook URL to set in Twilio console:
+//   https://gsb-swarm-production.up.railway.app/api/voice/incoming
+
+// POST /api/voice/incoming — initial call, greet and gather speech
+app.post('/api/voice/incoming', express.urlencoded({ extended: false }), async (req, res) => {
+  try {
+    const { handleIncoming } = require('./lib/voiceIntake');
+    const result = await handleIncoming({
+      stage: 'greeting',
+      speechResult: null,
+      callerPhone: req.body.From || req.body.Caller || 'unknown',
+    });
+    res.set('Content-Type', result.contentType);
+    res.send(result.body);
+  } catch (e) {
+    console.error('[voice/incoming]', e.message);
+    res.set('Content-Type', 'text/xml');
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="alice">Sorry, LocalIntel is temporarily unavailable. Please try again shortly.</Say></Response>');
+  }
+});
+
+// POST /api/voice/process — Twilio posts back here with SpeechResult after gather
+app.post('/api/voice/process', express.urlencoded({ extended: false }), async (req, res) => {
+  try {
+    const { handleIncoming } = require('./lib/voiceIntake');
+    const result = await handleIncoming({
+      stage: 'process',
+      speechResult: req.body.SpeechResult || '',
+      callerPhone: req.body.From || req.body.Caller || 'unknown',
+    });
+    res.set('Content-Type', result.contentType);
+    res.send(result.body);
+  } catch (e) {
+    console.error('[voice/process]', e.message);
+    res.set('Content-Type', 'text/xml');
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="alice">Something went wrong. Please call back and try again.</Say></Response>');
+  }
+});
+
 // ── Catch-all → index.html ────────────────────────────────────────────────────
 // ── Proxy /api/local-intel/* and /.well-known/* to internal health server (3001) ──
 // These routes live on the internal Express app (port 3001) but Railway's
