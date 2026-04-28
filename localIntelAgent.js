@@ -469,10 +469,15 @@ router.post('/claim/verify', express.json(), async (req, res) => {
     // Generate a persistent dispatch_token — this is their inbox login, never expires
     const { randomUUID } = require('crypto');
     const dispatchToken = randomUUID();
+    // sunbiz_id may be passed from claim flow step 3 (verifyDoc field)
+    const sunbizId = req.body?.sunbiz_id || null;
     await db.query(
-      `UPDATE businesses SET claimed_at = NOW(), claim_token = NULL, claim_token_exp = NULL,
-       dispatch_token = $2 WHERE business_id = $1`,
-      [business_id, dispatchToken]
+      `UPDATE businesses
+          SET claimed_at = NOW(), claim_token = NULL, claim_token_exp = NULL,
+              dispatch_token = $2
+              ${sunbizId ? ', sunbiz_id = $3' : ''}
+        WHERE business_id = $1`,
+      sunbizId ? [business_id, dispatchToken, sunbizId] : [business_id, dispatchToken]
     );
 
     // Register business in agent_registry so deposit listener can credit their wallet
@@ -558,7 +563,8 @@ router.get('/inbox', async (req, res) => {
     const [biz] = await db.query(
       `SELECT business_id, name, zip, category, notification_email,
               notify_push, claimed_at,
-              COALESCE(has_hours, false) AS has_hours
+              COALESCE(has_hours, false) AS has_hours,
+              COALESCE(sunbiz_id, sunbiz_doc_number) AS sunbiz_id
          FROM businesses
         WHERE dispatch_token = $1
           AND status != 'inactive'
@@ -584,6 +590,8 @@ router.get('/inbox', async (req, res) => {
       notify_push:       biz.notify_push || false,
       claimed_at:        biz.claimed_at || null,
       has_hours:         biz.has_hours  || false,
+      sunbiz_id:         biz.sunbiz_id  || null,
+      sunbiz_verified:   !!biz.sunbiz_id,
       balance_usd_micro: reg ? reg.balance_usd_micro : 0,
       wallet_funded:     reg ? (reg.balance_usd_micro || 0) > 0 : false,
       deposit_address:   reg ? reg.deposit_address : null,

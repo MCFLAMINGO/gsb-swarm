@@ -460,10 +460,12 @@ async function loadBusinessesByZip(zip) {
         `SELECT name, zip, address, city, phone, website, hours,
                 category, category_group, lat, lon,
                 confidence_score AS confidence, status, sources,
-                owner_verified, last_confirmed, tags, description
+                owner_verified, last_confirmed, tags, description,
+                COALESCE(sunbiz_id, sunbiz_doc_number) AS sunbiz_id,
+                (claimed_at IS NOT NULL)                AS claimed
          FROM businesses
          WHERE zip = $1 AND status != 'inactive'
-         ORDER BY confidence_score DESC`,
+         ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC`,
         [zip]
       );
       if (rows.length > 0) {
@@ -482,11 +484,17 @@ async function loadBusinessesByZip(zip) {
           confidence:     r.confidence     ? parseFloat(r.confidence) * 100 : 50,
           status:         r.status         || 'active',
           source:         (r.sources || [])[0] || 'unknown',
-          owner_verified: r.owner_verified || false,
-          last_confirmed: r.last_confirmed || null,
-          tags:           r.tags           || [],
-          description:    r.description    || '',
-          _pg:            true,
+          owner_verified:  r.owner_verified || false,
+          last_confirmed:  r.last_confirmed  || null,
+          tags:            r.tags            || [],
+          description:     r.description     || '',
+          claimed:         !!r.claimed,
+          sunbiz_id:       r.sunbiz_id       || null,
+          sunbiz_verified: !!r.sunbiz_id,
+          sunbiz_url:      r.sunbiz_id
+            ? `https://search.sunbiz.org/Inquiry/CorporationSearch/SearchResultDetail?inquirytype=DocumentNumber&inquisitionType=null&searchTerm=${r.sunbiz_id}`
+            : null,
+          _pg:             true,
         }));
       }
     } catch (e) {
@@ -889,10 +897,12 @@ async function pgCategorySearch(resolvedZip, normalizedQuery, rawQuery, limitN) 
     const rows = await db.query(
       `SELECT name, zip, address, city, phone, website, hours,
               category, category_group, lat, lon,
-              confidence_score AS confidence, status, sources, owner_verified, tags
+              confidence_score AS confidence, status, sources, owner_verified, tags,
+              COALESCE(sunbiz_id, sunbiz_doc_number) AS sunbiz_id,
+              (claimed_at IS NOT NULL) AS claimed
        FROM businesses
        ${where} AND (${catConditions})
-       ORDER BY confidence_score DESC
+       ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
        LIMIT $${resolvedZip ? termArr.length + 3 : termArr.length + 2}`,
       [...params, limitN]
     );
@@ -911,10 +921,16 @@ async function pgCategorySearch(resolvedZip, normalizedQuery, rawQuery, limitN) 
       lon:            r.lon  != null ? parseFloat(r.lon)  : null,
       confidence:     r.confidence ? parseFloat(r.confidence) * 100 : 50,
       status:         r.status    || 'active',
-      source:         (r.sources || [])[0] || 'pg',
-      owner_verified: r.owner_verified || false,
-      tags:           r.tags || [],
-      _pg:            true,
+      source:          (r.sources || [])[0] || 'pg',
+      owner_verified:  r.owner_verified  || false,
+      tags:            r.tags            || [],
+      claimed:         !!r.claimed,
+      sunbiz_id:       r.sunbiz_id       || null,
+      sunbiz_verified: !!r.sunbiz_id,
+      sunbiz_url:      r.sunbiz_id
+        ? `https://search.sunbiz.org/Inquiry/CorporationSearch/SearchResultDetail?inquirytype=DocumentNumber&inquisitionType=null&searchTerm=${r.sunbiz_id}`
+        : null,
+      _pg:             true,
     }));
   } catch (e) {
     console.error('[MCP] pgCategorySearch error:', e.message);
