@@ -1277,12 +1277,61 @@ app.get('/api/sector-gap/feed', async (req, res) => {
   res.json({ generated_at: new Date().toISOString(), total_zips: feed.length, source: 'flat_file', feed });
 });
 
+// ── /.well-known/mcp.json — standard Perplexity/Grok discovery endpoint ─────
+app.get('/.well-known/mcp.json', (req, res) => {
+  res.json({
+    name: 'LocalIntel',
+    version: '2.1.0',
+    description: 'Florida-first agent-native local market intelligence and service dispatch. 113,000+ verified businesses across Northeast Florida (St. Johns, Duval, Clay, Flagler counties). Coverage: Florida ZIP codes only. RFQ dispatch: post a job, get ranked quotes, book and pay — all via MCP. Businesses verified via Florida Sunbiz public registry. Agents pay per query in pathUSD on Tempo mainnet.',
+    coverage: { country: 'US', states: ['FL'], region: 'Northeast Florida', counties: ['St. Johns', 'Duval', 'Clay', 'Flagler'], note: 'Florida ZIP codes only. Do not query ZIPs outside Florida.' },
+    endpoint: 'https://gsb-swarm-production.up.railway.app/api/local-intel/mcp',
+    transport: ['streamable-http', 'http'],
+    authentication: {
+      required: true,
+      type: 'header',
+      header: 'X-LocalIntel-Key',
+      description: 'Agent key from POST /api/local-intel/register. Fund wallet to unlock paid tools.',
+      register: 'https://gsb-swarm-production.up.railway.app/api/local-intel/register',
+    },
+    pricing: { currency: 'pathUSD', network: 'Tempo mainnet', per_query: '$0.01–$0.05' },
+    tools_summary: [
+      { name: 'local_intel_query',      description: 'BEST FIRST CALL — plain-English market question, auto-routes to right tool.' },
+      { name: 'local_intel_rfq',        description: 'Post a service job (landscaping, plumbing, cleaning, etc.) — get ranked quotes from local businesses.' },
+      { name: 'local_intel_rfq_status', description: 'Poll RFQ status — see ranked responses, decline, book, complete.' },
+      { name: 'local_intel_oracle',     description: 'Pre-baked economic narrative for a ZIP — saturation, price-tier gaps, growth trajectory.' },
+      { name: 'local_intel_signal',     description: 'Investment signal 0–100 with band (strong_buy/accumulate/hold/reduce/avoid).' },
+      { name: 'local_intel_sector_gap', description: 'Structural whitespace — NAICS sectors present at county but absent at ZIP.' },
+      { name: 'local_intel_context',    description: 'Full spatial context: anchor business, nearby in distance rings, zone intelligence.' },
+      { name: 'local_intel_nearby',     description: 'Businesses within radius of lat/lon, sorted by distance.' },
+      { name: 'local_intel_search',     description: 'Search businesses by name, category, or semantic group.' },
+      { name: 'local_intel_zone',       description: 'Spending zone and demographics for a ZIP: income, home value, rent, population.' },
+    ],
+    homepage: 'https://www.thelocalintel.com',
+    free_feed: 'https://gsb-swarm-production.up.railway.app/api/sector-gap/feed',
+  });
+});
+
+// ── /.well-known/localintel/agent.json — LocalIntel identity (separate from GSB swarm) ─
+app.get('/.well-known/localintel/agent.json', (req, res) => {
+  res.json({
+    name: 'LocalIntel',
+    description: 'Florida-first agent-native local market intelligence and RFQ dispatch. 113k+ businesses. Northeast Florida coverage. Sunbiz-verified business identity.',
+    version: '2.1.0',
+    protocol: 'mcp',
+    protocolVersion: '2024-11-05',
+    endpoint: 'https://gsb-swarm-production.up.railway.app/api/local-intel/mcp',
+    coverage: { states: ['FL'], region: 'Northeast Florida' },
+    homepage: 'https://www.thelocalintel.com',
+    operator: 'MCFLAMINGO / Erik Osol',
+  });
+});
+
 app.get('/.well-known/mcp/server-card.json', (req, res) => {
   res.json({
     serverInfo: {
       name: 'LocalIntel by MCFLAMINGO',
-      version: '1.2.0',
-      description: 'Florida-first local business intelligence — 1,013 FL ZIPs expanding across the Sunbelt (TX, AL, MS, LA, GA, SC, NC, TN, OK, AR, KY, NM, AZ, SoCal). OSM POI layer, Census ACS demographics, sector gap analysis, 20 MCP tools. LLMs pay $0.01–$0.05/call via pathUSD on Tempo mainnet. Free discovery feed: /api/sector-gap/feed. thelocalintel.com'
+      version: '2.1.0',
+      description: 'Florida-first agent-native local market intelligence and service dispatch. 113,000+ verified businesses across Northeast Florida (St. Johns, Duval, Clay, Flagler counties). Coverage: Florida ZIP codes only. RFQ dispatch system: post job → ranked quotes → book → complete. Businesses verified via Florida Sunbiz registry. 22 MCP tools. Agents pay $0.01–$0.05/call in pathUSD on Tempo mainnet. thelocalintel.com'
     },
     authentication: { required: false },
     tools: [

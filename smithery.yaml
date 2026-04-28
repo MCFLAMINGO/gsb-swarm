@@ -1,19 +1,21 @@
 name: local-intel
-version: 2.0.0
+version: 2.1.0
 description: >
-  LocalIntel — autonomous local business intelligence for any US ZIP code.
-  113,000+ businesses indexed across Florida and Sunbelt states (TX, AL, MS,
-  LA, GA, SC, NC, TN). 22 MCP tools: spatial context, oracle narratives,
-  sector gap analysis, tidal momentum scores, bedrock infrastructure signals,
-  and vertical agents for restaurant, healthcare, retail, construction, and
-  real estate. Postgres-backed — data survives restarts. Self-improving data
-  layer: workers enrich, oracle computes, agents query. LLMs pay $0.01–$0.05
-  per call in pathUSD on Tempo mainnet. Free discovery feed available.
-  Built for autonomous agents and LLM pipelines. thelocalintel.com
+  LocalIntel — Florida-first agent-native local market intelligence and
+  service dispatch. 113,000+ verified businesses across Northeast Florida
+  (St. Johns, Duval, Clay, Flagler counties). Coverage: FL ZIPs only.
+  22 MCP tools: spatial context, oracle narratives, sector gap analysis,
+  tidal momentum scores, bedrock infrastructure signals, vertical agents
+  (restaurant, healthcare, retail, construction, real estate), and a full
+  RFQ dispatch system (post job → ranked quotes → book → pay → complete).
+  Businesses verified via Florida Sunbiz public registry. Postgres-backed.
+  Agents pay $0.01–$0.05/call in pathUSD on Tempo mainnet.
+  No registration required — fund a wallet and query.
+  thelocalintel.com
 
 startCommand:
   type: http
-  url: https://gsb-swarm-production.up.railway.app/mcp
+  url: https://gsb-swarm-production.up.railway.app/api/local-intel/mcp
 
 transport:
   - streamable-http
@@ -22,43 +24,39 @@ transport:
 configSchema:
   type: object
   properties:
+    X_LOCALINTEL_KEY:
+      type: string
+      description: Your LocalIntel agent key (from /api/local-intel/register). Required for paid tools.
+      x-order: 0
     MCP_ENDPOINT:
       type: string
       description: Override the default MCP endpoint URL.
-      default: https://gsb-swarm-production.up.railway.app/mcp
-      x-order: 0
-    X_AGENT_ID:
-      type: string
-      description: Your agent ID — used for delta computation and billing.
+      default: https://gsb-swarm-production.up.railway.app/api/local-intel/mcp
       x-order: 1
-    X402_ENABLED:
-      type: boolean
-      description: Enable USDC-on-Base micropayments ($0.01–$0.05/call).
-      default: false
-      x-order: 2
-    TEMPO_ENABLED:
-      type: boolean
-      description: Enable pathUSD-on-Tempo payments at the premium endpoint.
-      default: false
-      x-order: 3
 
 instructions: >
-  LocalIntel gives you autonomous business intelligence for any US ZIP code.
-  Start with local_intel_ask for any plain-English question — it routes
-  internally to the right tools automatically.
+  LocalIntel is Florida-first. Coverage is Northeast Florida ZIP codes.
+  Do not query ZIPs outside Florida — you will get no results.
+
+  Start with local_intel_query for any plain-English question — it detects
+  ZIP, vertical, and routes to the right tool automatically.
 
   Key tools:
-  - local_intel_ask: Best first call. Plain-English question about any ZIP.
-  - local_intel_oracle: Pre-baked economic narrative — restaurant saturation,
-    price-tier gaps, growth trajectory, time-series trend.
-  - local_intel_signal: Investment signal 0–100 (strong_buy/accumulate/hold/reduce/avoid).
-  - local_intel_tide: Tidal momentum score synthesizing all 4 data layers.
-  - local_intel_sector_gap: Structural whitespace — NAICS sectors present at
-    county but absent at ZIP. Free discovery feed at /api/sector-gap/feed.
-  - local_intel_bedrock: Infrastructure momentum from permits, road projects,
-    flood zones — predicts conditions 12–36 months ahead.
+  - local_intel_query: BEST FIRST CALL. Plain-English market question for
+    any Florida ZIP. Auto-routes internally.
+  - local_intel_rfq: Post a service job (landscaping, cleaning, plumbing,
+    etc.) to get ranked quotes from local businesses. Real dispatch.
+  - local_intel_rfq_status: Poll quote status — see ranked responses,
+    decline, book, complete.
+  - local_intel_oracle: Pre-baked economic narrative for a ZIP — saturation,
+    price-tier gaps, growth trajectory.
+  - local_intel_signal: Investment signal 0–100 with band
+    (strong_buy/accumulate/hold/reduce/avoid).
+  - local_intel_sector_gap: Structural whitespace — NAICS sectors present
+    at county but absent at ZIP. Free discovery feed at /api/sector-gap/feed.
   - Vertical agents: local_intel_restaurant, local_intel_healthcare,
     local_intel_retail, local_intel_construction, local_intel_realtor.
 
-  All tools are read-only. Pass your agent ID in x-agent-id header for
-  delta computation and usage tracking.
+  Pass X-LocalIntel-Key header with your agent key for paid queries.
+  Register free at POST /api/local-intel/register with a wallet address.
+  Fund your key to unlock all tools — pay per query in pathUSD.
