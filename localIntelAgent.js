@@ -1039,9 +1039,12 @@ router.get('/osm-queue', async (req, res) => {
   }
 });
 
-// ── GET /api/local-intel/stats — coverage stats ───────────────────────────────
+// ── GET /api/local-intel/stats — coverage stats (Florida only) ──────────────
 router.get('/stats', (req, res) => {
-  const data = loadData();
+  // Florida ZIPs only — 32xxx, 33xxx, 34xxx
+  const data = loadData().filter(b => b.zip && (
+    b.zip.startsWith('32') || b.zip.startsWith('33') || b.zip.startsWith('34')
+  ));
   const byZip = {};
   const byGroup = {};
 
@@ -1059,10 +1062,11 @@ router.get('/stats', (req, res) => {
     ok: true,
     totalBusinesses: data.length,
     avgConfidence:   avgConf,
+    coverage: 'Florida only — 32xxx, 33xxx, 34xxx ZIPs',
     byZip,
     byGroup,
-    sources: ['OSM','Census ACS 2022'],
-    pendingSources: ['FL Sunbiz','SJC BTR','SJC Permits'],
+    sources: ['OSM','Census ACS 2022','FL Sunbiz'],
+    pendingSources: ['SJC BTR','SJC Permits'],
     lastSync: '2026-04-20',
   });
 });
@@ -1199,9 +1203,11 @@ router.get('/coverage-stats', (req, res) => {
 
     // Build completedZips from actual data/zips/ files — zipCoverage.json may only
     // have seed entries and won't reflect 3 days of enrichment agent work.
-    let completedZips = Object.entries(cov.completed || {});
+    // Florida ZIPs only — filter any non-FL entries from coverage data
+    const isFloridaZip = z => z && (z.startsWith('32') || z.startsWith('33') || z.startsWith('34'));
+    let completedZips = Object.entries(cov.completed || {}).filter(([z]) => isFloridaZip(z));
     if (fs.existsSync(zipsDir)) {
-      const zipFiles = fs.readdirSync(zipsDir).filter(f => f.endsWith('.json'));
+      const zipFiles = fs.readdirSync(zipsDir).filter(f => f.endsWith('.json') && isFloridaZip(f.replace('.json','')));
       if (zipFiles.length > completedZips.length) {
         // Rebuild from actual files — these are the ground truth
         const fromFiles = {};
