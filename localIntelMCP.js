@@ -1480,9 +1480,30 @@ const TOOLS = {
   },
   local_intel_rfq_status: {
     fn: async (args) => {
-      const rfqService = require('./lib/rfqService');
       if (!args.rfq_id) return { error: 'rfq_id required' };
-      return await rfqService.getRfqStatus(args.rfq_id);
+      // Inline query — bypasses require cache, always runs fresh SQL with ::text cast
+      try {
+        const pool = require('./lib/db').getPool();
+        const id = String(args.rfq_id).trim();
+        const { rows: [rfq] } = await pool.query(
+          `SELECT * FROM rfq_requests WHERE id::text = $1`, [id]);
+        if (!rfq) return { error: 'RFQ not found', rfq_id: id };
+        const { rows: responses } = await pool.query(
+          `SELECT r.*, (b.claimed_at IS NOT NULL) AS verified,
+                  COALESCE(b.sunbiz_id, b.sunbiz_doc_number) AS sunbiz_id,
+                  (b.sunbiz_id IS NOT NULL OR b.sunbiz_doc_number IS NOT NULL) AS sunbiz_verified
+             FROM rfq_responses r
+             LEFT JOIN businesses b ON b.business_id::text = r.business_id::text
+            WHERE r.rfq_id::text = $1
+            ORDER BY r.created_at ASC`, [id]);
+        const { rows: [booking] } = await pool.query(
+          `SELECT * FROM rfq_bookings WHERE rfq_id::text = $1 LIMIT 1`, [id]);
+        return { rfq_id: id, status: rfq.status, job_type: rfq.job_type,
+                 category: rfq.category, zip: rfq.zip, autonomy: rfq.autonomy,
+                 responses, booking: booking || null };
+      } catch (e) {
+        return { error: e.message };
+      }
     }
   },
   local_intel_book: {
