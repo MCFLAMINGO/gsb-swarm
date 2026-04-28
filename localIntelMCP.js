@@ -414,10 +414,11 @@ const TOOL_COSTS = {
   local_intel_stats:    0.005,
   local_intel_compare:   0.08,  // premium — runs oracle for up to 10 ZIPs
   local_intel_project:   0.15,  // project type → L1 ZIP scoring + L2 matched verified businesses
-  local_intel_rfq:          0.01,   // post a job — cheap to encourage use
-  local_intel_rfq_status:   0.005,  // polling — nearly free
-  local_intel_book:         0.02,   // booking action
-  local_intel_complete:     0.02,   // completion action
+  local_intel_rfq:              0.01,   // post a job — cheap to encourage use
+  local_intel_rfq_status:       0.005,  // polling — nearly free
+  local_intel_book:             0.02,   // booking action
+  local_intel_decline_response: 0.005,  // decline + get next in queue
+  local_intel_complete:         0.02,   // completion action
 };
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
@@ -1475,6 +1476,13 @@ const TOOLS = {
       return await rfqService.bookRfq(args.rfq_id, args.response_id, args.note);
     }
   },
+  local_intel_decline_response: {
+    fn: async (args) => {
+      const rfqService = require('./lib/rfqService');
+      if (!args.rfq_id || !args.response_id) return { error: 'rfq_id and response_id required' };
+      return await rfqService.declineResponse(args.rfq_id, args.response_id, args.reason);
+    }
+  },
   local_intel_complete: {
     fn: async (args) => {
       const rfqService = require('./lib/rfqService');
@@ -1789,6 +1797,19 @@ const MCP_MANIFEST = {
           rfq_id:      { type: 'string', description: 'UUID of the RFQ' },
           response_id: { type: 'string', description: 'UUID of the response to accept' },
           note:        { type: 'string', description: 'Optional note to the business' },
+        },
+      },
+    },
+    {
+      name: 'local_intel_decline_response',
+      description: 'Decline a specific response to an RFQ and get the next in queue. Use when a client rejects the first responder — returns the next pending response automatically. First come first served queue.',
+      inputSchema: {
+        type: 'object',
+        required: ['rfq_id', 'response_id'],
+        properties: {
+          rfq_id:      { type: 'string', description: 'UUID of the RFQ' },
+          response_id: { type: 'string', description: 'UUID of the response to decline' },
+          reason:      { type: 'string', description: 'Optional reason for declining (e.g. price too high, too far)' },
         },
       },
     },
