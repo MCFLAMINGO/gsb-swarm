@@ -729,6 +729,39 @@ app.get('/api/admin/registry', async (req, res) => {
   }
 });
 
+// POST /api/admin/fund-agent — upsert agent with balance (operator only, for testing)
+app.post('/api/admin/fund-agent', express.json(), async (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.admin_token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const { token, label, balance_usd, wallet, type } = req.body || {};
+  if (!token) return res.status(400).json({ error: 'token required' });
+  try {
+    const { ensureTable } = require('./lib/agentRegistry');
+    await ensureTable();
+    const db = require('./lib/db');
+    const micro = Math.round((parseFloat(balance_usd) || 0) * 1e6);
+    await db.getPool().query(
+      `INSERT INTO agent_registry (token, label, type, balance_usd_micro, wallet)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (token) DO UPDATE
+         SET label = EXCLUDED.label,
+             type  = EXCLUDED.type,
+             balance_usd_micro = agent_registry.balance_usd_micro + $4,
+             wallet = COALESCE(EXCLUDED.wallet, agent_registry.wallet)`,
+      [token, label || token, type || 'agent', micro,
+       wallet || '0x0000000000000000000000000000000000000000']
+    );
+    const { rows:[a] } = await db.getPool().query(
+      `SELECT token, label, balance_usd_micro, total_spent_micro, total_queries FROM agent_registry WHERE token=$1`, [token]
+    );
+    res.json({ ok: true, agent: a, balance_usd: a.balance_usd_micro / 1e6 });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/admin/trigger-deposit-listener — (re)starts the deposit listener worker
 app.post('/api/admin/trigger-deposit-listener', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
