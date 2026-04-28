@@ -557,7 +557,8 @@ router.get('/inbox', async (req, res) => {
     // Look up by dispatch_token (set during claim flow or migration)
     const [biz] = await db.query(
       `SELECT business_id, name, zip, category, notification_email,
-              notify_push, claimed_at, has_hours
+              notify_push, claimed_at,
+              COALESCE(has_hours, false) AS has_hours
          FROM businesses
         WHERE dispatch_token = $1
           AND status != 'inactive'

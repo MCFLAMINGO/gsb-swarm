@@ -779,12 +779,11 @@ app.post('/api/admin/seed-test-business', express.json(), async (req, res) => {
       [name, zip, category || 'general', dispatch_token, lat || 30.099, lon || -81.393]
     );
     const { rows: [biz] } = await db.getPool().query(
-      `INSERT INTO businesses (name, zip, category, dispatch_token, lat, lon, status, claimed_at, notification_email)
-       SELECT $1,$2,$3,$4,$5,$6,'active',NOW(),$7
+      `INSERT INTO businesses (name, zip, category, dispatch_token, lat, lon, status, claimed_at)
+       SELECT $1,$2,$3,$4,$5,$6,'active',NOW()
        WHERE NOT EXISTS (SELECT 1 FROM businesses WHERE dispatch_token=$4)
        RETURNING business_id, name, dispatch_token`,
-      [name, zip, category || 'general', dispatch_token,
-       lat || 30.099, lon || -81.393, `test+${dispatch_token.slice(0,8)}@mcflamingo.com`]
+      [name, zip, category || 'general', dispatch_token, lat || 30.099, lon || -81.393]
     );
     // If insert was a no-op (already existed), fetch it
     const final = biz || (await db.getPool().query(
