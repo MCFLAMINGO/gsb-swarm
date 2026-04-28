@@ -762,6 +762,40 @@ app.post('/api/admin/fund-agent', express.json(), async (req, res) => {
   }
 });
 
+// POST /api/admin/seed-test-business — insert a test business with a known dispatch_token (test only)
+app.post('/api/admin/seed-test-business', express.json(), async (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.admin_token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const { name, zip, category, dispatch_token, lat, lon } = req.body || {};
+  if (!name || !zip || !dispatch_token) return res.status(400).json({ error: 'name, zip, dispatch_token required' });
+  try {
+    const db = require('./lib/db');
+    // Upsert: update if dispatch_token exists, else insert
+    await db.getPool().query(
+      `UPDATE businesses SET name=$1, zip=$2, category=$3, lat=$5, lon=$6
+       WHERE dispatch_token=$4`,
+      [name, zip, category || 'general', dispatch_token, lat || 30.099, lon || -81.393]
+    );
+    const { rows: [biz] } = await db.getPool().query(
+      `INSERT INTO businesses (name, zip, category, dispatch_token, lat, lon, status, claimed_at, notification_email)
+       SELECT $1,$2,$3,$4,$5,$6,'active',NOW(),$7
+       WHERE NOT EXISTS (SELECT 1 FROM businesses WHERE dispatch_token=$4)
+       RETURNING business_id, name, dispatch_token`,
+      [name, zip, category || 'general', dispatch_token,
+       lat || 30.099, lon || -81.393, `test+${dispatch_token.slice(0,8)}@mcflamingo.com`]
+    );
+    // If insert was a no-op (already existed), fetch it
+    const final = biz || (await db.getPool().query(
+      `SELECT business_id, name, dispatch_token FROM businesses WHERE dispatch_token=$1`, [dispatch_token]
+    )).rows[0];
+    res.json({ ok: true, business_id: final?.business_id, name: final?.name, dispatch_token: final?.dispatch_token });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/admin/trigger-deposit-listener — (re)starts the deposit listener worker
 app.post('/api/admin/trigger-deposit-listener', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
