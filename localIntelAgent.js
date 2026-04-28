@@ -466,9 +466,13 @@ router.post('/claim/verify', express.json(), async (req, res) => {
     if (biz.claim_token !== String(token)) return res.status(401).json({ error: 'invalid code' });
     if (new Date(biz.claim_token_exp) < new Date()) return res.status(401).json({ error: 'code expired' });
 
+    // Generate a persistent dispatch_token — this is their inbox login, never expires
+    const { randomUUID } = require('crypto');
+    const dispatchToken = randomUUID();
     await db.query(
-      `UPDATE businesses SET claimed_at = NOW(), claim_token = NULL, claim_token_exp = NULL WHERE business_id = $1`,
-      [business_id]
+      `UPDATE businesses SET claimed_at = NOW(), claim_token = NULL, claim_token_exp = NULL,
+       dispatch_token = $2 WHERE business_id = $1`,
+      [business_id, dispatchToken]
     );
 
     const channels = ['web'];
@@ -480,7 +484,9 @@ router.post('/claim/verify', express.json(), async (req, res) => {
       channels
     );
     setImmediate(() => nq.processQueue(5).catch(() => {}));
-    res.json({ ok: true, claimed: true, business_id, name: biz.name });
+    res.json({ ok: true, claimed: true, business_id, name: biz.name,
+      dispatch_token: dispatchToken,
+      inbox_url: `https://www.thelocalintel.com/inbox?token=${dispatchToken}` });
   } catch (err) {
     console.error('[claim/verify]', err.message);
     res.status(500).json({ error: err.message });
@@ -508,6 +514,99 @@ router.get('/claim/notifications', async (req, res) => {
 // POST /api/local-intel/claim (legacy — same as /claim/start)
 router.post('/claim', express.json(), async (req, res) => {
   res.redirect(307, '/api/local-intel/claim/start');
+});
+
+// ── RFQ Inbox API ─────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/local-intel/inbox?token=<dispatch_token>
+ * Returns business info + open RFQs matching their zip+category.
+ */
+router.get('/inbox', async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(401).json({ error: 'token required' });
+  try {
+    const rfqService = require('./lib/rfqService');
+    // Look up by dispatch_token (set during claim flow or migration)
+    const [biz] = await db.query(
+      `SELECT business_id, name, zip, category, notification_email
+         FROM businesses
+        WHERE dispatch_token = $1
+          AND status != 'inactive'
+        LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+
+    const open_rfqs = await rfqService.getOpenRfqs(biz.zip, biz.category);
+
+    res.json({
+      business_name: biz.name,
+      zip:           biz.zip,
+      category:      biz.category,
+      business_id:   biz.business_id,
+      open_rfqs,
+    });
+  } catch (err) {
+    console.error('[inbox GET]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/local-intel/inbox/respond
+ * Body: { token, rfq_id, quote_usd, message, eta_minutes }
+ */
+router.post('/inbox/respond', express.json(), async (req, res) => {
+  const { token, rfq_id, quote_usd, message, eta_minutes } = req.body || {};
+  if (!token)  return res.status(401).json({ error: 'token required' });
+  if (!rfq_id) return res.status(400).json({ error: 'rfq_id required' });
+  try {
+    const rfqService = require('./lib/rfqService');
+    const [biz] = await db.query(
+      `SELECT business_id, name FROM businesses
+        WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+
+    const result = await rfqService.submitResponse(
+      rfq_id,
+      biz.business_id,
+      { quote_usd: quote_usd || null, message: message || null, eta_minutes: eta_minutes || null }
+    );
+    res.json(result);
+  } catch (err) {
+    console.error('[inbox/respond POST]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/local-intel/inbox/book
+ * Body: { token, rfq_id, response_id }
+ * For approve/human autonomy — human confirms a booking.
+ */
+router.post('/inbox/book', express.json(), async (req, res) => {
+  const { token, rfq_id, response_id } = req.body || {};
+  if (!token)      return res.status(401).json({ error: 'token required' });
+  if (!rfq_id)     return res.status(400).json({ error: 'rfq_id required' });
+  if (!response_id) return res.status(400).json({ error: 'response_id required' });
+  try {
+    const rfqService = require('./lib/rfqService');
+    const [biz] = await db.query(
+      `SELECT business_id FROM businesses
+        WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+
+    const result = await rfqService.bookRfq(rfq_id, response_id, 'confirmed by human');
+    res.json(result);
+  } catch (err) {
+    console.error('[inbox/book POST]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post('/ingest', express.json({ limit: '50mb' }), async (req, res) => {

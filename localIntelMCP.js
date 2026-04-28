@@ -414,6 +414,10 @@ const TOOL_COSTS = {
   local_intel_stats:    0.005,
   local_intel_compare:   0.08,  // premium — runs oracle for up to 10 ZIPs
   local_intel_project:   0.15,  // project type → L1 ZIP scoring + L2 matched verified businesses
+  local_intel_rfq:          0.01,   // post a job — cheap to encourage use
+  local_intel_rfq_status:   0.005,  // polling — nearly free
+  local_intel_book:         0.02,   // booking action
+  local_intel_complete:     0.02,   // completion action
 };
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
@@ -1451,6 +1455,33 @@ const TOOLS = {
   local_intel_query:        { fn: handleQuery, desc: 'Fuzzy intent router — pass any plain-English question about any local market. Automatically detects ZIP, industry vertical, and best tool. Checks inference cache first (instant return if hit). On cache miss, routes to the correct vertical agent, stores result, and dispatches a scout agent if confidence is low. Handles region queries ("Northeast Florida", "St Johns County") by evaluating top ZIPs in parallel. Best first call for any LLM that does not know the ZIP or industry in advance.' },
   local_intel_compare:      { fn: toolCompare, desc: 'Compare up to 10 ZIPs side-by-side and get a ranked opportunity table. Pass focus="opportunity" (default), "hhi", "saturation", "growth", or "population". Returns per-ZIP signals (HHI, capture rate, infra momentum, consumer profile, top gap) plus a top_pick recommendation with reasoning. Best tool for site selection, franchise expansion, investment screening, and market prioritization.' },
   local_intel_project:      { fn: handleProject, desc: 'Project-type query: pass project_type (e.g. restaurant, clinic, banking, construction, real_estate) and get L1 ZIPs ranked by market or residential opportunity score + L2 matched verified businesses in that sector. Best tool for site selection when you know the business type but not the ZIP.' },
+  local_intel_rfq: {
+    fn: async (args) => {
+      const rfqService = require('./lib/rfqService');
+      return await rfqService.createRfq(args);
+    }
+  },
+  local_intel_rfq_status: {
+    fn: async (args) => {
+      const rfqService = require('./lib/rfqService');
+      if (!args.rfq_id) return { error: 'rfq_id required' };
+      return await rfqService.getRfqStatus(args.rfq_id);
+    }
+  },
+  local_intel_book: {
+    fn: async (args) => {
+      const rfqService = require('./lib/rfqService');
+      if (!args.rfq_id || !args.response_id) return { error: 'rfq_id and response_id required' };
+      return await rfqService.bookRfq(args.rfq_id, args.response_id, args.note);
+    }
+  },
+  local_intel_complete: {
+    fn: async (args) => {
+      const rfqService = require('./lib/rfqService');
+      if (!args.booking_id) return { error: 'booking_id required' };
+      return await rfqService.completeBooking(args.booking_id, args.note);
+    }
+  },
 };
 
 // ── MCP manifest (tools/list response) ───────────────────────────────────────
@@ -1716,6 +1747,62 @@ const MCP_MANIFEST = {
         required: ['project_type'],
       },
       annotations: { readOnly: true },
+    },
+    {
+      name: 'local_intel_rfq',
+      description: 'Post a job request to local businesses or drivers. Supports delivery (first-to-accept) and proposal (collect quotes) modes. Set autonomy=full for agent-only flow, approve for human confirmation, human for manual selection. Returns rfq_id to poll with local_intel_rfq_status.',
+      inputSchema: {
+        type: 'object',
+        required: ['description'],
+        properties: {
+          job_type:        { type: 'string', enum: ['delivery', 'proposal'], description: 'delivery = first-to-accept wins; proposal = collect quotes, pick best' },
+          category:        { type: 'string', description: 'Business category to match, e.g. "landscaping", "delivery", "florist", "handyman"' },
+          zip:             { type: 'string', description: 'ZIP code to search businesses in' },
+          description:     { type: 'string', description: 'What needs to be done — be specific' },
+          pickup_address:  { type: 'string', description: 'Pickup address (delivery jobs)' },
+          dropoff_address: { type: 'string', description: 'Drop-off address (delivery jobs)' },
+          budget_usd:      { type: 'number', description: 'Max budget in USD (optional)' },
+          deadline_minutes:{ type: 'number', description: 'Minutes until deadline (for urgent delivery jobs)' },
+          autonomy:        { type: 'string', enum: ['full', 'approve', 'human'], description: 'full=agent books automatically; approve=agent picks best, human confirms; human=human picks from list' },
+          notify_email:    { type: 'string', description: 'Email to notify for approve/human autonomy levels' },
+        },
+      },
+    },
+    {
+      name: 'local_intel_rfq_status',
+      description: 'Poll the status of an RFQ. Returns the original request, all responses received so far, and booking details if booked.',
+      inputSchema: {
+        type: 'object',
+        required: ['rfq_id'],
+        properties: {
+          rfq_id: { type: 'string', description: 'UUID returned by local_intel_rfq' },
+        },
+      },
+    },
+    {
+      name: 'local_intel_book',
+      description: 'Book a specific response to an RFQ — confirms the job with that business. Use after reviewing local_intel_rfq_status responses.',
+      inputSchema: {
+        type: 'object',
+        required: ['rfq_id', 'response_id'],
+        properties: {
+          rfq_id:      { type: 'string', description: 'UUID of the RFQ' },
+          response_id: { type: 'string', description: 'UUID of the response to accept' },
+          note:        { type: 'string', description: 'Optional note to the business' },
+        },
+      },
+    },
+    {
+      name: 'local_intel_complete',
+      description: 'Mark a booked job as complete. Triggers escrow release in v2. Call when the job is done.',
+      inputSchema: {
+        type: 'object',
+        required: ['booking_id'],
+        properties: {
+          booking_id: { type: 'string', description: 'UUID returned by local_intel_book' },
+          note:       { type: 'string', description: 'Completion note or rating' },
+        },
+      },
     },
   ],
 };
