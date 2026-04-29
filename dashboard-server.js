@@ -6297,7 +6297,7 @@ app.post('/api/voice/incoming', express.urlencoded({ extended: false }), async (
   } catch (e) {
     console.error('[voice/incoming]', e.message);
     res.set('Content-Type', 'text/xml');
-    res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="alice">Sorry, LocalIntel is temporarily unavailable. Please try again shortly.</Say></Response>');
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna-Neural">Sorry, LocalIntel is temporarily unavailable. Please try again shortly.</Say></Response>');
   }
 });
 
@@ -6315,7 +6315,7 @@ app.post('/api/voice/process', express.urlencoded({ extended: false }), async (r
   } catch (e) {
     console.error('[voice/process]', e.message);
     res.set('Content-Type', 'text/xml');
-    res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="alice">Something went wrong. Please call back and try again.</Say></Response>');
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna-Neural">Something went wrong. Please call back and try again.</Say></Response>');
   }
 });
 
