@@ -668,12 +668,23 @@ router.post('/inbox/book', express.json(), async (req, res) => {
   }
 });
 
-// ── GET /api/local-intel/surge/menu/:businessId — fetch live Surge menu ────────
-router.get('/surge/menu/:businessId', async (req, res) => {
+// ── GET /api/local-intel/surge/menu/:id — fetch live Surge menu (UUID or Sunbiz ID) ──
+router.get('/surge/menu/:id', async (req, res) => {
   try {
+    const db   = require('./lib/db');
+    const id   = req.params.id;
+    // Accept either internal UUID or Sunbiz ID
+    const isUuid = /^[0-9a-f-]{36}$/.test(id);
+    const [biz] = await db.query(
+      isUuid
+        ? `SELECT business_id FROM businesses WHERE business_id = $1 LIMIT 1`
+        : `SELECT business_id FROM businesses WHERE sunbiz_id = $1 OR sunbiz_doc_number = $1 LIMIT 1`,
+      [id]
+    );
+    if (!biz) return res.status(404).json({ error: 'business not found' });
     const surge = require('./lib/surgeAgent');
-    const menu  = await surge.fetchMenu(req.params.businessId);
-    res.json({ ok: true, menu });
+    const menu  = await surge.fetchMenu(biz.business_id);
+    res.json({ ok: true, business_id: biz.business_id, menu });
   } catch (err) {
     console.error('[surge/menu]', err.message);
     res.status(500).json({ error: err.message });
@@ -682,13 +693,23 @@ router.get('/surge/menu/:businessId', async (req, res) => {
 
 // ── POST /api/local-intel/surge/order — place order + send SMS payment link ──
 router.post('/surge/order', express.json(), async (req, res) => {
-  const { business_id, customer_phone, order_text, jurisdiction_code } = req.body || {};
-  if (!business_id) return res.status(400).json({ error: 'business_id required' });
-  if (!order_text)  return res.status(400).json({ error: 'order_text required' });
+  const { business_id, sunbiz_id, customer_phone, order_text, jurisdiction_code } = req.body || {};
+  const lookupId = business_id || sunbiz_id;
+  if (!lookupId)   return res.status(400).json({ error: 'business_id or sunbiz_id required' });
+  if (!order_text) return res.status(400).json({ error: 'order_text required' });
   try {
+    const db     = require('./lib/db');
+    const isUuid = /^[0-9a-f-]{36}$/.test(lookupId);
+    const [biz]  = await db.query(
+      isUuid
+        ? `SELECT business_id FROM businesses WHERE business_id = $1 LIMIT 1`
+        : `SELECT business_id FROM businesses WHERE sunbiz_id = $1 OR sunbiz_doc_number = $1 LIMIT 1`,
+      [lookupId]
+    );
+    if (!biz) return res.status(404).json({ error: 'business not found' });
     const surge  = require('./lib/surgeAgent');
     const result = await surge.placeOrderFromVoice({
-      businessId:      business_id,
+      businessId:      biz.business_id,
       customerPhone:   customer_phone || null,
       orderText:       order_text,
       jurisdictionCode: jurisdiction_code || 'US-FL',
