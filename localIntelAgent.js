@@ -564,7 +564,9 @@ router.get('/inbox', async (req, res) => {
       `SELECT business_id, name, zip, category, notification_email,
               notify_push, claimed_at,
               COALESCE(has_hours, false) AS has_hours,
-              COALESCE(sunbiz_id, sunbiz_doc_number) AS sunbiz_id
+              COALESCE(sunbiz_id, sunbiz_doc_number) AS sunbiz_id,
+              hours_json, services_text, menu_url,
+              CASE WHEN pos_config IS NOT NULL THEN (pos_config->>'pos_type') ELSE NULL END AS pos_type
          FROM businesses
         WHERE dispatch_token = $1
           AND status != 'inactive'
@@ -596,6 +598,10 @@ router.get('/inbox', async (req, res) => {
       wallet_funded:     reg ? (reg.balance_usd_micro || 0) > 0 : false,
       deposit_address:   reg ? reg.deposit_address : null,
       open_rfqs,
+      hours_json:     biz.hours_json   || null,
+      services_text:  biz.services_text || null,
+      menu_url:       biz.menu_url      || null,
+      pos_type:       biz.pos_type      || null,
     });
   } catch (err) {
     console.error('[inbox GET]', err.message);
@@ -655,6 +661,114 @@ router.post('/inbox/book', express.json(), async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[inbox/book POST]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/local-intel/inbox/hours — save business hours ──────────────────
+router.post('/inbox/hours', express.json(), async (req, res) => {
+  const { token, hours } = req.body || {};
+  if (!token) return res.status(401).json({ error: 'token required' });
+  if (!hours || typeof hours !== 'object') return res.status(400).json({ error: 'hours object required' });
+  try {
+    const db = require('./lib/db');
+    const [biz] = await db.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+    await db.query(
+      `UPDATE businesses SET hours_json = $1, has_hours = true WHERE business_id = $2`,
+      [JSON.stringify(hours), biz.business_id]
+    );
+    console.log(`[inbox/hours] saved for ${biz.business_id}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[inbox/hours POST]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/local-intel/inbox/services — save services text + menu URL ───────
+router.post('/inbox/services', express.json(), async (req, res) => {
+  const { token, services_text, menu_url } = req.body || {};
+  if (!token) return res.status(401).json({ error: 'token required' });
+  try {
+    const db = require('./lib/db');
+    const [biz] = await db.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+    await db.query(
+      `UPDATE businesses SET
+         services_text    = COALESCE($1, services_text),
+         menu_url         = COALESCE($2, menu_url),
+         menu_fetched_at  = NULL
+       WHERE business_id = $3`,
+      [services_text || null, menu_url || null, biz.business_id]
+    );
+    // If menu_url provided, trigger async fetch
+    if (menu_url) {
+      setImmediate(async () => {
+        try {
+          const menuFetch = require('./workers/menuFetchAgent');
+          if (typeof menuFetch.fetchMenuForBusiness === 'function') {
+            await menuFetch.fetchMenuForBusiness(biz.business_id, menu_url);
+            console.log(`[inbox/services] menu fetch triggered for ${biz.business_id}`);
+          }
+        } catch (e) {
+          console.warn('[inbox/services] menu fetch error:', e.message);
+        }
+      });
+    }
+    console.log(`[inbox/services] saved for ${biz.business_id}`);
+    res.json({ ok: true, menu_fetch_queued: !!menu_url });
+  } catch (err) {
+    console.error('[inbox/services POST]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/local-intel/inbox/pos — save POS credentials (AES-256 encrypted) ─
+router.post('/inbox/pos', express.json(), async (req, res) => {
+  const { token, pos_type, credentials } = req.body || {};
+  if (!token)       return res.status(401).json({ error: 'token required' });
+  if (!pos_type)    return res.status(400).json({ error: 'pos_type required (toast|square|clover|other)' });
+  if (!credentials) return res.status(400).json({ error: 'credentials object required' });
+  try {
+    const db     = require('./lib/db');
+    const crypto = require('crypto');
+    const [biz] = await db.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+
+    // AES-256-GCM encrypt credentials
+    const key = Buffer.from(
+      (process.env.POS_ENCRYPT_KEY || 'localintel-pos-key-32-bytes-here!').padEnd(32).slice(0, 32)
+    );
+    const iv         = crypto.randomBytes(12);
+    const cipher     = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const encrypted  = Buffer.concat([cipher.update(JSON.stringify(credentials), 'utf8'), cipher.final()]);
+    const authTag    = cipher.getAuthTag();
+    const posConfig  = {
+      pos_type,
+      iv:      iv.toString('hex'),
+      tag:     authTag.toString('hex'),
+      data:    encrypted.toString('hex'),
+      saved_at: new Date().toISOString()
+    };
+
+    await db.query(
+      `UPDATE businesses SET pos_config = $1 WHERE business_id = $2`,
+      [JSON.stringify(posConfig), biz.business_id]
+    );
+    console.log(`[inbox/pos] saved ${pos_type} credentials for ${biz.business_id}`);
+    res.json({ ok: true, pos_type });
+  } catch (err) {
+    console.error('[inbox/pos POST]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
