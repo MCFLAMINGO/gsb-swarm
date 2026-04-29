@@ -668,6 +668,38 @@ router.post('/inbox/book', express.json(), async (req, res) => {
   }
 });
 
+// ── GET /api/local-intel/surge/menu/:businessId — fetch live Surge menu ────────
+router.get('/surge/menu/:businessId', async (req, res) => {
+  try {
+    const surge = require('./lib/surgeAgent');
+    const menu  = await surge.fetchMenu(req.params.businessId);
+    res.json({ ok: true, menu });
+  } catch (err) {
+    console.error('[surge/menu]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/local-intel/surge/order — place order + send SMS payment link ──
+router.post('/surge/order', express.json(), async (req, res) => {
+  const { business_id, customer_phone, order_text, jurisdiction_code } = req.body || {};
+  if (!business_id) return res.status(400).json({ error: 'business_id required' });
+  if (!order_text)  return res.status(400).json({ error: 'order_text required' });
+  try {
+    const surge  = require('./lib/surgeAgent');
+    const result = await surge.placeOrderFromVoice({
+      businessId:      business_id,
+      customerPhone:   customer_phone || null,
+      orderText:       order_text,
+      jurisdictionCode: jurisdiction_code || 'US-FL',
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('[surge/order]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/local-intel/inbox/hours — save business hours ──────────────────
 router.post('/inbox/hours', express.json(), async (req, res) => {
   const { token, hours } = req.body || {};
