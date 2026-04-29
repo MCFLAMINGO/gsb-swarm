@@ -721,6 +721,40 @@ router.post('/surge/order', express.json(), async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/surge/webhook — receive Surge payment status events ──
+router.post('/surge/webhook', express.raw({ type: '*/*' }), async (req, res) => {
+  try {
+    const deliveryId = req.headers['x-basaltsurge-delivery'];
+    const signature  = req.headers['x-basaltsurge-signature'];
+    const rawBody    = req.body?.toString('utf8') || '';
+    const payload    = JSON.parse(rawBody);
+    const receiptId  = payload.receiptId || payload.id;
+    const status     = payload.status;
+
+    console.log(`[surge/webhook] delivery=${deliveryId} status=${status} receiptId=${receiptId}`);
+
+    // TODO: look up order by receiptId, verify signature, update rfq_bookings, release escrow on paid
+    // For now: log and acknowledge
+    const db = require('./lib/db');
+    await db.query(
+      `INSERT INTO rfq_gaps (raw_text, source, created_at)
+       VALUES ($1, 'surge_webhook', NOW())
+       ON CONFLICT DO NOTHING`,
+      [JSON.stringify({ receiptId, status, deliveryId })]
+    ).catch(() => {});
+
+    if (status === 'paid' || status === 'checkout_success') {
+      console.log(`[surge/webhook] PAYMENT CONFIRMED for receipt ${receiptId}`);
+      // TODO: release escrow, notify business, update booking status
+    }
+
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('[surge/webhook]', err.message);
+    res.status(200).json({ ok: true }); // always 200 to Surge
+  }
+});
+
 // ── POST /api/local-intel/inbox/hours — save business hours ──────────────────
 router.post('/inbox/hours', express.json(), async (req, res) => {
   const { token, hours } = req.body || {};
