@@ -43,33 +43,42 @@ const CUISINE_KEYWORDS = {
 const SECTION_RE = /^(appetizer|starter|entr[eé]e|main|burger|sandwich|salad|soup|side|dessert|drink|beverage|special|combo|breakfast|lunch|dinner|kids)/i;
 
 /**
- * Fetch a URL and return the raw text content (stripped of scripts/styles).
+ * Fetch a URL using Playwright (handles JS-rendered pages, Cloudflare, etc.)
+ * Falls back to plain fetch if Playwright is unavailable.
  */
 async function fetchPage(url) {
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'LocalIntel Menu Agent/1.0 (thelocalintel.com)',
-      'Accept': 'text/html,application/xhtml+xml,*/*',
-    },
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
-  const html = await res.text();
-  // Strip script, style, nav, footer tags
-  const stripped = html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
-    .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
-    .replace(/<[^>]+>/g, ' ')      // strip remaining tags
-    .replace(/&amp;/g, '&')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&#\d+;/g, '')
-    .replace(/\s{2,}/g, '\n')      // collapse whitespace
-    .trim();
-  return stripped;
+  try {
+    const { chromium } = require('playwright');
+    const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const ctx  = await browser.newContext({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' });
+    const page = await ctx.newPage();
+    await page.goto(url, { waitUntil: 'networkidle', timeout: 20000 });
+    // Wait for menu content to appear
+    await page.waitForTimeout(2000);
+    const html = await page.content();
+    await browser.close();
+    const stripped = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&#\d+;/g, '')
+      .replace(/\s{2,}/g, '\n')
+      .trim();
+    return { text: stripped, html };
+  } catch (e) {
+    console.warn('[menuFetchAgent] Playwright failed, falling back to fetch:', e.message);
+    const res = await fetch(url, { headers: { 'User-Agent': 'LocalIntel Menu Agent/1.0' }, signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const html = await res.text();
+    const stripped = html.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, '\n').trim();
+    return { text: stripped, html };
+  }
 }
 
 /**
@@ -177,19 +186,7 @@ function findOrderUrl(html, baseUrl) {
  */
 async function buildServicesJson(url) {
   console.log('[menuFetchAgent] Fetching:', url);
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'LocalIntel Menu Agent/1.0 (thelocalintel.com)' },
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const html = await res.text();
-  const text = html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/\s{2,}/g, '\n')
-    .trim();
+  const { text, html } = await fetchPage(url);
 
   const items      = extractMenuItems(text);
   const cuisines   = inferCuisines(items, text);
@@ -229,14 +226,14 @@ async function fetchAndStoreMenu({ url, businessId, name, zip }) {
   let result;
   if (businessId) {
     result = await db.query(
-      `UPDATE businesses SET services_json = $1, menu_fetched_at = NOW()
-       WHERE id::text = $2 RETURNING id, name, zip`,
+      `UPDATE businesses SET services_json = $1, menu_fetched_at = NOW(), menu_fetch_error = NULL
+       WHERE business_id = $2 RETURNING business_id, name, zip`,
       [JSON.stringify(services), businessId]
     );
   } else if (name && zip) {
     result = await db.query(
-      `UPDATE businesses SET services_json = $1, menu_fetched_at = NOW()
-       WHERE LOWER(name) LIKE LOWER($2) AND zip = $3 RETURNING id, name, zip`,
+      `UPDATE businesses SET services_json = $1, menu_fetched_at = NOW(), menu_fetch_error = NULL
+       WHERE LOWER(name) LIKE LOWER($2) AND zip = $3 RETURNING business_id, name, zip`,
       [JSON.stringify(services), `%${name}%`, zip]
     );
   } else {
@@ -253,7 +250,12 @@ async function fetchAndStoreMenu({ url, businessId, name, zip }) {
   return { stored: true, business: result[0], services };
 }
 
-module.exports = { fetchAndStoreMenu, buildServicesJson, extractMenuItems, inferTags };
+// Alias used by inbox/services route
+async function fetchMenuForBusiness(businessId, url) {
+  return fetchAndStoreMenu({ url, businessId });
+}
+
+module.exports = { fetchAndStoreMenu, fetchMenuForBusiness, buildServicesJson, extractMenuItems, inferTags };
 
 // ── CLI entrypoint ─────────────────────────────────────────────────────────────
 if (require.main === module) {

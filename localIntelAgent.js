@@ -565,7 +565,7 @@ router.get('/inbox', async (req, res) => {
               notify_push, claimed_at,
               COALESCE(has_hours, false) AS has_hours,
               COALESCE(sunbiz_id, sunbiz_doc_number) AS sunbiz_id,
-              hours_json, services_text, menu_url,
+              hours_json, services_text, menu_url, menu_fetched_at, menu_fetch_error, services_json,
               CASE WHEN pos_config IS NOT NULL THEN (pos_config->>'pos_type') ELSE NULL END AS pos_type
          FROM businesses
         WHERE dispatch_token = $1
@@ -598,10 +598,13 @@ router.get('/inbox', async (req, res) => {
       wallet_funded:     reg ? (reg.balance_usd_micro || 0) > 0 : false,
       deposit_address:   reg ? reg.deposit_address : null,
       open_rfqs,
-      hours_json:     biz.hours_json   || null,
-      services_text:  biz.services_text || null,
-      menu_url:       biz.menu_url      || null,
-      pos_type:       biz.pos_type      || null,
+      hours_json:       biz.hours_json      || null,
+      services_text:    biz.services_text   || null,
+      menu_url:         biz.menu_url        || null,
+      menu_fetched_at:  biz.menu_fetched_at || null,
+      menu_fetch_error: biz.menu_fetch_error|| null,
+      services_json:    biz.services_json   || null,
+      pos_type:         biz.pos_type        || null,
     });
   } catch (err) {
     console.error('[inbox GET]', err.message);
@@ -713,12 +716,16 @@ router.post('/inbox/services', express.json(), async (req, res) => {
       setImmediate(async () => {
         try {
           const menuFetch = require('./workers/menuFetchAgent');
-          if (typeof menuFetch.fetchMenuForBusiness === 'function') {
-            await menuFetch.fetchMenuForBusiness(biz.business_id, menu_url);
-            console.log(`[inbox/services] menu fetch triggered for ${biz.business_id}`);
-          }
+          await menuFetch.fetchMenuForBusiness(biz.business_id, menu_url);
+          console.log(`[inbox/services] menu fetch complete for ${biz.business_id}`);
         } catch (e) {
           console.warn('[inbox/services] menu fetch error:', e.message);
+          // Store error so UI can surface it
+          const db2 = require('./lib/db');
+          await db2.query(
+            `UPDATE businesses SET menu_fetch_error = $1 WHERE business_id = $2`,
+            [e.message.slice(0, 500), biz.business_id]
+          ).catch(() => {});
         }
       });
     }
