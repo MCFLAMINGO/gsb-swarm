@@ -39,7 +39,8 @@ const apiKeyMiddleware = createApiKeyMiddleware(db);
 // TREASURY receives USDC on Base mainnet.
 // Agents without a Base wallet still use the Tempo/pathUSD endpoint (/api/local-intel/mcp).
 // This x402 gate is ADDITIVE — a second payment rail, not a replacement.
-const X402_TREASURY = process.env.X402_TREASURY || '0x774f484192Cf3F4fB9716Af2e15f44371fD32FEA';
+// Base mainnet USDC treasury — separate from Tempo treasury
+const X402_TREASURY = process.env.BASE_TREASURY || '0x1447612B0Dc9221434bA78F63026E356de7F30FA';
 
 // ── Self-hosted facilitator (avoids x402.org/facilitator which is testnet-only) ──
 // Uses exact.evm.verify (local EIP-3009 sig check) + exact.evm.settle (on-chain USDC transfer).
@@ -1176,11 +1177,30 @@ router.post('/mcp', express.json(), apiKeyMiddleware, async (req, res) => {
   }
 });
 
+// ── x402 whitelist — agents in WHITELIST_USER_AGENTS bypass the payment gate ──
+// Set Railway env var: WHITELIST_USER_AGENTS=lovable,smithery  (comma-separated, case-insensitive)
+// Clear or remove the var to re-enable billing for all agents without a deploy.
+const _x402Whitelist = (process.env.WHITELIST_USER_AGENTS || '')
+  .split(',')
+  .map(s => s.trim().toLowerCase())
+  .filter(Boolean);
+
+function isX402Whitelisted(req) {
+  if (_x402Whitelist.length === 0) return false;
+  const ua = (req.headers['user-agent'] || '').toLowerCase();
+  const match = _x402Whitelist.find(agent => ua.includes(agent));
+  if (match) console.log(`[x402] whitelisted bypass for agent: ${match}`);
+  return !!match;
+}
+
 // ── x402 MCP endpoints — Base/USDC payment rail (additive alongside pathUSD) ──
 // Standard: $0.01 USDC on Base  |  Premium (local_intel_for_agent): $0.05 USDC
 // Agents without Base wallets continue using /api/local-intel/mcp (Tempo/pathUSD)
 // x402Middleware is scoped ONLY to these two routes — does NOT touch /mcp
-router.post('/mcp/x402', x402Middleware, express.json(), async (req, res) => {
+router.post('/mcp/x402', express.json(), async (req, res, next) => {
+  if (isX402Whitelisted(req)) return next();
+  x402Middleware(req, res, next);
+}, async (req, res) => {
   try {
     const body = req.body || {};
     if (body.method && body.method.startsWith('notifications/') && body.id === undefined) {
@@ -1202,7 +1222,10 @@ router.post('/mcp/x402', x402Middleware, express.json(), async (req, res) => {
   }
 });
 
-router.post('/mcp/x402/premium', x402Middleware, express.json(), async (req, res) => {
+router.post('/mcp/x402/premium', express.json(), async (req, res, next) => {
+  if (isX402Whitelisted(req)) return next();
+  x402Middleware(req, res, next);
+}, async (req, res) => {
   try {
     const body = req.body || {};
     // Force premium tool so agents can't use the $0.05 endpoint for cheap calls
