@@ -6494,6 +6494,16 @@ app.use((req, res, next) => {
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`[gsb-dashboard] Listening on port ${PORT}`);
 
+  // Start dispatch watchdog — monitors RFQ timeouts + auto-retry
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const watchdog = require('./lib/dispatchWatchdog');
+      await watchdog.start();
+    } catch (e) {
+      console.warn('[gsb-dashboard] Watchdog start failed (non-fatal):', e.message);
+    }
+  }
+
   // Start Telegram bot as background process
   if (process.env.TELEGRAM_SWAP_BOT || process.env.TELEGRAM_BOT_TOKEN) {
     try {
