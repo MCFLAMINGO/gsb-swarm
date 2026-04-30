@@ -475,3 +475,45 @@ Total OSM POIs promoted: 1,884 across 10 SJC ZIPs.
 - **Dashboard (swarm-deploy-throw.vercel.app) = INTERNAL ONLY** — no customer UX inside it
 - **Every completed feature committed to git before session ends**
 - **Run `npm install` after any package.json edits before pushing**
+
+---
+
+## 21. POS Router Layer (added 2026-04-30)
+
+### lib/posRouter.js
+Universal POS dispatch — every business routes through here regardless of pos_type.
+
+**Contract every handler must implement:**
+- `fetchMenu(businessId)` → `{ items: [{sku, name, priceUsd, available, category, description}] }`
+- `createOrder(businessId, items, opts)` → `{ receiptId, payUrl, total, items }`
+- `getPaymentUrl(receiptId)` → string or null
+- `sendPaymentSms(toPhone, payUrl, summary)` → `{ sent, sms_sid }`
+
+**Handlers registered:**
+| pos_type | Handler | Status |
+|---|---|---|
+| surge | surgeAgent.js | ✅ Live |
+| other (Surge) | surgeAgent.js | ✅ Live (auto-detected via pos_config) |
+| toast | toastAgent.js | ⚠️ Stub — needs client_id/client_secret/restaurant_guid in pos_config |
+| square | squareAgent.js | ⚠️ Stub — needs access_token/location_id in pos_config |
+| null/none | rfq fallback | ✅ Falls back to RFQ dispatch |
+
+**matchItems() algorithm:**
+1. Split order on "and" / "plus" / "," / "also" → segments
+2. Each segment: Jaccard similarity score against all menu items (stop-word filtered)
+3. Prefix matching bonus, phrase containment bonus
+4. Single best match per segment (no double-matches)
+5. Qty extraction: "two chicken tacos" → DIY CHICKEN TACO x2
+6. Threshold: 0.15 minimum score to avoid false positives
+7. Tested 13/13 on full McFlamingo menu
+
+**voiceIntake.js integration:**
+When category is resolved (non-uncertain), checks Postgres for POS-connected business in ZIP.
+If found → posRouter.placeOrder() → speaks confirmed items + total → SMS payment link.
+If no POS match or order fails → falls through to existing RFQ path.
+
+### McFlamingo Surge Inventory (live as of 2026-04-30)
+Key items: Chicken Pickles Sandwich $13.50, Double Chicken Smash Burger $13.95,
+Big Nolan Spicy Double Chicken Burger $13.95, SWEET SOY SALMON $25,
+SHRIMP CASHEW CURRY $22, DIY CHICKEN TACO $21, BRUSSEL SPROUTS $9,
+HUMMUS WITH AVOCADO $8.50, Lemonade $5, SIDE RICE $3.50, SIDE QUINOA $3.50
