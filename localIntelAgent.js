@@ -593,19 +593,28 @@ router.post('/auth/magic', express.json(), async (req, res) => {
 
     const inboxUrl = `https://www.thelocalintel.com/inbox.html?token=${biz.dispatch_token}`;
 
-    await nq.enqueue({
-      business_id: biz.business_id,
-      channel: 'email',
+    // Send directly via Resend — do not use notificationQueue (wrong signature for custom to)
+    const { Resend } = require('resend');
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    const result = await resend.emails.send({
+      from:    'LocalIntel <intel@thelocalintel.com>',
+      to:      biz.notification_email,
       subject: 'Your LocalIntel dashboard link',
-      body: `Hi ${biz.name},\n\nHere is your dashboard link — click to access your LocalIntel inbox:\n\n${inboxUrl}\n\nThis link is permanent. Bookmark it for next time.\n\nLocalIntel Data Services`,
-      html: `<p>Hi <strong>${biz.name}</strong>,</p>
-<p>Here is your LocalIntel dashboard link:</p>
-<p style="margin:24px 0;"><a href="${inboxUrl}" style="background:#16A34A;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;">Open My Dashboard &rarr;</a></p>
-<p style="font-size:13px;color:#666;">Or copy this link: ${inboxUrl}</p>
-<p style="font-size:13px;color:#666;">This link is permanent — bookmark it for next time.</p>
-<p style="font-size:12px;color:#999;">LocalIntel Data Services &mdash; thelocalintel.com</p>`,
-      to: biz.notification_email,
+      html: `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;">
+  <p style="font-size:18px;font-weight:700;color:#111827;margin-bottom:4px;">LocalIntel</p>
+  <p style="color:#6B7280;font-size:13px;margin-bottom:28px;">thelocalintel.com</p>
+  <p style="font-size:15px;color:#111827;">Hi <strong>${biz.name}</strong>,</p>
+  <p style="font-size:15px;color:#374151;margin-top:12px;">Here is your permanent dashboard link:</p>
+  <p style="margin:28px 0;">
+    <a href="${inboxUrl}" style="background:#16A34A;color:#fff;padding:13px 26px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;">Open My Dashboard &rarr;</a>
+  </p>
+  <p style="font-size:13px;color:#6B7280;">Or copy this link:<br><a href="${inboxUrl}" style="color:#16A34A;word-break:break-all;">${inboxUrl}</a></p>
+  <p style="font-size:13px;color:#6B7280;margin-top:20px;">Bookmark it — this link never expires.</p>
+  <hr style="border:none;border-top:1px solid #E5E7EB;margin:28px 0;">
+  <p style="font-size:12px;color:#9CA3AF;">LocalIntel Data Services &mdash; thelocalintel.com</p>
+</div>`,
     });
+    console.log(`[auth/magic] sent to ${biz.notification_email} — id: ${result.data?.id}, err: ${result.error?.message}`);
   } catch (err) {
     console.error('[auth/magic]', err.message);
     // Response already sent, just log
