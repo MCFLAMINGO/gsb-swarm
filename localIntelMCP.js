@@ -890,32 +890,55 @@ async function pgCategorySearch(resolvedZip, normalizedQuery, rawQuery, limitN) 
   try {
     const db = require('./lib/db');
 
-    // ── Name-first lookup (no ZIP filter) ────────────────────────────────────
-    // If the raw query looks like a specific business name (not a generic category),
-    // try a name ILIKE match across all ZIPs first — so "mcflamingo" finds McFlamingo
-    // even if the caller passes a wrong ZIP.
+    // ── Name-first lookup (no ZIP filter, proximity-sorted) ─────────────────
+    // Tries partial name match across all ZIPs, falls back to word tokens,
+    // then sorts by proximity to caller's ZIP so closest location comes first.
     const GENERIC_CATEGORIES = ['restaurant','food','gym','fitness','grocery','bank',
       'clinic','doctor','bar','cafe','hotel','store','shop','salon','pharmacy'];
     const rawLower = (rawQuery || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
     const isGeneric = GENERIC_CATEGORIES.some(c => rawLower === c || rawLower === c + 's');
     if (rawQuery && !isGeneric) {
-      const nameRows = await db.query(
-        `SELECT name, zip, address, city, phone, website, hours,
-                category, category_group, lat, lon,
-                confidence_score AS confidence, status, sources, owner_verified, tags,
-                COALESCE(sunbiz_id, sunbiz_doc_number) AS sunbiz_id,
-                (claimed_at IS NOT NULL) AS claimed,
-                wallet,
-                pos_config->>'pos_type' AS pos_type
-         FROM businesses
-         WHERE status != 'inactive'
-           AND name ILIKE $1
-         ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
-         LIMIT 5`,
-        ['%' + rawQuery + '%']
-      );
+      const NAME_SQL = `SELECT name, zip, address, city, phone, website, hours,
+              category, category_group, lat, lon,
+              confidence_score AS confidence, status, sources, owner_verified, tags,
+              COALESCE(sunbiz_id, sunbiz_doc_number) AS sunbiz_id,
+              (claimed_at IS NOT NULL) AS claimed,
+              wallet, pos_config->>'pos_type' AS pos_type
+       FROM businesses
+       WHERE status != 'inactive' AND name ILIKE $1
+       ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+       LIMIT 20`;
+
+      // Try full rawQuery first, then each word token as fallback
+      let nameRows = (await db.query(NAME_SQL, ['%' + rawQuery + '%'])).rows;
+      if (!nameRows.length) {
+        const tokens = rawLower.split(/s+/).filter(t => t.length >= 3);
+        for (const tok of tokens) {
+          const r = await db.query(NAME_SQL, ['%' + tok + '%']);
+          if (r.rows.length) { nameRows = r.rows; break; }
+        }
+      }
+
       if (nameRows.length > 0) {
-        return enrichWithUCP(nameRows.map(r => ({
+        // Sort by proximity to caller ZIP using business lat/lon centroid
+        if (resolvedZip) {
+          try {
+            const centroid = await db.query(
+              'SELECT AVG(lat) AS clat, AVG(lon) AS clon FROM businesses WHERE zip = $1 AND lat IS NOT NULL',
+              [resolvedZip]
+            );
+            const clat = parseFloat(centroid.rows[0]?.clat);
+            const clon = parseFloat(centroid.rows[0]?.clon);
+            if (!isNaN(clat) && !isNaN(clon)) {
+              nameRows.sort((a, b) => {
+                const da = a.lat && a.lon ? Math.pow(a.lat - clat, 2) + Math.pow(a.lon - clon, 2) : 999;
+                const db2 = b.lat && b.lon ? Math.pow(b.lat - clat, 2) + Math.pow(b.lon - clon, 2) : 999;
+                return da - db2;
+              });
+            }
+          } catch (_) {}
+        }
+        return enrichWithUCP(nameRows.slice(0, 5).map(r => ({
           name:            r.name,
           zip:             r.zip,
           address:         r.address        || '',
