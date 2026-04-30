@@ -417,7 +417,8 @@ router.post('/claim/start', express.json(), async (req, res) => {
       [business_id]
     );
     if (!biz)           return res.status(404).json({ error: 'business not found' });
-    if (biz.claimed_at) return res.status(409).json({ error: 'already claimed', claimed: true });
+    // Already claimed = returning owner. Still send a code so they can re-verify and get their inbox link.
+    // Do NOT block here — fall through to send the code.
 
     const token    = String(Math.floor(100000 + Math.random() * 900000));
     const tokenExp = new Date(Date.now() + 30 * 60 * 1000);
@@ -456,16 +457,27 @@ router.post('/claim/verify', express.json(), async (req, res) => {
     const db  = require('./lib/db');
     const nq  = require('./lib/notificationQueue');
     const [biz] = await db.query(
-      `SELECT business_id, name, claim_token, claim_token_exp, claimed_at,
+      `SELECT business_id, name, claim_token, claim_token_exp, claimed_at, dispatch_token,
               notify_sms, notify_email, notify_push, notify_web
          FROM businesses WHERE business_id = $1 AND status = 'active'`,
       [business_id]
     );
     if (!biz)             return res.status(404).json({ error: 'business not found' });
-    if (biz.claimed_at)   return res.status(409).json({ error: 'already claimed' });
     if (!biz.claim_token) return res.status(400).json({ error: 'no pending claim' });
     if (biz.claim_token !== String(token)) return res.status(401).json({ error: 'invalid code' });
     if (new Date(biz.claim_token_exp) < new Date()) return res.status(401).json({ error: 'code expired' });
+
+    // Already claimed — returning owner verified. Return their existing inbox link.
+    if (biz.claimed_at && biz.dispatch_token) {
+      return res.json({
+        ok: true,
+        returning: true,
+        business_id:    biz.business_id,
+        name:           biz.name,
+        dispatch_token: biz.dispatch_token,
+        inbox_url:      `https://www.thelocalintel.com/inbox?token=${biz.dispatch_token}`,
+      });
+    }
 
     // Generate a persistent dispatch_token — this is their inbox login, never expires
     const { randomUUID } = require('crypto');
