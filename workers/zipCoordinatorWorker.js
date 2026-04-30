@@ -115,18 +115,30 @@ function checkBudgetGate() {
 
 const pgStore = require('../lib/pgStore');
 
-function loadCoverage() {
-  // Try local file first for speed, Postgres is source of truth
-  if (fs.existsSync(COVERAGE_FILE)) {
-    return JSON.parse(fs.readFileSync(COVERAGE_FILE));
+// Coverage is now Postgres-only — no flat file
+// In-memory coverage cache is rebuilt from Postgres on every start
+let _coverageCache = null;
+
+async function loadCoverage() {
+  if (_coverageCache) return _coverageCache;
+  try {
+    const pgCoverage = await pgStore.getZipCoverage();
+    const coverage = { completed: {}, inProgress: {}, failed: {}, lastRun: null };
+    for (const [zip, info] of Object.entries(pgCoverage)) {
+      if (info.status === 'done') coverage.completed[zip] = { worker: info.worker, count: info.record_count };
+    }
+    _coverageCache = coverage;
+    console.log(`[ZipCoordinator] Loaded ${Object.keys(coverage.completed).length} completed ZIPs from Postgres`);
+    return coverage;
+  } catch (e) {
+    console.warn('[ZipCoordinator] Could not load coverage from Postgres:', e.message);
+    return { completed: {}, inProgress: {}, failed: {}, lastRun: null };
   }
-  return { completed: {}, inProgress: {}, failed: {}, lastRun: null };
 }
 
 function saveCoverage(coverage) {
-  // Write to file for local speed
-  fs.writeFileSync(COVERAGE_FILE, JSON.stringify(coverage, null, 2));
-  // Also persist completed ZIPs to Postgres so they survive restarts
+  // Update in-memory cache; Postgres is written by markZipProcessed() in zipAgent
+  _coverageCache = coverage;
   const completed = coverage.completed || {};
   Object.entries(completed).forEach(([zip, info]) => {
     pgStore.markZipProcessed(zip, info?.worker || 'zipCoordinator', info?.count || 0)
@@ -134,22 +146,10 @@ function saveCoverage(coverage) {
   });
 }
 
-// Restore coverage from Postgres on cold start (Railway restart)
+// No-op: kept for call-site compat — Postgres restore is now done in loadCoverage()
 async function restoreCoverageFromPostgres() {
-  if (fs.existsSync(COVERAGE_FILE)) return; // already have local copy
-  try {
-    const pgCoverage = await pgStore.getZipCoverage();
-    if (!Object.keys(pgCoverage).length) return;
-    const coverage = { completed: {}, inProgress: {}, failed: {}, lastRun: null };
-    for (const [zip, info] of Object.entries(pgCoverage)) {
-      if (info.status === 'done') coverage.completed[zip] = { worker: info.worker, count: info.record_count };
-    }
-    fs.mkdirSync(path.dirname(COVERAGE_FILE), { recursive: true });
-    fs.writeFileSync(COVERAGE_FILE, JSON.stringify(coverage, null, 2));
-    console.log(`[ZipCoordinator] Restored ${Object.keys(coverage.completed).length} completed ZIPs from Postgres`);
-  } catch (e) {
-    console.warn('[ZipCoordinator] Could not restore coverage from Postgres:', e.message);
-  }
+  _coverageCache = null; // force reload on next loadCoverage() call
+  console.log('[ZipCoordinator] Coverage cache cleared — will reload from Postgres');
 }
 
 function getFlCoveragePct(queue) {
@@ -330,7 +330,7 @@ async function coordinatorCycle() {
 
   checkBudgetGate();
 
-  const coverage = loadCoverage();
+  const coverage = await loadCoverage();
   const queue = loadQueue();
 
   // Reset stuck in-progress (older than 10 mins)
@@ -450,7 +450,7 @@ const app = express();
 app.use(express.json());
 
 app.get('/health', (req, res) => {
-  const coverage = loadCoverage();
+  const coverage = await loadCoverage();
   const queue = loadQueue();
   const completed = queue.filter(z => z.status === 'complete').length;
   const pending = queue.filter(z => z.status === 'pending').length;
@@ -497,7 +497,7 @@ app.post('/add-zip', (req, res) => {
 });
 
 app.get('/coverage', (req, res) => {
-  res.json(loadCoverage());
+  loadCoverage().then(cov => res.json(cov)).catch(() => res.json({}));
 });
 
 app.get('/queue', (req, res) => {

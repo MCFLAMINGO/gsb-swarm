@@ -24,6 +24,15 @@ const ZIPS_DIR = path.join(DATA_DIR, 'zips');
 const DELAY_MS   = 1500;
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
 
+// Postgres direct write (non-fatal if DB unavailable)
+let _db = null;
+function getDb() {
+  if (!_db && process.env.LOCAL_INTEL_DB_URL) {
+    try { _db = require('../lib/db'); } catch (_) {}
+  }
+  return _db;
+}
+
 // ZIP → BBB location search params
 // BBB uses city+state in URL and geo proximity
 const ZIP_CITY_MAP = {
@@ -204,60 +213,38 @@ async function fetchDetail(detailUrl) {
   };
 }
 
-// ── Merge into ZIP file ────────────────────────────────────────────────────────
+// ── Upsert BBB business directly to Postgres ─────────────────────────────────
 
-function mergeIntoZipFile(zipCode, biz) {
+async function upsertToPostgres(zipCode, biz) {
   if (!zipCode) return 'skipped';
-  const filePath = path.join(ZIPS_DIR, `${zipCode}.json`);
-  let existing = [];
-  if (fs.existsSync(filePath)) {
-    try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
-    if (!Array.isArray(existing)) existing = existing?.businesses || [];
-  }
-
-  const nameLower = biz.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const match = existing.find(b => {
-    const bLower = (b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    return bLower === nameLower || bLower.includes(nameLower) || nameLower.includes(bLower);
-  });
-
-  const now = new Date().toISOString();
-
-  if (match) {
-    let changed = false;
-    if (!match.phone   && biz.phone)   { match.phone   = biz.phone;   changed = true; }
-    if (!match.website && biz.website) { match.website = biz.website; changed = true; }
-    if (!match.address && biz.address) { match.address = biz.address; changed = true; }
-    // Stamp category_group if missing — heals older records on every enrichment pass
-    if (stamp(match)) changed = true;
-    if (changed) {
-      match.last_enriched = now;
-      match.bbb_verified  = true;
-      match.confidence    = Math.min(92, (match.confidence || 60) + 10);
-    }
-    if (changed) fs.writeFileSync(filePath, JSON.stringify(existing, null, 2));
-    return changed ? 'enriched' : 'skipped';
-  } else {
-    const newBiz = {
-      name:         biz.name,
-      phone:        biz.phone   || null,
-      website:      biz.website || null,
-      address:      biz.address || null,
-      hours:        null,
-      category:     mapCategory(biz.category),
-      zip:          zipCode,
-      lat:          null,
-      lon:          null,
-      confidence:   75,
-      source:       'bbb',
-      bbb_verified: true,
-      added_at:     now,
-      last_enriched: now,
-    };
-    stamp(newBiz); // always stamp on creation
-    existing.push(newBiz);
-    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2));
-    return 'added';
+  const db = getDb();
+  if (!db) return 'skipped';
+  try {
+    const category = mapCategory(biz.category);
+    const { created } = await db.upsertBusiness({
+      name:             biz.name,
+      zip:              zipCode,
+      address:          biz.address  || null,
+      city:             null,
+      phone:            biz.phone    || null,
+      website:          biz.website  || null,
+      hours:            null,
+      category,
+      category_group:   'services',
+      status:           'active',
+      lat:              null,
+      lon:              null,
+      confidence_score: 0.82,
+      tags:             [],
+      description:      null,
+      source_id:        'bbb',
+      source_weight:    0.5,
+      source_raw:       null,
+    });
+    return created ? 'added' : 'enriched';
+  } catch (e) {
+    console.warn(`[BBB] Postgres upsert error (${biz.name}):`, e.message);
+    return 'skipped';
   }
 }
 
@@ -331,7 +318,7 @@ async function bulkScrapeZip(zip) {
         if (detail.category) biz.category = detail.category;
       }
 
-      const r = mergeIntoZipFile(targetZip, biz);
+      const r = await upsertToPostgres(targetZip, biz);
       if      (r === 'added')    { added++;    console.log(`[BBB] + ${biz.name} (${targetZip})`); }
       else if (r === 'enriched') { enriched++; }
       else                       { skipped++;  }

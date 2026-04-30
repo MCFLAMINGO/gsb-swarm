@@ -8,11 +8,11 @@
  *  - Pulls amenity/shop/office/tourism/leisure nodes + ways per ZIP bounding box
  *  - Rate-limited: 1 req / 2 s (Overpass public policy)
  *  - Priority queue: high-population ZIPs first
- *  - Resume-safe: skips ZIPs whose data/zips/{zip}.json already has osm_pois[]
- *  - Merges POIs into existing zip JSON; does NOT overwrite other fields
+ *  - Resume-safe: checks zip_enrichment Postgres freshness first
+ *  - Writes POIs to zip_enrichment (raw cache) AND promotes to businesses table
  *  - Runs in a daemon loop: full pass → sleep 24 h → repeat
  *
- * Output per ZIP:  data/zips/{zip}.json  ← { ...existing, osm_pois: [...], osm_updated_at }
+ * Output per ZIP: zip_enrichment (Postgres cache) + businesses (promoted)
  */
 
 const fs    = require('fs');
@@ -20,6 +20,31 @@ const path  = require('path');
 const https = require('https');
 
 const { getZipsByPriority, getZipBbox } = require('./flZipRegistry');
+const db = require('../lib/db');
+
+// category/group mapper (mirrors zipAgent)
+const PG_GROUP_MAP = {
+  restaurant:'food', fast_food:'food', cafe:'food', bar:'food', pub:'food',
+  doctor:'health', dentist:'health', clinic:'health', hospital:'health', pharmacy:'health',
+  leisure:'retail', gym:'retail', fitness:'retail',
+  bank:'finance', insurance:'finance', financial:'finance',
+  legal:'legal', attorney:'legal',
+  retail:'retail', shop:'retail',
+  school:'civic', church:'civic', government:'civic', library:'civic',
+};
+function pgGroup(cat) {
+  if (!cat) return 'services';
+  return PG_GROUP_MAP[cat.toLowerCase().replace(/[^a-z_]/g,'_')] || 'services';
+}
+function resolveCategory(poi) {
+  const sub = poi.subtype || '';
+  const cat = poi.category || 'other';
+  if (cat === 'amenity' || cat === 'shop') return sub || cat;
+  if (cat === 'healthcare') return 'clinic';
+  if (cat === 'leisure') return sub === 'fitness_centre' ? 'gym' : (sub || 'leisure');
+  if (cat === 'tourism') return (sub === 'hotel' || sub === 'motel') ? 'hotel' : (sub || 'tourism');
+  return sub || cat;
+}
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const DATA_DIR      = path.join(__dirname, '..', 'data', 'osm');
@@ -52,8 +77,52 @@ function saveZipFile(zip, data) {
       osm_pois:       data.osm_pois,
       osm_updated_at: data.osm_updated_at,
       poi_count:      data.osm_pois.length,
-    }).catch(e => console.warn('[overpass] Postgres write failed:', e.message));
+    }).catch(e => console.warn('[overpass] Postgres zip_enrichment write failed:', e.message));
   }
+}
+
+/**
+ * promoteOsmToBusinesses — upserts all named POIs from a freshly-fetched set
+ * into the businesses table. Called immediately after saveZipFile so every
+ * Overpass run lands in Postgres without waiting for enrichmentAgent.
+ */
+async function promoteOsmToBusinesses(zip, pois) {
+  if (!process.env.LOCAL_INTEL_DB_URL) return;
+  const named = pois.filter(p => p.name);
+  if (!named.length) return;
+  let written = 0, failed = 0;
+  for (const poi of named) {
+    try {
+      const category = resolveCategory(poi);
+      const addr = poi.addr || {};
+      const address = [addr.street, addr.city].filter(Boolean).join(', ') || null;
+      await db.upsertBusiness({
+        name:             poi.name,
+        zip:              addr.postcode || zip,
+        address,
+        city:             addr.city || null,
+        phone:            poi.phone || null,
+        website:          poi.website || null,
+        hours:            poi.hours || null,
+        category,
+        category_group:   pgGroup(category),
+        status:           'active',
+        lat:              poi.lat || null,
+        lon:              poi.lon || null,
+        confidence_score: 0.70,
+        tags:             [],
+        description:      null,
+        source_id:        'osm',
+        source_weight:    0.3,
+        source_raw:       null,
+      });
+      written++;
+    } catch (e) {
+      failed++;
+      if (failed === 1) console.warn(`[overpass] promote error (${zip}):`, e.message);
+    }
+  }
+  console.log(`[overpass] ${zip}: promoted ${written}/${named.length} POIs to businesses (${failed} failed)`);
 }
 
 // Check Postgres first for freshness before re-fetching from Overpass
@@ -174,6 +243,9 @@ async function processZip(zip) {
     osm_poi_count : pois.length,
     osm_updated_at: new Date().toISOString(),
   });
+
+  // Promote POIs to businesses table — this is the key Postgres-first change
+  await promoteOsmToBusinesses(zip, pois);
 
   console.log(`[overpass] ${zip} → ${pois.length} named POIs`);
   return { zip, count: pois.length };

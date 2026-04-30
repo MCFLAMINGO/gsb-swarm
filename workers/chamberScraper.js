@@ -26,6 +26,15 @@ const { computeConfidence } = require('../lib/computeConfidence');
 const BASE_URL   = 'https://business.sjcchamber.com';
 const DELAY_MS   = 1200; // polite crawl delay
 
+// Postgres direct write (non-fatal if DB unavailable)
+let _db = null;
+function getDb() {
+  if (!_db && process.env.LOCAL_INTEL_DB_URL) {
+    try { _db = require('../lib/db'); } catch (_) {}
+  }
+  return _db;
+}
+
 // ── Utility: fetch raw HTML ──────────────────────────────────────────────────
 function fetchRaw(url, headers = {}, timeoutMs = 15000) {
   return new Promise((resolve) => {
@@ -186,63 +195,35 @@ function inferZip(address) {
   return zipMatch ? zipMatch[1] : null;
 }
 
-// ── Merge Chamber member into ZIP data file ──────────────────────────────────
-function mergeIntoZipFile(zipCode, business) {
-  const filePath = path.join(DATA_DIR, `${zipCode}.json`);
-  let data = { businesses: [] };
-
-  if (fs.existsSync(filePath)) {
-    try { data = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
-  }
-
-  if (!data.businesses) data.businesses = [];
-
-  // Match by name (case-insensitive, fuzzy)
-  const nameLower = business.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const existing = data.businesses.find(b => {
-    const bLower = (b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    return bLower === nameLower || bLower.includes(nameLower) || nameLower.includes(bLower);
-  });
-
-  const now = new Date().toISOString();
-
-  if (existing) {
-    // Enrich existing record
-    let changed = false;
-    if (!existing.phone    && business.phone)    { existing.phone    = business.phone;    changed = true; }
-    if (!existing.website  && business.website)  { existing.website  = business.website;  changed = true; }
-    if (!existing.hours    && business.hours)    { existing.hours    = business.hours;    changed = true; }
-    if (!existing.category && business.category) { existing.category = business.category; changed = true; }
-    if (!existing.address  && business.address)  { existing.address  = business.address;  changed = true; }
-    if (changed) {
-      existing.chamber_member   = true;
-      existing.chamber_source   = 'sjc_chamber';
-      existing.last_enriched    = now;
-      existing.confidence       = computeConfidence(existing);
-    }
-    return changed ? 'enriched' : 'skipped';
-  } else {
-    // Add as new business
-    const newBiz = {
-      name:           business.name,
-      phone:          business.phone || null,
-      website:        business.website || null,
-      address:        business.address || null,
-      hours:          business.hours || null,
-      category:       business.category || 'business',
-      zip:            zipCode,
-      lat:            business.lat || null,
-      lon:            business.lon || null,
-      chamber_member: true,
-      chamber_source: 'sjc_chamber',
-      source:         'sjc_chamber',
-      added_at:       now,
-      last_enriched:  now,
-    };
-    newBiz.confidence = computeConfidence(newBiz);
-    data.businesses.push(newBiz);
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    return 'added';
+// ── Upsert Chamber member directly to Postgres ───────────────────────────────
+async function upsertToPostgres(zipCode, business) {
+  const db = getDb();
+  if (!db) return 'skipped';
+  try {
+    const { created } = await db.upsertBusiness({
+      name:             business.name,
+      zip:              zipCode,
+      address:          business.address || null,
+      city:             null,
+      phone:            business.phone   || null,
+      website:          business.website || null,
+      hours:            business.hours   || null,
+      category:         business.category || 'business',
+      category_group:   'services',
+      status:           'active',
+      lat:              business.lat     || null,
+      lon:              business.lon     || null,
+      confidence_score: 0.82,
+      tags:             [],
+      description:      business.description || null,
+      source_id:        'chamber',
+      source_weight:    0.5,
+      source_raw:       null,
+    });
+    return created ? 'added' : 'enriched';
+  } catch (e) {
+    console.warn(`[ChamberScraper] Postgres upsert error (${business.name}):`, e.message);
+    return 'skipped';
   }
 }
 
@@ -289,7 +270,7 @@ async function bulkImport() {
       if (detail.phone && !m.phone) m.phone = detail.phone;
     }
 
-    const result = mergeIntoZipFile(zip, m);
+    const result = await upsertToPostgres(zip, m);
     if      (result === 'added')    added++;
     else if (result === 'enriched') enriched++;
     else                            skipped++;

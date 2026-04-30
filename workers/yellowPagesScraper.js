@@ -20,7 +20,16 @@ const fs     = require('fs');
 const DATA_DIR  = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const { computeConfidence } = require('../lib/computeConfidence');
 const { stamp } = require('../lib/categoryNormalizer');
-const ZIPS_DIR  = path.join(DATA_DIR, 'zips');  // flat-array format, matches zipAgent + MCP
+const ZIPS_DIR  = path.join(DATA_DIR, 'zips');  // kept for legacy fallback reads only
+
+// Postgres direct write (non-fatal if DB unavailable)
+let _db = null;
+function getDb() {
+  if (!_db && process.env.LOCAL_INTEL_DB_URL) {
+    try { _db = require('../lib/db'); } catch (_) {}
+  }
+  return _db;
+}
 
 // Infer OSM-style category from business name when schema.org type is generic 'LocalBusiness'
 function inferCategoryFromName(name) {
@@ -200,62 +209,36 @@ function inferZip(address) {
   return m ? m[1] : null;
 }
 
-// Merge YP business into ZIP data file — flat array in data/zips/{zip}.json (matches zipAgent + MCP)
-function mergeIntoZipFile(zipCode, biz) {
+// Upsert YP business directly to Postgres
+async function mergeIntoZipFile(zipCode, biz) {
   if (!zipCode || !/^\d{5}$/.test(zipCode)) return 'skipped'; // guard malformed ZIPs
-  if (!fs.existsSync(ZIPS_DIR)) fs.mkdirSync(ZIPS_DIR, { recursive: true });
-  const filePath = path.join(ZIPS_DIR, `${zipCode}.json`);
-  let data = [];
-  if (fs.existsSync(filePath)) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-      data = Array.isArray(raw) ? raw : (raw.businesses || []);
-    } catch (_) {}
-  }
-
-  const nameLower = biz.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const existing = data.find(b => {
-    const bLower = (b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    return bLower === nameLower || bLower.includes(nameLower) || nameLower.includes(bLower);
-  });
-
-  const now = new Date().toISOString();
-
-  if (existing) {
-    let changed = false;
-    if (!existing.phone   && biz.phone)   { existing.phone   = biz.phone;   changed = true; }
-    if (!existing.website && biz.website) { existing.website = biz.website; changed = true; }
-    if (!existing.hours   && biz.hours)   { existing.hours   = biz.hours;   changed = true; }
-    // Stamp category_group if missing — heals older records on every enrichment pass
-    if (stamp(existing)) changed = true;
-    if (changed) {
-      existing.last_enriched = now;
-      existing.yp_source = true;
-      existing.confidence = computeConfidence(existing);
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    }
-    return changed ? 'enriched' : 'skipped';
-  } else {
-    const newBiz = {
-      name:         biz.name,
-      phone:        biz.phone || null,
-      website:      biz.website || null,
-      address:      biz.address || null,
-      hours:        biz.hours || null,
-      category:     biz.category || 'business',
-      zip:          zipCode,
-      lat:          null,
-      lon:          null,
-      source:       'yellowpages',
-      yp_source:    true,
-      added_at:     now,
-      last_enriched: now,
-    };
-    stamp(newBiz); // always stamp on creation
-    newBiz.confidence = computeConfidence(newBiz);
-    data.push(newBiz);
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    return 'added';
+  const db = getDb();
+  if (!db) return 'skipped';
+  try {
+    const { created } = await db.upsertBusiness({
+      name:             biz.name,
+      zip:              zipCode,
+      address:          biz.address  || null,
+      city:             null,
+      phone:            biz.phone    || null,
+      website:          biz.website  || null,
+      hours:            biz.hours    || null,
+      category:         biz.category || 'business',
+      category_group:   'services',
+      status:           'active',
+      lat:              null,
+      lon:              null,
+      confidence_score: 0.60,
+      tags:             [],
+      description:      null,
+      source_id:        'yp',
+      source_weight:    0.3,
+      source_raw:       null,
+    });
+    return created ? 'added' : 'enriched';
+  } catch (e) {
+    console.warn(`[YP] Postgres upsert error (${biz.name}):`, e.message);
+    return 'skipped';
   }
 }
 
@@ -294,7 +277,7 @@ async function bulkScrapeYellowPages(options = {}) {
           const zip = biz.zip || inferZip(biz.address) || defaultZips[0];
           if (!zip) { skipped++; continue; }
 
-          const result = mergeIntoZipFile(zip, biz);
+          const result = await mergeIntoZipFile(zip, biz);
           if      (result === 'added')    added++;
           else if (result === 'enriched') enriched++;
           else                            skipped++;

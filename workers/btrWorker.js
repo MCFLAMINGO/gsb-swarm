@@ -31,6 +31,15 @@ const ZIPS_DIR  = path.join(DATA_DIR, 'zips');
 const BTR_DIR   = path.join(DATA_DIR, 'btr');
 const INDEX_FILE = path.join(BTR_DIR, '_index.json');
 
+// Postgres direct write (non-fatal if DB unavailable)
+let _db = null;
+function getDb() {
+  if (!_db && process.env.LOCAL_INTEL_DB_URL) {
+    try { _db = require('../lib/db'); } catch (_) {}
+  }
+  return _db;
+}
+
 // SJC ZIPs to pull BTR for — all active SJC coverage
 const BTR_ZIPS = [
   { zip: '32081', name: 'Nocatee',              queries: ['32081', 'Nocatee'] },
@@ -299,71 +308,47 @@ function cleanup(...files) {
 
 // ── Merge BTR records into ZIP file ──────────────────────────────────────────
 
-function mergeIntoZip(zipCode, btrRecords) {
-  const filePath = path.join(ZIPS_DIR, `${zipCode}.json`);
-  let existing = [];
-  if (fs.existsSync(filePath)) {
-    try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch(_) {}
-    if (!Array.isArray(existing)) existing = [];
-  }
-
+async function mergeIntoZip(zipCode, btrRecords) {
+  const db = getDb();
   let added = 0, enriched = 0;
-  const now = new Date().toISOString();
 
   for (const rec of btrRecords) {
     if (!rec.name) continue;
-
     // Only use records that actually belong to this ZIP
     const recZip = (rec.zip || '').replace(/[^0-9]/g, '').slice(0, 5);
     if (recZip && recZip !== zipCode) continue;
 
-    const nameLower = rec.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const match = existing.find(b => {
-      const bLower = (b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      return bLower === nameLower ||
-        (nameLower.length > 4 && (bLower.includes(nameLower) || nameLower.includes(bLower)));
-    });
-
-    if (match) {
-      let changed = false;
-      if (!match.address && rec.address) { match.address = rec.address; changed = true; }
-      if (!match.btr_account)            { match.btr_account = rec._account; changed = true; }
-      if (changed) {
-        match.btr_verified  = true;
-        match.confidence    = Math.min(95, (match.confidence || 60) + 12);
-        match.last_enriched = now;
-        enriched++;
+    if (db) {
+      try {
+        const category = mapLicenseType(rec.license_type);
+        const { created } = await db.upsertBusiness({
+          name:             rec.name,
+          zip:              zipCode,
+          address:          rec.address || null,
+          city:             rec.city    || null,
+          phone:            null,
+          website:          null,
+          hours:            null,
+          category,
+          category_group:   'services',
+          status:           'active',
+          lat:              null,
+          lon:              null,
+          confidence_score: 0.80, // government record = high base confidence
+          tags:             [],
+          description:      null,
+          source_id:        'btr',
+          source_weight:    0.6,
+          source_raw:       null,
+        });
+        if (created) added++; else enriched++;
+      } catch (e) {
+        console.warn(`[BTRWorker] Postgres upsert error (${rec.name}):`, e.message);
       }
-    } else {
-      // Net-new business from BTR — government verified
-      existing.push({
-        name:         rec.name,
-        phone:        null,
-        website:      null,
-        address:      rec.address || null,
-        city:         rec.city || null,
-        hours:        null,
-        category:     mapLicenseType(rec.license_type),
-        license_type: rec.license_type || null,
-        zip:          zipCode,
-        lat:          null,
-        lon:          null,
-        confidence:   80,        // government record = high base confidence
-        source:       'btr',
-        btr_verified: true,
-        btr_account:  rec._account || null,
-        added_at:     now,
-        last_enriched: now,
-      });
-      added++;
     }
   }
 
-  if (added > 0 || enriched > 0) {
-    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2));
-  }
-
-  return { added, enriched, total: existing.length };
+  return { added, enriched, total: added + enriched };
 }
 
 // ── Run full BTR import ────────────────────────────────────────────────────────
@@ -400,7 +385,7 @@ async function runBTR(targetZip = null) {
       fs.writeFileSync(rawFile, JSON.stringify(records, null, 2));
 
       // Merge into zip file
-      const stats = mergeIntoZip(zipEntry.zip, records);
+      const stats = await mergeIntoZip(zipEntry.zip, records);
       console.log(`[BTRWorker] ${zipEntry.zip}: +${stats.added} new, ${stats.enriched} enriched, ${stats.total} total`);
 
       index.zips[zipEntry.zip] = {

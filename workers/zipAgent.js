@@ -16,8 +16,8 @@
  *   6. SJC Chamber of Commerce — member directory bulk import (verified businesses)
  *   7. BBB — accredited business discovery (phone, address, category)
  *
- * Writes: data/zips/{zip}.json
- * Logs:   data/sourceLog.json  (per-zip availability log)
+ * Writes: businesses (Postgres) — direct per-source upserts
+ * Logs:   data/sourceLog.json  (per-zip availability log, kept for diagnostics)
  * Exit 0 = success, Exit 1 = fatal error
  */
 
@@ -230,8 +230,6 @@ if (!ZIP || isNaN(LAT) || isNaN(LON)) {
 }
 
 const DATA_DIR   = path.join(__dirname, '../data');
-const ZIPS_DIR   = path.join(DATA_DIR, 'zips');
-const ZIP_FILE   = path.join(ZIPS_DIR, `${ZIP}.json`);
 const SOURCE_LOG = path.join(DATA_DIR, 'sourceLog.json');
 
 // SJC zip codes — only these get ArcGIS Hub queries
@@ -522,14 +520,6 @@ function mergeBusinesses(existing, incoming) {
 
 async function run() {
   log(`Starting — ${NAME} (${LAT}, ${LON}) region=${REGION}`);
-  if (!fs.existsSync(ZIPS_DIR)) fs.mkdirSync(ZIPS_DIR, { recursive: true });
-
-  let existing = [];
-  if (fs.existsSync(ZIP_FILE)) {
-    try { existing = JSON.parse(fs.readFileSync(ZIP_FILE)); }
-    catch (e) { existing = []; }
-  }
-  log(`Existing: ${existing.length} businesses`);
 
   // Run all sources — each is non-blocking, logs and continues on failure
   const [osmResults] = await Promise.all([fetchOSM()]);
@@ -539,13 +529,12 @@ async function run() {
   await sleep(500);
   await fetchSunbiz();
 
-  // Address enrichment
+  // Address enrichment (in-memory only)
   const enriched = await enrichAddresses(osmResults);
 
-  // Merge OSM pass first
-  const afterOSM = mergeBusinesses(existing, enriched);
-  fs.writeFileSync(ZIP_FILE, JSON.stringify(afterOSM, null, 2));
-  log(`After OSM pass: ${afterOSM.length} businesses`);
+  // Write OSM results directly to Postgres
+  log(`OSM pass: ${enriched.length} businesses — writing to Postgres`);
+  await dualWritePostgres(enriched, ZIP, STATE || 'FL');
 
   // ── Source 5: YellowPages bulk ────────────────────────────────────────
   // Runs per-city-slug so it only pulls businesses relevant to this ZIP
@@ -617,24 +606,15 @@ async function run() {
     }
   }
 
-  // Re-read final state (all sources wrote directly to zip file)
-  let final = afterOSM;
-  try { final = JSON.parse(fs.readFileSync(ZIP_FILE, 'utf8')); } catch(_) {}
-  log(`Final: ${final.length} businesses`);
-  fs.writeFileSync(ZIP_FILE, JSON.stringify(final, null, 2));
-  log(`Written → data/zips/${ZIP}.json`);
+  // Update zip_coverage in Postgres (replaces flat zipCoverage.json)
+  try {
+    const { markZipProcessed } = require('../lib/pgStore');
+    await markZipProcessed(ZIP, 'zipagent', enriched.length);
+  } catch (e) {
+    log(`Warning: could not update zip_coverage: ${e.message}`);
+  }
 
-  // Dual-write to Postgres — persists across Railway deploys
-  await dualWritePostgres(final, ZIP, STATE || 'FL');
-
-  // Update coverage
-  const covFile = path.join(DATA_DIR, 'zipCoverage.json');
-  let cov = {};
-  if (fs.existsSync(covFile)) { try { cov = JSON.parse(fs.readFileSync(covFile)); } catch(e) {} }
-  if (!cov.completed) cov.completed = {};
-  cov.completed[ZIP] = { name: NAME, region: REGION, businesses: final.length, completedAt: new Date().toISOString() };
-  fs.writeFileSync(covFile, JSON.stringify(cov, null, 2));
-
+  log(`Done — Postgres updated for ${ZIP}`);
   process.exit(0);
 }
 

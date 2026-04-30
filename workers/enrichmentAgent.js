@@ -612,31 +612,26 @@ async function enrichmentCycle() {
   stats.running = true;
   stats.lastRun = new Date().toISOString();
 
-  // ZIP discovery: Postgres first, flat file fallback for local dev
+  // ZIP discovery: Postgres only
   let allZips = [];
-  let usePostgres = false;
-  if (process.env.LOCAL_INTEL_DB_URL) {
-    try {
-      const { getDistinctZips } = require('../lib/pgStore');
-      allZips = await getDistinctZips();
-      if (allZips.length > 0) {
-        usePostgres = true;
-        console.log(`[EnrichmentAgent] ZIP discovery: ${allZips.length} ZIPs from Postgres`);
-      }
-    } catch (e) {
-      console.warn('[EnrichmentAgent] Postgres ZIP discovery failed, falling back to flat files:', e.message);
-    }
+  if (!process.env.LOCAL_INTEL_DB_URL) {
+    console.log('[EnrichmentAgent] LOCAL_INTEL_DB_URL not set — skipping cycle');
+    stats.running = false;
+    return;
   }
-  if (!usePostgres) {
-    if (!fs.existsSync(ZIPS_DIR)) {
-      console.log('[EnrichmentAgent] No zips dir yet — waiting for ZipAgent');
-      stats.running = false;
-      return;
-    }
-    allZips = fs.readdirSync(ZIPS_DIR)
-      .filter(f => f.endsWith('.json'))
-      .map(f => f.replace('.json', ''));
-    console.log(`[EnrichmentAgent] ZIP discovery: ${allZips.length} ZIPs from flat files`);
+  try {
+    const { getDistinctZips } = require('../lib/pgStore');
+    allZips = await getDistinctZips();
+    console.log(`[EnrichmentAgent] ZIP discovery: ${allZips.length} ZIPs from Postgres`);
+  } catch (e) {
+    console.warn('[EnrichmentAgent] Postgres ZIP discovery failed:', e.message);
+    stats.running = false;
+    return;
+  }
+  if (!allZips.length) {
+    console.log('[EnrichmentAgent] No ZIPs in Postgres yet — waiting for ZipAgent');
+    stats.running = false;
+    return;
   }
 
   const log = loadLog();
@@ -645,19 +640,12 @@ async function enrichmentCycle() {
 
   for (const zip of allZips) {
     let businesses;
-    // Business reads: Postgres first, flat file fallback
-    if (usePostgres) {
-      try {
-        const { getBusinessesByZip } = require('../lib/pgStore');
-        businesses = await getBusinessesByZip(zip);
-      } catch (e) {
-        console.warn(`[EnrichmentAgent] Postgres read failed for ${zip}:`, e.message);
-        continue;
-      }
-    } else {
-      const file = path.join(ZIPS_DIR, `${zip}.json`);
-      try { businesses = JSON.parse(fs.readFileSync(file)); }
-      catch (e) { continue; }
+    try {
+      const { getBusinessesByZip } = require('../lib/pgStore');
+      businesses = await getBusinessesByZip(zip);
+    } catch (e) {
+      console.warn(`[EnrichmentAgent] Postgres read failed for ${zip}:`, e.message);
+      continue;
     }
     if (!Array.isArray(businesses)) continue;
 
@@ -675,7 +663,7 @@ async function enrichmentCycle() {
       .sort((a, b) => getStaleness(b).reEnrichPriority - getStaleness(a).reEnrichPriority);
 
     if (!candidates.length) continue;
-    console.log(`[EnrichmentAgent] ${file}: ${candidates.length} candidates`);
+    console.log(`[EnrichmentAgent] ${zip}: ${candidates.length} candidates`);
 
     let fileChanged = false;
     for (const biz of candidates) {
@@ -699,22 +687,16 @@ async function enrichmentCycle() {
     }
 
     if (fileChanged) {
-      // Write back to Postgres (individual upserts for enriched businesses)
-      if (usePostgres) {
-        const db2 = require('../lib/db');
-        for (const biz of businesses) {
-          try {
-            await db2.upsertBusiness({
-              ...biz,
-              source_id: biz.primary_source || 'enrichment',
-            });
-          } catch (_) { /* best effort */ }
-        }
-        console.log(`[EnrichmentAgent] Postgres updated for ZIP ${zip}`);
-      } else {
-        fs.writeFileSync(path.join(ZIPS_DIR, `${zip}.json`), JSON.stringify(businesses, null, 2));
-        console.log(`[EnrichmentAgent] Flat file updated for ZIP ${zip}`);
+      const db2 = require('../lib/db');
+      for (const biz of businesses) {
+        try {
+          await db2.upsertBusiness({
+            ...biz,
+            source_id: biz.primary_source || 'enrichment',
+          });
+        } catch (_) { /* best effort */ }
       }
+      console.log(`[EnrichmentAgent] Postgres updated for ZIP ${zip}`);
     }
   }
 
