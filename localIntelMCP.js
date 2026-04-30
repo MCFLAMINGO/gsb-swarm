@@ -912,7 +912,7 @@ async function pgCategorySearch(resolvedZip, normalizedQuery, rawQuery, limitN) 
       // Try full rawQuery first, then each word token as fallback
       let nameRows = (await db.query(NAME_SQL, ['%' + rawQuery + '%'])).rows;
       if (!nameRows.length) {
-        const tokens = rawLower.split(/s+/).filter(t => t.length >= 3);
+        const tokens = rawLower.split(/\s+/).filter(t => t.length >= 3);
         for (const tok of tokens) {
           const r = await db.query(NAME_SQL, ['%' + tok + '%']);
           if (r.rows.length) { nameRows = r.rows; break; }
@@ -1151,11 +1151,83 @@ async function toolSearch({ zip, query, category, group, limit = 20 }) {
  * Returns businesses within radius_miles of a lat/lon, sorted by distance.
  * Core tool for "what's near X" agent queries.
  */
-function toolNearby({ lat, lon, radius_miles = 0.5, category, group, limit = 15 }) {
-  if (!lat || !lon) return { error: 'lat and lon required' };
-  const refLat = parseFloat(lat);
-  const refLon = parseFloat(lon);
+async function toolNearby({ lat, lon, zip, radius_miles = 5, category, group, limit = 15 }) {
+  let refLat = lat ? parseFloat(lat) : null;
+  let refLon = lon ? parseFloat(lon) : null;
 
+  // Look up ZIP centroid from Postgres if lat/lon not provided
+  if ((!refLat || !refLon) && zip && process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const db = require('./lib/db');
+      const centroid = await db.query(
+        'SELECT AVG(lat) AS clat, AVG(lon) AS clon FROM businesses WHERE zip = $1 AND lat IS NOT NULL',
+        [zip]
+      );
+      refLat = parseFloat(centroid.rows[0]?.clat);
+      refLon = parseFloat(centroid.rows[0]?.clon);
+    } catch (_) {}
+  }
+
+  if (!refLat || !refLon || isNaN(refLat) || isNaN(refLon)) return { error: 'lat/lon or valid zip required' };
+
+  // Postgres geo distance query (degrees ≈ miles at FL latitudes: 1° lat ≈ 69mi, 1° lon ≈ 57mi)
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const db = require('./lib/db');
+      const degRadius = parseFloat(radius_miles) / 60; // conservative degree radius
+      let catWhere = '';
+      const params = [refLat, refLon, degRadius];
+      if (category) { params.push(`%${category}%`); catWhere = ` AND (category ILIKE $${params.length} OR category_group ILIKE $${params.length})`; }
+      else if (group) { params.push(`%${group}%`); catWhere = ` AND category_group ILIKE $${params.length}`; }
+      params.push(Math.min(limit, 50));
+      const rows = await db.query(
+        `SELECT name, zip, address, city, phone, website, hours, category, category_group,
+                lat, lon, confidence_score, sources, owner_verified, claimed_at,
+                COALESCE(sunbiz_id, sunbiz_doc_number) AS sunbiz_id,
+                wallet, pos_config->>'pos_type' AS pos_type,
+                sqrt(power(lat - $1, 2) + power(lon - $2, 2)) AS dist_deg
+         FROM businesses
+         WHERE lat IS NOT NULL AND lon IS NOT NULL
+           AND status != 'inactive'
+           AND abs(lat - $1) < $3 AND abs(lon - $2) < $3
+           ${catWhere}
+         ORDER BY dist_deg ASC
+         LIMIT $${params.length}`,
+        params
+      );
+      const results = rows.map(r => ({
+        name:           r.name,
+        zip:            r.zip,
+        address:        r.address  || '',
+        city:           r.city     || '',
+        phone:          r.phone    || '',
+        website:        r.website  || '',
+        hours:          r.hours    || '',
+        category:       r.category || 'business',
+        group:          r.category_group || 'services',
+        lat:            parseFloat(r.lat),
+        lon:            parseFloat(r.lon),
+        distance_miles: parseFloat((r.dist_deg * 60).toFixed(2)),
+        confidence:     r.confidence_score ? parseFloat(r.confidence_score) * 100 : 50,
+        source:         (r.sources || [])[0] || 'pg',
+        claimed:        !!(r.claimed_at),
+        sunbiz_id:      r.sunbiz_id || null,
+        wallet:         r.wallet    || null,
+        pos_type:       r.pos_type  || null,
+      }));
+      return {
+        center: { lat: refLat, lon: refLon },
+        radius_miles,
+        total: results.length,
+        businesses: results,
+        context_block: results.map(b => `${b.name} (${b.zip}) ${b.distance_miles}mi — ${b.phone||''}`).join('\n'),
+      };
+    } catch (e) {
+      console.error('[toolNearby] Postgres error:', e.message);
+    }
+  }
+
+  // Fallback: flat-file in-memory
   let results = loadBusinesses().filter(b => b.lat && b.lon);
   if (category) results = results.filter(b => b.category === category);
   if (group)    results = results.filter(b => getGroup(b.category) === group);
