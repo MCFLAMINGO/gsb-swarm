@@ -910,12 +910,12 @@ async function pgCategorySearch(resolvedZip, normalizedQuery, rawQuery, limitN) 
        LIMIT 20`;
 
       // Try full rawQuery first, then each word token as fallback
-      let nameRows = (await db.query(NAME_SQL, ['%' + rawQuery + '%'])).rows;
+      let nameRows = await db.query(NAME_SQL, ['%' + rawQuery + '%']);
       if (!nameRows.length) {
         const tokens = rawLower.split(/\s+/).filter(t => t.length >= 3);
         for (const tok of tokens) {
           const r = await db.query(NAME_SQL, ['%' + tok + '%']);
-          if (r.rows.length) { nameRows = r.rows; break; }
+          if (r.length) { nameRows = r; break; }
         }
       }
 
@@ -924,11 +924,11 @@ async function pgCategorySearch(resolvedZip, normalizedQuery, rawQuery, limitN) 
         if (resolvedZip) {
           try {
             const centroid = await db.query(
-              'SELECT AVG(lat) AS clat, AVG(lon) AS clon FROM businesses WHERE zip = $1 AND lat IS NOT NULL',
+              'SELECT AVG(lat) AS clat, AVG(lon) AS clon FROM businesses WHERE zip = $1 AND lat IS NOT NULL AND lon < -60',
               [resolvedZip]
             );
-            const clat = parseFloat(centroid.rows[0]?.clat);
-            const clon = parseFloat(centroid.rows[0]?.clon);
+            const clat = parseFloat(centroid[0]?.clat);
+            const clon = parseFloat(centroid[0]?.clon);
             if (!isNaN(clat) && !isNaN(clon)) {
               nameRows.sort((a, b) => {
                 const da = a.lat && a.lon ? Math.pow(a.lat - clat, 2) + Math.pow(a.lon - clon, 2) : 999;
@@ -1160,11 +1160,11 @@ async function toolNearby({ lat, lon, zip, radius_miles = 5, category, group, li
     try {
       const db = require('./lib/db');
       const centroid = await db.query(
-        'SELECT AVG(lat) AS clat, AVG(lon) AS clon FROM businesses WHERE zip = $1 AND lat IS NOT NULL',
+        'SELECT AVG(lat) AS clat, AVG(lon) AS clon FROM businesses WHERE zip = $1 AND lat IS NOT NULL AND lon < -60',
         [zip]
       );
-      refLat = parseFloat(centroid.rows[0]?.clat);
-      refLon = parseFloat(centroid.rows[0]?.clon);
+      refLat = parseFloat(centroid[0]?.clat);
+      refLon = parseFloat(centroid[0]?.clon);
     } catch (_) {}
   }
 
