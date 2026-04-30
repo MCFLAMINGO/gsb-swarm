@@ -983,7 +983,7 @@ async function pgCategorySearch(resolvedZip, normalizedQuery, rawQuery, limitN) 
        ${where} AND (${catConditions})
        ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
        LIMIT ${resolvedZip ? termArr.length + 3 : termArr.length + 2}`,
-      [...params, limitN]
+      params
     );
     if (!rows.length) return null;
     return enrichWithUCP(rows.map(r => ({
