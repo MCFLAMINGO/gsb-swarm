@@ -561,6 +561,57 @@ router.post('/claim', express.json(), async (req, res) => {
   res.redirect(307, '/api/local-intel/claim/start');
 });
 
+// ── Magic link login ──────────────────────────────────────────────────────────
+// POST /api/local-intel/auth/magic
+// Body: { email }
+// Looks up business by notification_email, sends Resend magic link to inbox.
+// Returns { ok: true } regardless (no email enumeration).
+router.post('/auth/magic', express.json(), async (req, res) => {
+  try {
+    const db  = require('./lib/db');
+    const nq  = require('./lib/notificationQueue');
+    const email = (req.body?.email || '').trim().toLowerCase();
+    if (!email || !/^[^@]+@[^@]+\.[^@]+$/.test(email)) {
+      return res.status(400).json({ error: 'valid email required' });
+    }
+
+    // Always return ok — don't reveal whether email exists
+    res.json({ ok: true });
+
+    // Look up claimed business by notification_email
+    const [biz] = await db.query(
+      `SELECT business_id, name, dispatch_token, notification_email
+         FROM businesses
+        WHERE LOWER(notification_email) = $1
+          AND claimed_at IS NOT NULL
+          AND status = 'active'
+        LIMIT 1`,
+      [email]
+    );
+
+    if (!biz || !biz.dispatch_token) return; // no match — silent
+
+    const inboxUrl = `https://www.thelocalintel.com/inbox.html?token=${biz.dispatch_token}`;
+
+    await nq.enqueue({
+      business_id: biz.business_id,
+      channel: 'email',
+      subject: 'Your LocalIntel dashboard link',
+      body: `Hi ${biz.name},\n\nHere is your dashboard link — click to access your LocalIntel inbox:\n\n${inboxUrl}\n\nThis link is permanent. Bookmark it for next time.\n\nLocalIntel Data Services`,
+      html: `<p>Hi <strong>${biz.name}</strong>,</p>
+<p>Here is your LocalIntel dashboard link:</p>
+<p style="margin:24px 0;"><a href="${inboxUrl}" style="background:#16A34A;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;">Open My Dashboard &rarr;</a></p>
+<p style="font-size:13px;color:#666;">Or copy this link: ${inboxUrl}</p>
+<p style="font-size:13px;color:#666;">This link is permanent — bookmark it for next time.</p>
+<p style="font-size:12px;color:#999;">LocalIntel Data Services &mdash; thelocalintel.com</p>`,
+      to: biz.notification_email,
+    });
+  } catch (err) {
+    console.error('[auth/magic]', err.message);
+    // Response already sent, just log
+  }
+});
+
 // ── RFQ Inbox API ─────────────────────────────────────────────────────────────
 
 /**
