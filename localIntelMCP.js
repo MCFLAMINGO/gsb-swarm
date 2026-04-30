@@ -889,6 +889,63 @@ async function pgCategorySearch(resolvedZip, normalizedQuery, rawQuery, limitN) 
   if (!process.env.LOCAL_INTEL_DB_URL) return null;
   try {
     const db = require('./lib/db');
+
+    // ── Name-first lookup (no ZIP filter) ────────────────────────────────────
+    // If the raw query looks like a specific business name (not a generic category),
+    // try a name ILIKE match across all ZIPs first — so "mcflamingo" finds McFlamingo
+    // even if the caller passes a wrong ZIP.
+    const GENERIC_CATEGORIES = ['restaurant','food','gym','fitness','grocery','bank',
+      'clinic','doctor','bar','cafe','hotel','store','shop','salon','pharmacy'];
+    const rawLower = (rawQuery || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+    const isGeneric = GENERIC_CATEGORIES.some(c => rawLower === c || rawLower === c + 's');
+    if (rawQuery && !isGeneric) {
+      const nameRows = await db.query(
+        `SELECT name, zip, address, city, phone, website, hours,
+                category, category_group, lat, lon,
+                confidence_score AS confidence, status, sources, owner_verified, tags,
+                COALESCE(sunbiz_id, sunbiz_doc_number) AS sunbiz_id,
+                (claimed_at IS NOT NULL) AS claimed,
+                wallet,
+                pos_config->>'pos_type' AS pos_type
+         FROM businesses
+         WHERE status != 'inactive'
+           AND name ILIKE $1
+         ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+         LIMIT 5`,
+        ['%' + rawQuery + '%']
+      );
+      if (nameRows.length > 0) {
+        return enrichWithUCP(nameRows.map(r => ({
+          name:            r.name,
+          zip:             r.zip,
+          address:         r.address        || '',
+          city:            r.city           || '',
+          phone:           r.phone          || '',
+          website:         r.website        || '',
+          hours:           r.hours          || '',
+          category:        r.category       || 'business',
+          group:           r.category_group || 'services',
+          lat:             r.lat  != null ? parseFloat(r.lat)  : null,
+          lon:             r.lon  != null ? parseFloat(r.lon)  : null,
+          confidence:      r.confidence ? parseFloat(r.confidence) * 100 : 50,
+          status:          r.status         || 'active',
+          source:          (r.sources || [])[0] || 'pg',
+          owner_verified:  r.owner_verified  || false,
+          tags:            r.tags            || [],
+          claimed:         !!r.claimed,
+          sunbiz_id:       r.sunbiz_id       || null,
+          sunbiz_verified: !!r.sunbiz_id,
+          sunbiz_url:      r.sunbiz_id
+            ? 'https://search.sunbiz.org/Inquiry/CorporationSearch/SearchResultDetail?inquirytype=DocumentNumber&inquisitionType=null&searchTerm=' + r.sunbiz_id
+            : null,
+          wallet:          r.wallet          || null,
+          pos_type:        r.pos_type        || null,
+          _pg:             true,
+        })));
+      }
+    }
+
+    // ── Category / keyword search (ZIP-scoped) ────────────────────────────────
     // Build category terms: the normalized alias + common variants
     const terms = new Set([normalizedQuery, rawQuery].filter(Boolean));
     // Add known expansions for common query types
