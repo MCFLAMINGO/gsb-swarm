@@ -38,6 +38,22 @@ const inferenceCache          = require('./workers/inferenceCache');
 const { resolveCaller }       = require('./lib/agentRegistry');
 const { x402Gate }            = require('./lib/x402Middleware');
 
+// ── UCP enrichment ────────────────────────────────────────────────────────────
+// Adds ucp_order_url / ucp_wallet / ucp_note to any business row that has
+// pos_type = 'other' (Surge) AND a wallet address set.
+function enrichWithUCP(rows) {
+  return rows.map(r => {
+    if (r.pos_type === 'other' && r.wallet) {
+      r.ucp_order_url = 'https://surge.basalthq.com/api/ucp/checkout-sessions';
+      r.ucp_wallet    = r.wallet;
+      r.ucp_note      = 'POST ucp_order_url with shopSlug resolved via GET https://surge.basalthq.com/api/directory/shops?q=' + encodeURIComponent(r.name);
+    }
+    delete r.pos_type;
+    delete r.wallet;
+    return r;
+  });
+}
+
 // ── handleQuery — fuzzy intent router entry point ─────────────────────────────
 // Single tool an LLM can call with any plain-English question about any market.
 // Checks inference cache first, routes to correct vertical + ZIP, dispatches
@@ -462,14 +478,16 @@ async function loadBusinessesByZip(zip) {
                 confidence_score AS confidence, status, sources,
                 owner_verified, last_confirmed, tags, description,
                 COALESCE(sunbiz_id, sunbiz_doc_number) AS sunbiz_id,
-                (claimed_at IS NOT NULL)                AS claimed
+                (claimed_at IS NOT NULL)                AS claimed,
+                wallet,
+                pos_config->>'pos_type'                AS pos_type
          FROM businesses
          WHERE zip = $1 AND status != 'inactive'
          ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC`,
         [zip]
       );
       if (rows.length > 0) {
-        return rows.map(r => ({
+        return enrichWithUCP(rows.map(r => ({
           name:           r.name,
           zip:            r.zip,
           address:        r.address        || '',
@@ -494,8 +512,10 @@ async function loadBusinessesByZip(zip) {
           sunbiz_url:      r.sunbiz_id
             ? `https://search.sunbiz.org/Inquiry/CorporationSearch/SearchResultDetail?inquirytype=DocumentNumber&inquisitionType=null&searchTerm=${r.sunbiz_id}`
             : null,
+          wallet:          r.wallet          || null,
+          pos_type:        r.pos_type        || null,
           _pg:             true,
-        }));
+        })));
       }
     } catch (e) {
       console.error('[MCP] PG loadBusinessesByZip error:', e.message);
@@ -899,15 +919,17 @@ async function pgCategorySearch(resolvedZip, normalizedQuery, rawQuery, limitN) 
               category, category_group, lat, lon,
               confidence_score AS confidence, status, sources, owner_verified, tags,
               COALESCE(sunbiz_id, sunbiz_doc_number) AS sunbiz_id,
-              (claimed_at IS NOT NULL) AS claimed
+              (claimed_at IS NOT NULL) AS claimed,
+              wallet,
+              pos_config->>'pos_type'               AS pos_type
        FROM businesses
        ${where} AND (${catConditions})
        ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
-       LIMIT $${resolvedZip ? termArr.length + 3 : termArr.length + 2}`,
+       LIMIT ${resolvedZip ? termArr.length + 3 : termArr.length + 2}`,
       [...params, limitN]
     );
     if (!rows.length) return null;
-    return rows.map(r => ({
+    return enrichWithUCP(rows.map(r => ({
       name:           r.name,
       zip:            r.zip,
       address:        r.address   || '',
@@ -930,8 +952,10 @@ async function pgCategorySearch(resolvedZip, normalizedQuery, rawQuery, limitN) 
       sunbiz_url:      r.sunbiz_id
         ? `https://search.sunbiz.org/Inquiry/CorporationSearch/SearchResultDetail?inquirytype=DocumentNumber&inquisitionType=null&searchTerm=${r.sunbiz_id}`
         : null,
+      wallet:          r.wallet          || null,
+      pos_type:        r.pos_type        || null,
       _pg:             true,
-    }));
+    })));
   } catch (e) {
     console.error('[MCP] pgCategorySearch error:', e.message);
     return null;
