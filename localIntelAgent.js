@@ -2665,6 +2665,76 @@ router.options('/ask', (req, res) => {
 router.get('/ask',  handleAskRequest);
 router.post('/ask', express.json(), handleAskRequest);
 
+// ── Service-request detector for /search ───────────────────────────────────────────
+// Deterministic vocabulary scoring — same approach as voiceIntake, no LLM.
+// Returns { isRequest: bool, category: string|null }
+const _SVC_MAP = {
+  // Landscaping
+  'lawn':'landscaping','mow':'landscaping','mowing':'landscaping','landscap':'landscaping',
+  'grass':'landscaping','yard':'landscaping','tree trimm':'landscaping','hedge':'landscaping',
+  'trim':'landscaping','bush':'landscaping','mulch':'landscaping','irrigation':'landscaping',
+  'sprinkler':'landscaping',
+  // Cleaning
+  'clean':'cleaning','maid':'cleaning','housekeep':'cleaning','janitorial':'cleaning',
+  'pressure wash':'cleaning','window clean':'cleaning',
+  // Plumbing
+  'plumb':'plumbing','pipe':'plumbing','leak':'plumbing','drain':'plumbing',
+  'water heater':'plumbing','toilet':'plumbing','faucet':'plumbing',
+  // Electrical
+  'electric':'electrical','wiring':'electrical','outlet':'electrical','breaker':'electrical',
+  'panel':'electrical','street light':'electrical','light fix':'electrical','light out':'electrical',
+  // HVAC
+  'hvac':'hvac','air condition':'hvac','heat pump':'hvac','furnace':'hvac','duct':'hvac',
+  // Roofing
+  'roof':'roofing','shingle':'roofing','gutter':'roofing',
+  // Painting
+  'paint':'painting','stain':'painting','drywall':'painting',
+  // Moving
+  'mov':'moving','haul':'moving','junk':'moving','removal':'moving',
+  // Handyman
+  'handyman':'handyman','fix':'handyman','repair':'handyman','install':'handyman',
+  // Pest
+  'pest':'pest_control','bug':'pest_control','termite':'pest_control','exterminate':'pest_control',
+  'mosquito':'pest_control',
+  // Flooring
+  'floor':'flooring','tile':'flooring','carpet':'flooring','hardwood':'flooring',
+  // Pool
+  'pool':'pool_service',
+  // Concrete
+  'concrete':'concrete','driveway':'concrete',
+  // Contractor
+  'remodel':'contractor','renovate':'contractor','construction':'contractor',
+  // Restaurant / food
+  'deliver':'restaurant','delivery':'restaurant','pick up':'restaurant','pickup':'restaurant',
+  'order food':'restaurant','takeout':'restaurant','restaurant':'restaurant',
+  'food from':'restaurant','catering':'catering','cater':'catering',
+  // Pest / auto / IT
+  'mechanic':'auto','oil change':'auto','car wash':'auto','tire':'auto',
+  'computer repair':'it_support','wifi':'it_support','tech support':'it_support',
+};
+// Phrases that signal "I want a service done" (not a business name search)
+const _REQUEST_PHRASES = [
+  'i need','i want','i have a','fix my','fix the','repair my','repair the',
+  'find me a','find me an','get me a','get me an','looking for a','looking for an',
+  'need a','need an','need someone','need help','help me','can someone',
+  'who can','who does','where can i','how do i','my [a-z]+ is broken',
+  'my [a-z]+ is leaking','my [a-z]+ is not working','broken','not working',
+  'clogged','flooded','flooring replaced','replace my','replace the',
+];
+const _REQUEST_RE = new RegExp(_REQUEST_PHRASES.join('|'), 'i');
+
+function detectServiceRequest(raw) {
+  const lower = raw.toLowerCase();
+  const isRequest = _REQUEST_RE.test(lower);
+  if (!isRequest) return { isRequest: false, category: null };
+  // Find best category match
+  let category = null;
+  for (const [kw, cat] of Object.entries(_SVC_MAP)) {
+    if (lower.includes(kw)) { category = cat; break; }
+  }
+  return { isRequest: true, category };
+}
+
 // GET /api/local-intel/search?q=<name>&zip=<zip>&cat=<cat>&limit=20
 // Direct Postgres business search — no MCP routing chain, no LLM, instant results.
 // Used by the search UI for reliable name/category/ZIP lookups.
@@ -2688,6 +2758,85 @@ router.get('/search', async (req, res) => {
 
   try {
     const db = require('./lib/db');
+
+    // ── Service request detection: route natural-language requests to category search
+    // Must happen before name matching so "I need my street light fixed" doesn't
+    // match businesses with "need" in their name.
+    if (raw) {
+      const svcDetect = detectServiceRequest(raw);
+      if (svcDetect.isRequest) {
+        const resolvedZip = zip || null;
+        const resolvedCat = svcDetect.category;
+
+        // If we mapped a category, find providers in ZIP (or all of NE FL)
+        let providerCount = 0;
+        let topProviders  = [];
+        if (resolvedCat) {
+          const params = resolvedZip
+            ? [`%${resolvedCat}%`, resolvedZip, 5]
+            : [`%${resolvedCat}%`, 5];
+          const zipClause = resolvedZip ? ' AND zip = $2' : '';
+          const lim = resolvedZip ? '$3' : '$2';
+          const provRows = await db.query(
+            `SELECT name, zip, address, city, phone, website, category, lat, lon,
+                    confidence_score, claimed_at, wallet
+             FROM businesses
+             WHERE status != 'inactive'
+               AND (category ILIKE $1 OR category_group ILIKE $1)${zipClause}
+             ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+             LIMIT ${lim}`,
+            params
+          );
+          providerCount = provRows.length;
+          topProviders  = provRows;
+        }
+
+        // Build a service-request narrative
+        const catLabel   = resolvedCat ? resolvedCat.replace(/_/g, ' ') : 'service';
+        let srNarrative;
+        if (providerCount > 0) {
+          const topName = topProviders[0].name;
+          const areaStr = resolvedZip ? ` in ${resolvedZip}` : ' in Northeast Florida';
+          srNarrative =
+            `We found ${providerCount} verified ${catLabel} provider${providerCount > 1 ? 's' : ''}${areaStr}. ` +
+            `Top match: ${topName}. Call (904) 506-7476 or use the search below to browse providers.`;
+        } else if (resolvedCat) {
+          srNarrative =
+            `We don't have a verified ${catLabel} provider${resolvedZip ? ' in ' + resolvedZip : ''} yet. ` +
+            `Call (904) 506-7476 and we'll find one for you — or your request goes on our RFQ board.`;
+        } else {
+          // Couldn't map to a category — honest response
+          srNarrative =
+            `We heard your request but couldn't match it to a service category yet. ` +
+            `Call (904) 506-7476 and describe what you need — we'll route it to the right provider.`;
+        }
+
+        return res.json({
+          type:       'service_request',
+          query:      raw,
+          zip:        resolvedZip,
+          category:   resolvedCat,
+          total:      providerCount,
+          narrative:  srNarrative,
+          results:    topProviders.map(r => ({
+            name:       r.name,
+            zip:        r.zip,
+            address:    r.address  || '',
+            city:       r.city     || '',
+            phone:      r.phone    || '',
+            website:    r.website  || '',
+            category:   r.category || 'business',
+            group:      r.category_group || 'services',
+            lat:        r.lat  != null ? parseFloat(r.lat)  : null,
+            lon:        r.lon  != null ? parseFloat(r.lon)  : null,
+            confidence: r.confidence_score ? parseFloat(r.confidence_score) * 100 : 50,
+            claimed:    !!r.claimed_at,
+            wallet:     r.wallet || null,
+          })),
+          latency_ms: Date.now() - t0,
+        });
+      }
+    }
 
     // Strip interrogative prefixes ("where is", "find me", etc.)
     const INTERO = /^(?:where(?:\s+is)?|who(?:\s+is)?|what(?:\s+is)?|find(?:\s+me)?|show(?:\s+me)?|look\s+up|search(?:\s+for)?|tell\s+me\s+about|info(?:rmation)?\s+on|get\s+me)\s+/i;
