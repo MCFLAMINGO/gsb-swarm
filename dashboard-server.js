@@ -1204,77 +1204,56 @@ app.get('/api/acp/webhook/health', async (req, res) => {
 // ── MCP Registry server card — lets Smithery + PulseMCP scan without auth issues
 // GET /api/sector-gap/feed — top sector gaps across all covered ZIPs (FREE, no payment required)
 // Discovery hook for agents and LLMs — shows what LocalIntel knows without paying
+// Source: zip_briefs table (deterministic, from businesses in Postgres — no LLM, no census_layer dependency)
 app.get('/api/sector-gap/feed', async (req, res) => {
-  // Postgres first — census_layer table has layer_json with sector_gaps[]
-  if (process.env.LOCAL_INTEL_DB_URL) {
-    try {
-      const db2 = require('./lib/db');
-      const rows = await db2.query(
-        `SELECT zip, layer_json, confidence FROM census_layer
-         WHERE layer_json IS NOT NULL
-           AND layer_json->'sector_gaps' IS NOT NULL
-           AND jsonb_array_length(layer_json->'sector_gaps') > 0
-         ORDER BY (confidence->>'data_confidence_score')::float DESC NULLS LAST
-         LIMIT 200`
-      );
-      const feed = [];
-      for (const r of rows) {
-        const layer  = r.layer_json || {};
-        const conf   = r.confidence || {};
-        const gaps   = layer.sector_gaps || [];
-        if (!gaps.length) continue;
-        const topGap = gaps[0];
-        feed.push({
-          zip:              r.zip,
-          name:             layer.name || r.zip,
-          county:           layer.county || '',
-          top_gap_naics:    topGap.naics,
-          top_gap_sector:   topGap.label,
-          county_emp_share: topGap.county_emp_share,
-          gap_count:        gaps.length,
-          population:       layer.population || 0,
-          median_hhi:       layer.median_household_income || 0,
-          confidence_tier:  conf.confidence_tier || 'UNKNOWN',
-          confidence_score: conf.data_confidence_score || 0,
-          oracle_vertical:  topGap.oracle_vertical || null,
-        });
-      }
-      return res.json({
-        generated_at: new Date().toISOString(),
-        total_zips:   feed.length,
-        source:       'postgres',
-        note:         'Free discovery feed. Call local_intel_sector_gap (MCP) with any zip for full ranked analysis with demand estimates.',
-        mcp_endpoint: 'https://gsb-swarm-production.up.railway.app/mcp',
-        feed,
-      });
-    } catch (e) {
-      console.warn('[sector-gap/feed] Postgres failed, falling back to flat files:', e.message);
-    }
-  }
-
-  // Flat file fallback (local dev)
-  const layerDir = path.join(__dirname, 'data', 'census_layer');
-  if (!fs.existsSync(layerDir)) {
-    return res.json({ status: 'not_yet_computed', message: 'Census layer not yet built.', feed: [] });
-  }
-  const feed = [];
-  for (const file of fs.readdirSync(layerDir).filter(f => /^\d{5}\.json$/.test(f))) {
-    try {
-      const layer = JSON.parse(fs.readFileSync(path.join(layerDir, file), 'utf8'));
-      if (!layer.sector_gaps?.length) continue;
-      const topGap = layer.sector_gaps[0];
+  try {
+    const db2 = require('./lib/db');
+    // zip_briefs has rich gap data derived from actual business counts in Postgres
+    const rows = await db2.query(
+      `SELECT zip, brief_json, generated_at
+       FROM zip_briefs
+       WHERE brief_json IS NOT NULL
+         AND brief_json->'gaps' IS NOT NULL
+         AND jsonb_array_length(brief_json->'gaps') > 0
+       ORDER BY (brief_json->>'total')::int DESC NULLS LAST
+       LIMIT 200`
+    );
+    const feed = [];
+    for (const r of rows) {
+      const b    = r.brief_json || {};
+      const gaps = b.gaps || [];
+      if (!gaps.length) continue;
+      // Prefer first gap of type 'absent', then first gap overall
+      const topGap = gaps.find(g => g.type === 'absent') || gaps[0];
       feed.push({
-        zip: layer.zip || file.replace('.json',''), name: layer.name || '', county: layer.county || '',
-        top_gap_naics: topGap.naics, top_gap_sector: topGap.label,
-        county_emp_share: topGap.county_emp_share, gap_count: layer.sector_gaps.length,
-        confidence_tier: layer.confidence?.confidence_tier || 'UNKNOWN',
-        confidence_score: layer.confidence?.data_confidence_score || 0,
-        oracle_vertical: topGap.oracle_vertical || null,
+        zip:              r.zip,
+        name:             b.label || r.zip,
+        top_gap_sector:   topGap.group,
+        top_gap_signal:   topGap.signal,
+        top_gap_type:     topGap.type,       // 'gap' | 'absent'
+        top_gap_count:    topGap.count,
+        gap_count:        gaps.length,
+        total_businesses: b.total || 0,
+        data_grade:       b.data_grade || 'UNKNOWN',
+        dominant_sector:  b.by_group ? Object.entries(b.by_group).sort((a,b)=>b[1]-a[1])[0]?.[0] : null,
+        narrative:        b.narrative || null,
+        source:           b.source || 'zip_briefs',
+        generated_at:     r.generated_at,
       });
-    } catch (_) {}
+    }
+    return res.json({
+      generated_at: new Date().toISOString(),
+      total_zips:   feed.length,
+      source:       'zip_briefs',
+      note:         'Free discovery feed — deterministic gap analysis from 122k+ verified businesses. Call local_intel_zip_intelligence (MCP) for full Bloomberg-grade ZIP intelligence.',
+      mcp_endpoint: 'https://gsb-swarm-production.up.railway.app/mcp',
+      ask_endpoint: 'https://gsb-swarm-production.up.railway.app/api/local-intel/ask',
+      feed,
+    });
+  } catch (e) {
+    console.error('[sector-gap/feed] Error reading zip_briefs:', e.message);
+    return res.status(500).json({ error: 'sector gap feed unavailable', detail: e.message, feed: [] });
   }
-  feed.sort((a,b) => (b.confidence_score - a.confidence_score) || (b.gap_count - a.gap_count));
-  res.json({ generated_at: new Date().toISOString(), total_zips: feed.length, source: 'flat_file', feed });
 });
 
 // ── /.well-known/mcp.json — standard Perplexity/Grok discovery endpoint ─────
