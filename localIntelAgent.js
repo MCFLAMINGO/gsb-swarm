@@ -2665,4 +2665,132 @@ router.options('/ask', (req, res) => {
 router.get('/ask',  handleAskRequest);
 router.post('/ask', express.json(), handleAskRequest);
 
+// GET /api/local-intel/search?q=<name>&zip=<zip>&cat=<cat>&limit=20
+// Direct Postgres business search — no MCP routing chain, no LLM, instant results.
+// Used by the search UI for reliable name/category/ZIP lookups.
+router.options('/search', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.sendStatus(204);
+});
+router.get('/search', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const t0 = Date.now();
+  const raw   = (req.query.q   || '').trim();
+  const zip   = (req.query.zip || '').trim() || null;
+  const cat   = (req.query.cat || '').trim() || null;
+  const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+
+  if (!raw && !zip && !cat) {
+    return res.status(400).json({ error: 'q, zip, or cat required' });
+  }
+
+  try {
+    const db = require('./lib/db');
+
+    // Strip interrogative prefixes ("where is", "find me", etc.)
+    const INTERO = /^(?:where(?:\s+is)?|who(?:\s+is)?|what(?:\s+is)?|find(?:\s+me)?|show(?:\s+me)?|look\s+up|search(?:\s+for)?|tell\s+me\s+about|info(?:rmation)?\s+on|get\s+me)\s+/i;
+    const q = raw.replace(INTERO, '').trim();
+
+    const PG_STOP = new Set(['for','the','and','near','in','at','of','a','an','show','me','find','get','list','what','where','who','how','is','are','there']);
+
+    const BASE_SELECT = `SELECT name, zip, address, city, phone, website, category, category_group,
+      lat, lon, confidence_score, claimed_at, wallet, status
+      FROM businesses WHERE status != 'inactive'`;
+
+    let rows = [];
+
+    // 1. Exact/partial name match (no ZIP filter — proximity sort after)
+    if (q) {
+      rows = await db.query(
+        BASE_SELECT + ` AND name ILIKE $1 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+        [`%${q}%`, limit * 2]
+      );
+
+      // Fallback: try each non-stop token
+      if (!rows.length) {
+        const tokens = q.toLowerCase().split(/\s+/).filter(t => t.length >= 3 && !PG_STOP.has(t));
+        for (const tok of tokens) {
+          const r = await db.query(
+            BASE_SELECT + ` AND name ILIKE $1 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+            [`%${tok}%`, limit * 2]
+          );
+          if (r.length) { rows = r; break; }
+        }
+      }
+    }
+
+    // 2. Category search (ZIP-scoped if provided)
+    if (!rows.length && (cat || q)) {
+      const term = cat || q;
+      const params = zip
+        ? [`%${term}%`, zip, limit]
+        : [`%${term}%`, limit];
+      const zipClause = zip ? ' AND zip = $2' : '';
+      const lim = zip ? '$3' : '$2';
+      rows = await db.query(
+        BASE_SELECT + ` AND (category ILIKE $1 OR category_group ILIKE $1 OR name ILIKE $1)${zipClause}
+        ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT ${lim}`,
+        params
+      );
+    }
+
+    // 3. ZIP-only browse
+    if (!rows.length && zip) {
+      rows = await db.query(
+        BASE_SELECT + ` AND zip = $1 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+        [zip, limit]
+      );
+    }
+
+    // Proximity sort if we have a ZIP and results have coords
+    if (zip && rows.length > 1) {
+      try {
+        const centroid = await db.query(
+          'SELECT AVG(lat) AS clat, AVG(lon) AS clon FROM businesses WHERE zip = $1 AND lat IS NOT NULL AND lon < -60',
+          [zip]
+        );
+        const clat = parseFloat(centroid[0]?.clat);
+        const clon = parseFloat(centroid[0]?.clon);
+        if (!isNaN(clat) && !isNaN(clon)) {
+          rows.sort((a, b) => {
+            const da = (a.lat && a.lon) ? Math.pow(a.lat-clat,2)+Math.pow(a.lon-clon,2) : 999;
+            const db2 = (b.lat && b.lon) ? Math.pow(b.lat-clat,2)+Math.pow(b.lon-clon,2) : 999;
+            return da - db2;
+          });
+        }
+      } catch(_) {}
+    }
+
+    const results = rows.slice(0, limit).map(r => ({
+      name:        r.name,
+      zip:         r.zip,
+      address:     r.address  || '',
+      city:        r.city     || '',
+      phone:       r.phone    || '',
+      website:     r.website  || '',
+      category:    r.category || 'business',
+      group:       r.category_group || 'services',
+      lat:         r.lat  != null ? parseFloat(r.lat)  : null,
+      lon:         r.lon  != null ? parseFloat(r.lon)  : null,
+      confidence:  r.confidence_score ? parseFloat(r.confidence_score) * 100 : 50,
+      claimed:     !!r.claimed_at,
+      wallet:      r.wallet || null,
+    }));
+
+    return res.json({
+      total:      results.length,
+      query:      q || null,
+      zip:        zip || null,
+      category:   cat || null,
+      latency_ms: Date.now() - t0,
+      results,
+    });
+  } catch (e) {
+    console.error('[/search] error:', e.message);
+    return res.status(500).json({ error: e.message, results: [] });
+  }
+});
+
 module.exports = router;
