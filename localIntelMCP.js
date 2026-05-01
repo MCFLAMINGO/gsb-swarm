@@ -37,6 +37,7 @@ const { route }               = require('./workers/intentRouter');
 const inferenceCache          = require('./workers/inferenceCache');
 const { resolveCaller }       = require('./lib/agentRegistry');
 const { x402Gate }            = require('./lib/x402Middleware');
+const { upsertAgentSession, logTask } = require('./lib/telemetry');
 
 // ── UCP enrichment ────────────────────────────────────────────────────────────
 // Adds ucp_order_url / ucp_wallet / ucp_note to any business row that has
@@ -2812,6 +2813,28 @@ const server = http.createServer((req, res) => {
             message: 'Free tier allows 3 calls/day. Register an API token at thelocalintel.com to unlock full access.',
             tier: 'sandbox',
           }));
+        }
+
+        // ── Agent provenance — read X-Agent-* headers, upsert agent_sessions ──
+        // Fire-and-forget. Attaches session_id to callerInfo for downstream use.
+        const agentToolName = !Array.isArray(parsed) && parsed?.params?.name;
+        const agentZip = !Array.isArray(parsed) && parsed?.params?.arguments?.zip;
+        const agentCat = !Array.isArray(parsed) && parsed?.params?.arguments?.category;
+        const agentSessionId = await upsertAgentSession(req, agentZip || null, agentCat || null);
+        if (agentSessionId) callerInfo.agentSessionId = agentSessionId;
+
+        // Log inbound MCP call to task_events
+        if (agentToolName && parsed?.method === 'tools/call') {
+          logTask({
+            task_type:       'mcp_call',
+            channel_in:      'mcp',
+            zip:             agentZip || null,
+            agent_session_id: agentSessionId,
+            agent_id:        req.headers['x-agent-id'] || callerInfo.caller || null,
+            agent_origin:    req.headers['x-agent-origin'] || null,
+            resolution_type: 'pending',
+            meta:            { tool: agentToolName, tier: callerInfo.tier },
+          });
         }
 
         // ── x402 gate for tools that require payment ─────────────────────────
