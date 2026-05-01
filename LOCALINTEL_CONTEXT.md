@@ -213,11 +213,10 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 
 ## Pending Setup (requires Erik action)
 
-### 1. Twilio SMS webhook (5 min)
-- Go to console.twilio.com → Phone Numbers → (904) 506-7476 → Messaging
-- Set "A message comes in" webhook to:
-  `POST https://gsb-swarm-production.up.railway.app/api/rfq/sms-inbound`
-- This enables: provider YES-CODE replies, caller 1/2/3 selections, CONFIRM email, WALLET attach
+### 1. Twilio SMS webhook — ✅ DONE (2026-05-01)
+- Set to `POST https://gsb-swarm-production.up.railway.app/api/rfq/sms-inbound`
+- ⚠️ Twilio account is on Trial ($13.05 remaining) — SMS only works to verified numbers until upgraded
+- **ACTION NEEDED: Upgrade Twilio to paid account** to broadcast to unverified provider phones
 
 ### 2. Resend inbound MX record (10 min)
 - In your DNS provider for thelocalintel.com, add:
