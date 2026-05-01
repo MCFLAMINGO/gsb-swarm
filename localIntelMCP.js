@@ -429,6 +429,9 @@ const TOOL_COSTS = {
   local_intel_ask:          0.05,
   local_intel_query:        0.03,
   local_intel_stats:    0.005,
+  local_intel_zip_intelligence: 0.03,
+  local_intel_business_score:   0.02,
+  local_intel_worker_health:    0,
   local_intel_compare:   0.08,  // premium — runs oracle for up to 10 ZIPs
   local_intel_project:   0.15,  // project type → L1 ZIP scoring + L2 matched verified businesses
   local_intel_rfq:              0.01,   // post a job — cheap to encourage use
@@ -1624,6 +1627,113 @@ async function handleProject(params) {
   };
 }
 
+
+// ── local_intel_zip_intelligence ─────────────────────────────────────────────
+// Returns aggregated conformance + task pattern data for a ZIP and optional
+// category. Reads from task_patterns (nightly rollup). Bloomberg layer.
+async function toolZipIntelligence({ zip, category_group, weeks = 8 }) {
+  if (!zip) return { error: 'zip required' };
+  const _db = require('./lib/db');
+  const rows = await _db.query(
+    `SELECT zip, category_group, week_start,
+        total_tasks, completion_rate, conformance_rate,
+        avg_response_minutes, avg_completion_minutes,
+        dominant_handoff_type, pos_connected_pct,
+        agent_closed_count, human_assisted_count, dropped_count,
+        highway_pct, local_pct, cul_de_sac_pct, drop_rate_by_stage
+      FROM task_patterns
+      WHERE zip = $1
+        ${category_group ? 'AND category_group = $3' : ''}
+      ORDER BY week_start DESC LIMIT $2`,
+    category_group ? [zip, weeks, category_group] : [zip, weeks]
+  );
+  if (!rows.length) {
+    return { zip, category_group: category_group || null,
+      message: 'No task pattern data yet. Accumulates as agents + voice calls interact with businesses here.',
+      weeks_requested: weeks };
+  }
+  const latest = rows[0];
+  const trend = rows.length >= 2 ? +(latest.conformance_rate - rows[1].conformance_rate).toFixed(2) : null;
+  return {
+    zip, category_group: category_group || 'all', weeks_of_data: rows.length,
+    latest_week: latest.week_start,
+    summary: {
+      conformance_rate:     latest.conformance_rate,
+      completion_rate:      latest.completion_rate,
+      avg_response_minutes: latest.avg_response_minutes,
+      dominant_handoff:     latest.dominant_handoff_type,
+      pos_connected_pct:    latest.pos_connected_pct,
+      road_distribution: {
+        highway: latest.highway_pct, local: latest.local_pct, cul_de_sac: latest.cul_de_sac_pct
+      },
+      task_counts: {
+        total: latest.total_tasks, agent_closed: latest.agent_closed_count,
+        human_assisted: latest.human_assisted_count, dropped: latest.dropped_count
+      },
+    },
+    conformance_trend_wow: trend,
+    history: rows.map(r => ({ week: r.week_start, conformance_rate: r.conformance_rate,
+      total_tasks: r.total_tasks, highway_pct: r.highway_pct })),
+  };
+}
+
+// ── local_intel_business_score ────────────────────────────────────────────────
+// Per-business responsiveness score + conformance data. Reads business_responsiveness.
+async function toolBusinessScore({ business_id, name, zip }) {
+  if (!business_id && !name) return { error: 'business_id or name required' };
+  const _db = require('./lib/db');
+  let bizRow = null;
+  if (business_id) {
+    const rows = await _db.query(
+      `SELECT business_id, name, zip, category_group, claimed_at, wallet,
+              pos_config->>'pos_type' AS pos_type FROM businesses WHERE business_id = $1 LIMIT 1`,
+      [business_id]
+    );
+    bizRow = rows[0] || null;
+  } else {
+    const rows = await _db.query(
+      `SELECT business_id, name, zip, category_group, claimed_at, wallet,
+              pos_config->>'pos_type' AS pos_type FROM businesses
+       WHERE LOWER(name) LIKE LOWER($1) ${zip ? 'AND zip = $2' : ''} LIMIT 1`,
+      zip ? [`%${name}%`, zip] : [`%${name}%`]
+    );
+    bizRow = rows[0] || null;
+  }
+  if (!bizRow) return { error: 'Business not found', params: { business_id, name, zip } };
+  const respRows = await _db.query(
+    'SELECT * FROM business_responsiveness WHERE business_id = $1 LIMIT 1', [bizRow.business_id]
+  );
+  const r = respRows[0];
+  if (!r) {
+    return { business_id: bizRow.business_id, name: bizRow.name, zip: bizRow.zip,
+      claimed: !!bizRow.claimed_at, pos_type: bizRow.pos_type || null,
+      response_score: 0, conformance_rate_30d: null, tasks_30d: 0,
+      message: 'No task data yet — score populates after first agent interaction.' };
+  }
+  const roadLabel = r.conformance_rate_30d >= 70 ? 'highway'
+    : r.conformance_rate_30d >= 30 ? 'local' : 'cul-de-sac';
+  return {
+    business_id: bizRow.business_id, name: bizRow.name, zip: bizRow.zip,
+    category_group: bizRow.category_group, claimed: !!bizRow.claimed_at,
+    pos_type: r.pos_type || bizRow.pos_type || null,
+    response_score: r.response_score, road_classification: roadLabel,
+    conformance: {
+      rate_30d: r.conformance_rate_30d, completion_30d: r.completion_rate_30d,
+      completion_90d: r.completion_rate_90d, avg_response_min: r.avg_response_min,
+      dominant_road: r.dominant_road_type, dominant_handoff: r.handoff_type,
+    },
+    activity: { tasks_7d: r.tasks_7d, tasks_30d: r.tasks_30d, tasks_90d: r.tasks_90d, last_task: r.last_task_at },
+    score_breakdown: { note: 'Score = speed(0-40) + completion_rate(0-30) + conformance_rate(0-30)', computed_at: r.computed_at },
+  };
+}
+
+// ── local_intel_worker_health ─────────────────────────────────────────────────
+// Returns health status of all LocalIntel workers. Knows when failing, not just logging.
+async function toolWorkerHealth({ worker_name } = {}) {
+  const wh = require('./lib/workerHealth');
+  return worker_name ? wh.check(worker_name) : wh.checkAll();
+}
+
 const TOOLS = {
   local_intel_context:   { fn: toolContext,    desc: 'Full spatial context block for a zip or lat/lon. Best first call for any location query.' },
   local_intel_search:    { fn: toolSearch,     desc: 'Search businesses by name, category, or group.' },
@@ -1647,6 +1757,9 @@ const TOOLS = {
   local_intel_restaurant:   { fn: (p) => handleVerticalQuery('restaurant',   p.query || 'give me a restaurant market overview', p.zip), desc: 'Restaurant market intelligence: saturation scores, price-tier gaps, capture rate, corridor analysis, tidal momentum.' },
   local_intel_ask:          { fn: handleAsk, desc: 'Composite NL query layer — ask any plain-English question about a ZIP and get a synthesized, sourced answer. Routes internally to zone, oracle, search, bedrock, signal, tide, corridor, changes, and nearby tools. Single entry point for humans and LLMs.' },
   local_intel_query:        { fn: handleQuery, desc: 'Fuzzy intent router — pass any plain-English question about any local market. Automatically detects ZIP, industry vertical, and best tool. Checks inference cache first (instant return if hit). On cache miss, routes to the correct vertical agent, stores result, and dispatches a scout agent if confidence is low. Handles region queries ("Northeast Florida", "St Johns County") by evaluating top ZIPs in parallel. Best first call for any LLM that does not know the ZIP or industry in advance.' },
+  local_intel_zip_intelligence: { fn: toolZipIntelligence, desc: 'Conformance + task pattern intelligence for a ZIP × category. Returns agent conformance rate (highway/local/cul-de-sac road distribution), avg response time, week-over-week trend. The Bloomberg layer — shows which markets are agent-ready. Required: zip. Optional: category_group, weeks.' },
+  local_intel_business_score:   { fn: toolBusinessScore,   desc: 'Responsiveness score (0-100) + conformance data for a specific business. Score = speed + completion_rate + conformance_rate. Returns road_classification (highway/local/cul-de-sac), task activity, dominant handoff type. Required: business_id or name.' },
+  local_intel_worker_health:    { fn: toolWorkerHealth,    desc: 'Health status of all LocalIntel workers. Returns healthy/degraded/failing per worker, hours since last run, consecutive fail count. No args for all workers, pass worker_name for one.' },
   local_intel_compare:      { fn: toolCompare, desc: 'Compare up to 10 ZIPs side-by-side and get a ranked opportunity table. Pass focus="opportunity" (default), "hhi", "saturation", "growth", or "population". Returns per-ZIP signals (HHI, capture rate, infra momentum, consumer profile, top gap) plus a top_pick recommendation with reasoning. Best tool for site selection, franchise expansion, investment screening, and market prioritization.' },
   local_intel_project:      { fn: handleProject, desc: 'Project-type query: pass project_type (e.g. restaurant, clinic, banking, construction, real_estate) and get L1 ZIPs ranked by market or residential opportunity score + L2 matched verified businesses in that sector. Best tool for site selection when you know the business type but not the ZIP.' },
   local_intel_rfq: {
