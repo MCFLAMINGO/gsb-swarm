@@ -300,7 +300,9 @@ function route(query) {
   const literalZip  = detectZip(query);
   const regionZips  = !literalZip ? detectRegion(query) : null;
   const vertical    = detectVertical(query);
-  const tool        = pickTool(query, vertical || 'realtor');
+  // When no vertical detected, do NOT default to 'realtor' — fall through to
+  // local_intel_ask (open query) so the best available tool is picked at runtime.
+  const tool        = pickTool(query, vertical || null);
 
   let zips;
   let isMulti = false;
