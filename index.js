@@ -200,12 +200,23 @@ function scheduleMonthlySync() {
     return next.getTime() - now.getTime();
   }
   const ms = msUntilNextSync();
+  // Cap at 2^31-1 ms (~24.8 days) to avoid Node.js 32-bit signed int overflow
+  // which would clamp the value to 1ms and create an infinite tight loop.
+  // scheduleMonthlySync re-arms itself, so if the cap fires early (ms > 24.8d)
+  // it will simply re-calculate and wait again — correctness is preserved.
+  const MAX_TIMEOUT = 2147483647; // 2^31 - 1
+  const safems = Math.min(ms, MAX_TIMEOUT);
   const days = (ms / 86400000).toFixed(1);
   console.log(`[acpSync] Monthly sync scheduled — next run in ${days} days`);
   setTimeout(() => {
+    if (ms > MAX_TIMEOUT) {
+      // Fired early due to 32-bit cap — re-arm, don't run sync yet
+      scheduleMonthlySync();
+      return;
+    }
     runAcpSync().catch(e => console.warn('[acpSync monthly]', e.message));
     scheduleMonthlySync(); // re-arm for next month
-  }, ms);
+  }, safems);
 }
 scheduleMonthlySync();
 

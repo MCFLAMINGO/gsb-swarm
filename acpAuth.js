@@ -150,32 +150,21 @@ async function getValidToken() {
     console.warn('[acpAuth] Privy refresh also failed.');
   }
 
-  // 4. All refresh attempts failed — log actionable instructions
-  const expiresIn = staleToken ? tokenExpiresIn(staleToken) : -1;
-  const expired   = expiresIn <= 0;
-
-  console.error(`
-[acpAuth] ❌ No valid ACP token available.
-  Token status: ${expired ? 'EXPIRED' : `expires in ${expiresIn}s`}
-  
-  To fix: update VIRTUALS_PRIVY_TOKEN in Railway with a fresh token.
-  
-  Quick steps:
-  1. Go to https://app.virtuals.io — make sure you're logged in
-  2. Open DevTools (Cmd+Option+I) → Console tab
-  3. Run: localStorage.getItem('privy:token')
-  4. Copy the value (without quotes)
-  5. In Railway → gsb-swarm service → Variables → update VIRTUALS_PRIVY_TOKEN
-  
-  For permanent fix, also set VIRTUALS_PRIVY_REFRESH_TOKEN:
-  3b. Run: localStorage.getItem('privy:refresh_token')
-  4b. Set as VIRTUALS_PRIVY_REFRESH_TOKEN in Railway
-  
-  ACP registration will be skipped until token is updated.
-`);
+  // 4. All refresh attempts failed — log actionable instructions (rate-limited to once per 10 min)
+  const now = Date.now();
+  if (now - lastNoTokenLogAt > NO_TOKEN_LOG_INTERVAL) {
+    lastNoTokenLogAt = now;
+    const expiresIn = staleToken ? tokenExpiresIn(staleToken) : -1;
+    const expired   = expiresIn <= 0;
+    console.error(`[acpAuth] ❌ No valid ACP token (${expired ? 'EXPIRED' : `expires in ${expiresIn}s`}). Update VIRTUALS_PRIVY_TOKEN in Railway. See acpAuth.js for steps. (This message suppressed for 10 min.)`);
+  }
 
   return null;
 }
+
+// ── Dedupe guard: only log the "no token" error once per 10 minutes ──────────
+let lastNoTokenLogAt = 0;
+const NO_TOKEN_LOG_INTERVAL = 10 * 60 * 1000; // 10 min
 
 // ── Seed cache from env on first load ────────────────────────────────────────
 // If env tokens are fresh, seed the cache so refresh tokens persist across restarts
