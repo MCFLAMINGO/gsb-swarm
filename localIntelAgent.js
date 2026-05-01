@@ -2794,18 +2794,44 @@ router.get('/search', async (req, res) => {
         // Build a service-request narrative
         const catLabel   = resolvedCat ? resolvedCat.replace(/_/g, ' ') : 'service';
         let srNarrative;
+        let jobCode = null;
+
+        // ── Broadcast RFQ to all matching providers ──────────────────────────────
+        // Web searches don't have a callerPhone, so we don't know who to call back.
+        // We create the job anyway (for tracking) but skip the outbound callback.
+        // The caller can see job status at thelocalintel.com/jobs/[code]
+        if (resolvedCat) {
+          try {
+            const rfqBroadcast = require('./lib/rfqBroadcast');
+            const { jobId, code } = await rfqBroadcast.createJob({
+              callerPhone:  'web-search',
+              callerName:   null,
+              category:     resolvedCat,
+              zip:          resolvedZip,
+              description:  raw,
+            });
+            jobCode = code;
+            // Fire broadcast non-blocking
+            rfqBroadcast.broadcastJob({ jobId, code, callerName: null, category: resolvedCat, zip: resolvedZip, description: raw })
+              .catch(e => console.error('[search svc-req] broadcastJob error:', e.message));
+          } catch (rfqErr) {
+            console.error('[search svc-req] RFQ create error:', rfqErr.message);
+          }
+        }
+
         if (providerCount > 0) {
           const topName = topProviders[0].name;
           const areaStr = resolvedZip ? ` in ${resolvedZip}` : ' in Northeast Florida';
           srNarrative =
-            `We found ${providerCount} verified ${catLabel} provider${providerCount > 1 ? 's' : ''}${areaStr}. ` +
-            `Top match: ${topName}. Call (904) 506-7476 or use the search below to browse providers.`;
+            `We found ${providerCount} verified ${catLabel} provider${providerCount > 1 ? 's' : ''}${areaStr} ` +
+            `and notified them about your request${jobCode ? ' (Job ' + jobCode + ')' : ''}. ` +
+            `Top match: ${topName}. Call (904) 506-7476 to get a callback when they respond.`;
         } else if (resolvedCat) {
           srNarrative =
-            `We don't have a verified ${catLabel} provider${resolvedZip ? ' in ' + resolvedZip : ''} yet. ` +
-            `Call (904) 506-7476 and we'll find one for you — or your request goes on our RFQ board.`;
+            `We don't have a verified ${catLabel} provider${resolvedZip ? ' in ' + resolvedZip : ''} yet` +
+            `${jobCode ? ' — but we logged your request as Job ' + jobCode + '.' : '.'} ` +
+            `Call (904) 506-7476 and we'll find one for you.`;
         } else {
-          // Couldn't map to a category — honest response
           srNarrative =
             `We heard your request but couldn't match it to a service category yet. ` +
             `Call (904) 506-7476 and describe what you need — we'll route it to the right provider.`;
@@ -2816,6 +2842,7 @@ router.get('/search', async (req, res) => {
           query:      raw,
           zip:        resolvedZip,
           category:   resolvedCat,
+          job_code:   jobCode,
           total:      providerCount,
           narrative:  srNarrative,
           results:    topProviders.map(r => ({

@@ -6083,6 +6083,32 @@ setInterval(async () => {
   }
 }, 6 * 60 * 60 * 1000); // every 6 hours
 
+// RFQ job expiry + 30-min callback trigger poll (every 10 min)
+setInterval(async () => {
+  try {
+    const rfqBroadcast = require('./lib/rfqBroadcast');
+    const rfqCallback  = require('./lib/rfqCallback');
+    const db           = require('./lib/db');
+    await rfqBroadcast.expireOldJobs();
+    const readyJobs = await db.query(
+      `SELECT * FROM rfq_jobs
+       WHERE status IN ('open','matched')
+         AND callback_fired = FALSE
+         AND response_count >= 1
+         AND created_at <= NOW() - INTERVAL '30 minutes'
+         AND caller_phone != 'web-search'`
+    );
+    for (const job of readyJobs) {
+      console.log(`[rfq-poll] Firing 30-min callback for job ${job.code} (${job.response_count} responses)`);
+      await rfqCallback.fireCallback(job).catch(e =>
+        console.error(`[rfq-poll] fireCallback error for ${job.code}:`, e.message)
+      );
+    }
+  } catch (e) {
+    console.error('[rfq-poll] error:', e.message);
+  }
+}, 10 * 60 * 1000); // every 10 minutes
+
 // ══════════════════════════════════════════════════════════════════════════════
 // GSB CONTENT ENGINE — 12 API endpoints (Post King competitor)
 // ══════════════════════════════════════════════════════════════════════════════
@@ -6297,6 +6323,177 @@ app.post('/api/voice/process', express.urlencoded({ extended: false }), async (r
     console.error('[voice/process]', e.message);
     res.set('Content-Type', 'text/xml');
     res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna-Neural">Something went wrong. Please call back and try again.</Say></Response>');
+  }
+});
+
+
+// ────────────────────────────────────────────────────────────────────────────
+// RFQ BROADCAST ROUTES
+// POST /api/rfq/sms-reply     — Twilio SMS webhook (provider replies YES-CODE)
+// POST /api/rfq/sms-inbound   — alias
+// GET  /api/rfq/callback-twiml?jobId=...  — TwiML for outbound callback call
+// POST /api/rfq/callback-process?jobId=... — Caller's spoken selection
+// POST /api/rfq/email-inbound — Resend inbound email webhook
+// ────────────────────────────────────────────────────────────────────────────
+
+async function handleSmsInbound(req, res) {
+  res.set('Content-Type', 'text/xml');
+  res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+
+  const from = req.body.From || req.body.from || '';
+  const body = (req.body.Body || req.body.body || '').trim();
+  if (!from || !body) return;
+
+  console.log(`[sms-inbound] From: ${from} | Body: ${body}`);
+
+  try {
+    const callerIdentity = require('./lib/callerIdentity');
+    const rfqBroadcast   = require('./lib/rfqBroadcast');
+    const rfqCallback    = require('./lib/rfqCallback');
+
+    await callerIdentity.getOrCreate(from);
+    const cmd = callerIdentity.parseSmsCommand(body);
+    console.log('[sms-inbound] Parsed command:', cmd);
+
+    if (cmd.cmd === 'rfq_yes') {
+      const result = await rfqBroadcast.recordResponse({
+        code: cmd.code, providerPhone: from, channel: 'sms', rawText: body,
+      });
+      if (!result.ok) {
+        await rfqBroadcast.sendSms(from,
+          `LocalIntel: Job code ${cmd.code} not found or already closed.`);
+        return;
+      }
+      if (result.duplicate) {
+        await rfqBroadcast.sendSms(from,
+          `LocalIntel: We already recorded your bid on job ${cmd.code}. The customer will be in touch if selected.`);
+        return;
+      }
+      await rfqBroadcast.sendSms(from,
+        `LocalIntel: Bid received on job ${cmd.code}! We are notifying the customer. If selected you will get their contact info.`);
+      if (result.shouldCallback) {
+        const db = require('./lib/db');
+        const jobRows = await db.query('SELECT * FROM rfq_jobs WHERE id = $1', [result.job.id]);
+        if (jobRows.length) await rfqCallback.fireCallback(jobRows[0]);
+      }
+      return;
+    }
+
+    if (cmd.cmd === 'rfq_select') {
+      const db = require('./lib/db');
+      const openJobs = await db.query(
+        'SELECT * FROM rfq_jobs WHERE caller_phone = $1 AND status IN ($2,$3) ORDER BY created_at DESC LIMIT 1',
+        [from, 'open', 'matched']
+      );
+      if (!openJobs.length) {
+        await rfqBroadcast.sendSms(from,
+          'LocalIntel: No open job requests found for your number. Call (904) 506-7476.');
+        return;
+      }
+      const result = await rfqBroadcast.confirmSelection({
+        jobId: openJobs[0].id, responseIndex: cmd.index, callerPhone: from,
+      });
+      if (!result.ok) {
+        await rfqBroadcast.sendSms(from,
+          'LocalIntel: Could not confirm that selection. Call (904) 506-7476.');
+      }
+      return;
+    }
+
+    if (cmd.cmd === 'confirm_email') {
+      const identity = await callerIdentity.confirmEmail(from, cmd.email);
+      const savedEmail = identity && identity.email;
+      if (savedEmail) {
+        await rfqBroadcast.sendSms(from,
+          `LocalIntel: Email confirmed — ${savedEmail}. You will receive job updates there too.`);
+      } else {
+        await rfqBroadcast.sendSms(from,
+          'LocalIntel: Could not save that email. Try again or call (904) 506-7476.');
+      }
+      return;
+    }
+
+    if (cmd.cmd === 'attach_wallet') {
+      if (!cmd.address) {
+        await rfqBroadcast.sendSms(from, 'LocalIntel: Could not read that wallet address. Send: WALLET 0x...');
+        return;
+      }
+      await callerIdentity.attachWallet(from, cmd.address);
+      await rfqBroadcast.sendSms(from,
+        `LocalIntel: Wallet ${cmd.address.slice(0,8)}... saved. You can now pay in pathUSD or USDC.`);
+      return;
+    }
+
+    if (cmd.cmd === 'unsubscribe') {
+      console.log(`[sms-inbound] Unsubscribe from ${from}`);
+      return;
+    }
+
+    console.log(`[sms-inbound] Unknown command from ${from}: ${body}`);
+  } catch (e) {
+    console.error('[sms-inbound] Error:', e.message);
+  }
+}
+
+app.post('/api/rfq/sms-reply',   express.urlencoded({ extended: false }), handleSmsInbound);
+app.post('/api/rfq/sms-inbound', express.urlencoded({ extended: false }), handleSmsInbound);
+
+app.get('/api/rfq/callback-twiml', async (req, res) => {
+  try {
+    const { callbackTwiml } = require('./lib/rfqCallback');
+    const xml = await callbackTwiml(req.query.jobId || '');
+    res.set('Content-Type', 'text/xml');
+    res.send(xml);
+  } catch (e) {
+    console.error('[callback-twiml]', e.message);
+    res.set('Content-Type', 'text/xml');
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna-Neural">Sorry, something went wrong. Please call back at (904) 506-7476.</Say></Response>');
+  }
+});
+
+app.post('/api/rfq/callback-process', express.urlencoded({ extended: false }), async (req, res) => {
+  try {
+    const { callbackProcess } = require('./lib/rfqCallback');
+    const xml = await callbackProcess(req.query.jobId || '', req.body.SpeechResult || '');
+    res.set('Content-Type', 'text/xml');
+    res.send(xml);
+  } catch (e) {
+    console.error('[callback-process]', e.message);
+    res.set('Content-Type', 'text/xml');
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna-Neural">Something went wrong. Please call (904) 506-7476.</Say></Response>');
+  }
+});
+
+app.post('/api/rfq/callback-status', express.urlencoded({ extended: false }), (req, res) => {
+  console.log(`[callback-status] CallSid: ${req.body.CallSid} Status: ${req.body.CallStatus}`);
+  res.sendStatus(204);
+});
+
+app.post('/api/rfq/email-inbound', express.json(), async (req, res) => {
+  res.sendStatus(200);
+  try {
+    const rfqBroadcast = require('./lib/rfqBroadcast');
+    const rfqCallback  = require('./lib/rfqCallback');
+    const payload = req.body;
+    const from    = payload.from || '';
+    const toAddr  = Array.isArray(payload.to) ? payload.to[0] : (payload.to || '');
+    const text    = payload.text || payload.html || '';
+    console.log(`[email-inbound] From: ${from} | To: ${toAddr}`);
+    const codeMatch = toAddr.match(/jobs\+([A-Z0-9]{5,8})@/i);
+    if (!codeMatch) { console.warn('[email-inbound] No job code in To:', toAddr); return; }
+    const code = codeMatch[1].toUpperCase();
+    const emailMatch = from.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/i);
+    const providerEmail = emailMatch ? emailMatch[0].toLowerCase() : null;
+    const result = await rfqBroadcast.recordResponse({
+      code, providerEmail, channel: 'email', rawText: text.slice(0, 500),
+    });
+    if (result.ok && !result.duplicate && result.shouldCallback) {
+      const db = require('./lib/db');
+      const jobRows = await db.query('SELECT * FROM rfq_jobs WHERE id = $1', [result.job.id]);
+      if (jobRows.length) await rfqCallback.fireCallback(jobRows[0]);
+    }
+  } catch (e) {
+    console.error('[email-inbound] Error:', e.message);
   }
 });
 
