@@ -6270,6 +6270,7 @@ app.post('/api/voice/incoming', express.urlencoded({ extended: false }), async (
       stage: 'greeting',
       speechResult: null,
       callerPhone: req.body.From || req.body.Caller || 'unknown',
+      callSid: req.body.CallSid || null,
     });
     res.set('Content-Type', result.contentType);
     res.send(result.body);
@@ -6288,6 +6289,7 @@ app.post('/api/voice/process', express.urlencoded({ extended: false }), async (r
       stage: 'process',
       speechResult: req.body.SpeechResult || '',
       callerPhone: req.body.From || req.body.Caller || 'unknown',
+      callSid: req.body.CallSid || null,
     });
     res.set('Content-Type', result.contentType);
     res.send(result.body);
