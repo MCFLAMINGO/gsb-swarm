@@ -365,6 +365,16 @@ async function enrichBusiness(biz) {
     biz.possibly_closed_why = null;
   }
 
+  // ── Signal narrative: description + tags from our own Postgres tables ──────
+  // Runs for every business with a business_id — independent of contact enrichment.
+  // Non-fatal: if it fails, contact enrichment result is still written.
+  try {
+    const narrativeChanged = await applySignalNarrative(biz);
+    if (narrativeChanged) changed = true;
+  } catch (narrativeErr) {
+    console.error(`[EnrichmentAgent] applySignalNarrative failed for ${biz.name}:`, narrativeErr.message);
+  }
+
   if (changed) {
     biz.last_enriched = new Date().toISOString();
     // Keep enriched_at for backward compat but last_enriched is canonical
@@ -373,6 +383,7 @@ async function enrichBusiness(biz) {
       (!biz.phone || !biz.hours) ? 'nominatim'   : null,
       biz.scraped_url            ? 'own_website'  : null,
       biz.phone                  ? '411'          : null,
+      biz.description            ? 'signal_narrative' : null,
     ].filter(Boolean).join('+') || 'nominatim';
   }
 
@@ -775,6 +786,192 @@ app.listen(PORT, () => {
 
 // Re-export staleness utilities so callers can use enrichmentAgent as the single import point
 module.exports = { getStaleness, stalenessBlock, STALENESS_TIERS };
+
+// ── Signal-based description + tags builder ───────────────────────────────────
+// Mines our own Postgres tables (task_events, business_responsiveness,
+// zip_intelligence) to build a deterministic description and tags array.
+// No LLM. No external API. Pure SQL + template.
+// Called at the end of enrichBusiness for every business that has a business_id.
+
+async function buildSignalNarrative(bizId, bizName, zip, category) {
+  const db = require('../lib/db');
+  const result = { description: null, tags: [] };
+
+  try {
+    // ── 1. Responsiveness signal ──────────────────────────────────────────
+    const respRows = await db.query(
+      `SELECT response_score, completion_rate_30d, conformance_rate_30d,
+              tasks_30d, tasks_90d, dominant_road_type, last_task_at
+       FROM business_responsiveness
+       WHERE business_id = $1
+       LIMIT 1`,
+      [bizId]
+    );
+    const resp = respRows[0] || null;
+
+    // ── 2. ZIP context ────────────────────────────────────────────────────
+    const zipRows = await db.query(
+      `SELECT restaurant_count, total_businesses, saturation_status,
+              consumer_profile, market_opportunity_score, name AS zip_name
+       FROM zip_intelligence WHERE zip = $1 LIMIT 1`,
+      [zip]
+    );
+    const zi = zipRows[0] || null;
+
+    // ── 3. Task signal — what do people actually call/message about? ──────
+    const taskRows = await db.query(
+      `SELECT task_type, COUNT(*) AS cnt
+       FROM task_events
+       WHERE business_id = $1
+         AND initiated_at > NOW() - INTERVAL '90 days'
+       GROUP BY task_type
+       ORDER BY cnt DESC
+       LIMIT 5`,
+      [bizId]
+    );
+
+    // ── 4. Build tags ─────────────────────────────────────────────────────
+    const tags = [];
+
+    // Category tag (normalised)
+    if (category) tags.push(category.toLowerCase().replace(/\s+/g, '_'));
+
+    // Responsiveness tags
+    if (resp) {
+      const score = parseFloat(resp.response_score) || 0;
+      if (score >= 85)      tags.push('highly_responsive');
+      else if (score >= 60) tags.push('responsive');
+
+      const conform = parseFloat(resp.conformance_rate_30d) || 0;
+      if (conform >= 80) tags.push('high_conformance');
+
+      const tasks30 = parseInt(resp.tasks_30d) || 0;
+      if (tasks30 >= 50)      tags.push('high_volume');
+      else if (tasks30 >= 15) tags.push('active');
+
+      if (resp.dominant_road_type === 'highway') tags.push('agent_closed');
+    }
+
+    // ZIP context tags
+    if (zi) {
+      if (zi.saturation_status === 'undersaturated') tags.push('market_gap');
+      if (zi.consumer_profile === 'affluent' || zi.consumer_profile === 'ultra_affluent') tags.push('affluent_market');
+    }
+
+    // Task-type tags (what people actually ask for)
+    for (const row of taskRows) {
+      const t = (row.task_type || '').toLowerCase().replace(/\s+/g, '_');
+      if (t && t.length > 2) tags.push(t);
+    }
+
+    result.tags = [...new Set(tags)]; // dedupe
+
+    // ── 5. Build description ──────────────────────────────────────────────
+    const parts = [];
+
+    // Opening: name + category + location
+    const zipLabel = zi && zi.zip_name ? zi.zip_name : `ZIP ${zip}`;
+    const catLabel = category ? ` ${category.toLowerCase()}` : '';
+    parts.push(`${bizName} is a${catLabel} business in ${zipLabel}.`);
+
+    // Responsiveness signal
+    if (resp) {
+      const score = parseFloat(resp.response_score) || 0;
+      const tasks30 = parseInt(resp.tasks_30d) || 0;
+      const tasks90 = parseInt(resp.tasks_90d) || 0;
+
+      if (score >= 85 && tasks30 >= 10) {
+        parts.push(`Highly responsive — ${tasks30} customer interactions in the last 30 days.`);
+      } else if (score >= 60 && tasks30 > 0) {
+        parts.push(`Active on LocalIntel with ${tasks30} interactions in the last 30 days.`);
+      } else if (tasks90 > 0) {
+        parts.push(`${tasks90} customer interactions recorded in the last 90 days.`);
+      }
+
+      const conform = parseFloat(resp.conformance_rate_30d) || 0;
+      if (conform >= 80) {
+        parts.push(`Consistently completes customer requests (${Math.round(conform)}% completion rate).`);
+      }
+    }
+
+    // ZIP standing
+    if (zi) {
+      const totalInZip = parseInt(zi.total_businesses) || 0;
+      if (totalInZip > 0) {
+        parts.push(`One of ${totalInZip} verified businesses in ${zipLabel}.`);
+      }
+      if (zi.saturation_status === 'undersaturated') {
+        parts.push(`Operating in an undersaturated market — strong demand signal for this category.`);
+      }
+    }
+
+    // Task types people call about
+    if (taskRows.length > 0) {
+      const topTasks = taskRows
+        .slice(0, 3)
+        .map(r => (r.task_type || '').toLowerCase())
+        .filter(Boolean);
+      if (topTasks.length) {
+        parts.push(`Customers commonly request: ${topTasks.join(', ')}.`);
+      }
+    }
+
+    result.description = parts.join(' ');
+
+  } catch (err) {
+    console.error(`[EnrichmentAgent] buildSignalNarrative error for ${bizName}:`, err.message);
+    // Non-fatal — return whatever we built so far
+  }
+
+  return result;
+}
+
+// Wire buildSignalNarrative into the enrichment cycle.
+// Called after contact enrichment so the description reflects the full state.
+// Only runs when business_id is present (claimed or DB-matched businesses).
+async function applySignalNarrative(biz) {
+  if (!biz.business_id) return false;
+
+  // Don't overwrite manually-set descriptions unless they are the old skeleton
+  // (i.e. very short or start with the signal template marker)
+  const existingDesc = biz.description || '';
+  const isSkeletonDesc = !existingDesc ||
+    existingDesc.length < 40 ||
+    existingDesc.startsWith('Business in');
+  if (!isSkeletonDesc) {
+    // Still refresh tags even if description is custom
+    const { tags } = await buildSignalNarrative(biz.business_id, biz.name, biz.zip, biz.category);
+    if (tags && tags.length) {
+      // Merge — preserve any existing human tags, append signal tags
+      const existing = Array.isArray(biz.tags) ? biz.tags : [];
+      const merged   = [...new Set([...existing, ...tags])];
+      if (merged.length !== existing.length) {
+        biz.tags = merged;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const { description, tags } = await buildSignalNarrative(
+    biz.business_id, biz.name, biz.zip, biz.category
+  );
+
+  let changed = false;
+  if (description && description !== biz.description) {
+    biz.description = description;
+    changed = true;
+  }
+  if (tags && tags.length) {
+    const existing = Array.isArray(biz.tags) ? biz.tags : [];
+    const merged   = [...new Set([...existing, ...tags])];
+    if (JSON.stringify(merged) !== JSON.stringify(existing)) {
+      biz.tags = merged;
+      changed = true;
+    }
+  }
+  return changed;
+}
 
 // ── Source 5: Public directory phone waterfall ────────────────────────────────
 // Tries YellowPages → Whitepages → BBB in order. Stops at first phone hit.
