@@ -214,9 +214,11 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 ## Pending Setup (requires Erik action)
 
 ### 1. Twilio SMS webhook — ✅ DONE (2026-05-01)
-- Set to `POST https://gsb-swarm-production.up.railway.app/api/rfq/sms-inbound`
-- ⚠️ Twilio account is on Trial ($13.05 remaining) — SMS only works to verified numbers until upgraded
-- **ACTION NEEDED: Upgrade Twilio to paid account** to broadcast to unverified provider phones
+- Webhook: `https://gsb-swarm-production.up.railway.app/api/rfq/sms-inbound` (HTTP POST)
+- A2P 10DLC brand registered — Low-Volume Standard ($4.50 one-time, Private company)
+- Campaign registered — covers job notifications + order confirmations + identity SMS
+- Account upgraded from Trial to paid
+- **SMS broadcasting to unverified provider phones is now unblocked**
 
 ### 2. Resend inbound MX record (10 min)
 - In your DNS provider for thelocalintel.com, add:
