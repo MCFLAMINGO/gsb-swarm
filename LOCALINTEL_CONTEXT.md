@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-01
+> Last updated: 2026-05-01 (session 2 — test + fix pass)
 
 ---
 
@@ -61,15 +61,16 @@
 - Voice: `Polly.Joanna-Neural` everywhere
 
 ### Resend
+- Domain: thelocalintel.com — verified, region us-east-1, registered on Namecheap
 - Outbound: `jobs@thelocalintel.com` → providers get broadcast emails
 - Reply-to encoding: `jobs+JOBCODE@thelocalintel.com` (e.g. `jobs+X4R9QW@thelocalintel.com`)
-- **PENDING SETUP (ONE DNS RECORD):** To receive email replies, add MX record on thelocalintel.com:
-  - Type: MX
-  - Name: @ (or thelocalintel.com)
-  - Value: `inbound.resend.com`
-  - Priority: 10
-  Then in Resend dashboard: Domains → thelocalintel.com → Inbound → add catch-all route
-  → POST to `https://gsb-swarm-production.up.railway.app/api/rfq/email-inbound`
+- DKIM: TXT record `resend._domainkey` — already set
+- SPF: MX record `send` → `feedback-smtp.us-east-1.amazonses.com` priority 10 — already set
+- **PENDING SETUP — Inbound MX (Namecheap Advanced DNS):**
+  - Type: `MX` | Host: `@` | Value: `inbound-smtp.us-east-1.amazonaws.com` | Priority: `10`
+  - NOTE: correct value is `inbound-smtp.us-east-1.amazonaws.com` NOT `inbound.resend.com`
+  - After adding: Resend dashboard → Domains → thelocalintel.com → Enable Receiving toggle → click "I've added the record"
+  - Then add webhook route in Resend: `jobs+*@thelocalintel.com` → POST `https://gsb-swarm-production.up.railway.app/api/rfq/email-inbound`
 - Inbound webhook: `POST /api/rfq/email-inbound` — extracts job code from To address
 
 ---
@@ -213,22 +214,30 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 
 ## Pending Setup (requires Erik action)
 
-### 1. Twilio SMS webhook — ✅ DONE (2026-05-01)
-- Webhook: `https://gsb-swarm-production.up.railway.app/api/rfq/sms-inbound` (HTTP POST)
-- A2P 10DLC brand registered — Low-Volume Standard ($4.50 one-time, Private company)
-- Campaign registered — covers job notifications + order confirmations + identity SMS
+### 1. Twilio — ✅ FULLY DONE (2026-05-01)
+- Webhook: `https://gsb-swarm-production.up.railway.app/api/rfq/sms-inbound` (HTTP POST, URL only, no 'POST ' prefix)
+- A2P 10DLC: brand registered Low-Volume Standard ($4.50), campaign registered
 - Account upgraded from Trial to paid
-- **SMS broadcasting to unverified provider phones is now unblocked**
+- SMS broadcasting fully unblocked
 
-### 2. Resend inbound MX record (10 min)
-- In your DNS provider for thelocalintel.com, add:
-  - Type: `MX`
-  - Name: `@`
-  - Value: `inbound.resend.com`
-  - Priority: `10`
-- In Resend dashboard → Domains → thelocalintel.com → Inbound tab:
-  - Add route: `jobs+*@thelocalintel.com` → POST to `https://gsb-swarm-production.up.railway.app/api/rfq/email-inbound`
-- This enables: provider email replies being matched to jobs
+### 2. Resend inbound MX record — PENDING (Namecheap + Resend dashboard)
+- **Namecheap Advanced DNS:** Add MX record:
+  - Type: `MX` | Host: `@` | Value: `inbound-smtp.us-east-1.amazonaws.com` | Priority: `10`
+- **Resend dashboard:** Domains → thelocalintel.com → Enable Receiving → "I've added the record"
+- **Resend webhook route:** `jobs+*@thelocalintel.com` → POST `https://gsb-swarm-production.up.railway.app/api/rfq/email-inbound`
+- Enables: provider email replies matched back to jobs by code
+
+---
+
+## Known Issues / Gotchas
+
+- **rfq_responses legacy table:** Old table from health-tester swarm (Apr 28) had column `rfq_id` instead of `job_id`. Renamed to `rfq_responses_legacy` on 2026-05-01. New correct table created.
+- **caller_identities + voice_sessions:** Auto-create via `migrate()` in Railway process works but the `migrated=true` flag caches after first run. If tables are missing, create them directly in Postgres (done 2026-05-01).
+- **`migrated` flag in rfqBroadcast.js:** Module-level boolean prevents re-running migrations on live process. If table schema changes, must run migration SQL directly against Postgres.
+- **Resend MX value:** Correct value is `inbound-smtp.us-east-1.amazonaws.com` — NOT `inbound.resend.com`.
+- **Twilio SMS URL:** Must be URL only — no `POST ` prefix. Twilio prepends method label in UI which caused initial save error.
+- **`db.query()` returns array** — never `.rows`. Critical — breaks silently if wrong.
+- **`pos_type` not a column** — always `pos_config->>'pos_type'`.
 
 ---
 
