@@ -231,6 +231,15 @@ app.get('/.well-known/agent.json', (req, res) => {
 app.listen(HEALTH_PORT, () => {
   console.log(`\n[SWARM] Health check running on port ${HEALTH_PORT}`);
   console.log(`[SWARM] All ${workers.length} workers active. Swarm is LIVE.\n`);
+
+  // ── Intelligence layer: nightly aggregation at 2am Eastern ──────────────
+  // Rolls task_events → task_patterns + business_responsiveness
+  try {
+    const { scheduleNightly } = require('./workers/intelligenceAggWorker');
+    scheduleNightly();
+  } catch (e) {
+    console.error('[SWARM] intelligenceAggWorker schedule failed (non-fatal):', e.message);
+  }
 });
 
 process.on('SIGTERM', () => {

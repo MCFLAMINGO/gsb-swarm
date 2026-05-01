@@ -309,7 +309,9 @@ router.post('/', async (req, res) => {
         business_id, name, address, city, zip, phone, website,
         hours, category, category_group, tags, description,
         confidence_score AS confidence, lat, lon, sunbiz_doc_number,
-        claimed_at IS NOT NULL AS claimed
+        claimed_at IS NOT NULL AS claimed,
+        wallet,
+        pos_config->>'pos_type' AS pos_type
         ${tagBoost}
       FROM businesses
       WHERE ${conditions.join(' AND ')}
@@ -317,7 +319,21 @@ router.post('/', async (req, res) => {
       LIMIT $${p}
     `;
 
-    const rows = await db.query(sql, params);
+    const rawRows = await db.query(sql, params);
+
+    // Enrich rows with UCP order URL for Surge-connected businesses
+    const rows = rawRows.map(r => {
+      const enriched = { ...r };
+      if (r.pos_type === 'other' && r.wallet) {
+        // Surge shop slug derived from wallet — agents can also use /api/directory/shops to discover
+        enriched.ucp_order_url = 'https://surge.basalthq.com/api/ucp/checkout-sessions';
+        enriched.ucp_wallet    = r.wallet;
+        enriched.ucp_note      = 'POST ucp_order_url with shopSlug resolved via GET https://surge.basalthq.com/api/directory/shops?q=' + encodeURIComponent(r.name);
+      }
+      // Remove internal fields agents don't need
+      delete enriched.pos_type;
+      return enriched;
+    });
 
     // ── Notify claimed businesses ────────────────────────────────────────────
     if (zip && effectiveGroup) {
@@ -2555,5 +2571,98 @@ router.get('/admin/pipeline/runs', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ─── PUBLIC ASK ROUTE ────────────────────────────────────────────────────────────────────────────
+// GET  /api/local-intel/ask?q=<question>&zip=<zip>
+// POST /api/local-intel/ask  { "q": "...", "zip": "32082" }
+//
+// Public, no auth, no payment gate. Natural language in → LocalIntel intel out.
+// Used by the search page, external agents, and any direct browser link.
+// Routes through the same handleQuery / handleAsk path as the MCP tools.
+// Rate-limited: 20 req/min per IP via X-Forwarded-For.
+// CORS: open (*) so any frontend or agent can call it.
+//
+// Response: { answer, zip, category, sources, tool_used, latency_ms }
+
+const _askRateMap = new Map(); // ip → { count, reset }
+function _askRateLimit(ip) {
+  const now = Date.now();
+  const entry = _askRateMap.get(ip);
+  if (!entry || now > entry.reset) {
+    _askRateMap.set(ip, { count: 1, reset: now + 60_000 });
+    return false; // not limited
+  }
+  if (entry.count >= 20) return true; // limited
+  entry.count++;
+  return false;
+}
+
+async function handleAskRequest(req, res) {
+  const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+  if (_askRateLimit(ip)) {
+    return res.status(429).json({ error: 'rate_limit', message: 'Max 20 requests per minute.' });
+  }
+
+  const q   = (req.method === 'GET' ? req.query.q   : req.body?.q)   || '';
+  const zip = (req.method === 'GET' ? req.query.zip : req.body?.zip) || null;
+  const cat = (req.method === 'GET' ? req.query.cat : req.body?.cat) || null;
+
+  if (!q && !zip) {
+    return res.status(400).json({
+      error: 'query required',
+      message: 'Pass ?q=<question> or POST { "q": "..." }. Optional: zip, cat.',
+      examples: [
+        '/ask?q=What restaurants are in 32082',
+        '/ask?q=Is there an urgent care gap in Nocatee&zip=32081',
+        '/ask?q=roofing contractors&zip=32082&cat=Construction',
+      ],
+    });
+  }
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  const t0 = Date.now();
+  try {
+    const { handleRPC } = require('./localIntelMCP');
+
+    // Build a tools/call RPC for local_intel_query — the fuzzy intent router
+    const rpc = {
+      jsonrpc: '2.0', id: 1, method: 'tools/call',
+      params: {
+        name: 'local_intel_query',
+        arguments: { query: [q, cat, zip].filter(Boolean).join(' ') },
+      },
+    };
+
+    const callerInfo = { tier: 'sandbox', caller: ip, agentSessionId: null };
+    const result = await handleRPC(rpc, callerInfo);
+
+    const answer = result?.result?.content?.[0]?.text
+      || result?.result
+      || result;
+
+    return res.json({
+      answer,
+      zip:      zip || null,
+      category: cat || null,
+      tool_used: 'local_intel_query',
+      latency_ms: Date.now() - t0,
+    });
+  } catch (e) {
+    console.error('[/ask] error:', e.message);
+    return res.status(500).json({ error: e.message, latency_ms: Date.now() - t0 });
+  }
+}
+
+router.options('/ask', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.sendStatus(204);
+});
+router.get('/ask',  handleAskRequest);
+router.post('/ask', express.json(), handleAskRequest);
 
 module.exports = router;
