@@ -913,10 +913,18 @@ async function pgCategorySearch(resolvedZip, normalizedQuery, rawQuery, limitN) 
        ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
        LIMIT 20`;
 
-      // Try full rawQuery first, then each word token as fallback
-      let nameRows = await db.query(NAME_SQL, ['%' + rawQuery + '%']);
+      // Strip interrogative prefixes before name matching
+      const INTERO_PREFIX = /^(?:where(?:\s+is)?|who(?:\s+is)?|what(?:\s+is)?|find(?:\s+me)?|show(?:\s+me)?|look\s+up|search(?:\s+for)?|tell\s+me\s+about|info(?:rmation)?\s+on|get\s+me)\s+/i;
+      const cleanRawQuery = rawQuery.replace(INTERO_PREFIX, '').trim();
+      const cleanRawLower = cleanRawQuery.toLowerCase();
+
+      // Stop words to skip in token fallback — same as in-memory scorer
+      const PG_STOP = new Set(['for','the','and','near','in','at','of','a','an','show','me','find','get','list','all','any','some','what','where','who','how','is','are','there']);
+
+      // Try full cleaned query first, then individual non-stop tokens
+      let nameRows = await db.query(NAME_SQL, ['%' + cleanRawQuery + '%']);
       if (!nameRows.length) {
-        const tokens = rawLower.split(/\s+/).filter(t => t.length >= 3);
+        const tokens = cleanRawLower.split(/\s+/).filter(t => t.length >= 3 && !PG_STOP.has(t));
         for (const tok of tokens) {
           const r = await db.query(NAME_SQL, ['%' + tok + '%']);
           if (r.length) { nameRows = r; break; }
@@ -1050,8 +1058,10 @@ async function toolSearch({ zip, query, category, group, limit = 20 }) {
   // Resolve ZIP: explicit param > numeric in query string > city name in query
   const resolvedZip = zip || extractZipFromQuery(query) || resolveZip(query);
 
-  // Strip ZIP and city phrase from query before scoring
+  // Strip ZIP, city phrase, and interrogative prefixes before scoring
+  const INTERO = /^(?:where(?:\s+is)?|who(?:\s+is)?|what(?:\s+is)?|find(?:\s+me)?|show(?:\s+me)?|look\s+up|search(?:\s+for)?|tell\s+me\s+about|info(?:rmation)?\s+on|get\s+me)\s+/i;
   const strippedQuery = (query || '')
+    .replace(INTERO, '')
     .replace(/\b\d{5}\b/g, '')
     .replace(/(?:in|near|at)\s+[a-z\s.]+$/i, '')
     .trim();
