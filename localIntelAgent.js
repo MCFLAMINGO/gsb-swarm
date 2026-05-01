@@ -2779,12 +2779,111 @@ router.get('/search', async (req, res) => {
       wallet:      r.wallet || null,
     }));
 
+    // ── Narrative: "what is X" / "tell me about X" intent ──────────────────
+    // Only when 1-2 results and query has about-intent — deterministic, no LLM
+    let narrative = null;
+    const ABOUT_INTENT = /^(?:what(?:\s+is|\s+are)?|tell\s+me\s+about|who\s+is|describe|about)\s+/i;
+    const hasAboutIntent = ABOUT_INTENT.test(raw);
+
+    if (hasAboutIntent && results.length >= 1 && results.length <= 3) {
+      try {
+        // Fetch rich fields for the top result (name match is already proven)
+        const topName = results[0].name;
+        const richRows = await db.query(
+          `SELECT name, description, tags, hours_json, menu_url, website, address, city, zip,
+                  phone, category, claimed_at
+           FROM businesses
+           WHERE name ILIKE $1 AND status != 'inactive'
+           ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+           LIMIT 1`,
+          [`%${topName}%`]
+        );
+
+        if (richRows.length) {
+          const b = richRows[0];
+          const parts = [];
+
+          // Opening: name + description or fallback
+          const desc = b.description || null;
+          const tags = Array.isArray(b.tags) ? b.tags : (b.tags ? JSON.parse(b.tags) : []);
+
+          // Build opening sentence
+          let opening = b.name;
+          const honorifics = tags.filter(t => ['best_of_ponte_vedra','award_winner','local_favorite','featured'].includes(t));
+          if (honorifics.length) {
+            const labelMap = {
+              best_of_ponte_vedra: 'voted Best of Ponte Vedra',
+              award_winner: 'an award winner',
+              local_favorite: 'a local favorite',
+              featured: 'a featured local business',
+            };
+            opening += ' is ' + honorifics.map(h => labelMap[h] || h).join(', ');
+          } else if (b.category) {
+            opening += ` is a ${b.category.toLowerCase()} in ${b.city || 'Northeast Florida'}`;
+          }
+          if (desc) {
+            parts.push(`${opening}. ${desc}`);
+          } else {
+            parts.push(`${opening}.`);
+          }
+
+          // Tags line (skip honorifics already used, skip internal tags)
+          const SKIP_TAGS = new Set(['best_of_ponte_vedra','award_winner','local_favorite','featured']);
+          const displayTags = tags.filter(t => !SKIP_TAGS.has(t)).map(t => t.replace(/_/g,' '));
+          if (displayTags.length) {
+            parts.push(`Known for: ${displayTags.join(', ')}.`);
+          }
+
+          // Address
+          if (b.address) {
+            const addrLine = [b.address, b.city].filter(Boolean).join(', ');
+            parts.push(`Located at ${addrLine}, FL ${b.zip || ''}.`);
+          }
+
+          // Hours summary (today's hours if hours_json present)
+          if (b.hours_json) {
+            try {
+              const hj = typeof b.hours_json === 'string' ? JSON.parse(b.hours_json) : b.hours_json;
+              const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+              const todayName = DAYS[new Date().getDay()];
+              const todayHours = hj[todayName];
+              if (todayHours && todayHours.open) {
+                parts.push(`Open today (${todayName}): ${todayHours.from} – ${todayHours.to}.`);
+              } else if (todayHours && !todayHours.open) {
+                // Find next open day
+                let nextOpen = null;
+                for (let i = 1; i <= 6; i++) {
+                  const d = DAYS[(new Date().getDay() + i) % 7];
+                  if (hj[d] && hj[d].open) { nextOpen = `${d} ${hj[d].from}–${hj[d].to}`; break; }
+                }
+                parts.push(nextOpen ? `Closed today — next open ${nextOpen}.` : 'Closed today.');
+              }
+            } catch(_) {}
+          }
+
+          // Online ordering / menu
+          if (b.menu_url) {
+            parts.push(`Order online: ${b.menu_url}`);
+          } else if (b.website) {
+            parts.push(`Website: ${b.website}`);
+          }
+
+          if (parts.length) narrative = parts.join(' ');
+        }
+      } catch (narrativeErr) {
+        console.error('[/search] narrative build error:', narrativeErr.message);
+        // Non-fatal — narrative just stays null
+      }
+    }
+    // ── end narrative ────────────────────────────────────────────────────────
+
     return res.json({
       total:      results.length,
       query:      q || null,
       zip:        zip || null,
       category:   cat || null,
       latency_ms: Date.now() - t0,
+      narrative,
       results,
     });
   } catch (e) {
