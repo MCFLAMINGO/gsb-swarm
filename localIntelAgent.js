@@ -461,8 +461,36 @@ router.get('/search', async (req, res) => {
     const params = [];
     let p = 1;
 
+    // Category expansion map — dropdown slug → all matching DB category values
+    const CAT_EXPAND = {
+      restaurant:           ['restaurant','fast_food','cafe','bar','pub','bbq','pizza','seafood','sandwich','italian','asian','steakhouse','food_court','ice_cream','fast_casual_mexican','upscale_dining'],
+      healthcare:           ['clinic','hospital','doctor','dentist','dental','pharmacy','urgent_care','therapist','veterinary','optometrist','chiropractor'],
+      retail:               ['retail','clothes','shoes','electronics','grocery','supermarket','convenience','hardware_store','nutrition_supplements'],
+      construction:         ['construction','contractor','builder','roofing','flooring'],
+      professional_services:['law_firm','legal','accountant','consulting','marketing','insurance','insurance_agency'],
+      landscaping:          ['landscaping','lawn_care','tree_service','irrigation'],
+      cleaning:             ['cleaning','maid_service','janitorial','dry_cleaning'],
+      hvac:                 ['hvac','heating','cooling','air_conditioning'],
+      plumber:              ['plumber','plumbing'],
+      electrician:          ['electrician','electrical'],
+      real_estate:          ['real_estate','real_estate_agency','estate_agent','property_management'],
+      finance:              ['finance','bank','bank_branch','atm','financial','mortgage','credit_union','investment'],
+      auto_repair:          ['auto_repair','car_wash','car_repair','tire_shop','auto_parts'],
+      beauty:               ['beauty','hair_salon','barbershop','nail_salon','spa','hair_chain'],
+      education:            ['school','college','university','tutoring','childcare','daycare'],
+    };
+
     if (zip) { conditions.push(`zip = $${p++}`); params.push(zip); }
-    if (cat) { conditions.push(`category = $${p++}`); params.push(cat); }
+    if (cat) {
+      const expanded = CAT_EXPAND[cat];
+      if (expanded && expanded.length > 1) {
+        conditions.push(`category = ANY($${p++})`);
+        params.push(expanded);
+      } else {
+        conditions.push(`category ILIKE $${p++}`);
+        params.push(`%${cat}%`);
+      }
+    }
     if (effectiveGroup) {
       const groupCats = CATEGORY_GROUPS[effectiveGroup];
       if (groupCats && groupCats.length) { conditions.push(`category = ANY($${p++})`); params.push(groupCats); }
