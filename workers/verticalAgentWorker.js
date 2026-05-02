@@ -23,14 +23,8 @@
  *  - Scores improve over time automatically
  */
 
-const path = require('path');
-const fs   = require('fs');
 const http = require('http');
-
-const DATA_DIR     = path.join(__dirname, '..', 'data');
-const VERTICALS_DIR = path.join(DATA_DIR, 'verticals');
-const GAPS_DIR     = path.join(DATA_DIR, 'gaps');
-const RUNS_DIR     = path.join(DATA_DIR, 'vertical-runs');
+const pgStore = require('../lib/pgStore');
 
 const MCP_ENDPOINT        = process.env.MCP_ENDPOINT || 'http://localhost:3001/api/local-intel/mcp';
 const ENRICHMENT_ENDPOINT = process.env.ENRICHMENT_ENDPOINT || 'http://localhost:3007/run';
@@ -333,17 +327,6 @@ function extractCategory(q, fallback) {
   return fallback;
 }
 
-function ensureDirs() {
-  [DATA_DIR, VERTICALS_DIR, GAPS_DIR, RUNS_DIR].forEach(d => {
-    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-  });
-}
-
-function atomicWrite(p, data) {
-  const tmp = p + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, p);
-}
 
 // ── MCP caller ────────────────────────────────────────────────────────────────
 
@@ -500,18 +483,13 @@ async function runVertical(verticalKey) {
     results,
   };
 
-  // Save run
-  atomicWrite(path.join(RUNS_DIR, `${runId}.json`), summary);
-
-  // Save/merge gaps
-  const gapFile = path.join(GAPS_DIR, `${verticalKey}.json`);
-  let existingGaps = [];
-  try { existingGaps = JSON.parse(fs.readFileSync(gapFile, 'utf8')); } catch (_) {}
-  const gapMap = {};
-  [...existingGaps, ...gaps].forEach(g => { gapMap[`${g.zip}|${g.prompt}`] = g; });
-  // Remove closed gaps (score >= 40 now)
-  results.filter(r => r.answered).forEach(r => { delete gapMap[`${r.zip}|${r.prompt}`]; });
-  atomicWrite(gapFile, Object.values(gapMap));
+  // Persist new/updated gaps to rfq_gaps; clear closed gaps for this run
+  for (const g of gaps) {
+    await pgStore.upsertRfqGap({ ...g, vertical: verticalKey });
+  }
+  for (const r of results) {
+    if (r.answered) await pgStore.deleteRfqGap(verticalKey, r.zip, r.prompt);
+  }
 
   console.log(`[verticalAgent] ${config.name}: ${answered}/${total} answered (${passRate}%) · ${gaps.length} gaps`);
   return summary;
@@ -521,7 +499,6 @@ async function runVertical(verticalKey) {
 
 async function runAllVerticals() {
   console.log(`[verticalAgent] Starting full vertical sweep at ${new Date().toISOString()}`);
-  ensureDirs();
 
   const summaries = [];
   for (const key of Object.keys(VERTICALS)) {
@@ -532,12 +509,6 @@ async function runAllVerticals() {
       console.error(`[verticalAgent] Error in ${key}:`, err.message);
     }
   }
-
-  // Write index
-  atomicWrite(path.join(VERTICALS_DIR, '_index.json'), {
-    updated_at: new Date().toISOString(),
-    verticals: summaries,
-  });
 
   console.log(`[verticalAgent] Sweep complete:`, summaries.map(s => `${s.vertical}=${s.pass_rate_pct}%`).join(', '));
 }
@@ -577,13 +548,12 @@ async function handleVerticalQuery(verticalKey, query, zip) {
 
   // ── 4. Low confidence: log gap + dispatch scout ──────────────────────────────
   if (score < 40) {
-    const gapFile = path.join(GAPS_DIR, `${verticalKey}.json`);
-    let gaps = [];
-    try { gaps = JSON.parse(fs.readFileSync(gapFile, 'utf8')); } catch (_) {}
-    const key = `${resolvedZip}|${query}`;
-    if (!gaps.find(g => `${g.zip}|${g.prompt}` === key)) {
-      gaps.push({ prompt: query, zip: resolvedZip, tool, industry: verticalKey, score, ts: new Date().toISOString() });
-      try { atomicWrite(gapFile, gaps); } catch (_) {}
+    const exists = await pgStore.hasRfqGap(verticalKey, resolvedZip, query);
+    if (!exists) {
+      await pgStore.upsertRfqGap({
+        vertical: verticalKey, zip: resolvedZip, prompt: query,
+        tool, score, industry: verticalKey,
+      });
     }
     // Fire scout agent — non-blocking
     dispatchScout(resolvedZip, verticalKey, query);

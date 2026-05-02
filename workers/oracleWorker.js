@@ -205,26 +205,22 @@ function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
 }
 
-function loadBusinesses(zip) {
-  // Try per-ZIP file first, fall back to main index
-  const zipFile = path.join(DATA_DIR, 'zips', `${zip}.json`);
-  if (fs.existsSync(zipFile)) {
-    const d = readJson(zipFile);
-    const arr = Array.isArray(d) ? d : (d?.businesses || []);
-    // Self-heal: stamp any record missing category_group and write back
-    let healed = 0;
-    for (const b of arr) { if (stamp(b)) healed++; }
-    if (healed > 0) {
-      try { fs.writeFileSync(zipFile, JSON.stringify(arr, null, 2)); } catch (_) {}
+async function loadBusinesses(zip) {
+  const db = getDb();
+  if (db) {
+    try {
+      const rows = await db.query(
+        `SELECT business_id, name, zip, address, city, phone, website, hours,
+                category, category_group, status, lat, lon,
+                confidence_score AS confidence, tags, description, sources,
+                primary_source, last_confirmed
+         FROM businesses WHERE zip = $1 ORDER BY name`, [zip]
+      );
+      for (const b of rows) stamp(b);
+      return rows;
+    } catch (e) {
+      console.warn(`[oracleWorker] businesses read failed for ${zip}: ${e.message}`);
     }
-    return arr;
-  }
-  // Fall back to scanning localIntel.json
-  const main = path.join(DATA_DIR, 'localIntel.json');
-  if (fs.existsSync(main)) {
-    const all = readJson(main);
-    const arr = Array.isArray(all) ? all : (all?.businesses || []);
-    return arr.filter(b => b.zip === zip || b.zip === String(zip));
   }
   return [];
 }
@@ -238,12 +234,31 @@ function loadBedrock(zip) {
   return readJson(path.join(DATA_DIR, 'bedrock', `${zip}.json`));
 }
 
-function loadOceanFloor(zip) {
-  return readJson(path.join(DATA_DIR, 'ocean_floor', `${zip}.json`));
+async function loadOceanFloor(zip) {
+  const db = getDb();
+  if (!db) return null;
+  try {
+    const rows = await db.query('SELECT census_json FROM ocean_floor WHERE zip = $1', [zip]);
+    return rows[0]?.census_json || null;
+  } catch (e) {
+    console.warn(`[oracleWorker] ocean_floor read failed for ${zip}: ${e.message}`);
+    return null;
+  }
 }
 
-function loadCensusLayer(zip) {
-  return readJson(path.join(DATA_DIR, 'census_layer', `${zip}.json`));
+async function loadCensusLayer(zip) {
+  const db = getDb();
+  if (!db) return null;
+  try {
+    const rows = await db.query('SELECT layer_json, confidence FROM census_layer WHERE zip = $1', [zip]);
+    if (!rows[0]) return null;
+    const layer = rows[0].layer_json || {};
+    if (rows[0].confidence) layer.confidence = rows[0].confidence;
+    return layer;
+  } catch (e) {
+    console.warn(`[oracleWorker] census_layer read failed for ${zip}: ${e.message}`);
+    return null;
+  }
 }
 
 // loadAcs — Postgres first (durable), null if no row found, throws on DB error
@@ -261,48 +276,29 @@ async function loadAcs(zip) {
   return readJson(path.join(DATA_DIR, 'acs', `${zip}.json`));
 }
 
-// Load vertical gap entries for this ZIP — census_layer Postgres table first,
-// flat file fallback for local dev. Returns [{vertical, ...gapData}].
+// Load vertical gap entries for this ZIP from census_layer.sector_gaps in Postgres.
 async function loadGapsForZip(zip) {
-  if (process.env.LOCAL_INTEL_DB_URL) {
-    try {
-      const pgStore = require('../lib/pgStore');
-      const row = await pgStore.getCensusLayer(zip);
-      if (row && Array.isArray(row.sector_gaps) && row.sector_gaps.length > 0) {
-        return row.sector_gaps.map(g => ({ vertical: g.oracle_vertical || 'general', ...g }));
-      }
-      // No gaps found in Postgres — not an error, ZIP just has no gaps yet
-      return [];
-    } catch (e) {
-      console.warn(`[oracleWorker] Postgres gap load failed for ${zip}: ${e.message}`);
+  try {
+    const pgStore = require('../lib/pgStore');
+    const row = await pgStore.getCensusLayer(zip);
+    if (row && Array.isArray(row.sector_gaps) && row.sector_gaps.length > 0) {
+      return row.sector_gaps.map(g => ({ vertical: g.oracle_vertical || 'general', ...g }));
     }
+    return [];
+  } catch (e) {
+    console.warn(`[oracleWorker] Postgres gap load failed for ${zip}: ${e.message}`);
+    return [];
   }
-  // Flat file fallback (local dev)
-  const GAPS_DIR = path.join(DATA_DIR, 'gaps');
-  if (!fs.existsSync(GAPS_DIR)) return [];
-  const results = [];
-  const files = fs.readdirSync(GAPS_DIR).filter(f => f.endsWith('.json') && !f.startsWith('_'));
-  for (const file of files) {
-    try {
-      const entries = JSON.parse(fs.readFileSync(path.join(GAPS_DIR, file), 'utf8'));
-      if (!Array.isArray(entries)) continue;
-      const vertical = file.replace('.json', '');
-      for (const entry of entries) {
-        if (String(entry.zip) === String(zip)) results.push({ vertical, ...entry });
-      }
-    } catch { /* skip bad file */ }
-  }
-  return results;
 }
 
 // ── Core oracle computation ───────────────────────────────────────────────────
 
 async function computeOracle(zip, name) {
-  const businesses  = loadBusinesses(zip);
+  const businesses  = await loadBusinesses(zip);
   const zone        = loadSpendingZone(zip);
   const bedrock     = loadBedrock(zip);
-  const ocean       = loadOceanFloor(zip);
-  const censusLayer = loadCensusLayer(zip);
+  const ocean       = await loadOceanFloor(zip);
+  const censusLayer = await loadCensusLayer(zip);
   const acs         = await loadAcs(zip);  // async: reads from Postgres, throws on DB error
   const verticalGaps = await loadGapsForZip(zip);
 
@@ -644,20 +640,15 @@ async function computeOracle(zip, name) {
 
 // ── Run & schedule ─────────────────────────────────────────────────────────────
 
-function ensureDirs() {
-  [DATA_DIR, ORACLE_DIR, HISTORY_DIR].forEach(d => {
-    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-  });
-}
 
 // ── Time-series append ────────────────────────────────────────────────────────
-// Appends a trimmed snapshot to data/oracle/history/{zip}.json (array, newest last)
-// Keeps MAX_HISTORY entries. Used to compute trend direction on next run.
+// Tracks a per-ZIP snapshot history in-memory. Used to compute trend direction
+// on the next run. History does not survive process restarts — that's fine, the
+// trend is rebuilt as new snapshots accumulate.
+const _historyByZip = new Map();
+
 function appendHistory(zip, result) {
-  const file = path.join(HISTORY_DIR, `${zip}.json`);
-  let history = [];
-  try { history = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
-  if (!Array.isArray(history)) history = [];
+  let history = _historyByZip.get(zip) || [];
 
   // Snapshot — only what we need to detect trends (keep it small)
   const snap = {
@@ -675,16 +666,14 @@ function appendHistory(zip, result) {
 
   history.push(snap);
   if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
-  atomicWrite(file, history);
+  _historyByZip.set(zip, history);
 }
 
 // Compute trend direction comparing last two snapshots
 // Returns { capture_rate: 'up'|'down'|'flat', growth_state: 'improving'|'declining'|'stable', cycles: N }
 function computeTrend(zip) {
-  const file = path.join(HISTORY_DIR, `${zip}.json`);
-  let history = [];
-  try { history = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
-  if (!Array.isArray(history) || history.length < 2) return { cycles: history.length, capture_rate: 'new', growth_state: 'new' };
+  const history = _historyByZip.get(zip) || [];
+  if (history.length < 2) return { cycles: history.length, capture_rate: 'new', growth_state: 'new' };
 
   const prev = history[history.length - 2];
   const curr = history[history.length - 1];
@@ -710,43 +699,21 @@ function computeTrend(zip) {
   };
 }
 
-function atomicWrite(file, data) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, file);
-}
-
 async function runOracle() {
-  ensureDirs();
   console.log('[oracleWorker] Starting oracle computation...');
 
-  // Discover all ZIPs from business data
-  const zones = (() => {
-    try { return JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'spendingZones.json'), 'utf8')); } catch { return {}; }
-  })();
-  const zoneZips = Object.keys(zones?.zones || {});
+  // ZIP discovery — Postgres businesses table is source of truth for active ZIPs
+  let pgZips = [];
+  try {
+    const pgStore = require('../lib/pgStore');
+    pgZips = await pgStore.getDistinctZips();
+  } catch (_) { /* fall through */ }
 
-  // Also discover from zips/ directory — include all ZIPs with sufficient business data
-  const zipDir = path.join(DATA_DIR, 'zips');
-  const fileZips = fs.existsSync(zipDir)
-    ? fs.readdirSync(zipDir)
-        .filter(f => f.endsWith('.json') && /^\d{5}\.json$/.test(f))
-        .map(f => f.replace('.json', ''))
-    : [];
-
-  // Merge: zone-backed ZIPs + file ZIPs with >=10 businesses (enough for meaningful signals)
-  // flZipRegistry fallback handles demographics for file ZIPs without zone data
+  const zones = loadSpendingZone(0) ? {} : {};  // legacy, no longer used for discovery
+  const zoneZips = [];
   const registry = getFlRegistry();
-  const qualifiedFileZips = fileZips.filter(zip => {
-    try {
-      const d = JSON.parse(fs.readFileSync(path.join(zipDir, `${zip}.json`), 'utf8'));
-      const count = Array.isArray(d) ? d.length : (d?.businesses?.length || 0);
-      // Must have >=10 businesses AND either zone data OR a registry entry with population
-      return count >= 10 && (zoneZips.includes(zip) || (registry[zip]?.population || 0) > 0);
-    } catch { return false; }
-  });
 
-  const allZips = [...new Set([...zoneZips, ...qualifiedFileZips])];
+  const allZips = [...new Set(pgZips)];
 
   // Top 30 known ZIPs — always included even if file data is still building
   const KNOWN_ZIPS = [
@@ -806,9 +773,8 @@ async function runOracle() {
       // Attach trend to the result file so API callers get it inline
       result.trend = trend;
 
-      atomicWrite(path.join(ORACLE_DIR, `${zip}.json`), result);
-      // Persist to Postgres — survives Railway deploys
-      upsertZipIntelligence(zip, result).catch(() => {});
+      // Persist to Postgres — zip_intelligence is the durable store
+      await upsertZipIntelligence(zip, result);
       index.zips[zip] = {
         name:               result.name,
         saturation_status:  result.restaurant_capacity.saturation_status,
@@ -829,8 +795,7 @@ async function runOracle() {
     }
   }
 
-  atomicWrite(INDEX_FILE, index);
-  console.log(`[oracleWorker] Done — ${allZips.length} ZIPs computed.`);
+  console.log(`[oracleWorker] Done — ${allZips.length} ZIPs computed (index entries: ${Object.keys(index.zips).length}).`);
 }
 
 // Run immediately, then every 6 hours — skip startup if ran within 6h

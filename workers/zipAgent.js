@@ -230,7 +230,7 @@ if (!ZIP || isNaN(LAT) || isNaN(LON)) {
 }
 
 const DATA_DIR   = path.join(__dirname, '../data');
-const SOURCE_LOG = path.join(DATA_DIR, 'sourceLog.json');
+const pgStoreLib = require('../lib/pgStore');
 
 // SJC zip codes — only these get ArcGIS Hub queries
 const SJC_ZIPS = new Set(['32004','32033','32068','32080','32081','32082','32084','32086','32092','32095','32259']);
@@ -241,34 +241,21 @@ function log(msg) {
   console.log(`[ZipAgent ${ZIP}] ${msg}`);
 }
 
-function loadSourceLog() {
-  if (fs.existsSync(SOURCE_LOG)) {
-    try { return JSON.parse(fs.readFileSync(SOURCE_LOG)); }
-    catch (e) { return {}; }
-  }
-  return {};
-}
-
-function saveSourceLog(slog) {
-  fs.writeFileSync(SOURCE_LOG, JSON.stringify(slog, null, 2));
-}
-
 /**
- * Record a source availability result for this zip.
+ * Record a source availability result for this zip into Postgres source_log.
  * status: 'ok' | 'unavailable' | 'error' | 'pending'
  */
 function logSource(source, status, detail, retryAfterHours = null) {
-  const slog = loadSourceLog();
-  if (!slog[ZIP]) slog[ZIP] = {};
-  slog[ZIP][source] = {
+  const retryAfter = retryAfterHours
+    ? new Date(Date.now() + retryAfterHours * 3600 * 1000).toISOString()
+    : null;
+  pgStoreLib.appendSourceLog({
+    zip: ZIP,
+    source_name: source,
     status,
-    detail,
-    checked_at: new Date().toISOString(),
-    retry_after: retryAfterHours
-      ? new Date(Date.now() + retryAfterHours * 3600 * 1000).toISOString()
-      : null,
-  };
-  saveSourceLog(slog);
+    fetched_at: new Date().toISOString(),
+    detail: { detail, retry_after: retryAfter },
+  }).catch(() => {});
   const emoji = status === 'ok' ? '✓' : status === 'unavailable' ? '⏭' : '⚠';
   log(`${emoji} [${source}] ${status}${detail ? ': ' + detail : ''}`);
 }

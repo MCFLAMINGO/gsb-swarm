@@ -33,15 +33,9 @@
  *   - data_confidence_score (how much to trust oracle signals)
  */
 
-const fs      = require('fs');
-const path    = require('path');
 const https   = require('https');
 const pgStore = require('../lib/pgStore');
-
-const DATA_DIR    = path.join(__dirname, '..', 'data');
-const LAYER_DIR   = path.join(DATA_DIR, 'census_layer');
-const ZIPS_DIR    = path.join(DATA_DIR, 'zips');
-const ORACLE_DIR  = path.join(DATA_DIR, 'oracle');
+const db      = require('../lib/db');
 
 // ── County FIPS map ────────────────────────────────────────────────────────────
 const COUNTY_CONFIG = [
@@ -135,17 +129,11 @@ function parseCensus(raw) {
 
 const toN = v => { const n = parseFloat(v); return isNaN(n) || n < -9000000 ? 0 : n; };
 
-function readJson(p) { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } }
-
-function atomicWrite(filePath, data) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmp = filePath + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, filePath);
-}
-
-function ensureDirs() {
-  [LAYER_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+// Strip Postgres-only metadata (e.g. _confidence) before re-upserting layer JSON
+function stripMeta(layer) {
+  if (!layer || typeof layer !== 'object') return layer;
+  const { _confidence, ...rest } = layer;
+  return rest;
 }
 
 // ── LAYER 1: ZBP — ZIP Business Patterns 2018 ─────────────────────────────────
@@ -153,12 +141,14 @@ function ensureDirs() {
 // Vintage 2018 — pulled once on startup, never re-fetched (data doesn't change)
 
 async function ingestZBP(targetZips = ALL_ZIPS) {
-  const stateFile = path.join(LAYER_DIR, '_zbp_ingested.json');
-  if (fs.existsSync(stateFile)) {
-    const s = readJson(stateFile);
-    console.log('[censusLayer] ZBP already ingested at', s?.ingested_at, '— skipping');
-    return;
-  }
+  // Skip if any ZIP already has a zbp section in Postgres
+  try {
+    const existing = await pgStore.getCensusLayer(targetZips[0]?.zip);
+    if (existing?.zbp?.zbp_vintage) {
+      console.log('[censusLayer] ZBP already ingested (Postgres has zbp section) — skipping');
+      return;
+    }
+  } catch (_) { /* fall through */ }
 
   console.log('[censusLayer] ZBP: fetching 2018 ZIP Business Patterns for all ZIPs...');
   const ZIP_LIST = targetZips.map(z => z.zip).join(',');
@@ -182,7 +172,7 @@ async function ingestZBP(targetZips = ALL_ZIPS) {
 
   for (const [zip, zipRows] of Object.entries(byZip)) {
     const total    = zipRows.find(r => r.NAICS2017 === '00') || {};
-    const existing = readJson(path.join(LAYER_DIR, `${zip}.json`)) || {};
+    const existing = stripMeta(await pgStore.getCensusLayer(zip)) || {};
 
     // Build sector breakdown (2-digit NAICS only)
     const sectors = {};
@@ -200,9 +190,9 @@ async function ingestZBP(targetZips = ALL_ZIPS) {
       }
     }
 
-    // Employment density (employees per 1000 residents)
-    const zone = readJson(path.join(DATA_DIR, 'spendingZones.json'))?.zones?.[zip] || {};
-    const population = zone.population || 0;
+    // Employment density (employees per 1000 residents) — population sourced from zip_intelligence
+    const intelRow = await pgStore.getZipIntelligenceRow(zip).catch(() => null);
+    const population = intelRow?._population || intelRow?.population || 0;
     const totalEmp   = toN(total.EMP);
     const totalEstab = toN(total.ESTAB);
     const empDensity = population > 0 && totalEmp > 0
@@ -235,13 +225,10 @@ async function ingestZBP(targetZips = ALL_ZIPS) {
       zbp:    zbpData,
       updated_at: new Date().toISOString(),
     };
-    atomicWrite(path.join(LAYER_DIR, `${zip}.json`), zbpLayerData);
-    // Mirror to Postgres (fire-and-forget)
-    pgStore.upsertCensusLayer(zip, zbpLayerData, null).catch(() => {});
+    await pgStore.upsertCensusLayer(zip, zbpLayerData, existing._confidence || null);
   }
 
-  atomicWrite(stateFile, { ingested_at: new Date().toISOString(), zips: Object.keys(byZip).length });
-  console.log(`[censusLayer] ZBP: ingested ${Object.keys(byZip).length} ZIPs`);
+  console.log(`[censusLayer] ZBP: ingested ${Object.keys(byZip).length} ZIPs into census_layer`);
 }
 
 // ── LAYER 2: CBP — County Business Patterns 2023 ──────────────────────────────
@@ -294,11 +281,11 @@ async function ingestCBP(targetZips = ALL_ZIPS) {
 
       console.log(`[censusLayer] CBP: ${name} — ${toN(total.ESTAB)} estab, ${toN(total.EMP).toLocaleString()} emp`);
 
-      // Merge county share into each ZIP's census layer file
+      // Merge county share into each ZIP's census layer record (Postgres)
       const countyZips = targetZips.filter(z => z.county === name);
       for (const { zip } of countyZips) {
-        const file     = path.join(LAYER_DIR, `${zip}.json`);
-        const existing = readJson(file) || { zip };
+        const existing = stripMeta(await pgStore.getCensusLayer(zip)) || { zip };
+        const prevConf = (await pgStore.getCensusLayer(zip))?._confidence || null;
         existing.cbp = countySectors[name];
         existing.updated_at = new Date().toISOString();
 
@@ -322,7 +309,7 @@ async function ingestCBP(targetZips = ALL_ZIPS) {
           existing.sector_gaps = sectorGaps;
         }
 
-        atomicWrite(file, existing);
+        await pgStore.upsertCensusLayer(zip, existing, prevConf);
       }
 
       // Small delay between counties
@@ -333,13 +320,7 @@ async function ingestCBP(targetZips = ALL_ZIPS) {
     }
   }
 
-  atomicWrite(path.join(LAYER_DIR, '_county_sectors.json'), {
-    generated_at: new Date().toISOString(),
-    cbp_vintage:  2023,
-    counties:     countySectors,
-  });
-
-  console.log('[censusLayer] CBP: county sectors written to _county_sectors.json');
+  console.log(`[censusLayer] CBP: county sectors merged into census_layer for ${Object.keys(countySectors).length} counties`);
 }
 
 // ── LAYER 3: PDB — Planning Database 2024 ─────────────────────────────────────
@@ -477,23 +458,20 @@ async function ingestPDB(targetZips = ALL_ZIPS) {
     //
     const censusQuality    = Math.max(0, Math.round(25 - (lowResponseScore * 0.25)));
 
-    const zipFile          = path.join(ZIPS_DIR, `${zip}.json`);
-    const bizData          = fs.existsSync(zipFile)
-      ? (() => { const d = readJson(zipFile); return Array.isArray(d) ? d : (d?.businesses || []); })()
-      : [];
-    const censusLayer      = readJson(path.join(LAYER_DIR, `${zip}.json`));
+    const bizData          = (await pgStore.getBusinessesByZip(zip).catch(() => null)) || [];
+    const censusLayer      = stripMeta(await pgStore.getCensusLayer(zip));
     const zbpTotal         = censusLayer?.zbp?.total_establishments || 0;
     const bizCoverage      = zbpTotal > 0
       ? Math.min(25, Math.round((bizData.length / zbpTotal) * 25))
       : (bizData.length > 10 ? 15 : bizData.length > 3 ? 8 : 2);
 
-    const zones            = readJson(path.join(DATA_DIR, 'spendingZones.json'));
-    const hasZoneData      = !!(zones?.zones?.[zip]?.population);
-    const hasOceanData     = fs.existsSync(path.join(DATA_DIR, 'ocean_floor', `${zip}.json`));
+    const intelRow         = await pgStore.getZipIntelligenceRow(zip).catch(() => null);
+    const oceanRow         = (await db.queryOne('SELECT zip FROM ocean_floor WHERE zip = $1', [zip]).catch(() => null));
+    const hasZoneData      = !!(intelRow?._population || intelRow?.population);
+    const hasOceanData     = !!oceanRow;
     const demoQuality      = hasZoneData ? (hasOceanData ? 25 : 18) : 8;
 
-    const oracleHistory    = readJson(path.join(ORACLE_DIR, 'history', `${zip}.json`)) || [];
-    const oracleCycles     = oracleHistory.length;
+    const oracleCycles     = intelRow ? (intelRow.oracle_cycles || 0) : 0;
     const oracleQuality    = Math.min(25, oracleCycles * 3);  // 25pts at 8+ cycles
 
     const dataConfidenceScore = censusQuality + bizCoverage + demoQuality + oracleQuality;
@@ -530,18 +508,15 @@ async function ingestPDB(targetZips = ALL_ZIPS) {
       has_ocean_data:       hasOceanData,
     };
 
-    // Merge into census layer file
-    const layerFile = path.join(LAYER_DIR, `${zip}.json`);
-    const existing  = readJson(layerFile) || { zip };
+    // Merge into census layer (Postgres)
+    const existing = stripMeta(await pgStore.getCensusLayer(zip)) || { zip };
     const pdbLayerData = {
       ...existing,
       pdb:        pdbData,
       confidence,
       updated_at: new Date().toISOString(),
     };
-    atomicWrite(layerFile, pdbLayerData);
-    // Mirror to Postgres with confidence (fire-and-forget)
-    pgStore.upsertCensusLayer(zip, pdbLayerData, confidence).catch(() => {});
+    await pgStore.upsertCensusLayer(zip, pdbLayerData, confidence);
 
     confidenceIndex[zip] = {
       score:           dataConfidenceScore,
@@ -553,96 +528,51 @@ async function ingestPDB(targetZips = ALL_ZIPS) {
     console.log(`[censusLayer] PDB: ${zip} confidence=${dataConfidenceScore} (${confidenceTier}) lrs=${lowResponseScore} college=${collegePct}%`);
   }
 
-  atomicWrite(path.join(LAYER_DIR, '_confidence.json'), {
-    generated_at: new Date().toISOString(),
-    zips:         confidenceIndex,
-  });
-
-  console.log('[censusLayer] PDB: confidence index written');
+  console.log(`[censusLayer] PDB: confidence index built for ${Object.keys(confidenceIndex).length} ZIPs`);
+  return confidenceIndex;
 }
 
 // ── Oracle integration: inject confidence into oracle output ───────────────────
 // Called after PDB ingest — stamps confidence tier onto existing oracle files
 // so that MCP callers see it without needing a separate fetch
 
-async function stampOracleConfidence() {
-  const confFile = path.join(LAYER_DIR, '_confidence.json');
-  const conf     = readJson(confFile);
-  if (!conf?.zips) return;
+async function stampOracleConfidence(confidenceIndex) {
+  if (!confidenceIndex || !Object.keys(confidenceIndex).length) return;
+  if (!db.isReady()) return;
 
   let stamped = 0;
-
-  // Postgres: batch-update zip_intelligence with confidence scores (durable)
-  if (process.env.LOCAL_INTEL_DB_URL) {
-    try {
-      const db2 = require('../lib/db');
-      for (const [zip, c] of Object.entries(conf.zips)) {
-        const confidenceBlock = {
-          score:         c.score,
-          tier:          c.tier,
-          oracle_cycles: c.oracle_cycles,
-          lrs:           c.lrs,
-          note: c.tier === 'SPARSE'    ? 'Low signal density — treat signals as directional only'
-              : c.tier === 'PROXY'     ? 'Moderate confidence — demographic data estimated from proxies'
-              : c.tier === 'ESTIMATED' ? 'Good confidence — Census-backed with growing oracle history'
-              : 'High confidence — Census-verified with validated oracle signal history',
-        };
-        // Merge confidence into the stored oracle_json blob
-        await db2.query(
-          `UPDATE zip_intelligence
-           SET oracle_json = jsonb_set(COALESCE(oracle_json, '{}'), '{data_confidence}', $2::jsonb),
-               updated_at  = NOW()
-           WHERE zip = $1`,
-          [zip, JSON.stringify(confidenceBlock)]
-        ).catch(() => {});
-        stamped++;
-      }
-      console.log(`[censusLayer] Stamped confidence scores on ${stamped} ZIPs in Postgres`);
-      return;
-    } catch (e) {
-      console.warn('[censusLayer] Postgres confidence stamp failed, falling back to flat files:', e.message);
-    }
-  }
-
-  // Flat file fallback (local dev)
-  stamped = 0;
-  for (const [zip, c] of Object.entries(conf.zips)) {
-    const oracleFile = path.join(ORACLE_DIR, `${zip}.json`);
-    if (!fs.existsSync(oracleFile)) continue;
-    const oracle = readJson(oracleFile);
-    if (!oracle) continue;
-    oracle.data_confidence = {
-      score:           c.score,
-      tier:            c.tier,
-      oracle_cycles:   c.oracle_cycles,
-      lrs:             c.lrs,
-      note:            c.tier === 'SPARSE'    ? 'Low signal density — treat signals as directional only'
-                     : c.tier === 'PROXY'     ? 'Moderate confidence — demographic data estimated from proxies'
-                     : c.tier === 'ESTIMATED' ? 'Good confidence — Census-backed with growing oracle history'
-                     : 'High confidence — Census-verified with validated oracle signal history',
+  for (const [zip, c] of Object.entries(confidenceIndex)) {
+    const confidenceBlock = {
+      score:         c.score,
+      tier:          c.tier,
+      oracle_cycles: c.oracle_cycles,
+      lrs:           c.lrs,
+      note: c.tier === 'SPARSE'    ? 'Low signal density — treat signals as directional only'
+          : c.tier === 'PROXY'     ? 'Moderate confidence — demographic data estimated from proxies'
+          : c.tier === 'ESTIMATED' ? 'Good confidence — Census-backed with growing oracle history'
+          : 'High confidence — Census-verified with validated oracle signal history',
     };
-    atomicWrite(oracleFile, oracle);
+    await db.query(
+      `UPDATE zip_intelligence
+       SET oracle_json = jsonb_set(COALESCE(oracle_json, '{}'), '{data_confidence}', $2::jsonb),
+           updated_at  = NOW()
+       WHERE zip = $1`,
+      [zip, JSON.stringify(confidenceBlock)]
+    ).catch(() => {});
     stamped++;
   }
-  console.log(`[censusLayer] Stamped confidence scores on ${stamped} oracle flat files`);
+  console.log(`[censusLayer] Stamped confidence scores on ${stamped} ZIPs in zip_intelligence`);
 }
 
-// ── Refresh schedule management ────────────────────────────────────────────────
-
-const SCHEDULE_FILE = path.join(LAYER_DIR, '_schedule.json');
-
-function readSchedule() {
-  return readJson(SCHEDULE_FILE) || {};
-}
+// ── Refresh schedule management (in-memory; resets on restart) ─────────────────
+const _schedule = {};
 
 function writeSchedule(updates) {
-  const current = readSchedule();
-  atomicWrite(SCHEDULE_FILE, { ...current, ...updates });
+  Object.assign(_schedule, updates);
 }
 
 function shouldRun(key, intervalMs) {
-  const schedule = readSchedule();
-  const last     = schedule[key] ? new Date(schedule[key]).getTime() : 0;
+  const last = _schedule[key] ? new Date(_schedule[key]).getTime() : 0;
   return Date.now() - last >= intervalMs;
 }
 
@@ -670,13 +600,12 @@ async function getTargetZips() {
 }
 
 async function runCensusLayer() {
-  ensureDirs();
   console.log('[censusLayer] Starting census layer update...');
 
   const MS_MONTHLY  = 24 * 24 * 60 * 60 * 1000; // 24 days — 30d overflows 32-bit signed int (2^31-1)
   const MS_QUARTERLY = 24 * 24 * 60 * 60 * 1000; // 24 days — 90d overflows 32-bit signed int; re-arms itself
 
-  // ZBP: once only (state file controls this internally)
+  // ZBP: once only (Postgres-backed flag)
   try {
     const targetZips = await getTargetZips();
     await ingestZBP(targetZips);
@@ -701,9 +630,9 @@ async function runCensusLayer() {
   if (shouldRun('pdb_last_run', MS_QUARTERLY)) {
     try {
       const targetZips3 = await getTargetZips();
-      await ingestPDB(targetZips3);
+      const confidenceIndex = await ingestPDB(targetZips3);
       writeSchedule({ pdb_last_run: new Date().toISOString() });
-      await stampOracleConfidence();
+      await stampOracleConfidence(confidenceIndex);
     } catch (err) {
       console.error('[censusLayer] PDB error:', err.message);
     }

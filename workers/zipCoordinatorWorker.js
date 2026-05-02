@@ -11,17 +11,11 @@
  */
 
 const express = require('express');
-const fs = require('fs');
 const path = require('path');
 const { execSync, spawn } = require('child_process');
 const { ALL_SUNBELT_ZIPS, getZipsByPhase, getSummary: getSunbeltSummary } = require('./sunbeltZipRegistry');
 
 const PORT = 3006;
-const DATA_DIR = path.join(__dirname, '../data');
-const ZIPS_DIR = path.join(DATA_DIR, 'zips');
-const COVERAGE_FILE = path.join(DATA_DIR, 'zipCoverage.json');
-const QUEUE_FILE = path.join(DATA_DIR, 'zipQueue.json');
-const LEDGER_FILE = path.join(DATA_DIR, 'usageLedger.json');
 
 // FL priority seeds — SJC + major metro anchors only.
 // Full 1013-ZIP FL list is loaded from flZipRegistry.js at runtime.
@@ -71,33 +65,32 @@ const FL_PHASE_GATE_PCT = 95; // percent of FL ZIPs complete to unlock Phase 2
 let revenue7d = 0;
 let gateStatus = 'zero_revenue';
 
-function checkBudgetGate() {
-  if (!fs.existsSync(LEDGER_FILE)) {
+async function checkBudgetGate() {
+  // Pull 7-day revenue from usage_ledger Postgres table.
+  if (!db.isReady()) {
     CONCURRENT_AGENTS = 2;
     revenue7d = 0;
-    gateStatus = 'no_ledger';
-    console.log('[ZipCoordinator] Budget gate: no ledger found — defaulting to 2 agents (conservative start)');
+    gateStatus = 'no_db';
+    console.log('[ZipCoordinator] Budget gate: no DB — defaulting to 2 agents');
     return;
   }
-
-  let ledger = [];
   try {
-    ledger = JSON.parse(fs.readFileSync(LEDGER_FILE, 'utf8'));
+    const row = await db.queryOne(
+      `SELECT COALESCE(SUM(cost_path_usd), 0) AS revenue
+       FROM usage_ledger
+       WHERE called_at >= NOW() - INTERVAL '7 days'`
+    );
+    revenue7d = parseFloat(row?.revenue || 0);
   } catch (e) {
     CONCURRENT_AGENTS = 2;
     revenue7d = 0;
-    gateStatus = 'ledger_parse_error';
-    console.log('[ZipCoordinator] Budget gate: ledger parse error — defaulting to 2 agents');
+    gateStatus = 'ledger_query_error';
+    console.log('[ZipCoordinator] Budget gate: ledger query error — defaulting to 2 agents');
     return;
   }
 
-  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  revenue7d = ledger
-    .filter(entry => entry.timestamp && new Date(entry.timestamp).getTime() >= sevenDaysAgo)
-    .reduce((sum, entry) => sum + (entry.amount || 0), 0);
-
   if (revenue7d === 0) {
-    CONCURRENT_AGENTS = 6; // Pre-revenue: run full FL expansion — data is the asset
+    CONCURRENT_AGENTS = 6;
     gateStatus = 'zero_revenue';
     console.log('[ZipCoordinator] Budget gate: zero revenue — running 6 agents for FL expansion (data-first mode)');
   } else if (revenue7d < 5) {
@@ -114,6 +107,7 @@ function checkBudgetGate() {
 // ── State ─────────────────────────────────────────────────────────────────────
 
 const pgStore = require('../lib/pgStore');
+const db      = require('../lib/db');
 
 // Coverage is now Postgres-only — no flat file
 // In-memory coverage cache is rebuilt from Postgres on every start
@@ -252,26 +246,20 @@ function buildFullFlQueue() {
   return buildFullQueue([]);
 }
 
-function loadQueue() {
-  if (fs.existsSync(QUEUE_FILE)) {
-    const existing = JSON.parse(fs.readFileSync(QUEUE_FILE));
-    // Rebuild queue each load to pick up phase gate unlocks and new state ZIPs
-    const fullQueue = buildFullQueue(existing);
-    // Only rewrite if meaningfully different (new ZIPs added or phase unlocked)
-    if (fullQueue.length !== existing.length) {
-      console.log(`[ZipCoordinator] Queue expanded: ${existing.length} → ${fullQueue.length} ZIPs`);
-      fs.writeFileSync(QUEUE_FILE, JSON.stringify(fullQueue, null, 2));
-    }
-    return fullQueue;
+async function loadQueue() {
+  const existing = await pgStore.getAllZipQueueEntries();
+  const fullQueue = buildFullQueue(existing);
+  if (fullQueue.length !== existing.length) {
+    console.log(`[ZipCoordinator] Queue expanded: ${existing.length} → ${fullQueue.length} ZIPs`);
+    await saveQueue(fullQueue);
   }
-  // First run — build full FL queue
-  const queue = buildFullFlQueue();
-  fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
-  return queue;
+  return fullQueue;
 }
 
-function saveQueue(queue) {
-  fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
+async function saveQueue(queue) {
+  for (const entry of queue) {
+    await pgStore.upsertZipQueueEntry(entry);
+  }
 }
 
 // ── Coordinator Loop ──────────────────────────────────────────────────────────
@@ -328,10 +316,10 @@ async function coordinatorCycle() {
   if (isRunning) return;
   isRunning = true;
 
-  checkBudgetGate();
+  await checkBudgetGate();
 
   const coverage = await loadCoverage();
-  const queue = loadQueue();
+  const queue = await loadQueue();
 
   // Reset stuck in-progress (older than 10 mins)
   const now = Date.now();
@@ -363,7 +351,7 @@ async function coordinatorCycle() {
         });
         coverage.lastRun = new Date().toISOString();
         saveCoverage(coverage);
-        saveQueue(queue);
+        await saveQueue(queue);
         isRunning = false;
         return; // next cycle will pick up the reset queue
       } else {
@@ -372,7 +360,7 @@ async function coordinatorCycle() {
     }
     coverage.lastRun = new Date().toISOString();
     saveCoverage(coverage);
-    saveQueue(queue);
+    await saveQueue(queue);
     isRunning = false;
     return;
   }
@@ -389,12 +377,13 @@ async function coordinatorCycle() {
     z.attempts = (z.attempts || 0) + 1;
     activeAgents[z.zip] = true;
   });
-  saveQueue(queue);
+  await saveQueue(queue);
 
   // Run batch in parallel
   const results = await Promise.all(batch.map(z => runZipAgent(z)));
 
-  results.forEach((result, i) => {
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
     const z = batch[i];
     delete activeAgents[z.zip];
 
@@ -402,19 +391,18 @@ async function coordinatorCycle() {
       z.status = 'complete';
       z.completedAt = new Date().toISOString();
 
-      // Read business count from the zip file written by ZipAgent
+      // Compute business count from Postgres businesses table
       let bizCount = 0;
       let avgConf = 0;
       try {
-        const zipFile = path.join(ZIPS_DIR, `${z.zip}.json`);
-        if (fs.existsSync(zipFile)) {
-          const bizs = JSON.parse(fs.readFileSync(zipFile));
-          bizCount = Array.isArray(bizs) ? bizs.length : 0;
+        const rows = await pgStore.getBusinessesByZip(z.zip);
+        if (Array.isArray(rows)) {
+          bizCount = rows.length;
           if (bizCount > 0) {
-            avgConf = Math.round(bizs.reduce((s, b) => s + (b.confidence || 0), 0) / bizCount);
+            avgConf = Math.round(rows.reduce((s, b) => s + (b.confidence_score || 0), 0) / bizCount);
           }
         }
-      } catch(e) { /* non-fatal */ }
+      } catch(_) { /* non-fatal */ }
 
       coverage.completed[z.zip] = {
         name: z.name,
@@ -431,11 +419,11 @@ async function coordinatorCycle() {
         coverage.failed[z.zip] = { name: z.name, error: z.lastError, attempts: z.attempts };
       }
     }
-  });
+  }
 
   coverage.lastRun = new Date().toISOString();
   saveCoverage(coverage);
-  saveQueue(queue);
+  await saveQueue(queue);
 
   const completed = queue.filter(z => z.status === 'complete').length;
   const total = queue.length;
@@ -449,9 +437,9 @@ async function coordinatorCycle() {
 const app = express();
 app.use(express.json());
 
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
   const coverage = await loadCoverage();
-  const queue = loadQueue();
+  const queue = await loadQueue();
   const completed = queue.filter(z => z.status === 'complete').length;
   const pending = queue.filter(z => z.status === 'pending').length;
   const failed = queue.filter(z => z.status === 'failed').length;
@@ -485,14 +473,14 @@ app.post('/run', async (req, res) => {
   coordinatorCycle().catch(err => console.error('[ZipCoordinator] Cycle error:', err));
 });
 
-app.post('/add-zip', (req, res) => {
+app.post('/add-zip', async (req, res) => {
   const { zip, lat, lon, region, name, priority } = req.body;
   if (!zip || !lat || !lon) return res.status(400).json({ error: 'zip, lat, lon required' });
-  const queue = loadQueue();
+  const queue = await loadQueue();
   if (queue.find(z => z.zip === zip)) return res.json({ status: 'already_queued', zip });
-  queue.push({ zip, lat, lon, region: region || 'FL', name: name || zip, priority: priority || 50, status: 'pending', attempts: 0 });
-  queue.sort((a, b) => b.priority - a.priority);
-  saveQueue(queue);
+  const entry = { zip, lat, lon, region: region || 'FL', name: name || zip, priority: priority || 50, status: 'pending', attempts: 0 };
+  queue.push(entry);
+  await pgStore.upsertZipQueueEntry(entry);
   res.json({ status: 'queued', zip, queueLength: queue.length });
 });
 
@@ -500,8 +488,8 @@ app.get('/coverage', (req, res) => {
   loadCoverage().then(cov => res.json(cov)).catch(() => res.json({}));
 });
 
-app.get('/queue', (req, res) => {
-  res.json(loadQueue());
+app.get('/queue', async (req, res) => {
+  res.json(await loadQueue());
 });
 
 app.get('/budget-status', (req, res) => {
@@ -520,8 +508,6 @@ const CYCLE_INTERVAL_MS = 60 * 60 * 1000; // Every 1 hour (slowed from 2min — 
 
 app.listen(PORT, async () => {
   console.log(`[ZipCoordinator] Running on port ${PORT}`);
-  // Ensure zips dir exists
-  if (!fs.existsSync(ZIPS_DIR)) fs.mkdirSync(ZIPS_DIR, { recursive: true });
   // Restore coverage from Postgres on cold start (Railway restart wipes local files)
   await restoreCoverageFromPostgres();
   // Run first cycle immediately, then on interval

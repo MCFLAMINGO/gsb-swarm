@@ -4,28 +4,20 @@
  * Layer 3 — WAVE SURFACE
  * Hourly aggregation of MCP query events per ZIP code.
  *
- * Reads:   data/wave_surface/_events.jsonl  (append-only log written by mcpMiddleware)
- * Writes:  data/wave_surface/{zip}.json
- *          data/wave_surface/_index.json
- * Prunes:  _events.jsonl to last 35 days
+ * Reads events from `wave_events` table (Postgres).
+ * Writes per-ZIP aggregates to `wave_surface` table (Postgres).
  *
- * Also exports appendEvent(event) for use by mcpMiddleware.js.
+ * Also exports appendEvent(event) for use by mcpMiddleware.js, which
+ * inserts into the `wave_events` table.
  *
  * Runs on start, then every hour at :05.
  */
 
 'use strict';
 
-const path = require('path');
-const fs   = require('fs');
-
-const DATA_DIR        = path.join(__dirname, '..', 'data');
-const WAVE_DIR        = path.join(DATA_DIR, 'wave_surface');
-const EVENTS_FILE     = path.join(WAVE_DIR, '_events.jsonl');
+const pgStore = require('../lib/pgStore');
 
 const INTERVAL_MS     = 60 * 60 * 1000; // 1 hour
-
-const KEEP_DAYS_PRUNE = 35;
 const WINDOW_24H_MS   = 24 * 60 * 60 * 1000;
 const WINDOW_30D_MS   = 30 * 24 * 60 * 60 * 1000;
 
@@ -33,64 +25,6 @@ const WINDOW_30D_MS   = 30 * 24 * 60 * 60 * 1000;
 const AGENT_TYPES = ['real_estate', 'financial', 'ad_placement', 'logistics', 'business_owner', 'civic'];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function ensureDir(dir) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
-/**
- * Atomic write: write to .tmp then rename.
- */
-function atomicWrite(filePath, data) {
-  const tmp = filePath + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-  fs.renameSync(tmp, filePath);
-}
-
-/**
- * Read all events from _events.jsonl. Returns array of parsed event objects.
- * Silently skips malformed lines.
- */
-function readAllEvents() {
-  if (!fs.existsSync(EVENTS_FILE)) return [];
-
-  const lines = fs.readFileSync(EVENTS_FILE, 'utf8').split('\n');
-  const events = [];
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      events.push(JSON.parse(trimmed));
-    } catch (e) {
-      // Skip malformed line
-    }
-  }
-
-  return events;
-}
-
-/**
- * Prune _events.jsonl: keep only events from the last KEEP_DAYS_PRUNE days.
- * Rewrites the file atomically.
- */
-function pruneEvents(events) {
-  const cutoff = Date.now() - KEEP_DAYS_PRUNE * 24 * 60 * 60 * 1000;
-  const kept = events.filter(e => {
-    const ts = e.ts ? new Date(e.ts).getTime() : 0;
-    return ts >= cutoff;
-  });
-
-  if (kept.length === events.length) return kept; // nothing to prune
-
-  const tmp = EVENTS_FILE + '.tmp';
-  const lines = kept.map(e => JSON.stringify(e)).join('\n') + (kept.length > 0 ? '\n' : '');
-  fs.writeFileSync(tmp, lines, 'utf8');
-  fs.renameSync(tmp, EVENTS_FILE);
-
-  console.log(`[waveSurfaceWorker] Pruned events: ${events.length} → ${kept.length} (kept last ${KEEP_DAYS_PRUNE}d)`);
-  return kept;
-}
 
 /**
  * Find the most frequent value in an array of primitives.
@@ -108,27 +42,22 @@ function mostCommon(arr) {
 // ── appendEvent (exported for mcpMiddleware) ─────────────────────────────────
 
 /**
- * Append a single query event to _events.jsonl.
- * Non-blocking — uses appendFileSync in try/catch, never throws.
+ * Append a single query event to the `wave_events` table.
+ * Non-blocking — fire-and-forget; never throws.
  *
- * @param {object} event - { zip, tool, agent_type, lat, lon, agent_id }
+ * @param {object} event - { zip, tool, agent_type, lat, lon, agent_id, vertical, query, score, latency_ms }
  */
 function appendEvent(event) {
-  try {
-    ensureDir(WAVE_DIR);
-    const line = JSON.stringify({
-      ts:         new Date().toISOString(),
-      zip:        event.zip        || null,
-      tool:       event.tool       || null,
-      agent_type: event.agent_type || 'unknown',
-      lat:        event.lat        || null,
-      lon:        event.lon        || null,
-      agent_id:   event.agent_id   || null,
-    }) + '\n';
-    fs.appendFileSync(EVENTS_FILE, line, 'utf8');
-  } catch (e) {
-    // Intentionally swallowed — never throw from appendEvent
-  }
+  pgStore.appendWaveEvent({
+    ts:         new Date().toISOString(),
+    zip:        event.zip        || null,
+    tool:       event.tool       || null,
+    agent_id:   event.agent_id   || null,
+    vertical:   event.vertical   || event.agent_type || null,
+    query:      event.query      || null,
+    score:      event.score      || null,
+    latency_ms: event.latency_ms || null,
+  }).catch(() => {});
 }
 
 // ── Main aggregation ──────────────────────────────────────────────────────────
@@ -136,25 +65,17 @@ function appendEvent(event) {
 async function aggregateWaveSurface() {
   console.log('[waveSurfaceWorker] Starting wave surface aggregation...');
 
-  ensureDir(WAVE_DIR);
-
-  // Read and prune events
-  let events = readAllEvents();
-  events = pruneEvents(events);
+  // Read recent events from Postgres
+  let events = [];
+  try {
+    events = await pgStore.getWaveEvents(WINDOW_30D_MS);
+  } catch (e) {
+    console.log('[waveSurfaceWorker] Could not load wave_events:', e.message);
+    return;
+  }
 
   if (events.length === 0) {
     console.log('[waveSurfaceWorker] No events to aggregate.');
-    // Write empty index
-    try {
-      atomicWrite(path.join(WAVE_DIR, '_index.json'), {
-        generated_at: new Date().toISOString(),
-        total_events: 0,
-        zip_count:    0,
-        zips:         {},
-      });
-    } catch (e) {
-      console.log('[waveSurfaceWorker] Could not write empty _index.json:', e.message);
-    }
     return;
   }
 
@@ -188,8 +109,6 @@ async function aggregateWaveSurface() {
   for (const { zip, rank } of rankedZips) rankMap[zip] = rank;
 
   // ── Per-ZIP aggregation ───────────────────────────────────────────────────
-  const indexZips = {};
-
   for (const [zip, evts] of Object.entries(byZip)) {
     const evts24h = evts.filter(e => new Date(e.ts).getTime() >= cutoff24h);
     const evts30d = evts.filter(e => new Date(e.ts).getTime() >= cutoff30d);
@@ -225,7 +144,7 @@ async function aggregateWaveSurface() {
     // ── Agent type breakdown ────────────────────────────────────────────────
     const agentBreakdown = { real_estate: 0, financial: 0, ad_placement: 0, logistics: 0, business_owner: 0, civic: 0, unknown: 0 };
     for (const e of evts30d) {
-      const at = e.agent_type || 'unknown';
+      const at = e.vertical || e.agent_type || 'unknown';
       if (agentBreakdown.hasOwnProperty(at)) {
         agentBreakdown[at]++;
       } else {
@@ -266,28 +185,11 @@ async function aggregateWaveSurface() {
       hotspot_rank:           hotspotRank,
     };
 
-    // Write per-ZIP — Postgres first, flat file fallback
-    if (process.env.LOCAL_INTEL_DB_URL) {
-      try {
-        const { upsertWaveSurface } = require('../lib/pgStore');
-        await upsertWaveSurface(zip, record);
-      } catch (e) {
-        console.log(`[waveSurfaceWorker] Postgres write failed for ${zip}: ${e.message}`);
-      }
+    try {
+      await pgStore.upsertWaveSurface(zip, record);
+    } catch (e) {
+      console.log(`[waveSurfaceWorker] Postgres write failed for ${zip}: ${e.message}`);
     }
-    const outPath = path.join(WAVE_DIR, `${zip}.json`);
-    try { atomicWrite(outPath, record); } catch (_) {}
-
-    indexZips[zip] = {
-      zip,
-      computed_at:          record.computed_at,
-      queries_24h:          queries24h,
-      queries_30d:          queries30d,
-      avg_daily_queries:    avgDaily,
-      tidal_state:          tidalState,
-      hotspot_rank:         hotspotRank,
-      query_velocity_trend: velocityTrend,
-    };
 
     console.log(
       `[waveSurfaceWorker] ${zip}: tidal=${tidalState} 24h=${queries24h} 30d=${queries30d}` +
@@ -295,21 +197,7 @@ async function aggregateWaveSurface() {
     );
   }
 
-  // ── Write _index.json ─────────────────────────────────────────────────────
-  const indexPath = path.join(WAVE_DIR, '_index.json');
-  try {
-    atomicWrite(indexPath, {
-      generated_at: new Date().toISOString(),
-      total_events: events.length,
-      zip_count:    zipCount,
-      zips:         indexZips,
-    });
-    console.log(`[waveSurfaceWorker] Index written: ${zipCount} ZIPs, ${events.length} total events`);
-  } catch (e) {
-    console.log('[waveSurfaceWorker] Could not write _index.json:', e.message);
-  }
-
-  console.log('[waveSurfaceWorker] Wave surface aggregation complete.');
+  console.log(`[waveSurfaceWorker] Wave surface aggregation complete: ${zipCount} ZIPs, ${events.length} events.`);
 }
 
 // ── Error handling ────────────────────────────────────────────────────────────
@@ -347,7 +235,6 @@ function scheduleNextRun() {
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 console.log('[waveSurfaceWorker] Starting — Layer 3 Wave Surface worker');
-ensureDir(WAVE_DIR);
 
 // Run immediately on start
 aggregateWaveSurface().catch(e => console.error("[waveSurface] run error:", e.message));

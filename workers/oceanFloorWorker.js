@@ -20,14 +20,7 @@
  * Schedule: immediate on start, then weekly (~7 days)
  */
 
-const path    = require('path');
-const fs      = require('fs');
 const pgStore = require('../lib/pgStore');
-
-const DATA_DIR       = path.join(__dirname, '..', 'data');
-const OCEAN_DIR      = path.join(DATA_DIR, 'ocean_floor');
-const ERRORS_FILE    = path.join(OCEAN_DIR, '_errors.json');
-const INDEX_FILE     = path.join(OCEAN_DIR, '_index.json');
 
 // ── ZIP registry ─────────────────────────────────────────────────────────────
 const SJC_ZIPS = [
@@ -69,25 +62,8 @@ const NAICS_SECTORS = {
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
-function ensureDirs() {
-  [DATA_DIR, OCEAN_DIR].forEach(d => {
-    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-  });
-}
-
-function atomicWrite(filePath, data) {
-  const tmp = filePath + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, filePath);
-}
-
 function logError(context, err) {
   console.log(`[oceanFloorWorker] ERROR [${context}]:`, err.message || err);
-  let errors = [];
-  try { errors = JSON.parse(fs.readFileSync(ERRORS_FILE, 'utf8')); } catch (_) {}
-  errors.push({ ts: new Date().toISOString(), context, message: err.message || String(err) });
-  if (errors.length > 200) errors = errors.slice(-200);
-  try { atomicWrite(ERRORS_FILE, errors); } catch (_) {}
 }
 
 async function safeFetch(url) {
@@ -416,11 +392,8 @@ async function processZip(zipEntry, cbpData) {
     },
   };
 
-  const outPath = path.join(OCEAN_DIR, `${zip}.json`);
-  atomicWrite(outPath, result);
-  console.log(`[oceanFloorWorker] Wrote ${outPath} — profile: ${consumer_profile}, score: ${carrying_capacity_score}`);
-  // Mirror to Postgres (fire-and-forget)
-  pgStore.upsertOceanFloor(zip, result).catch(() => {});
+  await pgStore.upsertOceanFloor(zip, result);
+  console.log(`[oceanFloorWorker] Upserted ocean_floor[${zip}] — profile: ${consumer_profile}, score: ${carrying_capacity_score}`);
   return result;
 }
 
@@ -428,34 +401,22 @@ async function processZip(zipEntry, cbpData) {
 
 async function runOceanFloor() {
   console.log(`[oceanFloorWorker] Starting run at ${new Date().toISOString()}`);
-  ensureDirs();
 
   // Fetch CBP once for the county (shared across all ZIPs)
   const cbpData = await fetchCBP();
 
-  const index = {
-    updated_at: new Date().toISOString(),
-    zips: [],
-  };
-
+  let processed = 0;
   for (const zipEntry of SJC_ZIPS) {
     try {
-      const result = await processZip(zipEntry, cbpData);
-      index.zips.push({
-        zip:                    result.zip,
-        name:                   result.name,
-        carrying_capacity_score: result.carrying_capacity_score,
-        consumer_profile:        result.consumer_profile,
-        updated_at:              result.updated_at,
-      });
+      await processZip(zipEntry, cbpData);
+      processed++;
     } catch (err) {
       logError(`processZip-${zipEntry.zip}`, err);
       console.log(`[oceanFloorWorker] Skipping ${zipEntry.zip} after error`);
     }
   }
 
-  atomicWrite(INDEX_FILE, index);
-  console.log(`[oceanFloorWorker] Run complete. Index written to ${INDEX_FILE}`);
+  console.log(`[oceanFloorWorker] Run complete. ${processed}/${SJC_ZIPS.length} ZIPs upserted to ocean_floor`);
 }
 
 // ── Scheduling ────────────────────────────────────────────────────────────────

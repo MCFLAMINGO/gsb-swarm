@@ -16,12 +16,7 @@
 
 'use strict';
 
-const path = require('path');
-const fs   = require('fs');
-
-const DATA_DIR           = path.join(__dirname, '..', 'data');
-const ZIPS_DIR           = path.join(DATA_DIR, 'zips');
-const SURFACE_CURRENT_DIR = path.join(DATA_DIR, 'surface_current');
+const pgStore = require('../lib/pgStore');
 
 const INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -36,19 +31,6 @@ const EXPECTED_CATEGORIES = [
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function ensureDir(dir) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
-/**
- * Atomic write: write to .tmp then rename to final path.
- */
-function atomicWrite(filePath, data) {
-  const tmp = filePath + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-  fs.renameSync(tmp, filePath);
-}
 
 /**
  * Determine Florida seasonal values for a given month and ZIP.
@@ -149,31 +131,14 @@ function computeCategoryGap(businesses) {
 async function computeSurfaceCurrent() {
   console.log('[surfaceCurrentWorker] Starting surface current computation...');
 
-  ensureDir(SURFACE_CURRENT_DIR);
-
-  // ZIP discovery: Postgres first, flat file fallback for local dev
+  // ZIP discovery: Postgres only
   let allZips = [];
-  let usePostgres = false;
-  if (process.env.LOCAL_INTEL_DB_URL) {
-    try {
-      const { getDistinctZips } = require('../lib/pgStore');
-      allZips = await getDistinctZips();
-      if (allZips.length > 0) {
-        usePostgres = true;
-        console.log(`[surfaceCurrentWorker] ZIP discovery: ${allZips.length} ZIPs from Postgres`);
-      }
-    } catch (e) {
-      console.warn('[surfaceCurrentWorker] Postgres ZIP discovery failed, falling back to flat files:', e.message);
-    }
-  }
-  if (!usePostgres) {
-    try {
-      allZips = fs.readdirSync(ZIPS_DIR)
-        .filter(f => f.endsWith('.json'))
-        .map(f => f.replace('.json', ''));
-    } catch (e) {
-      console.log('[surfaceCurrentWorker] No zips directory found or empty:', e.message);
-    }
+  try {
+    allZips = await pgStore.getDistinctZips();
+    console.log(`[surfaceCurrentWorker] ZIP discovery: ${allZips.length} ZIPs from Postgres`);
+  } catch (e) {
+    console.warn('[surfaceCurrentWorker] Postgres ZIP discovery failed:', e.message);
+    return;
   }
 
   if (allZips.length === 0) {
@@ -183,33 +148,18 @@ async function computeSurfaceCurrent() {
 
   const now   = new Date();
   const month = now.getMonth() + 1; // 1-based
-  const index = {};
+  let processed = 0;
 
   for (const zip of allZips) {
-    const zipFilePath = path.join(ZIPS_DIR, `${zip}.json`);
-
-    // ── Read businesses ──────────────────────────────────────────────────────
-    // ── Read businesses — Postgres first, flat file fallback ──────────────────
+    // ── Read businesses from Postgres ──────────────────────────────────────────
     let businesses = [];
     const fileMtimeMs = Date.now();
-    if (usePostgres) {
-      try {
-        const { getBusinessesByZip } = require('../lib/pgStore');
-        const rows = await getBusinessesByZip(zip);
-        businesses = Array.isArray(rows) ? rows : [];
-      } catch (e) {
-        console.log(`[surfaceCurrentWorker] Postgres read failed for ${zip}: ${e.message}`);
-        continue;
-      }
-    } else {
-      try {
-        const raw = fs.readFileSync(zipFilePath, 'utf8');
-        businesses = JSON.parse(raw);
-        if (!Array.isArray(businesses)) businesses = [];
-      } catch (e) {
-        console.log(`[surfaceCurrentWorker] Could not read flat file for ${zip}: ${e.message}`);
-        continue;
-      }
+    try {
+      const rows = await pgStore.getBusinessesByZip(zip);
+      businesses = Array.isArray(rows) ? rows : [];
+    } catch (e) {
+      console.log(`[surfaceCurrentWorker] Postgres read failed for ${zip}: ${e.message}`);
+      continue;
     }
 
     const currentCount = businesses.length;
@@ -217,32 +167,22 @@ async function computeSurfaceCurrent() {
     // ── Apply confidence decay ───────────────────────────────────────────────
     businesses = applyConfidenceDecay(businesses);
 
-    // Write updated businesses back — Postgres if available, flat file fallback
-    if (usePostgres) {
-      try {
-        const db2 = require('../lib/db');
-        for (const biz of businesses) {
-          await db2.upsertBusiness({ ...biz, source_id: biz.primary_source || 'surface' }).catch(() => {});
-        }
-      } catch (e) {
-        console.log(`[surfaceCurrentWorker] Postgres write-back failed for ${zip}: ${e.message}`);
-      }
-    } else {
-      try { atomicWrite(zipFilePath, businesses); } catch (e) {
-        console.log(`[surfaceCurrentWorker] Could not write back flat file for ${zip}: ${e.message}`);
-      }
-    }
-
-    // ── Load previous snapshot ───────────────────────────────────────────────
-    const prevFilePath = path.join(SURFACE_CURRENT_DIR, `${zip}_prev.json`);
-    let prevSnapshot = null;
+    // Write updated businesses back to Postgres
     try {
-      if (fs.existsSync(prevFilePath)) {
-        prevSnapshot = JSON.parse(fs.readFileSync(prevFilePath, 'utf8'));
+      const dbLib = require('../lib/db');
+      for (const biz of businesses) {
+        await dbLib.upsertBusiness({ ...biz, source_id: biz.primary_source || 'surface' }).catch(() => {});
       }
     } catch (e) {
-      console.log(`[surfaceCurrentWorker] Could not read prev snapshot for ${zip}: ${e.message}`);
+      console.log(`[surfaceCurrentWorker] Postgres write-back failed for ${zip}: ${e.message}`);
     }
+
+    // ── Load previous snapshot from wave_surface ─────────────────────────────
+    let prevSnapshot = null;
+    try {
+      const prev = await pgStore.getWaveSurface(zip);
+      if (prev?._snapshot) prevSnapshot = prev._snapshot;
+    } catch (_) { /* no prev */ }
 
     // ── Compute delta ────────────────────────────────────────────────────────
     let birthRate   = 0;
@@ -307,37 +247,21 @@ async function computeSurfaceCurrent() {
       has_prev_snapshot:   prevSnapshot !== null,
     };
 
-    // ── Write surface_current/{zip}.json ─────────────────────────────────────
-    const outPath = path.join(SURFACE_CURRENT_DIR, `${zip}.json`);
-    try {
-      atomicWrite(outPath, record);
-    } catch (e) {
-      console.log(`[surfaceCurrentWorker] Could not write ${zip}.json: ${e.message}`);
-    }
-
-    // ── Take snapshot for next run ────────────────────────────────────────────
+    // Take snapshot for next run — store inside surface_json
     const snapshot = {
       zip,
       snapshotAt:    now.toISOString(),
       businessCount: currentCount,
       businessIds:   businesses.map(b => b.id || b.place_id || b.name).filter(Boolean),
     };
-    try {
-      atomicWrite(prevFilePath, snapshot);
-    } catch (e) {
-      console.log(`[surfaceCurrentWorker] Could not write prev snapshot for ${zip}: ${e.message}`);
-    }
 
-    index[zip] = {
-      zip,
-      computed_at:        record.computed_at,
-      velocity_score:     velocityScore,
-      current_direction:  currentDirection,
-      net_change_30d:     netChange,
-      data_freshness_grade: dataFreshnessGrade,
-      seasonal_bias,
-      seasonal_index,
-    };
+    // ── Write to wave_surface (Postgres) ─────────────────────────────────────
+    try {
+      await pgStore.upsertWaveSurface(zip, { ...record, _snapshot: snapshot });
+      processed++;
+    } catch (e) {
+      console.log(`[surfaceCurrentWorker] Could not upsert wave_surface for ${zip}: ${e.message}`);
+    }
 
     console.log(
       `[surfaceCurrentWorker] ${zip}: direction=${currentDirection} velocity=${velocityScore}` +
@@ -345,20 +269,7 @@ async function computeSurfaceCurrent() {
     );
   }
 
-  // ── Write _index.json ─────────────────────────────────────────────────────
-  const indexPath = path.join(SURFACE_CURRENT_DIR, '_index.json');
-  try {
-    atomicWrite(indexPath, {
-      generated_at: now.toISOString(),
-      zip_count:    Object.keys(index).length,
-      zips:         index,
-    });
-    console.log(`[surfaceCurrentWorker] Index written: ${Object.keys(index).length} ZIPs`);
-  } catch (e) {
-    console.log('[surfaceCurrentWorker] Could not write _index.json:', e.message);
-  }
-
-  console.log('[surfaceCurrentWorker] Surface current computation complete.');
+  console.log(`[surfaceCurrentWorker] Surface current complete. ${processed}/${allZips.length} ZIPs upserted to wave_surface`);
 }
 
 // ── Error handling ────────────────────────────────────────────────────────────
@@ -374,7 +285,6 @@ process.on('unhandledRejection', (reason) => {
 // ── Scheduler ─────────────────────────────────────────────────────────────────
 
 console.log('[surfaceCurrentWorker] Starting — Layer 2 Surface Current worker');
-ensureDir(SURFACE_CURRENT_DIR);
 
 // Run immediately on start — skip if ran within 24h
 (async () => {

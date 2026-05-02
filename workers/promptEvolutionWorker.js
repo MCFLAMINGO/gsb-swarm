@@ -22,17 +22,8 @@
  * Schedule: daily at 2am (runs immediately on start, then 24h interval)
  */
 
-const fs   = require('fs');
-const path = require('path');
 const http = require('http');
-
-const DATA_DIR      = path.join(__dirname, '..', 'data');
-const ORACLE_DIR    = path.join(DATA_DIR, 'oracle');
-const HISTORY_DIR   = path.join(ORACLE_DIR, 'history');
-const PROMPTS_FILE  = path.join(DATA_DIR, 'oracle_prompts_v2.json');
-const EVOLUTION_DIR = path.join(DATA_DIR, 'evolution');
-const REPORT_FILE   = path.join(EVOLUTION_DIR, '_report.json');
-const GAPS_FILE     = path.join(EVOLUTION_DIR, '_gaps.json');
+const pgStore = require('../lib/pgStore');
 
 // ── ZIP registry (all known ZIPs across the platform) ─────────────────────────
 // SJC_FALLBACK — used only when Postgres is unavailable (local dev)
@@ -98,43 +89,20 @@ const PROMPT_TARGETS = {
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
 
-function readJson(filePath) {
-  try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch { return null; }
-}
-
-function atomicWrite(filePath, data) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmp = filePath + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, filePath);
-}
-
-function ensureDirs() {
-  [EVOLUTION_DIR, HISTORY_DIR].forEach(d => {
-    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-  });
-}
 
 // ── Step 1: AUDIT — classify every known ZIP by signal quality ─────────────────
 
 async function auditZips() {
   const audit = {};
+  const auditList = await getAuditZips();
 
   for (const { zip, name, county } of auditList) {
-    const historyFile = path.join(HISTORY_DIR, `${zip}.json`);
-    const history     = readJson(historyFile) || [];
-    // Oracle: Postgres first, flat file fallback
+    // Oracle row from Postgres — history is no longer per-ZIP file, just empty
     let oracle = null;
-    if (process.env.LOCAL_INTEL_DB_URL) {
-      try {
-        const { getZipIntelligenceRow } = require('../lib/pgStore');
-        oracle = await getZipIntelligenceRow(zip);
-      } catch (_) {}
-    }
-    if (!oracle) {
-      const oracleFile = path.join(ORACLE_DIR, `${zip}.json`);
-      oracle = readJson(oracleFile) || null;
-    }
+    try {
+      oracle = await pgStore.getZipIntelligenceRow(zip);
+    } catch (_) {}
+    const history = []; // history table not yet ported; treat as empty (worst case: BLIND)
 
     // Data layer availability
     const hasDemoData  = oracle?.data_sources?.has_spending_zone || oracle?.data_sources?.has_ocean_floor || false;
@@ -585,20 +553,8 @@ async function writeReport(audit, dispatchResults, promptCounts, startedAt) {
       .map(a => ({ zip: a.zip, name: a.name, quality: a.quality, biz_count: a.biz_count, gaps: a.gaps })),
   };
 
-  atomicWrite(REPORT_FILE, report);
-  atomicWrite(GAPS_FILE, audit);
-  // Mirror to Postgres — survives volume wipes
-  if (process.env.LOCAL_INTEL_DB_URL) {
-    try {
-      const { upsertEvolutionReport } = require('../lib/pgStore');
-      await upsertEvolutionReport(report);
-      console.log('[promptEvolution] REPORT written to Postgres + flat file');
-    } catch (e) {
-      console.warn('[promptEvolution] Postgres report write failed (flat file still written):', e.message);
-    }
-  } else {
-    console.log('[promptEvolution] REPORT written:', REPORT_FILE);
-  }
+  await pgStore.upsertEvolutionReport({ ...report, audit });
+  console.log('[promptEvolution] REPORT written to evolution_report');
   return report;
 }
 
@@ -607,7 +563,6 @@ async function writeReport(audit, dispatchResults, promptCounts, startedAt) {
 async function runEvolution() {
   const startedAt = new Date().toISOString();
   console.log('[promptEvolution] Starting evolution cycle...');
-  ensureDirs();
 
   // Step 1: Audit
   const audit = await auditZips();
@@ -623,9 +578,8 @@ async function runEvolution() {
     console.warn('[promptEvolution] Gap dispatch error (non-fatal):', err.message);
   }
 
-  // Step 4: Evolve prompts
+  // Step 4: Evolve prompts (in-memory only — persisted into evolution_report)
   const evolved = evolvePrompts(audit);
-  atomicWrite(PROMPTS_FILE, evolved);
 
   // Step 5: Report
   const promptCounts = Object.fromEntries(Object.entries(evolved).map(([k, v]) => [k, v.length]));

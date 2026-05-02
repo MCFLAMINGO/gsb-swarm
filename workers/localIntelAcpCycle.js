@@ -15,26 +15,23 @@
  * Cycle: every 30 min, 5 ZIPs per run, cheapest possible calls (no HTTP)
  */
 
-const fs   = require('fs');
 const path = require('path');
+const fs   = require('fs');  // for spendingZones.json static seed only
 
 const { getZipsByPriority }               = require('./flZipRegistry');
 const { handleVerticalQuery }             = require('./verticalAgentWorker');
 const { handleSignal, handleBedrock }     = require('../localIntelTidalTools');
+const pgStore                              = require('../lib/pgStore');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const BASE_DIR       = path.join(__dirname, '..');
-const BRIEFS_DIR     = path.join(BASE_DIR, 'data', 'briefs');
-const OSM_DIR        = path.join(BASE_DIR, 'data', 'osm');
-const CENSUS_DIR     = path.join(BASE_DIR, 'data', 'census_layer');
-const ZONES_PATH     = path.join(BASE_DIR, 'data', 'spendingZones.json');
+const ZONES_PATH     = path.join(BASE_DIR, 'data', 'spendingZones.json');  // static seed
 const CYCLE_INTERVAL = 30 * 60 * 1000;  // 30 min
 const ZIPS_PER_CYCLE = 5;
 const BRIEF_TTL_H    = 48;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function sleep(ms)    { return new Promise(r => setTimeout(r, ms)); }
-function ensureDir(p) { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); }
 
 function readJson(fp)  { try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch { return null; } }
 
@@ -42,21 +39,25 @@ function loadZone(zip) {
   const zones = readJson(ZONES_PATH) || [];
   return zones.find(z => String(z.zip || z.zipCode) === String(zip)) || null;
 }
-function loadOsm(zip)    { return readJson(path.join(OSM_DIR,    `${zip}.json`)); }
-function loadCensus(zip) { return readJson(path.join(CENSUS_DIR, `${zip}.json`)); }
 
-function briefAge(zip) {
-  const b = readJson(path.join(BRIEFS_DIR, `${zip}.json`));
-  if (!b?.generated_at) return Infinity;
-  return Date.now() - new Date(b.generated_at).getTime();
+async function loadOsm(zip) {
+  const row = await pgStore.getZipEnrichment(zip);
+  return row?.osm_json || null;
 }
 
-function saveBrief(zip, data) {
-  ensureDir(BRIEFS_DIR);
-  fs.writeFileSync(
-    path.join(BRIEFS_DIR, `${zip}.json`),
-    JSON.stringify({ zip, generated_at: new Date().toISOString(), ...data })
-  );
+async function loadCensus(zip) {
+  const row = await pgStore.getCensusLayer(zip);
+  return row || null;
+}
+
+async function briefAge(zip) {
+  const b = await pgStore.getZipBrief(zip);
+  if (!b?._stored_at) return Infinity;
+  return Date.now() - new Date(b._stored_at).getTime();
+}
+
+async function saveBrief(zip, data) {
+  await pgStore.upsertZipBrief(zip, { zip, generated_at: new Date().toISOString(), ...data });
 }
 
 // ── Agent 1: GSB CEO — investor signal ───────────────────────────────────────
@@ -77,8 +78,8 @@ async function ceoInvestorScan(zip) {
 }
 
 // ── Agent 2: Alpha Scanner — sector gap whitespace ────────────────────────────
-function alphaWhitespaceScan(zip) {
-  const cl   = loadCensus(zip);
+async function alphaWhitespaceScan(zip) {
+  const cl   = await loadCensus(zip);
   const gaps = cl?.sector_gaps ?? [];
   return {
     agent     : 'alpha_scanner',
@@ -95,9 +96,9 @@ function alphaWhitespaceScan(zip) {
 }
 
 // ── Agent 3: Token Analyst — zone economics ───────────────────────────────────
-function tokenAnalystUnderwrite(zip) {
+async function tokenAnalystUnderwrite(zip) {
   const zone = loadZone(zip);
-  const osm  = loadOsm(zip);
+  const osm  = await loadOsm(zip);
   return {
     agent          : 'token_analyst',
     role           : 'underwriter',
@@ -152,41 +153,41 @@ function threadWriterSynthesize(zip, { ceo, alpha, token, wallet }) {
 async function runZipCycle(zip) {
   console.log(`[acp-cycle] ZIP ${zip} start`);
 
-  // Token Analyst and Alpha Scanner are sync reads — run instantly
-  const token = tokenAnalystUnderwrite(zip);
-  const alpha = alphaWhitespaceScan(zip);
-
-  // CEO (async tidal) and Wallet Profiler (async vertical) run in parallel
-  const [ceo, wallet] = await Promise.all([
+  const [token, alpha, ceo, wallet] = await Promise.all([
+    tokenAnalystUnderwrite(zip),
+    alphaWhitespaceScan(zip),
     ceoInvestorScan(zip),
     walletProfilerScan(zip),
   ]);
 
   const thread = threadWriterSynthesize(zip, { ceo, alpha, token, wallet });
 
-  saveBrief(zip, { ceo, alpha, token, wallet, thread });
+  await saveBrief(zip, { ceo, alpha, token, wallet, thread });
   console.log(`[acp-cycle] ZIP ${zip} done — ${ceo.signal_band ?? 'no signal'} | gaps:${alpha.total_gaps} | "${thread.brief.slice(0, 60)}..."`);
 }
 
 // ── Pick ZIPs needing briefs ──────────────────────────────────────────────────
-function pickNextZips(n) {
+async function pickNextZips(n) {
   const ttl   = BRIEF_TTL_H * 60 * 60 * 1000;
-  return getZipsByPriority()
-    .filter(z => briefAge(z.zip) > ttl)
-    .slice(0, n)
-    .map(z => z.zip);
+  const candidates = getZipsByPriority();
+  const stale = [];
+  for (const z of candidates) {
+    if (stale.length >= n) break;
+    const age = await briefAge(z.zip);
+    if (age > ttl) stale.push(z.zip);
+  }
+  return stale;
 }
 
 // ── Daemon loop ───────────────────────────────────────────────────────────────
 (async function main() {
   console.log('[acp-cycle] ACP intelligence cycle started');
-  ensureDir(BRIEFS_DIR);
 
   // Stagger 2 min — let Overpass + IRS SOI initialize first
   await sleep(2 * 60 * 1000);
 
   while (true) {
-    const zips = pickNextZips(ZIPS_PER_CYCLE);
+    const zips = await pickNextZips(ZIPS_PER_CYCLE);
     if (zips.length === 0) {
       console.log('[acp-cycle] All ZIPs fresh — waiting');
     } else {

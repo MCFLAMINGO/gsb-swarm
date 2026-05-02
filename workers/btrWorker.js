@@ -26,10 +26,10 @@ const path          = require('path');
 const { spawn }     = require('child_process');
 const express       = require('express');
 
-const DATA_DIR  = path.join(__dirname, '..', 'data');
-const ZIPS_DIR  = path.join(DATA_DIR, 'zips');
-const BTR_DIR   = path.join(DATA_DIR, 'btr');
-const INDEX_FILE = path.join(BTR_DIR, '_index.json');
+const os        = require('os');
+// Temp dir for Python extractor script + JSON output. We use os.tmpdir() so
+// nothing dynamic gets persisted to the repo data/ tree.
+const TMP_DIR   = path.join(os.tmpdir(), 'btr-worker');
 
 // Postgres direct write (non-fatal if DB unavailable)
 let _db = null;
@@ -137,7 +137,8 @@ function mapLicenseType(licenseType) {
 
 function runPythonExtractor(queries, zipCode) {
   return new Promise((resolve) => {
-    const outFile = path.join(BTR_DIR, `_tmp_${zipCode}.json`);
+    fs.mkdirSync(TMP_DIR, { recursive: true });
+    const outFile = path.join(TMP_DIR, `_tmp_${zipCode}.json`);
 
     // Build a minimal inline Python script that reuses extractor logic
     // but writes to our temp file and only searches for these queries
@@ -263,7 +264,7 @@ with open(${JSON.stringify(outFile)}, "w") as f:
 print(f"BTR {${JSON.stringify(zipCode)}}: {len(all_recs)} records", file=sys.stderr)
 `;
 
-    const tmpPy = path.join(BTR_DIR, `_run_${zipCode}.py`);
+    const tmpPy = path.join(TMP_DIR, `_run_${zipCode}.py`);
     fs.writeFileSync(tmpPy, pyScript);
 
     const timeout = setTimeout(() => {
@@ -362,10 +363,6 @@ async function runBTR(targetZip = null) {
   }
   btrStatus.running = true;
 
-  [DATA_DIR, ZIPS_DIR, BTR_DIR].forEach(d => {
-    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-  });
-
   const zips = targetZip
     ? BTR_ZIPS.filter(z => z.zip === targetZip)
     : BTR_ZIPS;
@@ -380,11 +377,7 @@ async function runBTR(targetZip = null) {
       const records = await runPythonExtractor(zipEntry.queries, zipEntry.zip);
       console.log(`[BTRWorker] ${zipEntry.zip}: ${records.length} raw BTR records`);
 
-      // Save raw for audit
-      const rawFile = path.join(BTR_DIR, `raw_${zipEntry.zip}.json`);
-      fs.writeFileSync(rawFile, JSON.stringify(records, null, 2));
-
-      // Merge into zip file
+      // Merge into businesses table
       const stats = await mergeIntoZip(zipEntry.zip, records);
       console.log(`[BTRWorker] ${zipEntry.zip}: +${stats.added} new, ${stats.enriched} enriched, ${stats.total} total`);
 
@@ -407,7 +400,7 @@ async function runBTR(targetZip = null) {
     await new Promise(r => setTimeout(r, 3000));
   }
 
-  fs.writeFileSync(INDEX_FILE, JSON.stringify(index, null, 2));
+  btrStatus.lastIndex = index;
   btrStatus.running = false;
   btrStatus.lastRun = new Date().toISOString();
   console.log('[BTRWorker] Done.');
@@ -426,11 +419,23 @@ router.post('/run', async (req, res) => {
 
 router.get('/status', (req, res) => res.json(btrStatus));
 
-router.get('/raw/:zip', (req, res) => {
+router.get('/raw/:zip', async (req, res) => {
   const zip = req.params.zip.replace(/\D/g, '').slice(0, 5);
-  const f = path.join(BTR_DIR, `raw_${zip}.json`);
-  if (!fs.existsSync(f)) return res.status(404).json({ error: 'No BTR data for this ZIP yet' });
-  res.json(JSON.parse(fs.readFileSync(f, 'utf8')));
+  const db = getDb();
+  if (!db) return res.status(503).json({ error: 'DB unavailable' });
+  try {
+    const rows = await db.query(
+      `SELECT business_id, name, zip, address, city, category, category_group,
+              confidence_score, sunbiz_doc_number
+       FROM businesses
+       WHERE zip = $1 AND 'btr' = ANY(sources)
+       ORDER BY name`, [zip]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'No BTR data for this ZIP yet' });
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── Schedule: run on start, then every 24h ─────────────────────────────────────
