@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-02 (session 3 — bedrockWorker fix, Virtuals Compute auth rewrite, rfq_responses schema fix, createJob BigInt fix)
+> Last updated: 2026-05-02 (session 4 — all filesystem workers ported to Postgres)
 
 ---
 
@@ -286,6 +286,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 ## Session History (what's been built)
 
 ### Committed this session (2026-05-02)
+- `05b4ee3` — feat: port all filesystem workers to Postgres — ocean_floor, census_layer, wave_surface, wave_events, oracle reads, gaps, briefs, zip_queue, source_log, btr, evolution. All `workers/*.js` workers now write/read dynamic data via `lib/pgStore.js` (with extended schema for `rfq_gaps`, `source_log`, and full-state `zip_queue`). No worker still writes JSON files under `data/` for dynamic state — only static seeds (e.g. `spendingZones.json`) remain on disk.
 - `3a5f9bf` — fix: stop log spam — cap 32-bit setTimeout overflow + rate-limit ACP token error logs
 - `6b41a26` — docs: update context — Virtuals Compute new auth, per-agent API key vars
 - `e32a04a` — feat: replace Privy JWT auth with Virtuals Compute API keys (acpAuth.js rewrite)
