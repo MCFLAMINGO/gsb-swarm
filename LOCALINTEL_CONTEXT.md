@@ -45,10 +45,30 @@
 | `OWNER_ALERT_PHONE` | Erik's phone for alerts (fallback: +19045867887) |
 | `VOICE_CALLER_KEY` | Legacy voice-intake key (now unused — rfqBroadcast handles it) |
 | `RAILWAY_PUBLIC_DOMAIN` | Used by rfqCallback.js for TwiML URLs |
+| `VIRTUALS_API_KEY_WALLET_PROFILER` | GSB Wallet Profiler + DCA Engine (agent 1333) — Virtuals Compute |
+| `VIRTUALS_API_KEY_CEO` | GSB CEO (agent 1332) — Virtuals Compute |
+| `VIRTUALS_API_KEY_ALPHA_SCANNER` | GSB Alpha Scanner (agent 1334) — Virtuals Compute |
+| `VIRTUALS_API_KEY_TOKEN_ANALYST` | GSB Token Analyst (agent 1335) — Virtuals Compute |
+| `VIRTUALS_API_KEY_THREAD_WRITER` | GSB Thread Writer (agent 1336) — Virtuals Compute |
 
 ---
 
 ## Third-Party Integrations
+
+### Virtuals Compute (NEW — replaces old Privy JWT auth as of 2026-05-01)
+- Base URL: `https://compute.virtuals.io/v1`
+- Auth: `x-api-key: $VIRTUALS_API_KEY` (NOT Bearer token)
+- OpenAI-compatible: `POST /v1/chat/completions` with `Authorization: Bearer $VIRTUALS_API_KEY`
+- Anthropic-compatible: `POST /v1/messages` with `x-api-key: $VIRTUALS_API_KEY` + `anthropic-version: 2023-06-01`
+- Available models: `anthropic/claude-sonnet-4-5`, `moonshotai/kimi-k2-0905`
+- Old vars OBSOLETE: `VIRTUALS_PRIVY_TOKEN`, `VIRTUALS_PRIVY_REFRESH_TOKEN` — delete from Railway
+- `acpAuth.js` will be rewritten to use per-agent keys once all keys are added by Erik
+- Per-agent keys being added to Railway (Erik adding manually):
+  - `VIRTUALS_API_KEY_CEO` — agent 1332
+  - `VIRTUALS_API_KEY_WALLET_PROFILER` — agent 1333
+  - `VIRTUALS_API_KEY_ALPHA_SCANNER` — agent 1334
+  - `VIRTUALS_API_KEY_TOKEN_ANALYST` — agent 1335
+  - `VIRTUALS_API_KEY_THREAD_WRITER` — agent 1336
 
 ### Twilio
 - Voice number: **(904) 506-7476**
