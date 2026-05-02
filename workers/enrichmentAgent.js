@@ -775,7 +775,7 @@ app.get('/log', (req, res) => res.json(loadLog().slice(-100)));
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
-const CYCLE_MS = 10 * 60 * 1000; // every 10 minutes
+const CYCLE_MS = 6 * 60 * 60 * 1000; // every 6 hours (slowed from 10min — data not changing rapidly)
 
 app.listen(PORT, () => {
   console.log(`[EnrichmentAgent] Running on port ${PORT}`);
