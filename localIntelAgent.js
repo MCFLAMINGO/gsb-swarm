@@ -446,6 +446,78 @@ router.post('/', async (req, res) => {
   }
 });
 
+// ── GET /api/local-intel/search — public business search (used by search.html) ──
+// Maps query params: q, zip, cat, limit, page → same Postgres query as POST /
+router.get('/search', async (req, res) => {
+  const { q, zip, cat, limit = 50, page = 1 } = req.query;
+  const offset = (Math.max(1, Number(page)) - 1) * Math.min(Number(limit), 200);
+
+  try {
+    const db = require('./lib/db');
+    const nlIntent = resolveNlIntent(q);
+    const effectiveGroup = nlIntent.group;
+
+    const conditions = ["status != 'inactive'"];
+    const params = [];
+    let p = 1;
+
+    if (zip) { conditions.push(`zip = $${p++}`); params.push(zip); }
+    if (cat) { conditions.push(`category = $${p++}`); params.push(cat); }
+    if (effectiveGroup) {
+      const groupCats = CATEGORY_GROUPS[effectiveGroup];
+      if (groupCats && groupCats.length) { conditions.push(`category = ANY($${p++})`); params.push(groupCats); }
+    }
+
+    let orderBy = 'confidence_score DESC, name ASC';
+    let tagBoost = '';
+    if (q && !effectiveGroup) {
+      conditions.push(`(name ILIKE $${p} OR category ILIKE $${p} OR address ILIKE $${p} OR description ILIKE $${p})`);
+      params.push(`%${q}%`);
+      p++;
+    }
+    if (nlIntent.tags && nlIntent.tags.length) {
+      tagBoost = `, CASE WHEN tags && $${p++}::text[] THEN 1 ELSE 0 END AS tag_score`;
+      params.push(nlIntent.tags);
+      orderBy = 'tag_score DESC, confidence_score DESC';
+    }
+
+    const lim = Math.min(Number(limit) || 50, 200);
+    const limIdx = p++;   // $p = lim
+    const offIdx = p++;   // $p = offset
+    params.push(lim, offset);
+
+    const sql = `
+      SELECT
+        business_id, name, address, city, zip, phone, website,
+        hours, category, category_group, tags, description,
+        confidence_score AS confidence, lat, lon, sunbiz_doc_number,
+        claimed_at IS NOT NULL AS claimed,
+        wallet,
+        pos_config->>'pos_type' AS pos_type
+        ${tagBoost}
+      FROM businesses
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY ${orderBy}
+      LIMIT $${limIdx} OFFSET $${offIdx}
+    `;
+
+    const rawRows = await db.query(sql, params);
+    const rows = rawRows.map(r => { const e = { ...r }; delete e.pos_type; return e; });
+
+    let total = rows.length;
+    try {
+      const countParams = params.slice(0, -2);
+      const countRows = await db.query(`SELECT COUNT(*) AS total FROM businesses WHERE ${conditions.join(' AND ')}`, countParams);
+      total = parseInt(countRows[0]?.total || rows.length, 10);
+    } catch (_) {}
+
+    res.json({ ok: true, total, returned: rows.length, page: Number(page), zips: zip ? [zip] : [], results: rows, meta: { source: 'postgres', coverage: '113,684 businesses — Florida statewide' } });
+  } catch (e) {
+    console.error('[local-intel search]', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ── GET /api/local-intel/zones — spending zone summary ────────────────────────
 router.get('/zones', (req, res) => {
   const zones = loadZones();
