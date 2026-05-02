@@ -298,6 +298,9 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 - `1647d93` — feat: LocalIntelIntent JSDoc typedef + internal intent logging in /ask and /mcp (no public response change)
 - `2926bb5` — perf: disable mcpProbeWorker; slow enrichmentAgent 10min→6hr; zipCoordinator 2min→1hr
 
+### localintel-landing commits (2026-05-02)
+- `83cf741` — fix: complete truncated renderResults + auto-search on load and filter change (search was broken — JS file cut off mid-function)
+
 ### Committed prior session (2026-05-01)
 - `25b7cd9` — Voice session state: `lib/voiceSession.js`, `handleMenuResponse`, `handleOrderBuilding` — multi-turn ordering with Postgres CallSid sessions
 - `6bead23` — Service request detection in `/search` — "I need my X fixed" no longer matches business names
