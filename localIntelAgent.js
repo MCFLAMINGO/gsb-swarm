@@ -20,6 +20,70 @@
  *   GET  /api/local-intel/stats  — coverage stats
  */
 
+/**
+ * Normalized LocalIntel intent shape.
+ *
+ * Documentation only — no runtime validation, no class, no new file.
+ * Every LocalIntel entry path should normalize into this shape before
+ * routing or logging: search/ask/MCP, Twilio voice, RFQ SMS/email/callback,
+ * and later Siri/Gemini adapter layers.
+ *
+ * @typedef {Object} LocalIntelIntent
+ * @property {'search'|'ask'|'mcp'|'twilio_voice'|'rfq_sms'|'rfq_email'|'rfq_callback'} source
+ * Source rail that produced the intent.
+ *
+ * @property {Object} actor
+ * @property {'human'|'business'|'agent'|'provider'} actor.type
+ * @property {string|null} actor.phone
+ * @property {string|null} actor.email
+ * @property {string|null} actor.agent_key
+ * @property {string|null} actor.session_id
+ * @property {string|null} actor.call_sid
+ *
+ * @property {string} raw_input
+ * Original user text, transcript, SMS body, or inbound email text before routing.
+ *
+ * @property {Object} command
+ * @property {'local_intel'|'voice_order'|'rfq'|'identity'} command.family
+ * @property {'query'|'nearby'|'ask'|'oracle'|'place_order'|'service_request'|'rfq_yes'|'rfq_select'|'confirm_email'|'attach_wallet'} command.name
+ * Operational command name. Keep adapter-friendly and route-specific.
+ * @property {string|null} command.stage
+ * Optional current stage for multi-turn flows, e.g. greeting, menu_presented,
+ * order_building, order_confirmed.
+ *
+ * @property {Object} task
+ * @property {string|null} task.category
+ * @property {string|number|null} task.business_id
+ * @property {string|null} task.business_name
+ * @property {string|null} task.zip
+ * @property {string|null} task.city
+ * @property {number|null} task.lat
+ * @property {number|null} task.lon
+ * @property {number|null} task.radius_miles
+ * @property {string|null} task.description
+ * @property {Array<Object>} task.items
+ * Parsed order items or structured requested items when applicable.
+ *
+ * @property {Object} task.constraints
+ * @property {number|null} task.constraints.budget
+ * @property {number|null} task.constraints.eta_minutes
+ * @property {string|null} task.constraints.time_window
+ *
+ * @property {Object} routing
+ * @property {'answer'|'business_search'|'pos_router'|'rfq_broadcast'|'identity_update'|'callback_flow'} routing.destination
+ * @property {string|null} routing.pos_type
+ * Read from businesses.pos_config->>'pos_type' when a business is selected.
+ * @property {number|null} routing.confidence
+ * Optional normalized confidence score if a handler computes one.
+ * @property {string|null} routing.fallback_reason
+ * Why the request fell back to RFQ, callback, clarification, or manual handling.
+ *
+ * @property {Object} delivery
+ * @property {'voice'|'sms'|'email'|'json'} delivery.channel
+ * @property {boolean} delivery.reply_expected
+ * Whether the current channel expects a user reply or next-step interaction.
+ */
+
 const express = require('express');
 const path    = require('path');
 const fs      = require('fs');
@@ -1252,6 +1316,52 @@ router.post('/mcp', express.json(), apiKeyMiddleware, async (req, res) => {
     if (body.method === 'tools/call' && body.params) {
       body.params._caller = detectSource(req);
       body.params._entry  = 'free';
+      const _intent = {
+        source: 'mcp',
+        actor: {
+          type: 'agent',
+          phone: null,
+          email: null,
+          agent_key: req.headers['x-localintel-key'] || null,
+          session_id: null,
+          call_sid: null,
+        },
+        raw_input: body.params.arguments?.query || body.params.arguments?.prompt || '',
+        command: {
+          family: 'local_intel',
+          name: (
+            body.params.name === 'local_intel_nearby' ? 'nearby' :
+            body.params.name === 'local_intel_ask'    ? 'ask'    :
+            body.params.name === 'local_intel_oracle' ? 'oracle' :
+            body.params.name === 'local_intel_rfq'    ? 'service_request' :
+            'query'
+          ),
+          stage: null,
+        },
+        task: {
+          category:      body.params.arguments?.category     || null,
+          business_id:   null,
+          business_name: null,
+          zip:           body.params.arguments?.zip          || null,
+          city:          null,
+          lat:           null,
+          lon:           null,
+          radius_miles:  body.params.arguments?.radius_miles || null,
+          description:   body.params.arguments?.query || body.params.arguments?.prompt || null,
+          items: [],
+          constraints: { budget: null, eta_minutes: null, time_window: null },
+        },
+        routing: {
+          destination: (
+            body.params.name === 'local_intel_rfq'    ? 'rfq_broadcast'   :
+            body.params.name === 'local_intel_nearby' ? 'business_search' :
+            'answer'
+          ),
+          pos_type: null, confidence: null, fallback_reason: null,
+        },
+        delivery: { channel: 'json', reply_expected: false },
+      };
+      console.log('[mcp] intent', JSON.stringify(_intent));
     }
     const response = await fetch('http://localhost:3004/mcp', {
       method: 'POST',
@@ -2607,6 +2717,23 @@ async function handleAskRequest(req, res) {
   const zip = (req.method === 'GET' ? req.query.zip : req.body?.zip) || null;
   const cat = (req.method === 'GET' ? req.query.cat : req.body?.cat) || null;
 
+  /** @type {LocalIntelIntent} */
+  const intent = {
+    source: 'ask',
+    actor: { type: 'human', phone: null, email: null, agent_key: null, session_id: null, call_sid: null },
+    raw_input: q || zip || '',
+    command: { family: 'local_intel', name: 'ask', stage: null },
+    task: {
+      category: cat || null, business_id: null, business_name: null,
+      zip: zip || null, city: null, lat: null, lon: null, radius_miles: null,
+      description: q || null, items: [],
+      constraints: { budget: null, eta_minutes: null, time_window: null },
+    },
+    routing: { destination: 'answer', pos_type: null, confidence: null, fallback_reason: null },
+    delivery: { channel: 'json', reply_expected: false },
+  };
+  console.log('[/ask] intent', JSON.stringify(intent));
+
   if (!q && !zip) {
     return res.status(400).json({
       error: 'query required',
@@ -2645,8 +2772,8 @@ async function handleAskRequest(req, res) {
 
     return res.json({
       answer,
-      zip:      zip || null,
-      category: cat || null,
+      zip:      intent.task.zip,
+      category: intent.task.category,
       tool_used: 'local_intel_query',
       latency_ms: Date.now() - t0,
     });
