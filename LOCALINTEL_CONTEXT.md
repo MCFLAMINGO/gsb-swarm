@@ -294,6 +294,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 - `8f674ad` — fix: bedrockWorker — once-a-month, graceful failure, FDOT stubbed
 - `9e1e0ff` — fix: rfq_responses old schema drop+recreate on migration; createJob BigInt serialization
 - `56f75e4` — docs: mark Resend inbound MX + webhook complete
+- `1647d93` — feat: LocalIntelIntent JSDoc typedef + internal intent logging in /ask and /mcp (no public response change)
 
 ### Committed prior session (2026-05-01)
 - `25b7cd9` — Voice session state: `lib/voiceSession.js`, `handleMenuResponse`, `handleOrderBuilding` — multi-turn ordering with Postgres CallSid sessions
