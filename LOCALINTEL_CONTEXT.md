@@ -286,6 +286,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 ## Session History (what's been built)
 
 ### Committed this session (2026-05-02)
+- `4a21278` — fix: expand GET /search category filter — dropdown slugs (restaurant/plumber/electrician/etc) now map to ALL matching DB sub-categories via ANY array; previously exact match returned 0 results for most categories
 - `2dba0b2` — fix: rfq_jobs→rfq_requests (table was renamed in rfqService migration, dashboard-server still used old name → rfq-poll 500 errors); committed spendingZones.json to git (was in .gitignore → never deployed to Railway → zones.find crash on every acp-cycle ZIP); truncate overpass addr.postcode to 5 chars (ZIP+4 codes were hitting CHAR(5) column constraint)
 - `c1580cc` — feat: add GET /api/local-intel/search — maps q/zip/cat query params to business search for search.html. Root cause of search returning nothing: search.html called GET /api/local-intel/search but only POST / existed — catch-all was serving dashboard HTML. Now fixed with proper GET route using same SQL logic.
 - `05b4ee3` — feat: port all filesystem workers to Postgres — ocean_floor, census_layer, wave_surface, wave_events, oracle reads, gaps, briefs, zip_queue, source_log, btr, evolution. All `workers/*.js` workers now write/read dynamic data via `lib/pgStore.js` (with extended schema for `rfq_gaps`, `source_log`, and full-state `zip_queue`). No worker still writes JSON files under `data/` for dynamic state — only static seeds (e.g. `spendingZones.json`) remain on disk.
@@ -302,6 +303,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 - `2926bb5` — perf: disable mcpProbeWorker; slow enrichmentAgent 10min→6hr; zipCoordinator 2min→1hr
 
 ### localintel-landing commits (2026-05-02)
+- `3d45698` — fix: category option values now match DB slugs (was sending 'Restaurant', DB stores 'restaurant'); removed truncated broken `if (status === 'cla` line that was a JS syntax error killing all rendering. Deployed to www.thelocalintel.com.
 - `83cf741` — fix: complete truncated renderResults + auto-search on load and filter change (search was broken — JS file cut off mid-function)
 
 ### Committed prior session (2026-05-01)
