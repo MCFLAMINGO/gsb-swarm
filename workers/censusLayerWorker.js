@@ -673,8 +673,8 @@ async function runCensusLayer() {
   ensureDirs();
   console.log('[censusLayer] Starting census layer update...');
 
-  const MS_MONTHLY  = 30 * 24 * 60 * 60 * 1000;
-  const MS_QUARTERLY = 90 * 24 * 60 * 60 * 1000;
+  const MS_MONTHLY  = 24 * 24 * 60 * 60 * 1000; // 24 days — 30d overflows 32-bit signed int (2^31-1)
+  const MS_QUARTERLY = 24 * 24 * 60 * 60 * 1000; // 24 days — 90d overflows 32-bit signed int; re-arms itself
 
   // ZBP: once only (state file controls this internally)
   try {

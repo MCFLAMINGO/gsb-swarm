@@ -373,8 +373,8 @@ async function runBedrock(mode = 'incremental') {
 
 // ── Scheduling ────────────────────────────────────────────────────────────────
 
-const WEEKLY_MS  = 7  * 24 * 60 * 60 * 1000;
-const MONTHLY_MS = 30 * 24 * 60 * 60 * 1000;
+const WEEKLY_MS  = 7  * 24 * 60 * 60 * 1000; // 604M ms — safe
+const MONTHLY_MS = 24 * 24 * 60 * 60 * 1000; // 24 days — capped below 2^31-1 (30d overflows 32-bit int)
 
 // ── Error guard ───────────────────────────────────────────────────────────────
 
