@@ -112,11 +112,9 @@
 - Reply-to encoding: `jobs+JOBCODE@thelocalintel.com` (e.g. `jobs+X4R9QW@thelocalintel.com`)
 - DKIM: TXT record `resend._domainkey` — already set
 - SPF: MX record `send` → `feedback-smtp.us-east-1.amazonses.com` priority 10 — already set
-- **PENDING SETUP — Inbound MX (Namecheap Advanced DNS):**
-  - Type: `MX` | Host: `@` | Value: `inbound-smtp.us-east-1.amazonaws.com` | Priority: `10`
-  - NOTE: correct value is `inbound-smtp.us-east-1.amazonaws.com` NOT `inbound.resend.com`
-  - After adding: Resend dashboard → Domains → thelocalintel.com → Enable Receiving toggle → click "I've added the record"
-  - Then add webhook route in Resend: `jobs+*@thelocalintel.com` → POST `https://gsb-swarm-production.up.railway.app/api/rfq/email-inbound`
+- Inbound MX: ✅ LIVE — `10 inbound-smtp.us-east-1.amazonaws.com` confirmed via dig (2026-05-02)
+- Resend receiving: ✅ ENABLED — domain thelocalintel.com receiving active
+- Resend webhook: ✅ LIVE — `email.received` → `https://gsb-swarm-production.up.railway.app/api/rfq/email-inbound` (enabled 2026-05-02)
 - Inbound webhook: `POST /api/rfq/email-inbound` — extracts job code from To address
 
 ---
@@ -266,11 +264,8 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 - Account upgraded from Trial to paid
 - SMS broadcasting fully unblocked
 
-### 2. Resend inbound MX record — PENDING (Namecheap + Resend dashboard)
-- **Namecheap Advanced DNS:** Add MX record:
-  - Type: `MX` | Host: `@` | Value: `inbound-smtp.us-east-1.amazonaws.com` | Priority: `10`
-- **Resend dashboard:** Domains → thelocalintel.com → Enable Receiving → "I've added the record"
-- **Resend webhook route:** `jobs+*@thelocalintel.com` → POST `https://gsb-swarm-production.up.railway.app/api/rfq/email-inbound`
+### 2. Resend inbound MX record — ✅ COMPLETE (2026-05-02)
+- MX live, receiving enabled, webhook wired to `/api/rfq/email-inbound`
 - Enables: provider email replies matched back to jobs by code
 
 ---
@@ -297,7 +292,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 - `5907beb` — fix: compute/test — parallel Promise.all to avoid 75s sequential timeout
 - `8056494` — fix: bedrockWorker + censusLayerWorker 32-bit overflow
 - `8f674ad` — fix: bedrockWorker — once-a-month, graceful failure, FDOT stubbed
-- `(this commit)` — fix: rfq_responses old schema drop+recreate on migration; createJob BigInt serialization
+- `9e1e0ff` — fix: rfq_responses old schema drop+recreate on migration; createJob BigInt serialization
 
 ### Committed prior session (2026-05-01)
 - `25b7cd9` — Voice session state: `lib/voiceSession.js`, `handleMenuResponse`, `handleOrderBuilding` — multi-turn ordering with Postgres CallSid sessions
