@@ -1,186 +1,105 @@
 'use strict';
 /**
- * ACP Auth Manager — GSB Swarm
+ * ACP Auth — GSB Swarm
  *
- * Manages the Virtuals ACP access token lifecycle on Railway:
+ * Virtuals deprecated Privy JWT auth. All agents now use stable API keys
+ * issued from the Compute tab at app.virtuals.io.
  *
- *  Token sources (tried in order):
- *  1. VIRTUALS_PRIVY_TOKEN env var  — set manually, expires in 60 min
- *  2. Cached file (/tmp/gsb-acp-token.json) — written after a successful refresh
+ * Each agent has its own key stored in Railway:
+ *   VIRTUALS_API_KEY_CEO             — agent 1332
+ *   VIRTUALS_API_KEY_WALLET_PROFILER — agent 1333
+ *   VIRTUALS_API_KEY_ALPHA_SCANNER   — agent 1334
+ *   VIRTUALS_API_KEY_TOKEN_ANALYST   — agent 1335
+ *   VIRTUALS_API_KEY_THREAD_WRITER   — agent 1336
  *
- *  Auto-refresh:
- *  - Decodes the JWT to check expiry before every API call
- *  - If token expires in < 5 minutes, tries to refresh using VIRTUALS_REFRESH_TOKEN
- *  - Refresh hits POST /auth/cli/refresh on api.acp.virtuals.io
- *  - On success: writes new token + refresh token to /tmp/gsb-acp-token.json
- *  - On failure: logs a clear actionable message telling you exactly what to do
- *
- *  How to get a refresh token:
- *  The ACP CLI refresh token is different from privy:refresh_token.
- *  It comes from running `acp configure` which stores it in the OS keychain.
- *  Since your Mac can't run the CLI, grab it from the browser network tab:
- *    1. app.virtuals.io → DevTools → Network → filter "cli/token"
- *    2. Find the POST /auth/cli/token response
- *    3. Copy the "refreshToken" field from the response body
- *  Set it as VIRTUALS_REFRESH_TOKEN in Railway.
- *
- *  Alternatively: use the web refresh token (privy:refresh_token from localStorage)
- *  via the Privy session endpoint. This module tries both.
+ * Compute endpoint: https://compute.virtuals.io/v1
+ *   OpenAI-compatible:    POST /v1/chat/completions  — Authorization: Bearer $KEY
+ *   Anthropic-compatible: POST /v1/messages          — x-api-key: $KEY
  */
 
-const fs   = require('fs');
-const path = require('path');
+const COMPUTE_BASE_URL = 'https://compute.virtuals.io/v1';
 
-const ACP_SERVER    = 'https://api.acp.virtuals.io';
-const PRIVY_SERVER  = 'https://auth.privy.io';
-const PRIVY_APP_ID  = 'cltsev9j90f67yhyw4sngtrpv'; // from JWT aud claim
-const TOKEN_CACHE   = '/tmp/gsb-acp-token.json';
-const EXPIRY_BUFFER = 5 * 60; // refresh if < 5 min remaining
+// Map agent ID → Railway env var name
+const AGENT_KEY_MAP = {
+  1332: 'VIRTUALS_API_KEY_CEO',
+  1333: 'VIRTUALS_API_KEY_WALLET_PROFILER',
+  1334: 'VIRTUALS_API_KEY_ALPHA_SCANNER',
+  1335: 'VIRTUALS_API_KEY_TOKEN_ANALYST',
+  1336: 'VIRTUALS_API_KEY_THREAD_WRITER',
+};
 
-// ── JWT helpers ───────────────────────────────────────────────────────────────
-function decodeJwtPayload(token) {
-  try {
-    const payload = token.split('.')[1];
-    const padded  = payload + '='.repeat((4 - payload.length % 4) % 4);
-    return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
-  } catch { return null; }
-}
-
-function tokenExpiresIn(token) {
-  const p = decodeJwtPayload(token);
-  if (!p?.exp) return 0;
-  return p.exp - Math.floor(Date.now() / 1000);
-}
-
-function isTokenFresh(token) {
-  if (!token) return false;
-  return tokenExpiresIn(token) > EXPIRY_BUFFER;
-}
-
-// ── Token cache (persists across the 45s startup delay) ──────────────────────
-function loadCache() {
-  try { return JSON.parse(fs.readFileSync(TOKEN_CACHE, 'utf8')); }
-  catch { return {}; }
-}
-
-function saveCache(data) {
-  try { fs.writeFileSync(TOKEN_CACHE, JSON.stringify(data, null, 2)); } catch {}
-}
-
-// ── Refresh via ACP CLI refresh endpoint ─────────────────────────────────────
-async function refreshViaAcpCli(refreshToken) {
-  try {
-    const res = await fetch(`${ACP_SERVER}/auth/cli/refresh`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ refreshToken }),
-    });
-    if (!res.ok) return null;
-    const body = await res.json();
-    const token    = body?.data?.token;
-    const newRefresh = body?.data?.refreshToken;
-    if (token) return { token, refreshToken: newRefresh || refreshToken };
-  } catch {}
+/**
+ * Get the Virtuals Compute API key for a given agent.
+ * Falls back to VIRTUALS_API_KEY if set (generic / legacy).
+ * Returns null if no key is configured — callers must handle gracefully.
+ */
+function getAgentKey(agentId) {
+  if (agentId) {
+    const envVar = AGENT_KEY_MAP[agentId];
+    if (envVar && process.env[envVar]) return process.env[envVar];
+  }
+  // Generic fallback
+  if (process.env.VIRTUALS_API_KEY) return process.env.VIRTUALS_API_KEY;
   return null;
 }
 
-// ── Refresh via Privy session endpoint ────────────────────────────────────────
-async function refreshViaPrivy(privyRefreshToken, currentAccessToken) {
-  try {
-    // Privy session refresh: POST /api/v1/sessions
-    // Requires current access token in Authorization + refresh_token in body
-    const res = await fetch(`${PRIVY_SERVER}/api/v1/sessions`, {
-      method:  'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'privy-app-id':  PRIVY_APP_ID,
-        'Authorization': `Bearer ${currentAccessToken}`,
-      },
-      body: JSON.stringify({ refresh_token: privyRefreshToken }),
-    });
-    if (!res.ok) return null;
-    const body = await res.json();
-    const token      = body?.token;
-    const newRefresh = body?.refresh_token;
-    if (token) return { token, refreshToken: newRefresh || privyRefreshToken };
-  } catch {}
-  return null;
+/**
+ * Returns headers for OpenAI-compatible calls (POST /v1/chat/completions).
+ * agentId is optional — pass the agent number (e.g. 1333) to use per-agent key.
+ */
+function openaiHeaders(agentId) {
+  const key = getAgentKey(agentId);
+  if (!key) _warnNoKey(agentId);
+  return {
+    'Authorization': `Bearer ${key || ''}`,
+    'Content-Type':  'application/json',
+  };
 }
 
-// ── Main: get a valid token ───────────────────────────────────────────────────
+/**
+ * Returns headers for Anthropic-compatible calls (POST /v1/messages).
+ * agentId is optional — pass the agent number (e.g. 1333) to use per-agent key.
+ */
+function anthropicHeaders(agentId) {
+  const key = getAgentKey(agentId);
+  if (!key) _warnNoKey(agentId);
+  return {
+    'x-api-key':         key || '',
+    'anthropic-version': '2023-06-01',
+    'Content-Type':      'application/json',
+  };
+}
+
+/**
+ * Legacy compat shim — anything still calling getValidToken() gets the
+ * generic key (or null). Logs a deprecation notice once.
+ */
+let _legacyWarned = false;
 async function getValidToken() {
-  // 1. Check env var
-  const envToken = process.env.VIRTUALS_PRIVY_TOKEN;
-  if (envToken && isTokenFresh(envToken)) {
-    return envToken;
+  if (!_legacyWarned) {
+    _legacyWarned = true;
+    console.warn('[acpAuth] getValidToken() is deprecated — use getAgentKey(agentId) or openaiHeaders(agentId) directly.');
   }
-
-  // 2. Check cache file
-  const cache = loadCache();
-  if (cache.token && isTokenFresh(cache.token)) {
-    return cache.token;
-  }
-
-  // 3. Try to refresh
-  const staleToken     = envToken || cache.token;   // need for Privy refresh
-  const acpRefreshTok  = process.env.VIRTUALS_REFRESH_TOKEN || cache.refreshToken;
-  const privyRefreshTok = process.env.VIRTUALS_PRIVY_REFRESH_TOKEN || cache.privyRefreshToken;
-
-  // Try ACP CLI refresh first (cleaner)
-  if (acpRefreshTok) {
-    console.log('[acpAuth] Access token expired — refreshing via ACP CLI...');
-    const result = await refreshViaAcpCli(acpRefreshTok);
-    if (result) {
-      console.log('[acpAuth] ✅ Token refreshed via ACP CLI.');
-      saveCache({ token: result.token, refreshToken: result.refreshToken });
-      return result.token;
-    }
-    console.warn('[acpAuth] ACP CLI refresh failed. Trying Privy...');
-  }
-
-  // Try Privy session refresh as fallback
-  if (privyRefreshTok && staleToken) {
-    console.log('[acpAuth] Trying Privy session refresh...');
-    const result = await refreshViaPrivy(privyRefreshTok, staleToken);
-    if (result) {
-      console.log('[acpAuth] ✅ Token refreshed via Privy.');
-      saveCache({ token: result.token, privyRefreshToken: result.refreshToken });
-      return result.token;
-    }
-    console.warn('[acpAuth] Privy refresh also failed.');
-  }
-
-  // 4. All refresh attempts failed — log actionable instructions (rate-limited to once per 10 min)
-  const now = Date.now();
-  if (now - lastNoTokenLogAt > NO_TOKEN_LOG_INTERVAL) {
-    lastNoTokenLogAt = now;
-    const expiresIn = staleToken ? tokenExpiresIn(staleToken) : -1;
-    const expired   = expiresIn <= 0;
-    console.error(`[acpAuth] ❌ No valid ACP token (${expired ? 'EXPIRED' : `expires in ${expiresIn}s`}). Update VIRTUALS_PRIVY_TOKEN in Railway. See acpAuth.js for steps. (This message suppressed for 10 min.)`);
-  }
-
-  return null;
+  return getAgentKey(null);
 }
 
-// ── Dedupe guard: only log the "no token" error once per 10 minutes ──────────
-let lastNoTokenLogAt = 0;
-const NO_TOKEN_LOG_INTERVAL = 10 * 60 * 1000; // 10 min
+// ── Internal helpers ──────────────────────────────────────────────────────────
+let _lastNoKeyWarn = {};
+function _warnNoKey(agentId) {
+  const now = Date.now();
+  const last = _lastNoKeyWarn[agentId || 'generic'] || 0;
+  if (now - last > 10 * 60 * 1000) {
+    _lastNoKeyWarn[agentId || 'generic'] = now;
+    const envVar = agentId ? AGENT_KEY_MAP[agentId] : 'VIRTUALS_API_KEY';
+    console.warn(`[acpAuth] ⚠️  No API key for agent ${agentId || '(generic)'}. Set ${envVar || 'VIRTUALS_API_KEY'} in Railway. (suppressed 10 min)`);
+  }
+}
 
-// ── Seed cache from env on first load ────────────────────────────────────────
-// If env tokens are fresh, seed the cache so refresh tokens persist across restarts
-(function seedCache() {
-  const cache = loadCache();
-  let changed = false;
-
-  const envToken   = process.env.VIRTUALS_PRIVY_TOKEN;
-  const envRefresh = process.env.VIRTUALS_REFRESH_TOKEN;
-  const envPrivyR  = process.env.VIRTUALS_PRIVY_REFRESH_TOKEN;
-
-  if (envToken && !cache.token)        { cache.token = envToken;               changed = true; }
-  if (envRefresh && !cache.refreshToken) { cache.refreshToken = envRefresh;    changed = true; }
-  if (envPrivyR && !cache.privyRefreshToken) { cache.privyRefreshToken = envPrivyR; changed = true; }
-
-  if (changed) saveCache(cache);
-})();
-
-module.exports = { getValidToken, isTokenFresh, tokenExpiresIn };
+module.exports = {
+  COMPUTE_BASE_URL,
+  AGENT_KEY_MAP,
+  getAgentKey,
+  openaiHeaders,
+  anthropicHeaders,
+  getValidToken, // legacy compat
+};
