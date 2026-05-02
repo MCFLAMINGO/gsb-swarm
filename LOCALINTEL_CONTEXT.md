@@ -272,6 +272,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 
 ## Known Issues / Gotchas
 
+- **Worker throttling (2026-05-02):** mcpProbeWorker disabled (no real users yet — re-enable when live traffic arrives). enrichmentAgent slowed to 6hr, zipCoordinator slowed to 1hr. All other workers unchanged. Re-enable/speed up when user volume justifies it.
 - **rfq_responses schema:** Old table (job_id bigint PK, wrong columns) detected and dropped automatically by `migrate()` in rfqService.js on startup. Correct schema (rfq_id UUID FK, quote_usd, status, etc.) now live as of 2026-05-02. No manual intervention needed going forward.
 - **caller_identities + voice_sessions:** Auto-create via `migrate()` in Railway process works but the `migrated=true` flag caches after first run. If tables are missing, create them directly in Postgres (done 2026-05-01).
 - **`migrated` flag in rfqBroadcast.js:** Module-level boolean prevents re-running migrations on live process. If table schema changes, must run migration SQL directly against Postgres.
@@ -295,6 +296,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 - `9e1e0ff` — fix: rfq_responses old schema drop+recreate on migration; createJob BigInt serialization
 - `56f75e4` — docs: mark Resend inbound MX + webhook complete
 - `1647d93` — feat: LocalIntelIntent JSDoc typedef + internal intent logging in /ask and /mcp (no public response change)
+- `2926bb5` — perf: disable mcpProbeWorker; slow enrichmentAgent 10min→6hr; zipCoordinator 2min→1hr
 
 ### Committed prior session (2026-05-01)
 - `25b7cd9` — Voice session state: `lib/voiceSession.js`, `handleMenuResponse`, `handleOrderBuilding` — multi-turn ordering with Postgres CallSid sessions
