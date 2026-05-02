@@ -2353,12 +2353,14 @@ app.post('/api/fire-job', requireOperator, async (req, res) => {
 
   try {
     console.log(`[api] Firing job → ${workerName}: "${requirement}"`);
-    const jobId = await acpClient.createJobByOfferingName(
+    const jobIdRaw = await acpClient.createJobByOfferingName(
       8453,
       workerName,
       worker.address,
       { prompt: requirement },
     );
+    if (!jobIdRaw && jobIdRaw !== 0n) throw new Error('createJobByOfferingName returned no jobId');
+    const jobId = jobIdRaw.toString();
     jobWorkerMap.set(jobId, workerName);
     setWorkerStatus(workerName, 'working', jobId);
     logJob(jobId, workerName, 'fired', 'fired');
@@ -4824,17 +4826,19 @@ Focus on actionable signals. If compute tokens are up = look for AI/agent token 
     const alphaWorker = WORKER_CATALOG['GSB Alpha Scanner'];
     if (!acpClient) return res.status(503).json({ error: 'ACP client not ready — Railway may be starting up' });
 
-    const jobId = await acpClient.createJobByOfferingName(
+    const jobIdRaw2 = await acpClient.createJobByOfferingName(
       8453,
       'GSB Alpha Scanner',
       alphaWorker.address,
       { prompt: gflopRequirement },
     );
-    jobWorkerMap.set(jobId, 'GSB Alpha Scanner');
-    setWorkerStatus('GSB Alpha Scanner', 'working', jobId);
-    logJob(jobId, 'GSB Alpha Scanner', 'gflop-scan', 'fired');
-    console.log(`[gflop-scan] Job fired: ${jobId}`);
-    res.json({ ok: true, jobId, computeData, message: 'GFLOP scan fired to Alpha Scanner' });
+    if (!jobIdRaw2 && jobIdRaw2 !== 0n) throw new Error('createJobByOfferingName returned no jobId');
+    const jobId2 = jobIdRaw2.toString();
+    jobWorkerMap.set(jobId2, 'GSB Alpha Scanner');
+    setWorkerStatus('GSB Alpha Scanner', 'working', jobId2);
+    logJob(jobId2, 'GSB Alpha Scanner', 'gflop-scan', 'fired');
+    console.log(`[gflop-scan] Job fired: ${jobId2}`);
+    res.json({ ok: true, jobId: jobId2, computeData, message: 'GFLOP scan fired to Alpha Scanner' });
   } catch (err) {
     const msg = err.message || String(err);
     console.error('[gflop-scan] Error:', msg);

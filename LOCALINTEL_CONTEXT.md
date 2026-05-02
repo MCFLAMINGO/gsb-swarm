@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-01 (session 2 — test + fix pass)
+> Last updated: 2026-05-02 (session 3 — bedrockWorker fix, Virtuals Compute auth rewrite, rfq_responses schema fix, createJob BigInt fix)
 
 ---
 
@@ -64,7 +64,7 @@
 - Old vars OBSOLETE: `VIRTUALS_PRIVY_TOKEN`, `VIRTUALS_PRIVY_REFRESH_TOKEN` — delete from Railway
 - `acpAuth.js` will be rewritten to use per-agent keys once all keys are added by Erik
 - Per-agent keys being added to Railway (Erik adding manually):
-  - `VIRTUALS_API_KEY_CEO` — agent 1332 | Base Builder Code: `bc_qhc9o1lh`
+  - `VIRTUALS_API_KEY_CEO` — agent 1332 | Base Builder Code: `bc_qhc9o1lh` | Compute billing: FUNDED (2026-05-01)
     - Agent UUID: `019d7568-cd41-7523-9538-e501cc1875cc` | Created: 2026-04-09
     - EVM wallet: `0xb165a3b019eb1922f5dcda97b83be75484b30d27`
     - SOL wallet: `2XZYfpH6nSYL53C45RiNrCfkHr3LjSsrFxUgRcMc64Da`
@@ -289,7 +289,17 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 
 ## Session History (what's been built)
 
-### Committed this session (2026-05-01)
+### Committed this session (2026-05-02)
+- `3a5f9bf` — fix: stop log spam — cap 32-bit setTimeout overflow + rate-limit ACP token error logs
+- `6b41a26` — docs: update context — Virtuals Compute new auth, per-agent API key vars
+- `e32a04a` — feat: replace Privy JWT auth with Virtuals Compute API keys (acpAuth.js rewrite)
+- `0cf9841` — test: add /api/compute/test route
+- `5907beb` — fix: compute/test — parallel Promise.all to avoid 75s sequential timeout
+- `8056494` — fix: bedrockWorker + censusLayerWorker 32-bit overflow
+- `8f674ad` — fix: bedrockWorker — once-a-month, graceful failure, FDOT stubbed
+- `(this commit)` — fix: rfq_responses old schema drop+recreate on migration; createJob BigInt serialization
+
+### Committed prior session (2026-05-01)
 - `25b7cd9` — Voice session state: `lib/voiceSession.js`, `handleMenuResponse`, `handleOrderBuilding` — multi-turn ordering with Postgres CallSid sessions
 - `6bead23` — Service request detection in `/search` — "I need my X fixed" no longer matches business names
 - `258ae3f` — Full RFQ broadcast system:
