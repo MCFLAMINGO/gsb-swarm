@@ -1162,6 +1162,27 @@ app.post('/api/acp/webhook/thread-writer', express.json(), async (req, res) => {
   }
 });
 
+// ── Virtuals Compute key test — temporary, admin only
+app.get('/api/compute/test', async (req, res) => {
+  const { getAgentKey } = require('./acpAuth');
+  const results = {};
+  for (const [id, name] of [[1332,'CEO'],[1333,'WalletProfiler'],[1334,'AlphaScanner'],[1335,'TokenAnalyst'],[1336,'ThreadWriter']]) {
+    const key = getAgentKey(id);
+    if (!key) { results[name] = 'NO KEY'; continue; }
+    try {
+      const r = await fetch('https://compute.virtuals.io/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'moonshotai/kimi-k2-0905', messages: [{ role: 'user', content: 'Reply with OK only.' }], max_tokens: 5 }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const j = await r.json();
+      results[name] = r.ok ? `OK — ${j?.choices?.[0]?.message?.content?.trim() || 'responded'}` : `HTTP ${r.status}: ${JSON.stringify(j).slice(0,120)}`;
+    } catch(e) { results[name] = `ERROR: ${e.message}`; }
+  }
+  res.json(results);
+});
+
 // ── ACP Webhook health check — Virtuals can ping this to verify all 5 are live
 app.get('/api/acp/webhook/health', async (req, res) => {
   const AGENTS = [
