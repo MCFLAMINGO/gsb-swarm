@@ -153,8 +153,8 @@ rfq_jobs             — id(UUID), code(6-char), caller_phone, caller_name, call
 rfq_broadcasts       — job_id(FK), business_id, business_name, phone, email,
                        sms_sent, email_sent, sent_at
 
-rfq_responses        — job_id(FK), business_id, business_name, business_phone, business_email,
-                       channel(sms|email|voice), raw_text, responded_at, selected(bool)
+rfq_responses        — id(UUID PK), rfq_id(FK→rfq_requests), business_id, business_name,
+                       quote_usd, message, eta_minutes, status(pending|accepted|declined), created_at
 ```
 
 ### Identity (NEW — auto-created by lib/callerIdentity.js)
@@ -272,7 +272,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 
 ## Known Issues / Gotchas
 
-- **rfq_responses legacy table:** Old table from health-tester swarm (Apr 28) had column `rfq_id` instead of `job_id`. Renamed to `rfq_responses_legacy` on 2026-05-01. New correct table created.
+- **rfq_responses schema:** Old table (job_id bigint PK, wrong columns) detected and dropped automatically by `migrate()` in rfqService.js on startup. Correct schema (rfq_id UUID FK, quote_usd, status, etc.) now live as of 2026-05-02. No manual intervention needed going forward.
 - **caller_identities + voice_sessions:** Auto-create via `migrate()` in Railway process works but the `migrated=true` flag caches after first run. If tables are missing, create them directly in Postgres (done 2026-05-01).
 - **`migrated` flag in rfqBroadcast.js:** Module-level boolean prevents re-running migrations on live process. If table schema changes, must run migration SQL directly against Postgres.
 - **Resend MX value:** Correct value is `inbound-smtp.us-east-1.amazonaws.com` — NOT `inbound.resend.com`.
@@ -293,6 +293,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 - `8056494` — fix: bedrockWorker + censusLayerWorker 32-bit overflow
 - `8f674ad` — fix: bedrockWorker — once-a-month, graceful failure, FDOT stubbed
 - `9e1e0ff` — fix: rfq_responses old schema drop+recreate on migration; createJob BigInt serialization
+- `56f75e4` — docs: mark Resend inbound MX + webhook complete
 
 ### Committed prior session (2026-05-01)
 - `25b7cd9` — Voice session state: `lib/voiceSession.js`, `handleMenuResponse`, `handleOrderBuilding` — multi-turn ordering with Postgres CallSid sessions
