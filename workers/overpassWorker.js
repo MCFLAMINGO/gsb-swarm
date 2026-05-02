@@ -98,7 +98,7 @@ async function promoteOsmToBusinesses(zip, pois) {
       const address = [addr.street, addr.city].filter(Boolean).join(', ') || null;
       await db.upsertBusiness({
         name:             poi.name,
-        zip:              addr.postcode || zip,
+        zip:              (addr.postcode || zip).toString().slice(0,5),
         address,
         city:             addr.city || null,
         phone:            poi.phone || null,

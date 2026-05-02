@@ -6116,7 +6116,7 @@ setInterval(async () => {
     const db           = require('./lib/db');
     await rfqBroadcast.expireOldJobs();
     const readyJobs = await db.query(
-      `SELECT * FROM rfq_jobs
+      `SELECT * FROM rfq_requests
        WHERE status IN ('open','matched')
          AND callback_fired = FALSE
          AND response_count >= 1
@@ -6398,7 +6398,7 @@ async function handleSmsInbound(req, res) {
         `LocalIntel: Bid received on job ${cmd.code}! We are notifying the customer. If selected you will get their contact info.`);
       if (result.shouldCallback) {
         const db = require('./lib/db');
-        const jobRows = await db.query('SELECT * FROM rfq_jobs WHERE id = $1', [result.job.id]);
+        const jobRows = await db.query('SELECT * FROM rfq_requests WHERE id = $1', [result.job.id]);
         if (jobRows.length) await rfqCallback.fireCallback(jobRows[0]);
       }
       return;
@@ -6407,7 +6407,7 @@ async function handleSmsInbound(req, res) {
     if (cmd.cmd === 'rfq_select') {
       const db = require('./lib/db');
       const openJobs = await db.query(
-        'SELECT * FROM rfq_jobs WHERE caller_phone = $1 AND status IN ($2,$3) ORDER BY created_at DESC LIMIT 1',
+        'SELECT * FROM rfq_requests WHERE caller_phone = $1 AND status IN ($2,$3) ORDER BY created_at DESC LIMIT 1',
         [from, 'open', 'matched']
       );
       if (!openJobs.length) {
@@ -6514,7 +6514,7 @@ app.post('/api/rfq/email-inbound', express.json(), async (req, res) => {
     });
     if (result.ok && !result.duplicate && result.shouldCallback) {
       const db = require('./lib/db');
-      const jobRows = await db.query('SELECT * FROM rfq_jobs WHERE id = $1', [result.job.id]);
+      const jobRows = await db.query('SELECT * FROM rfq_requests WHERE id = $1', [result.job.id]);
       if (jobRows.length) await rfqCallback.fireCallback(jobRows[0]);
     }
   } catch (e) {
