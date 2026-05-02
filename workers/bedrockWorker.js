@@ -145,47 +145,17 @@ function fetchPermits(zipEntry) {
 }
 
 /**
- * Fetch active FDOT road projects near a ZIP centroid.
- * Returns { active_road_projects, planned_projects }
+ * FDOT road project data — API endpoint returns HTTP 400 (confirmed broken 2026-05-02).
+ * Returns zeros until a working endpoint is found. Logs once at startup.
+ * TODO: find replacement endpoint at https://gis.fdot.gov/arcgis/rest/services/
  */
+let _fdotWarned = false;
 async function fetchFdotProjects(zipEntry) {
-  const { zip, lat, lon } = zipEntry;
-  const bb = bbox(lat, lon);
-  const geometry = encodeURIComponent(
-    JSON.stringify({ xmin: bb.xmin, ymin: bb.ymin, xmax: bb.xmax, ymax: bb.ymax, spatialReference: { wkid: 4326 } })
-  );
-  const url =
-    `https://gis.fdot.gov/arcgis/rest/services/Work_Program_Current/FeatureServer/0/query` +
-    `?geometry=${geometry}` +
-    `&geometryType=esriGeometryEnvelope` +
-    `&spatialRel=esriSpatialRelIntersects` +
-    `&outFields=PROJECT_STATUS,PHASE_DESC` +
-    `&returnGeometry=false` +
-    `&f=json` +
-    `&resultRecordCount=200`;
-
-  try {
-    const data = await safeFetch(url, { _timeout: 10_000 });
-    const features = data.features || [];
-
-    let active_road_projects = 0;
-    let planned_projects     = 0;
-
-    for (const f of features) {
-      const status = ((f.attributes?.PROJECT_STATUS || f.attributes?.PHASE_DESC || '')).toLowerCase();
-      if (/active|construction|under.way|in.progress|let/.test(status)) active_road_projects++;
-      else planned_projects++;
-    }
-
-    return { active_road_projects, planned_projects };
-  } catch (err) {
-    if (!fetchFdotProjects._warned) fetchFdotProjects._warned = {};
-    if (!fetchFdotProjects._warned[zip]) {
-      console.warn(`[bedrockWorker] FDOT unavailable for ${zip} — using zeros (won't repeat)`);
-      fetchFdotProjects._warned[zip] = true;
-    }
-    return { active_road_projects: 0, planned_projects: 0 };
+  if (!_fdotWarned) {
+    _fdotWarned = true;
+    console.warn('[bedrockWorker] ⚠️  FDOT API returning HTTP 400 — road project data unavailable. road_investment_score will be 0 until fixed.');
   }
+  return { active_road_projects: 0, planned_projects: 0 };
 }
 
 /**
@@ -358,7 +328,23 @@ async function runBedrock(mode = 'incremental') {
   }
 
   atomicWrite(INDEX_FILE, index);
-  console.log(`[bedrockWorker] ${mode} run complete — ${scores.join(', ')}`);
+  const scoresSummary = scores.join(', ') || 'no ZIPs processed';
+  console.log(`[bedrockWorker] ${mode} run complete — ${scoresSummary}`);
+
+  // Alert owner if FEMA fell back on all ZIPs (means API is down, not just slow)
+  const allFallback = index.zips.length > 0 && index.zips.every(z => z.infrastructure_momentum_score === 0);
+  if (allFallback) {
+    console.error('[bedrockWorker] ❌ ALL ZIPs scored 0 — FEMA and permit data may both be unavailable. Check API endpoints.');
+    try {
+      const twilio = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      await twilio.messages.create({
+        body: `[LocalIntel] bedrockWorker: all ZIPs scored 0 — FEMA/permit APIs may be down. Check Railway logs.`,
+        from: process.env.TWILIO_FROM_NUMBER,
+        to: process.env.OWNER_ALERT_PHONE || '+19045867887',
+      });
+    } catch (_) {}
+  }
+
   // Write heartbeat to Postgres so restarts skip if fresh
   try {
     if (process.env.LOCAL_INTEL_DB_URL) {
@@ -373,8 +359,7 @@ async function runBedrock(mode = 'incremental') {
 
 // ── Scheduling ────────────────────────────────────────────────────────────────
 
-const WEEKLY_MS  = 7  * 24 * 60 * 60 * 1000; // 604M ms — safe
-const MONTHLY_MS = 24 * 24 * 60 * 60 * 1000; // 24 days — capped below 2^31-1 (30d overflows 32-bit int)
+// No recurring intervals — runs once per deploy, Railway redeploys handle monthly cadence.
 
 // ── Error guard ───────────────────────────────────────────────────────────────
 
@@ -391,9 +376,11 @@ process.on('unhandledRejection', (reason) => {
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 (async () => {
-  // Skip startup run if last full run was within 6 hours (checked via Postgres)
-  const SKIP_IF_FRESH_MS = 6 * 60 * 60 * 1000;
-  let skipStartup = false;
+  // Bedrock only needs to run once a month — permits, FDOT road projects,
+  // and FEMA flood zones don't change week-to-week.
+  // Skip if last run was within 25 days. Railway deploys act as the monthly trigger.
+  const SKIP_IF_FRESH_MS = 25 * 24 * 60 * 60 * 1000;
+  let skipRun = false;
   try {
     if (process.env.LOCAL_INTEL_DB_URL) {
       const db = require('../lib/db');
@@ -404,27 +391,18 @@ process.on('unhandledRejection', (reason) => {
         `SELECT last_run FROM worker_heartbeat WHERE worker_name = 'bedrockWorker'`
       );
       if (row && row.last_run && (Date.now() - new Date(row.last_run).getTime()) < SKIP_IF_FRESH_MS) {
-        console.log(`[bedrockWorker] Last run was ${row.last_run} — skipping startup run`);
-        skipStartup = true;
+        console.log(`[bedrockWorker] Last run was ${row.last_run} — fresh, skipping. Next run in ~${Math.round((SKIP_IF_FRESH_MS - (Date.now() - new Date(row.last_run).getTime())) / 86400000)}d`);
+        skipRun = true;
       }
     }
   } catch (_) {}
 
-  if (!skipStartup) await runBedrock('full');
+  if (!skipRun) {
+    await runBedrock('full');
+  }
 
-  setInterval(async () => {
-    try { await runBedrock('incremental'); }
-    catch (err) { logError('weeklyInterval', err); }
-  }, WEEKLY_MS);
-
-  setInterval(async () => {
-    try { await runBedrock('full'); }
-    catch (err) { logError('monthlyInterval', err); }
-  }, MONTHLY_MS);
-
-  // Keep-alive: prevents Node from exiting between interval ticks,
-  // which would trigger spawnLocalIntelWorker's auto-restart loop.
-  setInterval(() => {}, 1 << 30);
-
-  console.log(`[bedrockWorker] Scheduled — weekly incremental every ${WEEKLY_MS}ms, monthly full every ${MONTHLY_MS}ms`);
+  // Keep process alive so spawnLocalIntelWorker doesn't auto-restart it.
+  // No setInterval for re-runs — Railway redeploys handle monthly cadence.
+  console.log('[bedrockWorker] Done. Staying alive until next deploy.');
+  setInterval(() => {}, 60 * 60 * 1000); // 1hr keep-alive, well under 32-bit limit
 })();
