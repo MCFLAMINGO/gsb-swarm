@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-03 (session 9 — enrichment layer + tasks scaffolding for 7 ZIPs, 5,151 businesses)
+> Last updated: 2026-05-03 (session 10 — businessMergeWorker wired and tested, dedupe-on-ingest live)
 
 ---
 
@@ -422,6 +422,12 @@ The data we're collecting isn't just a directory. It's the intelligence layer th
 ---
 
 ## Session History (what's been built)
+
+### gsb-swarm commits (2026-05-03, session 10)
+- `workers/businessMergeWorker.js` added — Union-Find cluster detection on phone (digits-only, ≥10) + name/address-prefix proximity. Scored canonical selection (confidence_score, claimed_at, owner_verified, field completeness, longer name as tie-breaker). Merges best non-null fields from siblings into canonical. Reassigns FKs in `business_tasks`, `source_evidence`, `notification_queue`, `task_events`, `business_responsiveness` BEFORE deleting sibling rows. Exports `runMerge()` and `triggerMerge()`. Standalone daemon mode (every 6h) only when `require.main === module`.
+- Wired into `LOCAL_INTEL_WORKERS` in `dashboard-server.js` (forked alongside enrichmentFillWorker / taskSeedWorker).
+- Triggered automatically at the END of `overpassWorker.runPass()` — every fresh ingestion pass now ends with a dedupe sweep, no manual intervention.
+- Live Postgres test: **Valley Smoke 4 rows → 2 rows after merge** (3 cluster duplicates collapsed to canonical confidence=0.9; "Palm Valley Smoke" correctly left alone — different name root, no shared phone). Targeted run completed in 3.3s with 0 errors. Full-DB pass on 244k active rows finds ~13.7k clusters of ≥2 rows.
 
 ### gsb-swarm commits (2026-05-03, session 7)
 - `608976e` — fix: Tier 3 wallet sort moved to SQL ORDER BY — all 9 GET /search queries now use `(wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC`. JS sort block removed. Postgres is king.
