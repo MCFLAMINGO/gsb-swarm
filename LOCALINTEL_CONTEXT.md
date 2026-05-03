@@ -512,3 +512,23 @@ The data we're collecting isn't just a directory. It's the intelligence layer th
   - Live test result: 3600 rows loaded, 63 clusters found, 60 merged, 76 rows deleted, 0 errors
   - Valley Smoke: 3 ingestion dupes → 1 canonical (ZIP 32082, conf 0.9, website populated)
   - Phone-only shared lines (dental group practices) correctly NOT merged (name similarity gate)
+
+### gsb-swarm + localintel-landing commits (2026-05-03, session 10 continued)
+- `244f94b` (gsb-swarm) — feat: order intent routing — detect order queries, return menu_url CTA, log to usage_ledger
+  - `_ORDER_INTENT_RE` fires BEFORE service-request and name-search branches in GET /search
+  - Matches: "order food from X", "order from X", "place an order at X", "i'd like to order from X", "get/grab food from X", "food from X", "order at X", bare "i want to order"
+  - Extracts business name → ZIP-scoped ILIKE lookup → NE-FL fallback
+  - Returns `{ intent:'order', business, message, cta_label:'Start Order →', cta_url, fallback_phone }`
+  - `cta_url` = `menu_url` (Toast/Surge link) || `website` fallback
+  - Logs `query_type='order_routing'` to `usage_ledger` with `cost_path_usd=0` (fee hook for future on-chain confirmation)
+  - `intent:'order_not_found'` when no business match
+- `8951ffa` (localintel-landing) — feat: order-start card — render focused order CTA when intent=order
+  - `buildAgentBubble` short-circuits on `intent==='order'`: agent bubble + `.order-card` with green "Start Order →" button → `cta_url` (new tab), `tel:` phone link, "Powered by Toast · Routed by LocalIntel" footer
+  - `.order-card` styled to match existing result cards (white bg, green top border, shadow)
+  - `intent==='order_not_found'` renders bubble only
+
+### Payment model notes (architecture locked)
+- LocalIntel = routing layer only. Does NOT process orders or payments.
+- `menu_url` on `businesses` table is the agentic handoff link (Toast/Surge for McFlamingo)
+- Routing fee (0.05%–1% on confirmed transactions) triggered by future on-chain confirmation wired to `usage_ledger.tx_hash`
+- Businesses without `menu_url` fall back to `website`; future: Surge agentic API can place order directly
