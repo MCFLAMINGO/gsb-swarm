@@ -2937,7 +2937,7 @@ router.get('/search', async (req, res) => {
   const t0 = Date.now();
   const raw   = (req.query.q   || '').trim();
   const zip   = (req.query.zip || '').trim() || null;
-  const cat   = (req.query.cat || '').trim() || null;
+  let cat   = (req.query.cat || '').trim() || null;
   const limit = Math.min(parseInt(req.query.limit) || 20, 50);
 
   if (!raw && !zip && !cat) {
