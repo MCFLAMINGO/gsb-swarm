@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-03 (session 7 — Tiers 2-4 COMPLETE: hoursParseWorker live, wallet routing priority sort, open-now / open-late / open-weekend filter in GET /search)
+> Last updated: 2026-05-03 (session 7 — Tiers 2-4 COMPLETE + Tier 3 wallet sort moved to SQL ORDER BY — Postgres is king)
 
 ---
 
@@ -337,7 +337,7 @@ This means the claimed+wallet businesses are the product. The data layer is the 
 5. **Surface `zip_intelligence` fields** in ZIP queries — answers WHY — NEXT
 
 ### Tier 3 — Wallet Routing Priority ✅ COMPLETE (session 7)
-1. ✅ `wallet IS NOT NULL` businesses sort above `wallet IS NULL` after proximity sort in GET /search
+1. ✅ `wallet IS NOT NULL` sort in SQL ORDER BY — all 9 GET /search queries. No JS sort. Postgres is king.
 2. ✅ `in_routing_tier: true` flag returned per result
 3. Micro-fee debit per routing event (x402 pathUSD `$0.001–$0.05`) — PENDING
 4. Transaction fee hook in RFQ confirmation — PENDING
@@ -381,6 +381,7 @@ The data we're collecting isn't just a directory. It's the intelligence layer th
 ## Session History (what's been built)
 
 ### gsb-swarm commits (2026-05-03, session 7)
+- `608976e` — fix: Tier 3 wallet sort moved to SQL ORDER BY — all 9 GET /search queries now use `(wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC`. JS sort block removed. Postgres is king.
 - `86ffdf1` — feat: Tiers 2-4 — hours parse worker, wallet routing priority, open-now filter. workers/hoursParseWorker.js (OSM→hours_json, zero LLM, 9/9 test cases, startup+daily batch, isOpenNow). dashboard-server.js wired into LOCAL_INTEL_WORKERS. lib/intentMap.js detectOpenIntent() now/late/early/weekend. localIntelAgent.js Tier 3 wallet sort + Tier 4 open-now filter with graceful fallback.
 
 ### gsb-swarm commits (2026-05-02, session 6)
