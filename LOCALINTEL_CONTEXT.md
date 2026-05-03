@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-02 (session 4 — all filesystem workers ported to Postgres; GET /search route added)
+> Last updated: 2026-05-02 (session 5 — conversational thread UI live; search.html full rewrite; category expansion, about-business queries, duplicate route, brief narratives all fixed)
 
 ---
 
@@ -188,7 +188,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 | File | Purpose |
 |---|---|
 | `index.html` | Landing page — search bar + Call (904) 506-7476 CTA |
-| `search.html` | Search UI — calls `/api/local-intel/search`, renders narrative + cards + service request RFQ card |
+| `search.html` | Conversational thread UI — full Q&A history, follow-up context resolution, task handoff to RFQ. Thread above, cards below. Fresh on refresh. |
 
 ---
 
@@ -270,6 +270,22 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 
 ---
 
+## Conversational Search — Design Philosophy
+
+LocalIntel search is built around how humans actually think and talk. A person asking "can you get me a landscaper at 205 Odoms Mill Blvd in Ponte Vedra" isn't running a database query — they're starting a conversation. They expect to follow up: "what kind of work do they do?" or "ok call them." That's the flow we support.
+
+**Thread model:**
+- Every Q&A pair is a turn. The full thread stays visible above — user bubbles right (green), agent left with avatar.
+- The agent always has context of what came before. Follow-up pronouns (they/them/their/it) resolve to the last business returned.
+- The API receives `ctx_business` and `ctx_names` on every call so the backend can use prior context too.
+- Task handoff: if the user says "ok call them / go ahead / yes call / send it," the UI fires an RFQ for the last business in context and shows a task card with the job code and call CTA.
+- Fresh on every refresh — no localStorage. Conversation state is in memory only.
+
+**Why this matters for the north star ($546k):**
+The data we're collecting isn't just a directory. It's the intelligence layer that lets an agent answer follow-up questions, surface context, and hand off to real action. The UI embodies that — it's not a search box, it's a conversation that ends in a task.
+
+---
+
 ## Known Issues / Gotchas
 
 - **Worker throttling (2026-05-02):** mcpProbeWorker disabled (no real users yet — re-enable when live traffic arrives). enrichmentAgent slowed to 6hr, zipCoordinator slowed to 1hr. All other workers unchanged. Re-enable/speed up when user volume justifies it.
@@ -285,7 +301,11 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 
 ## Session History (what's been built)
 
-### Committed this session (2026-05-02)
+### gsb-swarm commits (2026-05-02, session 5)
+- `a7f7437` — docs: context update (session 4 close)
+- `d426189` — fix: about-business query extraction (ABOUT_BIZ_RE regex); FL-only ILIKE scope (ZIPs 32004–34997); stop word expansion; longest-token-first fallback. Fixes "what kind of landscaping does X do" returning wrong businesses.
+- `b4b8f49` — fix: remove duplicate /search route — old stub at line 451 intercepted all requests before full route with CAT_EXPAND, service_request detection, narratives. Caused all category expansion and NL intent to be silently skipped.
+- `a0bf29d` — feat: brief narratives enriched — zipBriefWorker now includes description/tags in notable_businesses; /brief/:zip reads from Postgres not filesystem; search returns narrative for ZIP-level queries.
 - `4a21278` — fix: expand GET /search category filter — dropdown slugs (restaurant/plumber/electrician/etc) now map to ALL matching DB sub-categories via ANY array; previously exact match returned 0 results for most categories
 - `2dba0b2` — fix: rfq_jobs→rfq_requests (table was renamed in rfqService migration, dashboard-server still used old name → rfq-poll 500 errors); committed spendingZones.json to git (was in .gitignore → never deployed to Railway → zones.find crash on every acp-cycle ZIP); truncate overpass addr.postcode to 5 chars (ZIP+4 codes were hitting CHAR(5) column constraint)
 - `c1580cc` — feat: add GET /api/local-intel/search — maps q/zip/cat query params to business search for search.html. Root cause of search returning nothing: search.html called GET /api/local-intel/search but only POST / existed — catch-all was serving dashboard HTML. Now fixed with proper GET route using same SQL logic.
@@ -303,6 +323,8 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 - `2926bb5` — perf: disable mcpProbeWorker; slow enrichmentAgent 10min→6hr; zipCoordinator 2min→1hr
 
 ### localintel-landing commits (2026-05-02)
+- `858a5ee` — feat: conversational thread UI — full rewrite of search.html. Each Q&A pair stays visible in thread (user bubbles right, agent left). Follow-up pronouns (they/them/their/it) resolve to last business in context. Thread context (ctx_business, ctx_names) passed to API on every call. Task handoff regex fires RFQ when user says 'ok call them / go ahead / send it'. No localStorage — fresh on refresh. Auto-seeds '32082' on load. **DEPLOYED to www.thelocalintel.com (commit 858a5ee)**
+- `cb7de6f` — feat: narrative card shows real business spotlight — description + tags from claimed businesses above result cards
 - `9261a99` — fix: remove escaped backtick `\`` in renderServiceRequest template literal — this was a JS syntax error that prevented ALL JavaScript from parsing: runSearch, renderResults, esc(), and event listeners were all dead. Root cause of search showing nothing on load and not responding to any interaction.
 - `3d45698` — fix: category option values now match DB slugs (was sending 'Restaurant', DB stores 'restaurant'); removed truncated broken `if (status === 'cla` line that was a JS syntax error killing all rendering. Deployed to www.thelocalintel.com.
 - `83cf741` — fix: complete truncated renderResults + auto-search on load and filter change (search was broken — JS file cut off mid-function)
