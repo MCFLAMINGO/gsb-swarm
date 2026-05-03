@@ -2989,31 +2989,53 @@ router.get('/search', async (req, res) => {
       }
     }
 
-    // Strip interrogative prefixes ("where is", "find me", etc.)
+    // Strip interrogative prefixes and about-business question patterns
     const INTERO = /^(?:where(?:\s+is)?|who(?:\s+is)?|what(?:\s+is)?|find(?:\s+me)?|show(?:\s+me)?|look\s+up|search(?:\s+for)?|tell\s+me\s+about|info(?:rmation)?\s+on|get\s+me)\s+/i;
-    const q = raw.replace(INTERO, '').trim();
+    // Strip "what kind of X does Y do" → extract Y (business name)
+    const ABOUT_BIZ_RE = /^(?:what\s+(?:kind\s+of\s+\S+|type\s+of\s+\S+|services?|work)\s+does\s+(.+?)\s+(?:do|offer|provide|specialize in|handle)[?]?$|(?:tell\s+me\s+about|info(?:rmation)?\s+(?:on|about))\s+(.+)$)/i;
+    const aboutMatch = raw.match(ABOUT_BIZ_RE);
+    const aboutName  = aboutMatch ? (aboutMatch[1] || aboutMatch[2] || '').trim() : null;
+    const q = aboutName || raw.replace(INTERO, '').trim();
+    const isAboutQuery = !!aboutName;
 
-    const PG_STOP = new Set(['for','the','and','near','in','at','of','a','an','show','me','find','get','list','what','where','who','how','is','are','there']);
+    // Stop words — never use these as standalone search tokens
+    const PG_STOP = new Set(['for','the','and','near','in','at','of','a','an','show','me','find','get','list','what','where','who','how','is','are','there','does','do','kind','type','services','work','offer','provide','can','you','your','their','its','this','that','which']);
+
+    // Florida ZIP prefix ranges for state-scoping fallback results
+    const FL_ZIPS = (z) => { const n = parseInt(z,10); return n >= 32004 && n <= 34997; };
 
     const BASE_SELECT = `SELECT name, zip, address, city, phone, website, category, category_group,
-      lat, lon, confidence_score, claimed_at, wallet, status
+      description, tags, lat, lon, confidence_score, claimed_at, wallet, status
       FROM businesses WHERE status != 'inactive'`;
 
     let rows = [];
 
-    // 1. Exact/partial name match (no ZIP filter — proximity sort after)
+    // 1. Exact/partial name match
     if (q) {
+      // Prefer Florida results when no ZIP given
+      const zipWhere = zip ? ` AND zip = '${zip.replace(/'/g,"\'")}' ` : ` AND zip BETWEEN '32004' AND '34997' `;
       rows = await db.query(
-        BASE_SELECT + ` AND name ILIKE $1 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+        BASE_SELECT + zipWhere + ` AND name ILIKE $1 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
         [`%${q}%`, limit * 2]
       );
 
-      // Fallback: try each non-stop token
+      // Widen to all FL if ZIP-scoped returned nothing
+      if (!rows.length && zip) {
+        rows = await db.query(
+          BASE_SELECT + ` AND zip BETWEEN '32004' AND '34997' AND name ILIKE $1 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+          [`%${q}%`, limit * 2]
+        );
+      }
+
+      // Token fallback — skip short/stop tokens, try longest meaningful tokens first
       if (!rows.length) {
-        const tokens = q.toLowerCase().split(/\s+/).filter(t => t.length >= 3 && !PG_STOP.has(t));
+        const tokens = q.toLowerCase()
+          .split(/\s+/)
+          .filter(t => t.length >= 4 && !PG_STOP.has(t))
+          .sort((a,b) => b.length - a.length); // longest first = most specific
         for (const tok of tokens) {
           const r = await db.query(
-            BASE_SELECT + ` AND name ILIKE $1 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+            BASE_SELECT + ` AND zip BETWEEN '32004' AND '34997' AND name ILIKE $1 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
             [`%${tok}%`, limit * 2]
           );
           if (r.length) { rows = r; break; }
@@ -3119,9 +3141,9 @@ router.get('/search', async (req, res) => {
     // Only when 1-2 results and query has about-intent — deterministic, no LLM
     let narrative = null;
     const ABOUT_INTENT = /^(?:what(?:\s+is|\s+are)?|tell\s+me\s+about|who\s+is|describe|about)\s+/i;
-    const hasAboutIntent = ABOUT_INTENT.test(raw);
+    const hasAboutIntent = ABOUT_INTENT.test(raw) || isAboutQuery;
 
-    if (hasAboutIntent && results.length >= 1 && results.length <= 3) {
+    if (hasAboutIntent && results.length >= 1) {
       try {
         // Fetch rich fields for the top result (name match is already proven)
         const topName = results[0].name;
