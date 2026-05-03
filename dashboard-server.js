@@ -6651,6 +6651,7 @@ app.use((req, res, next) => {
     { name: 'Router Learning Worker',     file: 'workers/routerLearningWorker.js'  },
     { name: 'Enrichment Fill Worker',     file: 'workers/enrichmentFillWorker.js'  },
     { name: 'Task Seed Worker',           file: 'workers/taskSeedWorker.js'        },
+    { name: 'Business Merge Worker',      file: 'workers/businessMergeWorker.js'   },
     { name: 'ZIP Brief Worker',           file: 'workers/zipBriefWorker.js'        },
     { name: 'Hours Parse Worker',         file: 'workers/hoursParseWorker.js'      },
     // { name: 'Embedding Worker',           file: 'workers/embeddingWorker.js'       }, // disabled — Railway disk ephemeral, needs pgvector
