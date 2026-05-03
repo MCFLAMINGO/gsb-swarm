@@ -97,6 +97,7 @@ const { exact } = require('x402/schemes');
 // ── API key middleware (pathUSD + USDC, Postgres-backed) ─────────────────────
 const { createApiKeyMiddleware } = require('./lib/apiKeyMiddleware');
 const db = require('./lib/db');
+const { resolveIntent } = require('./lib/intentMap');
 const apiKeyMiddleware = createApiKeyMiddleware(db);
 
 // ── x402 payment config ───────────────────────────────────────────────
@@ -2989,6 +2990,19 @@ router.get('/search', async (req, res) => {
       }
     }
 
+    // ── NL intent → category (lib/intentMap.js — shared with voiceIntake) ──────
+    let nlTags = null;
+    let nlDeflect = false;
+    if (!cat && raw) {
+      const intent = resolveIntent(raw);
+      if (intent.deflect) {
+        nlDeflect = true;
+      } else if (intent.cat) {
+        cat    = intent.cat;
+        nlTags = intent.tags || null;
+      }
+    }
+
     // Strip interrogative prefixes and about-business question patterns
     const INTERO = /^(?:where(?:\s+is)?|who(?:\s+is)?|what(?:\s+is)?|find(?:\s+me)?|show(?:\s+me)?|look\s+up|search(?:\s+for)?|tell\s+me\s+about|info(?:rmation)?\s+on|get\s+me)\s+/i;
     // Strip "what kind of X does Y do" → extract Y (business name)
@@ -3005,13 +3019,26 @@ router.get('/search', async (req, res) => {
     const FL_ZIPS = (z) => { const n = parseInt(z,10); return n >= 32004 && n <= 34997; };
 
     const BASE_SELECT = `SELECT name, zip, address, city, phone, website, category, category_group,
-      description, tags, lat, lon, confidence_score, claimed_at, wallet, status
+      description, tags, hours, hours_json, price_tier, services_text,
+      lat, lon, confidence_score, claimed_at, wallet, status
       FROM businesses WHERE status != 'inactive'`;
+
+    // Deflect out-of-scope queries gracefully
+    if (nlDeflect) {
+      return res.json({
+        ok: true, total: 0, returned: 0, results: [],
+        type: 'out_of_scope',
+        narrative: "That's a bit outside my lane — I'm built for finding local Florida businesses. Try asking me for a restaurant, landscaper, doctor, or any service you need nearby.",
+        notable_businesses: [], latency_ms: Date.now() - t0,
+      });
+    }
 
     let rows = [];
 
     // 1. Exact/partial name match
-    if (q) {
+    // Skip name search when NL_INTENT already resolved a category — go straight to cat search
+    const skipNameSearch = !!cat && !aboutName;
+    if (q && !skipNameSearch) {
       // Prefer Florida results when no ZIP given
       const zipWhere = zip ? ` AND zip = '${zip.replace(/'/g,"\'")}' ` : ` AND zip BETWEEN '32004' AND '34997' `;
       rows = await db.query(
@@ -3072,14 +3099,27 @@ router.get('/search', async (req, res) => {
       const expanded = CAT_EXPAND[term];
       let catWhere, catParams;
       if (expanded && expanded.length) {
-        if (zip) {
-          catWhere  = ` AND category = ANY($1) AND zip = $2 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`;
-          catParams = [expanded, zip, limit];
-        } else {
-          catWhere  = ` AND category = ANY($1) ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`;
-          catParams = [expanded, limit];
+        // nlTags: if NL_INTENT returned tag hints (e.g. healthy/vegan), try tag-filtered first
+        if (nlTags && nlTags.length) {
+          const tagRows = await db.query(
+            BASE_SELECT +
+            (zip ? ` AND category = ANY($1) AND zip = $2 AND tags && $3 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $4`
+                 : ` AND category = ANY($1) AND tags && $2 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`),
+            zip ? [expanded, zip, nlTags, limit] : [expanded, nlTags, limit]
+          );
+          if (tagRows.length) rows = tagRows;
         }
-        rows = await db.query(BASE_SELECT + catWhere, catParams);
+        // Fall through to unfiltered cat search if tag-filtered returned nothing
+        if (!rows.length) {
+          if (zip) {
+            catWhere  = ` AND category = ANY($1) AND zip = $2 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`;
+            catParams = [expanded, zip, limit];
+          } else {
+            catWhere  = ` AND category = ANY($1) ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`;
+            catParams = [expanded, limit];
+          }
+          rows = await db.query(BASE_SELECT + catWhere, catParams);
+        }
       } else {
         const params = zip
           ? [`%${term}%`, zip, limit]
@@ -3122,19 +3162,25 @@ router.get('/search', async (req, res) => {
     }
 
     const results = rows.slice(0, limit).map(r => ({
-      name:        r.name,
-      zip:         r.zip,
-      address:     r.address  || '',
-      city:        r.city     || '',
-      phone:       r.phone    || '',
-      website:     r.website  || '',
-      category:    r.category || 'business',
-      group:       r.category_group || 'services',
-      lat:         r.lat  != null ? parseFloat(r.lat)  : null,
-      lon:         r.lon  != null ? parseFloat(r.lon)  : null,
-      confidence:  r.confidence_score ? parseFloat(r.confidence_score) * 100 : 50,
-      claimed:     !!r.claimed_at,
-      wallet:      r.wallet || null,
+      name:          r.name,
+      zip:           r.zip,
+      address:       r.address       || '',
+      city:          r.city          || '',
+      phone:         r.phone         || '',
+      website:       r.website       || '',
+      category:      r.category      || 'business',
+      group:         r.category_group || 'services',
+      description:   r.description   || '',
+      services_text: r.services_text || '',
+      tags:          r.tags          || [],
+      hours:         r.hours         || '',
+      hours_json:    r.hours_json    || null,
+      price_tier:    r.price_tier    || null,
+      lat:           r.lat  != null ? parseFloat(r.lat)  : null,
+      lon:           r.lon  != null ? parseFloat(r.lon)  : null,
+      confidence:    r.confidence_score ? parseFloat(r.confidence_score) * 100 : 50,
+      claimed:       !!r.claimed_at,
+      wallet:        r.wallet || null,
     }));
 
     // ── Narrative: "what is X" / "tell me about X" intent ──────────────────
@@ -3249,13 +3295,15 @@ router.get('/search', async (req, res) => {
     }
 
     return res.json({
-      ok:         true,
-      total:      results.length,
-      returned:   results.length,
-      query:      q || null,
-      zip:        zip || null,
-      category:   cat || null,
-      latency_ms: Date.now() - t0,
+      ok:            true,
+      total:         results.length,
+      returned:      results.length,
+      query:         q || null,
+      zip:           zip || null,
+      category:      cat || null,
+      detected_cat:  cat || null,   // echoes NL-detected category for UI
+      nl_tags:       nlTags || [],  // tag hints used for filtering
+      latency_ms:    Date.now() - t0,
       narrative,
       notable_businesses: notableBusinesses,
       results,
