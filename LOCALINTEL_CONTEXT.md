@@ -490,3 +490,19 @@ The data we're collecting isn't just a directory. It's the intelligence layer th
 - Payment: Tempo mainnet pathUSD for all LocalIntel query pricing
 - Everyone pays in pathUSD — no registration, no query. No balance, no response.
 - All agents running without human in the loop — full autonomy
+
+### gsb-swarm commits (2026-05-03, session 10)
+- `023a9a2` (localintel-landing) — feat: card UI — website field always visible on every result card; clickable blue link (globe icon + ↗) if present, muted italic "No website listed" if not. Encourages business owners to claim profiles.
+- `915e338` — feat: businessMergeWorker — cluster-merge duplicate business rows into one confident record
+  - Union-Find clustering: phone (name-similarity gated, ≥4 char common prefix or substring match to avoid grouping shared-line group practices) + normName+normAddr
+  - Scored canonical: wallet(8)+claimed_at(4)+website(2)+phone(1)+hours_json(1)+description(1)
+  - Merge: best non-null fields across cluster members; services_text union; longer description wins; most-decimal lat/lon wins; non-LocalBusiness category preferred; confidence_score += 0.1/source capped at 1.0
+  - Batch task ops: delete conflict titles first, then reassign remaining in 2 SQL calls (avoids unique constraint race)
+  - Scoped to 7 target ZIPs (fast index hit, no full FL table scan)
+  - worker_events logging: correct schema (worker_name, meta columns)
+  - 6h skip window; respects FULL_REFRESH=true env var
+  - Wired into LOCAL_INTEL_WORKERS in dashboard-server.js (auto-spawned on Railway)
+  - Auto-triggered at end of overpassWorker.runPass() after each ingestion cycle
+  - Live test result: 3600 rows loaded, 63 clusters found, 60 merged, 76 rows deleted, 0 errors
+  - Valley Smoke: 3 ingestion dupes → 1 canonical (ZIP 32082, conf 0.9, website populated)
+  - Phone-only shared lines (dental group practices) correctly NOT merged (name similarity gate)
