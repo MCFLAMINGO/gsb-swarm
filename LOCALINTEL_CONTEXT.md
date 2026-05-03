@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-02 (session 6 — shared NL intent layer live; intentMap.js unifies web + voice; rich business cards with hours/description/price_tier; McFlamingo data updated)
+> Last updated: 2026-05-03 (session 7 — Tiers 2-4 COMPLETE: hoursParseWorker live, wallet routing priority sort, open-now / open-late / open-weekend filter in GET /search)
 
 ---
 
@@ -173,6 +173,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 |---|---|
 | `dashboard-server.js` | Main Express server — all routes registered here |
 | `localIntelAgent.js` | `/api/local-intel/*` routes — search, ask, sector-gap, oracle |
+| `lib/intentMap.js` | **Single NL intent source of truth** — resolveIntent() + detectOpenIntent(). Both web + voice import this. Zero LLM. |
 | `lib/voiceIntake.js` | Twilio voice handler — all stages, session state, RFQ routing |
 | `lib/voiceSession.js` | Postgres CallSid session for multi-turn ordering |
 | `lib/posRouter.js` | POS routing: fetchMenu, matchItems, placeOrder |
@@ -181,6 +182,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 | `lib/rfqCallback.js` | Outbound Twilio callback call — reads responses, confirms selection |
 | `lib/callerIdentity.js` | Wallet-agnostic caller identity — phone→name/email/wallet |
 | `lib/db.js` | Postgres client — returns arrays directly, never .rows |
+| `workers/hoursParseWorker.js` | **OSM hours→hours_json** — batch parser + isOpenNow(). Runs on startup + daily. |
 | `workers/enrichmentAgent.js` | Signal narrative builder — zero LLM, runs every 10 min |
 | `workers/intentRouter.js` | MCP intent routing — deterministic vocabulary scoring |
 
@@ -327,21 +329,23 @@ This means the claimed+wallet businesses are the product. The data layer is the 
 
 ## Roadmap (next sessions)
 
-### Tier 2 — Data Activation (hours + enrichment)
-1. **Parse `hours` string → `hours_json`** — one-time worker pass converts OSM strings to structured JSONB. Unlocks "open now" / "open late" answers for 72k businesses.
-2. **Populate `price_tier`** — deterministic from `category` + `tags` signals (fast_food→$, upscale_dining→$$$)
-3. **Populate `tags` for unclaimed businesses** — from `category` + `services_text` signals, no LLM
-4. **Surface `zip_intelligence` fields** in ZIP-level queries — answers WHY (income, saturation, consumer profile)
+### Tier 2 — Data Activation ✅ COMPLETE (session 7)
+1. ✅ `workers/hoursParseWorker.js` — OSM→hours_json JSONB, zero LLM. Startup + daily batch. `isOpenNow()` uses America/New_York.
+2. ✅ Wired into `dashboard-server.js` LOCAL_INTEL_WORKERS
+3. **Populate `price_tier`** — deterministic from `category` + `tags` (fast_food→$, upscale_dining→$$$) — NEXT
+4. **Populate `tags` for unclaimed businesses** — from `category` + `services_text`, no LLM — NEXT
+5. **Surface `zip_intelligence` fields** in ZIP queries — answers WHY — NEXT
 
-### Tier 3 — Wallet Routing Priority
-1. `wallet IS NOT NULL` businesses get sort priority in results
-2. Micro-fee debit on each routing event (x402 pathUSD `$0.001–$0.05`)
-3. Transaction fee hook in RFQ confirmation (`0.05%–1%`)
-4. Dashboard shows routing revenue per ZIP
+### Tier 3 — Wallet Routing Priority ✅ COMPLETE (session 7)
+1. ✅ `wallet IS NOT NULL` businesses sort above `wallet IS NULL` after proximity sort in GET /search
+2. ✅ `in_routing_tier: true` flag returned per result
+3. Micro-fee debit per routing event (x402 pathUSD `$0.001–$0.05`) — PENDING
+4. Transaction fee hook in RFQ confirmation — PENDING
 
-### Tier 4 — "Open Now" Query Path
-Once `hours_json` is parsed: detect "open now" / "open late" / "open Sunday" in `intentMap.js`,
-compute current day/time server-side, filter `hours_json` accordingly.
+### Tier 4 — Open Now Query Path ✅ COMPLETE (session 7)
+1. ✅ `detectOpenIntent(text)` in `lib/intentMap.js` — now / late / early / weekend
+2. ✅ GET /search filters `rows` by `hours_json` when openIntent is set
+3. ✅ Graceful fallback: < 3 results → returns full unfiltered list
 
 ---
 
@@ -375,6 +379,9 @@ The data we're collecting isn't just a directory. It's the intelligence layer th
 ---
 
 ## Session History (what's been built)
+
+### gsb-swarm commits (2026-05-03, session 7)
+- `86ffdf1` — feat: Tiers 2-4 — hours parse worker, wallet routing priority, open-now filter. workers/hoursParseWorker.js (OSM→hours_json, zero LLM, 9/9 test cases, startup+daily batch, isOpenNow). dashboard-server.js wired into LOCAL_INTEL_WORKERS. lib/intentMap.js detectOpenIntent() now/late/early/weekend. localIntelAgent.js Tier 3 wallet sort + Tier 4 open-now filter with graceful fallback.
 
 ### gsb-swarm commits (2026-05-02, session 6)
 - `0aae74f` — feat: shared NL intent layer (lib/intentMap.js) — web + voice unified. resolveIntent() covers 50 human prompts deterministically. localIntelAgent.js and voiceIntake.js both import it. BASE_SELECT now returns hours, hours_json, price_tier, services_text. McFlamingo record updated with real website description, mcflamingo.com URL, services_text, expanded tags.
