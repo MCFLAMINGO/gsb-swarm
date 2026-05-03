@@ -6650,6 +6650,7 @@ app.use((req, res, next) => {
     // { name: 'MCP Probe Worker',          file: 'workers/mcpProbeWorker.js'        }, // disabled — no real users yet
     { name: 'Router Learning Worker',     file: 'workers/routerLearningWorker.js'  },
     { name: 'ZIP Brief Worker',           file: 'workers/zipBriefWorker.js'        },
+    { name: 'Hours Parse Worker',         file: 'workers/hoursParseWorker.js'      },
     { name: 'Embedding Worker',           file: 'workers/embeddingWorker.js'       },
     { name: 'ACS Demographics Worker',    file: 'workers/acsWorker.js'             },
     { name: 'Sunbiz Import Worker',        file: 'workers/sunbizWorker.js'          },

@@ -97,7 +97,8 @@ const { exact } = require('x402/schemes');
 // ── API key middleware (pathUSD + USDC, Postgres-backed) ─────────────────────
 const { createApiKeyMiddleware } = require('./lib/apiKeyMiddleware');
 const db = require('./lib/db');
-const { resolveIntent } = require('./lib/intentMap');
+const { resolveIntent, detectOpenIntent } = require('./lib/intentMap');
+const { isOpenNow } = require('./workers/hoursParseWorker');
 const apiKeyMiddleware = createApiKeyMiddleware(db);
 
 // ── x402 payment config ───────────────────────────────────────────────
@@ -2993,13 +2994,17 @@ router.get('/search', async (req, res) => {
     // ── NL intent → category (lib/intentMap.js — shared with voiceIntake) ──────
     let nlTags = null;
     let nlDeflect = false;
-    if (!cat && raw) {
-      const intent = resolveIntent(raw);
-      if (intent.deflect) {
-        nlDeflect = true;
-      } else if (intent.cat) {
-        cat    = intent.cat;
-        nlTags = intent.tags || null;
+    let openIntent = null; // 'now' | 'late' | 'early' | 'weekend' | null
+    if (raw) {
+      openIntent = detectOpenIntent(raw);
+      if (!cat) {
+        const intent = resolveIntent(raw);
+        if (intent.deflect) {
+          nlDeflect = true;
+        } else if (intent.cat) {
+          cat    = intent.cat;
+          nlTags = intent.tags || null;
+        }
       }
     }
 
@@ -3159,6 +3164,72 @@ router.get('/search', async (req, res) => {
           });
         }
       } catch(_) {}
+    }
+
+    // ── Tier 3: Wallet routing priority ─────────────────────────────────
+    // Businesses with a wallet (in the paid routing tier) float to the top.
+    // Within each tier (wallet vs no-wallet), existing sort order is preserved.
+    if (rows.length > 1) {
+      rows.sort((a, b) => {
+        const aW = a.wallet ? 1 : 0;
+        const bW = b.wallet ? 1 : 0;
+        return bW - aW; // wallet=1 sorts before wallet=0
+      });
+    }
+
+    // ── Tier 4: Open-now filter ────────────────────────────────────
+    // If the query contains open-now/late/early intent AND we have hours_json data,
+    // filter to only open businesses. Fall back to full list if filter leaves < 3.
+    if (openIntent && rows.length > 0) {
+      const DAYS_FULL = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+      const now = new Date();
+      const etStr = now.toLocaleString('en-US', { timeZone: 'America/New_York' });
+      const et = new Date(etStr);
+      const jsDay = et.getDay(); // 0=Sun
+      const ourDay = jsDay === 0 ? 6 : jsDay - 1;
+      const todayName   = DAYS_FULL[ourDay];
+      const tomorrowName = DAYS_FULL[(ourDay + 1) % 7];
+      const nowMins = et.getHours() * 60 + et.getMinutes();
+
+      const filtered = rows.filter(r => {
+        if (!r.hours_json) return false;
+        const hj = typeof r.hours_json === 'string' ? JSON.parse(r.hours_json) : r.hours_json;
+        if (hj._unparseable) return false;
+
+        const checkDay = (dayName) => {
+          const entry = hj[dayName];
+          if (!entry || !entry.open) return false;
+          if (!entry.from) return true; // open, no specific hours
+          const [fh, fm] = entry.from.split(':').map(Number);
+          const [th, tm] = entry.to.split(':').map(Number);
+          const fromMins = fh * 60 + fm;
+          const toMins   = th * 60 + tm;
+          return nowMins >= fromMins && nowMins < toMins;
+        };
+
+        if (openIntent === 'now')  return checkDay(todayName);
+        if (openIntent === 'late') {
+          // Open late = closes after 9pm (21:00)
+          const entry = hj[todayName];
+          if (!entry || !entry.open || !entry.to) return false;
+          const [th, tm] = entry.to.split(':').map(Number);
+          return (th * 60 + tm) >= 21 * 60;
+        }
+        if (openIntent === 'early') {
+          const entry = hj[todayName];
+          if (!entry || !entry.open || !entry.from) return false;
+          const [fh] = entry.from.split(':').map(Number);
+          return fh <= 8; // opens at or before 8am
+        }
+        if (openIntent === 'weekend') {
+          const sat = hj['Saturday'], sun = hj['Sunday'];
+          return (sat && sat.open) || (sun && sun.open);
+        }
+        return true;
+      });
+
+      // Only apply filter if it returns meaningful results; otherwise keep full list
+      if (filtered.length >= 2) rows = filtered;
     }
 
     const results = rows.slice(0, limit).map(r => ({
