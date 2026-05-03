@@ -265,6 +265,14 @@ async function runPass() {
   }
 
   console.log(`[overpass] Pass complete — pulled:${done} skipped:${skipped} errors:${errors}`);
+
+  // Trigger deduplication after every ingestion pass
+  try {
+    const merge = require('./businessMergeWorker');
+    await merge.triggerMerge();
+  } catch (e) {
+    console.warn('[overpass] businessMergeWorker trigger failed:', e.message);
+  }
 }
 
 (async function main() {

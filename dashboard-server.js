@@ -6656,6 +6656,7 @@ app.use((req, res, next) => {
     // { name: 'Embedding Worker',           file: 'workers/embeddingWorker.js'       }, // disabled — Railway disk ephemeral, needs pgvector
     { name: 'ACS Demographics Worker',    file: 'workers/acsWorker.js'             },
     { name: 'Sunbiz Import Worker',        file: 'workers/sunbizWorker.js'          },
+    { name: 'Business Merge Worker',       file: 'workers/businessMergeWorker.js'   },
   ];
 
   function spawnLocalIntelWorker(w, attempt = 0) {
