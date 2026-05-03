@@ -764,3 +764,35 @@ Prefer postMessage `gateway-card-success` as primary confirmation signal.
 **CSP note:** portal route `/portal/*` has `frame-ancestors 'self' https://surge.basalthq.com` —
 thelocalintel.com is NOT in this allowlist by default. If iframe embedding is blocked, fall back to
 new-tab + polling. May need Basalt to add thelocalintel.com to their CSP frame-ancestors.
+
+### Basalt/Surge POS Guide — Key Notes (guides/pos — 2026-05-03)
+**Kitchen display is LocalIntel's job, not Basalt's.**
+After `gateway-card-success` (iframe postMessage) or poll confirms payment:
+1. LocalIntel backend calls its own kitchen/dispatch endpoint
+2. For pickup: POST to McFlamingo kitchen system (MQTT signal or future KDS endpoint)
+3. For delivery: MQTT broadcast to driver pool (existing THROW/MQTT infrastructure)
+
+**QR code for in-person POS:**
+`https://surge.basalthq.com/portal/{receiptId}` — no recipient param needed for simple display
+Customer scans QR → Surge portal → pays → receipt confirmed
+
+**POS polling interval:** 2 seconds (confirmed from guide — tighter than e-commerce 5s)
+**Timeout:** 5 minutes, then clear/cancel
+
+**Receipt lineItems shape (from receipt printer example):**
+```js
+receipt.lineItems = [{ qty, label, priceUsd, itemId }]
+receipt.totalUsd   // float
+receipt.receiptId  // string
+receipt.brandName  // merchant name
+```
+
+**Delivery driver dispatch flow (LocalIntel custom — not in Basalt):**
+After payment confirmed:
+1. Insert into `delivery_jobs` table (business_id, receipt_id, items, pickup_addr, status='open')
+2. MQTT broadcast on `localintel/delivery/{zip}` topic
+3. Driver accepts → update job status, notify customer via search.html thread
+4. McFlamingo sets driver pay rate in pos_config or a new `delivery_config` column
+
+**Terminal endpoint `POST /api/receipts/terminal`** is JWT/admin only — not callable via developer API.
+Use polling or postMessage only for status confirmation.
