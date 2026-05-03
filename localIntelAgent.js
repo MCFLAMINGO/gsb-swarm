@@ -463,7 +463,7 @@ router.get('/search', async (req, res) => {
 
     // Category expansion map — dropdown slug → all matching DB category values
     const CAT_EXPAND = {
-      restaurant:           ['restaurant','fast_food','cafe','bar','pub','bbq','pizza','seafood','sandwich','italian','asian','steakhouse','food_court','ice_cream','fast_casual_mexican','upscale_dining'],
+      restaurant:           ['restaurant','fast_food','cafe','bar','pub','bbq','pizza','seafood','sandwich','italian','asian','steakhouse','food_court','ice_cream','fast_casual_mexican','upscale_dining','barbecue_restaurant','LocalBusiness','coffee_chain','bakery','juice_bar','smoothie','wings','sushi','thai','mediterranean','greek','indian','chinese','mexican','burger','brunch','breakfast','diner','tapas','wine_bar','brewery','gastropub'],
       healthcare:           ['clinic','hospital','doctor','dentist','dental','pharmacy','urgent_care','therapist','veterinary','optometrist','chiropractor'],
       retail:               ['retail','clothes','shoes','electronics','grocery','supermarket','convenience','hardware_store','nutrition_supplements'],
       construction:         ['construction','contractor','builder','roofing','flooring'],
@@ -478,6 +478,10 @@ router.get('/search', async (req, res) => {
       auto_repair:          ['auto_repair','car_wash','car_repair','tire_shop','auto_parts'],
       beauty:               ['beauty','hair_salon','barbershop','nail_salon','spa','hair_chain'],
       education:            ['school','college','university','tutoring','childcare','daycare'],
+      pizza:                ['pizza'],
+      bar:                  ['bar','pub','wine_bar','brewery','gastropub'],
+      cafe:                 ['cafe','coffee_chain','bakery'],
+      gym:                  ['gym_chain','fitness_centre','yoga','crossfit'],
     };
 
     if (zip) { conditions.push(`zip = $${p++}`); params.push(zip); }
@@ -491,18 +495,33 @@ router.get('/search', async (req, res) => {
         params.push(`%${cat}%`);
       }
     }
-    if (effectiveGroup) {
+    let orderBy = 'confidence_score DESC, name ASC';
+    let tagBoost = '';
+
+    if (q) {
+      const qLike = `%${q}%`;
+      if (effectiveGroup) {
+        // q has a category intent — match by (category group OR name) so specific names still surface
+        const groupCats = CATEGORY_GROUPS[effectiveGroup];
+        if (groupCats && groupCats.length) {
+          conditions.push(`(category = ANY($${p}) OR name ILIKE $${p + 1})`);
+          params.push(groupCats, qLike);
+          p += 2;
+        }
+      } else {
+        // pure name/address search
+        conditions.push(`(name ILIKE $${p} OR category ILIKE $${p} OR address ILIKE $${p} OR description ILIKE $${p})`);
+        params.push(qLike);
+        p++;
+      }
+      orderBy = `CASE WHEN name ILIKE $${p} THEN 0 ELSE 1 END, confidence_score DESC`;
+      params.push(qLike);
+      p++;
+    } else if (effectiveGroup) {
       const groupCats = CATEGORY_GROUPS[effectiveGroup];
       if (groupCats && groupCats.length) { conditions.push(`category = ANY($${p++})`); params.push(groupCats); }
     }
 
-    let orderBy = 'confidence_score DESC, name ASC';
-    let tagBoost = '';
-    if (q && !effectiveGroup) {
-      conditions.push(`(name ILIKE $${p} OR category ILIKE $${p} OR address ILIKE $${p} OR description ILIKE $${p})`);
-      params.push(`%${q}%`);
-      p++;
-    }
     if (nlIntent.tags && nlIntent.tags.length) {
       tagBoost = `, CASE WHEN tags && $${p++}::text[] THEN 1 ELSE 0 END AS tag_score`;
       params.push(nlIntent.tags);
