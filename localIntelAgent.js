@@ -2953,19 +2953,88 @@ router.get('/search', async (req, res) => {
     if (raw) {
       const svcDetect = detectServiceRequest(raw);
       if (svcDetect.isRequest) {
-        const resolvedZip = zip || null;
+        // ── Extract ZIP from query text if not supplied via filter ─────────────
+        // e.g. "in ponte vedra" → 32082, "in nocatee" → 32081, bare 5-digit ZIP
+        const PLACE_TO_ZIP = {
+          'ponte vedra beach': '32082', 'ponte vedra': '32082', 'pvb': '32082',
+          'nocatee': '32081', 'twenty mile': '32081',
+          'jacksonville beach': '32250', 'jax beach': '32250',
+          'neptune beach': '32266',
+          'atlantic beach': '32233',
+          'st johns': '32259', 'saint johns': '32259',
+          'fernandina': '32034', 'fernandina beach': '32034', 'amelia island': '32034',
+          'st augustine': '32084', 'saint augustine': '32084',
+          'world golf': '32092', 'wgv': '32092',
+        };
+        // Neighboring ZIPs for fallback expansion (ordered by proximity)
+        const ZIP_NEIGHBORS = {
+          '32082': ['32081','32250','32266','32233','32259'],
+          '32081': ['32082','32259','32250','32266','32092'],
+          '32250': ['32266','32233','32082','32081','32256'],
+          '32266': ['32250','32233','32082','32081','32256'],
+          '32233': ['32266','32250','32082','32081','32256'],
+          '32259': ['32081','32082','32092','32084','32084'],
+          '32034': ['32082','32081','32259','32250','32266'],
+          '32092': ['32081','32259','32084','32082','32256'],
+          '32084': ['32080','32092','32259','32081','32082'],
+        };
+        const rawLower = (raw||'').toLowerCase();
+        let resolvedZip = zip || null;
+        if (!resolvedZip) {
+          // Try bare 5-digit ZIP in text
+          const zipMatch = rawLower.match(/(3[0-9]{4})/);
+          if (zipMatch) {
+            resolvedZip = zipMatch[1];
+          } else {
+            // Try place names
+            for (const [place, z] of Object.entries(PLACE_TO_ZIP)) {
+              if (rawLower.includes(place)) { resolvedZip = z; break; }
+            }
+          }
+        }
         const resolvedCat = svcDetect.category;
 
-        // If we mapped a category, find providers in ZIP (or all of NE FL)
+        // ── Provider lookup with automatic neighbor expansion on zero results ──
+        const SVC_PROVIDER_QUERY = `SELECT name, zip, address, city, phone, website, category, lat, lon,
+                    confidence_score, claimed_at, wallet`;
         let providerCount = 0;
         let topProviders  = [];
+        let actualZip     = resolvedZip; // may change to a neighbor ZIP
         if (resolvedCat) {
-          const params = resolvedZip
-            ? [`%${resolvedCat}%`, resolvedZip, 5]
-            : [`%${resolvedCat}%`, 5];
-          const zipClause = resolvedZip ? ' AND zip = $2' : '';
-          const lim = resolvedZip ? '$3' : '$2';
-          const provRows = await db.query(
+          // Helper: query providers for a given zip (null = all NE FL)
+          const fetchProviders = async (z) => {
+            const p = z ? [`%${resolvedCat}%`, z, 5] : [`%${resolvedCat}%`, 5];
+            const clause = z ? ' AND zip = $2' : '';
+            const lim = z ? '$3' : '$2';
+            return db.query(
+              SVC_PROVIDER_QUERY + ` FROM businesses
+               WHERE status != 'inactive'
+                 AND (category ILIKE $1 OR category_group ILIKE $1)${clause}
+               ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+               LIMIT ${lim}`, p
+            );
+          };
+
+          let provRows = await fetchProviders(resolvedZip);
+
+          // Zero results in specific ZIP → try each neighbor ZIP in order
+          if (!provRows.length && resolvedZip && ZIP_NEIGHBORS[resolvedZip]) {
+            for (const neighborZip of ZIP_NEIGHBORS[resolvedZip]) {
+              provRows = await fetchProviders(neighborZip);
+              if (provRows.length) { actualZip = neighborZip; break; }
+            }
+          }
+          // Still zero → try all NE FL
+          if (!provRows.length) {
+            provRows = await fetchProviders(null);
+            if (provRows.length) actualZip = null;
+          }
+
+          providerCount = provRows.length;
+          topProviders  = provRows;
+        }
+        // (legacy path kept for shape compatibility below)
+        if (false) { const provRows = await db.query(
             `SELECT name, zip, address, city, phone, website, category, lat, lon,
                     confidence_score, claimed_at, wallet
              FROM businesses
@@ -3008,15 +3077,19 @@ router.get('/search', async (req, res) => {
         }
 
         if (providerCount > 0) {
-          const topName = topProviders[0].name;
-          const areaStr = resolvedZip ? ` in ${resolvedZip}` : ' in Northeast Florida';
+          const topName  = topProviders[0].name;
+          // actualZip may differ from resolvedZip when we expanded to a neighbor
+          const expanded  = actualZip && resolvedZip && actualZip !== resolvedZip;
+          const areaStr   = actualZip
+            ? (expanded ? ` in nearby ${actualZip} (nearest available)` : ` in ${actualZip}`)
+            : ' in Northeast Florida';
           srNarrative =
             `We found ${providerCount} verified ${catLabel} provider${providerCount > 1 ? 's' : ''}${areaStr} ` +
             `and notified them about your request${jobCode ? ' (Job ' + jobCode + ')' : ''}. ` +
             `Top match: ${topName}. Call (904) 506-7476 to get a callback when they respond.`;
         } else if (resolvedCat) {
           srNarrative =
-            `We don't have a verified ${catLabel} provider${resolvedZip ? ' in ' + resolvedZip : ''} yet` +
+            `We don't have a verified ${catLabel} provider${resolvedZip ? ' in ' + resolvedZip + ' or nearby ZIPs' : ''} yet` +
             `${jobCode ? ' — but we logged your request as Job ' + jobCode + '.' : '.'} ` +
             `Call (904) 506-7476 and we'll find one for you.`;
         } else {
