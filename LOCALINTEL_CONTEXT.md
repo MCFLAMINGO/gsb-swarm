@@ -124,18 +124,48 @@
 ### Core Business Intelligence
 ```
 businesses           — 122k+ FL businesses. pos_config is JSONB. pos_type via pos_config->>'pos_type'
-zip_intelligence     — 1,109 rows
-zip_briefs           — 1,193 rows
-zip_enrichment       — 1,012 rows
+zip_intelligence     — 1,109 rows. Now includes irs_agi_median, irs_returns,
+                        irs_wage_share, irs_updated_at (added by irsSoiWorker)
+zip_briefs           — 1,193 rows. Single source for /brief/:zip
+zip_enrichment       — 1,012 rows. OSM POIs cached by overpassWorker
 census_layer         — 0 rows, DO NOT USE
 task_events          — intelligence signal layer
-worker_events        — enrichment worker logs
+worker_events        — enrichment worker logs (also feeds /source-log + /enrichment-log)
 agent_sessions       — MCP agent sessions
 task_patterns        — self-improvement patterns
 business_responsiveness — response tracking
 rfq_gaps             — unmatched voice/web requests for self-improvement batch
 voice_leads          — legacy audit log (still written to for orders)
+acp_broadcast_log    — every registry broadcast + per-zip announcements (acpBroadcaster)
+mcp_probe_log        — probe scores per persona/tool/zip (auto-created)
+router_learning_log  — proposed VERTICAL_SIGNALS keyword patches (auto-created)
 ```
+
+### Postgres-only worker contract (session 8)
+Every worker now follows the same five-step shape — **the Railway disk is
+ephemeral; nothing persists across redeploys except Postgres**:
+
+1. START → ASK Postgres what's already done.
+2. WORK → only process what's missing/new.
+3. END   → upsert the result back into Postgres.
+4. REDEPLOY SAFE — step 1 naturally re-skips on the next boot.
+5. `process.env.FULL_REFRESH === 'true'` ignores all skip logic.
+
+| Worker | Skip query | Result table |
+|---|---|---|
+| overpassWorker | `SELECT DISTINCT zip FROM businesses WHERE 'osm' = ANY(sources) AND status != 'inactive'` | `businesses` (+ `zip_enrichment` cache) |
+| zipBriefWorker | `SELECT zip FROM zip_briefs WHERE generated_at > NOW() - INTERVAL '7 days'` | `zip_briefs` |
+| irsSoiWorker | `SELECT zip FROM zip_intelligence WHERE irs_agi_median IS NOT NULL` | `zip_intelligence` |
+| acpBroadcaster | `SELECT DISTINCT zip FROM acp_broadcast_log WHERE broadcast_at > NOW() - INTERVAL '30 days'` | `acp_broadcast_log` |
+| localIntelAcpCycle | `SELECT zip FROM zip_briefs WHERE generated_at > NOW() - INTERVAL '48 hours'` | `zip_briefs` |
+| routerLearningWorker | `SELECT MAX(run_at) FROM router_learning_log` (skip if <30 min) | `router_learning_log` |
+
+`embeddingWorker` is **disabled** in `dashboard-server.js` — needs pgvector
+to be revived.
+
+All `data/*.json` writes for these workers are removed. CSV downloads
+(IRS SOI) live in `os.tmpdir()`. Static seeds (e.g. `data/spendingZones.json`)
+remain on disk but are read-only.
 
 ### Voice / Session
 ```
