@@ -2923,6 +2923,31 @@ function detectServiceRequest(raw) {
   return { isRequest: true, category };
 }
 
+// ── ORDER intent: route "order food from X" → focused order CTA ───────────────
+// Patterns recognized: "order food from X", "order from X", "place an order at X",
+// "i want to order [from X]", "get food from X", "i'd like to order [from X]",
+// "order at X", "food from X".
+const _ORDER_INTENT_RE = /\b(?:(?:i(?:'d| would| wanna| want to| 'd like to| would like to)?\s+(?:like\s+to\s+)?)?(?:place\s+an?\s+order|order(?:\s+(?:some\s+)?food)?|get\s+(?:some\s+)?food|grab\s+(?:some\s+)?food|food))\s+(?:from|at)\s+(.+?)$/i;
+
+function detectOrderIntent(raw) {
+  if (!raw) return { isOrder: false, name: null };
+  const m = raw.trim().match(_ORDER_INTENT_RE);
+  if (!m) {
+    // Bare "i want to order" / "i'd like to order" with no business name
+    if (/\b(?:i(?:'d| would)?\s+(?:like\s+to|want\s+to|wanna)\s+order)\b/i.test(raw)) {
+      return { isOrder: true, name: null };
+    }
+    return { isOrder: false, name: null };
+  }
+  let name = (m[1] || '').trim();
+  // Strip trailing "please" / "now" / punctuation / "in <zip>"
+  name = name.replace(/\s+(?:please|now|today|tonight)\.?\s*$/i, '')
+             .replace(/\s+in\s+\d{5}\s*$/i, '')
+             .replace(/[?.!]+$/, '')
+             .trim();
+  return { isOrder: true, name: name || null };
+}
+
 // GET /api/local-intel/search?q=<name>&zip=<zip>&cat=<cat>&limit=20
 // Direct Postgres business search — no MCP routing chain, no LLM, instant results.
 // Used by the search UI for reliable name/category/ZIP lookups.
@@ -2946,6 +2971,90 @@ router.get('/search', async (req, res) => {
 
   try {
     const db = require('./lib/db');
+
+    // ── ORDER intent detection ─────────────────────────────────────────────────
+    // Checked BEFORE service-request and name search so "order food from McFlamingo"
+    // returns a focused order-start CTA (not a business list).
+    if (raw) {
+      const orderDetect = detectOrderIntent(raw);
+      if (orderDetect.isOrder) {
+        const reqIp = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || 'unknown').toString().split(',')[0].trim();
+
+        let bizRows = [];
+        if (orderDetect.name) {
+          const nameLike = `%${orderDetect.name}%`;
+          if (zip) {
+            bizRows = await db.query(
+              `SELECT business_id, name, phone, menu_url, website, description,
+                      address, zip, wallet, hours_json, category_intel
+                 FROM businesses
+                WHERE status != 'inactive'
+                  AND name ILIKE $1
+                  AND zip = $2
+                ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+                LIMIT 1`,
+              [nameLike, zip]
+            );
+          }
+          if (!bizRows.length) {
+            // Fall back to all NE FL ZIPs
+            bizRows = await db.query(
+              `SELECT business_id, name, phone, menu_url, website, description,
+                      address, zip, wallet, hours_json, category_intel
+                 FROM businesses
+                WHERE status != 'inactive'
+                  AND name ILIKE $1
+                  AND zip BETWEEN '32004' AND '34997'
+                ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+                LIMIT 1`,
+              [nameLike]
+            );
+          }
+        }
+
+        if (!bizRows.length) {
+          return res.json({
+            intent: 'order_not_found',
+            message: `I couldn't find a business called '${orderDetect.name || raw}' in this area.`,
+            latency_ms: Date.now() - t0,
+          });
+        }
+
+        const b = bizRows[0];
+
+        // Log the routing event — never block the response on ledger errors.
+        try {
+          await db.query(
+            `INSERT INTO usage_ledger (id, caller_id, zip, query_type, tool_name, cost_path_usd, called_at)
+             VALUES (gen_random_uuid(), $1, $2, 'order_routing', $3, 0, NOW())`,
+            [reqIp, b.zip || null, b.name]
+          );
+        } catch (ledgerErr) {
+          console.error('[search order] usage_ledger insert error:', ledgerErr.message);
+        }
+
+        const ctaUrl = b.menu_url || b.website || null;
+
+        return res.json({
+          intent: 'order',
+          business: {
+            name:        b.name,
+            phone:       b.phone        || '',
+            address:     b.address      || '',
+            zip:         b.zip          || '',
+            description: b.description  || '',
+            menu_url:    b.menu_url     || '',
+            website:     b.website      || '',
+            wallet:      b.wallet       || '',
+          },
+          message:        `Starting your order at ${b.name} — tap below to go to their menu.`,
+          cta_label:      'Start Order →',
+          cta_url:        ctaUrl,
+          fallback_phone: b.phone || '',
+          latency_ms:     Date.now() - t0,
+        });
+      }
+    }
 
     // ── Service request detection: route natural-language requests to category search
     // Must happen before name matching so "I need my street light fixed" doesn't
