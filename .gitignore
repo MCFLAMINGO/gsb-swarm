@@ -24,3 +24,5 @@ data/.seeded
 data/irs_soi_2022.csv
 data/localIntel.json
 data/spendingZones.json
+data/*.json
+!data/spendingZones.json
