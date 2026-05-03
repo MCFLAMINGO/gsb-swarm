@@ -3047,14 +3047,14 @@ router.get('/search', async (req, res) => {
       // Prefer Florida results when no ZIP given
       const zipWhere = zip ? ` AND zip = '${zip.replace(/'/g,"\'")}' ` : ` AND zip BETWEEN '32004' AND '34997' `;
       rows = await db.query(
-        BASE_SELECT + zipWhere + ` AND name ILIKE $1 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+        BASE_SELECT + zipWhere + ` AND name ILIKE $1 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
         [`%${q}%`, limit * 2]
       );
 
       // Widen to all FL if ZIP-scoped returned nothing
       if (!rows.length && zip) {
         rows = await db.query(
-          BASE_SELECT + ` AND zip BETWEEN '32004' AND '34997' AND name ILIKE $1 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+          BASE_SELECT + ` AND zip BETWEEN '32004' AND '34997' AND name ILIKE $1 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
           [`%${q}%`, limit * 2]
         );
       }
@@ -3067,7 +3067,7 @@ router.get('/search', async (req, res) => {
           .sort((a,b) => b.length - a.length); // longest first = most specific
         for (const tok of tokens) {
           const r = await db.query(
-            BASE_SELECT + ` AND zip BETWEEN '32004' AND '34997' AND name ILIKE $1 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+            BASE_SELECT + ` AND zip BETWEEN '32004' AND '34997' AND name ILIKE $1 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
             [`%${tok}%`, limit * 2]
           );
           if (r.length) { rows = r; break; }
@@ -3108,8 +3108,8 @@ router.get('/search', async (req, res) => {
         if (nlTags && nlTags.length) {
           const tagRows = await db.query(
             BASE_SELECT +
-            (zip ? ` AND category = ANY($1) AND zip = $2 AND tags && $3 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $4`
-                 : ` AND category = ANY($1) AND tags && $2 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`),
+            (zip ? ` AND category = ANY($1) AND zip = $2 AND tags && $3 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $4`
+                 : ` AND category = ANY($1) AND tags && $2 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`),
             zip ? [expanded, zip, nlTags, limit] : [expanded, nlTags, limit]
           );
           if (tagRows.length) rows = tagRows;
@@ -3117,10 +3117,10 @@ router.get('/search', async (req, res) => {
         // Fall through to unfiltered cat search if tag-filtered returned nothing
         if (!rows.length) {
           if (zip) {
-            catWhere  = ` AND category = ANY($1) AND zip = $2 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`;
+            catWhere  = ` AND category = ANY($1) AND zip = $2 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`;
             catParams = [expanded, zip, limit];
           } else {
-            catWhere  = ` AND category = ANY($1) ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`;
+            catWhere  = ` AND category = ANY($1) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`;
             catParams = [expanded, limit];
           }
           rows = await db.query(BASE_SELECT + catWhere, catParams);
@@ -3133,7 +3133,7 @@ router.get('/search', async (req, res) => {
         const lim = zip ? '$3' : '$2';
         rows = await db.query(
           BASE_SELECT + ` AND (category ILIKE $1 OR category_group ILIKE $1 OR name ILIKE $1)${zipClause}
-          ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT ${lim}`,
+          ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT ${lim}`,
           params
         );
       }
@@ -3142,7 +3142,7 @@ router.get('/search', async (req, res) => {
     // 3. ZIP-only browse
     if (!rows.length && zip) {
       rows = await db.query(
-        BASE_SELECT + ` AND zip = $1 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+        BASE_SELECT + ` AND zip = $1 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
         [zip, limit]
       );
     }
@@ -3166,17 +3166,7 @@ router.get('/search', async (req, res) => {
       } catch(_) {}
     }
 
-    // ── Tier 3: Wallet routing priority ─────────────────────────────────
-    // Businesses with a wallet (in the paid routing tier) float to the top.
-    // Within each tier (wallet vs no-wallet), existing sort order is preserved.
-    if (rows.length > 1) {
-      rows.sort((a, b) => {
-        const aW = a.wallet ? 1 : 0;
-        const bW = b.wallet ? 1 : 0;
-        return bW - aW; // wallet=1 sorts before wallet=0
-      });
-    }
-
+    // ── Tier 3: Wallet priority — handled in SQL ORDER BY (wallet IS NOT NULL) DESC. Postgres is king.
     // ── Tier 4: Open-now filter ────────────────────────────────────
     // If the query contains open-now/late/early intent AND we have hours_json data,
     // filter to only open businesses. Fall back to full list if filter leaves < 3.
