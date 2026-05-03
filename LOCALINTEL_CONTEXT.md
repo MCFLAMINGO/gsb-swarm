@@ -812,3 +812,5 @@ Three fixes to the agentic order flow in `localIntelAgent.js` (commit `7aab661`)
 3. **`jurisdictionCode: 'US-FL'` added to POST `/api/orders` body** — required for all McFlamingo orders. Body shape is now `{ items: [{sku, qty}], jurisdictionCode: 'US-FL' }`.
 
 Frontend (localintel-landing) was upgraded to embedded iframe with PostMessage origin verification (`event.origin !== 'https://surge.basalthq.com'`), handling `gateway-card-success`, `gateway-card-cancel`, and `gateway-preferred-height`. Falls back to new tab if iframe load fails (CSP).
+
+2026-05-03 patch 2: removed x-merchant-wallet from GET /api/inventory call in menu endpoint
