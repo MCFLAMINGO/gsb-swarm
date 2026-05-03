@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-03 (session 8 — full Postgres migration: every worker + dashboard route reads/writes Postgres, no `data/*.json` filesystem state. Railway-redeploy safe.)
+> Last updated: 2026-05-03 (session 9 — enrichment layer + tasks scaffolding for 7 ZIPs, 5,151 businesses)
 
 ---
 
@@ -124,6 +124,13 @@
 ### Core Business Intelligence
 ```
 businesses           — 122k+ FL businesses. pos_config is JSONB. pos_type via pos_config->>'pos_type'
+                        Enrichment cols (session 9): category_intel JSONB, enrichment_source TEXT
+                        DEFAULT 'system', enrichment_updated_at TIMESTAMPTZ
+business_tasks       — Per-business setup tasks seeded by taskSeedWorker.
+                        Cols: id UUID PK, business_id UUID FK→businesses, title TEXT,
+                        status TEXT ('pending'|'done'|'skipped'), task_type TEXT
+                        ('setup'|'data'|'integration'), template_key TEXT, metadata JSONB,
+                        created_at, updated_at. Indexed on business_id and status.
 zip_intelligence     — 1,109 rows. Now includes irs_agi_median, irs_returns,
                         irs_wage_share, irs_updated_at (added by irsSoiWorker)
 zip_briefs           — 1,193 rows. Single source for /brief/:zip
@@ -159,6 +166,8 @@ ephemeral; nothing persists across redeploys except Postgres**:
 | acpBroadcaster | `SELECT DISTINCT zip FROM acp_broadcast_log WHERE broadcast_at > NOW() - INTERVAL '30 days'` | `acp_broadcast_log` |
 | localIntelAcpCycle | `SELECT zip FROM zip_briefs WHERE generated_at > NOW() - INTERVAL '48 hours'` | `zip_briefs` |
 | routerLearningWorker | `SELECT MAX(run_at) FROM router_learning_log` (skip if <30 min) | `router_learning_log` |
+| enrichmentFillWorker | `SELECT business_id FROM businesses WHERE zip = ANY(TARGET_ZIPS) AND category_intel IS NOT NULL AND enrichment_source IS NOT NULL` | `businesses` (services_text, description, category_intel, enrichment_source, enrichment_updated_at) |
+| taskSeedWorker | `SELECT DISTINCT business_id FROM business_tasks` (run-once) | `business_tasks` |
 
 `embeddingWorker` is **disabled** in `dashboard-server.js` — needs pgvector
 to be revived.
@@ -232,6 +241,10 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 | GET | `/api/local-intel/search?q=&zip=&cat=&limit=` | Business search + service request detection + RFQ broadcast |
 | GET/POST | `/api/local-intel/ask?q=&zip=` | MCP intelligence query |
 | GET | `/api/sector-gap/feed` | ZIP market briefs |
+| GET | `/api/local-intel/profile/:business_id` | Full business profile + tasks array + task_summary |
+| GET | `/api/local-intel/tasks/:business_id` | Tasks array for business (404 if biz not found) |
+| POST | `/api/local-intel/tasks/:business_id` | Insert new task or update by id (body: title, status, task_type, template_key, metadata) |
+| PATCH | `/api/local-intel/tasks/:business_id/:task_id` | Update task status (body: {status}) |
 
 ### Voice
 | Method | Path | Purpose |
