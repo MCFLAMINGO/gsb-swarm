@@ -15,8 +15,6 @@
  * Output per ZIP: zip_enrichment (Postgres cache) + businesses (promoted)
  */
 
-const fs    = require('fs');
-const path  = require('path');
 const https = require('https');
 
 const { getZipsByPriority, getZipBbox } = require('./flZipRegistry');
@@ -47,7 +45,6 @@ function resolveCategory(poi) {
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const DATA_DIR      = path.join(__dirname, '..', 'data', 'osm');
 const OVERPASS_URL  = 'https://overpass-api.de/api/interpreter';
 const RATE_MS       = 2200;          // 1 req / 2.2 s — stay under public limit
 const BBOX_DEG      = 0.07;          // ~7.7 km half-width; tighter = fewer noise POIs
@@ -58,27 +55,15 @@ const MAX_POI_TAGS  = ['amenity', 'shop', 'office', 'tourism', 'leisure',
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function ensureDir(p) {
-  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
-}
-
-function loadZipFile(zip) {
-  const fp = path.join(DATA_DIR, `${zip}.json`);
-  try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch { return {}; }
-}
-
-function saveZipFile(zip, data) {
-  ensureDir(DATA_DIR);
-  fs.writeFileSync(path.join(DATA_DIR, `${zip}.json`), JSON.stringify(data));
-  // Mirror OSM POIs to Postgres zip_enrichment (non-blocking)
-  if (process.env.LOCAL_INTEL_DB_URL && Array.isArray(data.osm_pois)) {
-    const { upsertOsmEnrichment } = require('../lib/pgStore');
-    upsertOsmEnrichment(zip, {
-      osm_pois:       data.osm_pois,
-      osm_updated_at: data.osm_updated_at,
-      poi_count:      data.osm_pois.length,
-    }).catch(e => console.warn('[overpass] Postgres zip_enrichment write failed:', e.message));
-  }
+// Mirror raw OSM POIs to Postgres zip_enrichment (non-blocking)
+function saveOsmEnrichment(zip, pois) {
+  if (!process.env.LOCAL_INTEL_DB_URL || !Array.isArray(pois)) return;
+  const { upsertOsmEnrichment } = require('../lib/pgStore');
+  return upsertOsmEnrichment(zip, {
+    osm_pois:       pois,
+    osm_updated_at: new Date().toISOString(),
+    poi_count:      pois.length,
+  }).catch(e => console.warn('[overpass] Postgres zip_enrichment write failed:', e.message));
 }
 
 /**
@@ -125,7 +110,26 @@ async function promoteOsmToBusinesses(zip, pois) {
   console.log(`[overpass] ${zip}: promoted ${written}/${named.length} POIs to businesses (${failed} failed)`);
 }
 
-// Check Postgres first for freshness before re-fetching from Overpass
+// Check Postgres for freshness before re-fetching from Overpass.
+// Returns the set of ZIPs already covered by recent overpass data so the
+// hot loop can skip them up-front (the contract: ASK Postgres first).
+async function getFreshZipSetFromBusinesses() {
+  if (!process.env.LOCAL_INTEL_DB_URL) return new Set();
+  try {
+    // Any ZIP that already has an overpass-sourced active business is "covered".
+    const rows = await db.query(
+      `SELECT DISTINCT zip FROM businesses
+        WHERE 'osm' = ANY(sources)
+          AND status != 'inactive'
+          AND zip IS NOT NULL`
+    );
+    return new Set(rows.map(r => r.zip));
+  } catch (e) {
+    console.warn('[overpass] fresh-zip lookup failed:', e.message);
+    return new Set();
+  }
+}
+
 async function alreadyFreshPg(zip) {
   if (!process.env.LOCAL_INTEL_DB_URL) return false;
   try {
@@ -135,13 +139,6 @@ async function alreadyFreshPg(zip) {
     const age = Date.now() - new Date(row.osm_updated_at || 0).getTime();
     return age < 20 * 60 * 60 * 1000;
   } catch { return false; }
-}
-
-function alreadyFresh(zip) {
-  const d = loadZipFile(zip);
-  if (!Array.isArray(d.osm_pois) || d.osm_pois.length === 0) return false;
-  const age = Date.now() - new Date(d.osm_updated_at || 0).getTime();
-  return age < 20 * 60 * 60 * 1000; // re-pull if > 20 h old
 }
 
 // ── Overpass query builder ────────────────────────────────────────────────────
@@ -214,8 +211,10 @@ function normalisePois(elements) {
 }
 
 // ── Process one ZIP ───────────────────────────────────────────────────────────
-async function processZip(zip) {
-  if (await alreadyFreshPg(zip) || alreadyFresh(zip)) {
+const FULL_REFRESH = process.env.FULL_REFRESH === 'true';
+
+async function processZip(zip, freshZipSet) {
+  if (!FULL_REFRESH && (freshZipSet?.has(zip) || await alreadyFreshPg(zip))) {
     return { zip, skipped: true };
   }
 
@@ -235,14 +234,9 @@ async function processZip(zip) {
   }
 
   const pois = normalisePois(result.elements || []);
-  const existing = loadZipFile(zip);
-  saveZipFile(zip, {
-    ...existing,
-    zip,
-    osm_pois      : pois,
-    osm_poi_count : pois.length,
-    osm_updated_at: new Date().toISOString(),
-  });
+
+  // Cache raw POIs to Postgres zip_enrichment (replaces data/osm/{zip}.json).
+  await saveOsmEnrichment(zip, pois);
 
   // Promote POIs to businesses table — this is the key Postgres-first change
   await promoteOsmToBusinesses(zip, pois);
@@ -254,11 +248,16 @@ async function processZip(zip) {
 // ── Main loop ─────────────────────────────────────────────────────────────────
 async function runPass() {
   const zips = getZipsByPriority();  // sorted by population desc
-  console.log(`[overpass] Starting pass — ${zips.length} FL ZIPs`);
+  // Step 1 of the contract: ASK Postgres what's already done before we start.
+  const freshZipSet = FULL_REFRESH ? new Set() : await getFreshZipSetFromBusinesses();
+  console.log(
+    `[overpass] Starting pass — ${zips.length} FL ZIPs ` +
+    `(skip set: ${freshZipSet.size}, FULL_REFRESH=${FULL_REFRESH})`
+  );
   let done = 0, skipped = 0, errors = 0;
 
   for (const entry of zips) {
-    const result = await processZip(entry.zip);
+    const result = await processZip(entry.zip, freshZipSet);
     if (result.skipped) { skipped++; }
     else if (result.error) { errors++; }
     else { done++; }

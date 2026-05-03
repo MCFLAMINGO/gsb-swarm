@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-03 (session 7 — Tiers 2-4 COMPLETE + Tier 3 wallet sort moved to SQL ORDER BY — Postgres is king)
+> Last updated: 2026-05-03 (session 8 — full Postgres migration: every worker + dashboard route reads/writes Postgres, no `data/*.json` filesystem state. Railway-redeploy safe.)
 
 ---
 

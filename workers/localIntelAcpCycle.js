@@ -22,6 +22,7 @@ const { getZipsByPriority }               = require('./flZipRegistry');
 const { handleVerticalQuery }             = require('./verticalAgentWorker');
 const { handleSignal, handleBedrock }     = require('../localIntelTidalTools');
 const pgStore                              = require('../lib/pgStore');
+const db                                   = require('../lib/db');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const BASE_DIR       = path.join(__dirname, '..');
@@ -29,6 +30,7 @@ const ZONES_PATH     = path.join(BASE_DIR, 'data', 'spendingZones.json');  // st
 const CYCLE_INTERVAL = 30 * 60 * 1000;  // 30 min
 const ZIPS_PER_CYCLE = 5;
 const BRIEF_TTL_H    = 48;
+const FULL_REFRESH   = process.env.FULL_REFRESH === 'true';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function sleep(ms)    { return new Promise(r => setTimeout(r, ms)); }
@@ -57,7 +59,27 @@ async function briefAge(zip) {
 }
 
 async function saveBrief(zip, data) {
-  await pgStore.upsertZipBrief(zip, { zip, generated_at: new Date().toISOString(), ...data });
+  // Direct upsert into zip_briefs — no flat-file fallback.
+  const brief = { zip, generated_at: new Date().toISOString(), ...data };
+  await db.query(
+    `INSERT INTO zip_briefs (zip, brief_json, generated_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (zip) DO UPDATE SET brief_json = EXCLUDED.brief_json, generated_at = NOW()`,
+    [zip, JSON.stringify(brief)]
+  );
+}
+
+async function getFreshZipSet() {
+  if (FULL_REFRESH) return new Set();
+  try {
+    const rows = await db.query(
+      `SELECT zip FROM zip_briefs WHERE generated_at > NOW() - INTERVAL '48 hours'`
+    );
+    return new Set(rows.map(r => r.zip));
+  } catch (e) {
+    console.warn('[acp-cycle] fresh-zip lookup failed:', e.message);
+    return new Set();
+  }
 }
 
 // ── Agent 1: GSB CEO — investor signal ───────────────────────────────────────
@@ -168,13 +190,14 @@ async function runZipCycle(zip) {
 
 // ── Pick ZIPs needing briefs ──────────────────────────────────────────────────
 async function pickNextZips(n) {
-  const ttl   = BRIEF_TTL_H * 60 * 60 * 1000;
+  // Step 1 of the contract: ASK Postgres what's already done (fresh briefs).
+  const freshSet = await getFreshZipSet();
   const candidates = getZipsByPriority();
   const stale = [];
   for (const z of candidates) {
     if (stale.length >= n) break;
-    const age = await briefAge(z.zip);
-    if (age > ttl) stale.push(z.zip);
+    if (freshSet.has(z.zip)) continue;
+    stale.push(z.zip);
   }
   return stale;
 }

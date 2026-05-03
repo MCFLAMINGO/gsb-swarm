@@ -22,18 +22,21 @@
  */
 
 const fs    = require('fs');
+const os    = require('os');
 const path  = require('path');
 const https = require('https');
 
+const db = require('../lib/db');
+
 // ── Config ────────────────────────────────────────────────────────────────────
-const DATA_DIR          = path.join(__dirname, '..', 'data');
-const ZIPS_DIR          = path.join(DATA_DIR, 'osm');
-const SPENDING_ZONES_FP = path.join(DATA_DIR, 'spendingZones.json');
-const CSV_CACHE_FP      = path.join(DATA_DIR, 'irs_soi_2022.csv');
+// CSV is source data — temp file is fine. State/results live in Postgres.
+const TMP_DIR           = os.tmpdir();
+const CSV_CACHE_FP      = path.join(TMP_DIR, 'irs_soi_2022.csv');
 const CSV_URL           = 'https://www.irs.gov/pub/irs-soi/22zpallagi.csv';
 const FL_STATEFIPS      = '12';
 const LOOP_SLEEP_H      = 24;
 const CSV_MAX_AGE_H     = 72;   // re-download every 3 days
+const FULL_REFRESH      = process.env.FULL_REFRESH === 'true';
 
 // agi_stub midpoints ($000s × 1000 = actual $)
 const STUB_MIDPOINTS = { '1': 12500, '2': 37500, '3': 62500, '4': 87500, '5': 150000, '6': 350000 };
@@ -41,8 +44,40 @@ const STUB_MIDPOINTS = { '1': 12500, '2': 37500, '3': 62500, '4': 87500, '5': 15
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function ensureDir(p) {
-  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+async function ensureSchema() {
+  await db.query(`
+    ALTER TABLE zip_intelligence
+      ADD COLUMN IF NOT EXISTS irs_agi_median NUMERIC,
+      ADD COLUMN IF NOT EXISTS irs_returns INTEGER,
+      ADD COLUMN IF NOT EXISTS irs_wage_share NUMERIC,
+      ADD COLUMN IF NOT EXISTS irs_updated_at TIMESTAMPTZ
+  `);
+}
+
+async function getEnrichedZipSet() {
+  if (FULL_REFRESH) return new Set();
+  try {
+    const rows = await db.query(
+      `SELECT zip FROM zip_intelligence WHERE irs_agi_median IS NOT NULL`
+    );
+    return new Set(rows.map(r => String(r.zip).padStart(5, '0')));
+  } catch (e) {
+    console.warn('[irs-soi] enriched-zip lookup failed:', e.message);
+    return new Set();
+  }
+}
+
+async function upsertIrsRow(zip, m) {
+  await db.query(
+    `INSERT INTO zip_intelligence (zip, irs_agi_median, irs_returns, irs_wage_share, irs_updated_at)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (zip) DO UPDATE SET
+       irs_agi_median = EXCLUDED.irs_agi_median,
+       irs_returns    = EXCLUDED.irs_returns,
+       irs_wage_share = EXCLUDED.irs_wage_share,
+       irs_updated_at = NOW()`,
+    [zip, m.irs_agi_median, m.irs_returns, m.irs_wage_share_pct]
+  );
 }
 
 function csvFresh() {
@@ -155,39 +190,14 @@ function computeMetrics(stubs) {
   };
 }
 
-// ── Load / save helpers ───────────────────────────────────────────────────────
-function loadZipFile(zip) {
-  const fp = path.join(ZIPS_DIR, `${zip}.json`);
-  try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch { return {}; }
-}
-
-function saveZipFile(zip, data) {
-  ensureDir(ZIPS_DIR);
-  fs.writeFileSync(path.join(ZIPS_DIR, `${zip}.json`), JSON.stringify(data));
-  // Mirror IRS enrichment fields to Postgres (non-blocking)
-  if (process.env.LOCAL_INTEL_DB_URL && data.irs_agi_median !== undefined) {
-    const { upsertIrsEnrichment } = require('../lib/pgStore');
-    upsertIrsEnrichment(zip, {
-      irs_agi_median:  data.irs_agi_median,
-      irs_returns:     data.irs_returns,
-      irs_wage_share:  data.irs_wage_share,
-      irs_updated_at:  data.irs_updated_at,
-    }).catch(e => console.warn('[irsSoi] Postgres write failed:', e.message));
-  }
-}
-
-function loadSpendingZones() {
-  try { return JSON.parse(fs.readFileSync(SPENDING_ZONES_FP, 'utf8')); }
-  catch { return []; }
-}
-
-function saveSpendingZones(zones) {
-  fs.writeFileSync(SPENDING_ZONES_FP, JSON.stringify(zones, null, 2));
-}
-
 // ── Main enrichment pass ──────────────────────────────────────────────────────
 async function runPass() {
-  // 1. Ensure CSV is available
+  await ensureSchema();
+
+  // Step 1 of the contract: ASK Postgres what's already done.
+  const enrichedSet = await getEnrichedZipSet();
+
+  // 1. Ensure CSV is available (source data — temp file is fine)
   if (!csvFresh()) {
     try { await downloadCsv(); }
     catch (err) {
@@ -203,32 +213,20 @@ async function runPass() {
   try { byZip = parseFlorida(); }
   catch (err) { console.error('[irs-soi] Parse failed:', err.message); return; }
 
-  // 3. Enrich data/zips/{zip}.json for every FL ZIP we have data for
-  let enriched = 0;
+  // 3. Upsert each ZIP into zip_intelligence (skipping already-enriched unless FULL_REFRESH)
+  let enriched = 0, skipped = 0, errors = 0;
   for (const [zip, stubs] of byZip.entries()) {
-    const metrics  = computeMetrics(stubs);
-    const existing = loadZipFile(zip);
-    saveZipFile(zip, { ...existing, zip, ...metrics });
-    enriched++;
+    if (enrichedSet.has(zip)) { skipped++; continue; }
+    try {
+      const metrics = computeMetrics(stubs);
+      await upsertIrsRow(zip, metrics);
+      enriched++;
+    } catch (e) {
+      errors++;
+      if (errors <= 3) console.warn(`[irs-soi] upsert ${zip} failed:`, e.message);
+    }
   }
-  console.log(`[irs-soi] Enriched ${enriched} ZIP files`);
-
-  // 4. Also patch spendingZones.json entries that have matching ZIPs
-  const zones   = loadSpendingZones();
-  let   patched = 0;
-  for (const zone of zones) {
-    const zip = zone.zip || zone.zipCode;
-    if (!zip) continue;
-    const stubs = byZip.get(String(zip).padStart(5, '0'));
-    if (!stubs) continue;
-    const metrics = computeMetrics(stubs);
-    Object.assign(zone, metrics);
-    patched++;
-  }
-  if (patched > 0) {
-    saveSpendingZones(zones);
-    console.log(`[irs-soi] Patched ${patched} spendingZones entries`);
-  }
+  console.log(`[irs-soi] Enriched ${enriched} ZIPs; skipped:${skipped} errors:${errors}`);
 }
 
 // ── Daemon loop ───────────────────────────────────────────────────────────────

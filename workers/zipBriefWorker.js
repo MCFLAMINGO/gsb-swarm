@@ -5,35 +5,27 @@
  * Builds deterministic market intelligence briefs for every enriched ZIP.
  * Zero API calls. Zero cost. Pure math from the data we already have.
  *
- * Output: data/briefs/{zip}.json — one file per ZIP, structured summary:
- *   - Market narrative (plain English, LLM-ready)
- *   - Business count by group + top categories
- *   - Market gaps (categories present at state level, absent locally)
- *   - Data quality grade
- *   - Notable / anchor businesses
- *   - Signals (density scores, saturation, opportunity flags)
+ * Output: zip_briefs table in Postgres.
  *
- * When an LLM calls local_intel_ask("tell me about 32082") it reads this brief
- * instead of scanning 557 raw records. Answer quality goes from a list to a story.
+ * Postgres-first contract:
+ *   1. START → query Postgres for ZIPs with fresh briefs (skip those)
+ *   2. WORK → only build briefs for ZIPs without a fresh row
+ *   3. END   → upsert brief into zip_briefs
+ *   4. REDEPLOY SAFE — step 1 naturally skips everything still fresh
+ *   5. FULL_REFRESH=true ignores skip logic
  *
- * Cycle: runs once at startup, then every 4 hours (after enrichment runs).
- * Rebuilt when the zip file is newer than the brief.
+ * Cycle: runs once at startup, then every 4 hours.
  */
 
-const fs   = require('fs');
-const path = require('path');
-
-const BASE_DIR    = path.join(__dirname, '..');
-const ZIPS_DIR    = path.join(BASE_DIR, 'data', 'zips');
-const BRIEFS_DIR  = path.join(BASE_DIR, 'data', 'briefs');
-const OSM_DIR     = path.join(BASE_DIR, 'data', 'osm');
-
-const { validateAll, getFailedZips } = require('./briefValidator');
+const db = require('../lib/db');
+const { validateAll } = require('./briefValidator');
 
 const CYCLE_MS   = 4 * 60 * 60 * 1000; // 4 hours
 const STAGGER_MS = 3 * 60 * 1000;       // 3 min after startup
+const FRESH_INTERVAL = '7 days';
+const FULL_REFRESH = process.env.FULL_REFRESH === 'true';
 
-// ── Category → group mapping (mirrors localIntelMCP.js CAT_GROUPS) ────────────
+// ── Category → group mapping ────────────────────────────────────────────────
 const CAT_GROUPS = {
   food:     ['restaurant','fast_food','cafe','bar','pub','ice_cream','alcohol'],
   retail:   ['supermarket','convenience','clothes','hairdresser','beauty','chemist',
@@ -54,7 +46,6 @@ function getGroup(cat) {
   for (const [g, cats] of Object.entries(CAT_GROUPS)) {
     if (cats.includes(c)) return g;
   }
-  // Fuzzy fallback for generic YP categories
   if (/restaurant|dining|cafe|food|eatery|diner|pizza|sushi|bbq|seafood/i.test(c)) return 'food';
   if (/clinic|dental|doctor|physician|health|therapy|pharmacy|medical/i.test(c)) return 'health';
   if (/retail|store|shop|boutique|apparel|fashion|grocery/i.test(c)) return 'retail';
@@ -65,7 +56,6 @@ function getGroup(cat) {
   return 'other';
 }
 
-// ── ZIP label map ─────────────────────────────────────────────────────────────
 const ZIP_LABELS = {
   '32082': 'Ponte Vedra Beach', '32081': 'Nocatee', '32084': 'St. Augustine',
   '32086': 'St. Augustine South', '32092': 'World Golf Village', '32080': 'St. Augustine Beach',
@@ -77,8 +67,6 @@ const ZIP_LABELS = {
   '32246': 'Regency', '32258': 'Bartram Park', '32224': 'Southside',
 };
 
-// ── Saturation thresholds (businesses per 10k residents, estimated) ────────────
-// Based on national averages for suburban Florida markets
 const SATURATION = {
   food:     { saturated: 40, healthy: 20, sparse: 8 },
   health:   { saturated: 30, healthy: 15, sparse: 5 },
@@ -88,7 +76,6 @@ const SATURATION = {
   legal:    { saturated: 25, healthy: 12, sparse: 4 },
 };
 
-// Estimated population per ZIP (rough — will be replaced by census layer when available)
 const POP_ESTIMATES = {
   '32082': 22000, '32081': 35000, '32084': 28000, '32086': 32000,
   '32092': 30000, '32080': 8000,  '32095': 12000, '32259': 45000,
@@ -113,27 +100,29 @@ function buildBrief(zip, businesses) {
     };
   }
 
-  // ── Group counts ──────────────────────────────────────────────────────────
   const byCat   = {};
   const byGroup = {};
-  const anchors = []; // high-confidence, claimed, or well-known businesses
+  const anchors = [];
 
   for (const b of businesses) {
     const cat = (b.category || 'other').toLowerCase();
     const grp = getGroup(cat);
     byCat[cat]   = (byCat[cat]   || 0) + 1;
     byGroup[grp] = (byGroup[grp] || 0) + 1;
-    if ((b.confidence || 0) >= 90 || b.claimed) anchors.push(b);
+    const conf = (b.confidence || b.confidence_score || 0);
+    if (conf >= 0.9 || conf >= 90 || b.claimed) anchors.push(b);
   }
 
-  // Top categories sorted by count
   const topCats = Object.entries(byCat)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 8)
     .map(([cat, count]) => ({ cat, count }));
 
-  // ── Quality metrics ───────────────────────────────────────────────────────
-  const avgConf     = Math.round(businesses.reduce((s, b) => s + (b.confidence || 0), 0) / total);
+  const confValues = businesses.map(b => {
+    const c = b.confidence ?? b.confidence_score ?? 0;
+    return c <= 1 ? Math.round(c * 100) : Math.round(c);
+  });
+  const avgConf     = Math.round(confValues.reduce((s, c) => s + c, 0) / total);
   const withPhone   = businesses.filter(b => b.phone).length;
   const withHours   = businesses.filter(b => b.hours).length;
   const withCoords  = businesses.filter(b => b.lat && b.lon).length;
@@ -145,7 +134,6 @@ function buildBrief(zip, businesses) {
                     : avgConf >= 70 && coveragePct >= 60 ? 'B'
                     : avgConf >= 60 ? 'C' : 'D';
 
-  // ── Saturation signals ────────────────────────────────────────────────────
   const per10k = (count) => Math.round((count / pop) * 10000);
   const signals = [];
   const gaps    = [];
@@ -162,9 +150,8 @@ function buildBrief(zip, businesses) {
     }
   }
 
-  // ── Notable businesses (anchors) ──────────────────────────────────────────
   const notables = anchors
-    .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
+    .sort((a, b) => (b.confidence || b.confidence_score || 0) - (a.confidence || a.confidence_score || 0))
     .slice(0, 8)
     .map(b => ({
       name:        b.name,
@@ -177,7 +164,6 @@ function buildBrief(zip, businesses) {
       tags:        Array.isArray(b.tags) ? b.tags : [],
     }));
 
-  // Build a human-readable spotlight from claimed/described businesses
   const spotlightLines = notables
     .filter(b => b.description || b.tags.length > 0)
     .slice(0, 3)
@@ -188,21 +174,12 @@ function buildBrief(zip, businesses) {
       return `${b.name}: ${parts.join(' ')}`;
     });
 
-  // ── Plain-English narrative ───────────────────────────────────────────────
-  const dominantGroup = Object.entries(byGroup).sort((a, b) => b[1] - a[1])[0];
-  const topCatName    = topCats[0]?.cat || 'mixed';
-  const satList       = signals.map(s => s.group).join(', ') || 'none identified';
-  const gapList       = gaps.filter(g => g.type === 'gap').map(g => g.group).join(', ') || 'none identified';
-
+  const gapList = gaps.filter(g => g.type === 'gap').map(g => g.group).join(', ') || 'none identified';
   const foodCount = byGroup.food || 0;
   const narrative = [
     `${label} (${zip}) has ${total.toLocaleString()} verified businesses.`,
-    foodCount > 0
-      ? `${foodCount} food & dining options.`
-      : '',
-    spotlightLines.length > 0
-      ? spotlightLines.join(' ')
-      : '',
+    foodCount > 0 ? `${foodCount} food & dining options.` : '',
+    spotlightLines.length > 0 ? spotlightLines.join(' ') : '',
     gaps.filter(g => g.type === 'gap').length > 0
       ? `Local gaps: ${gapList} — undersupplied relative to ${pop.toLocaleString()} residents.`
       : '',
@@ -234,89 +211,62 @@ function buildBrief(zip, businesses) {
   };
 }
 
-// ── File helpers ──────────────────────────────────────────────────────────────
-function briefPath(zip) {
-  return path.join(BRIEFS_DIR, `${zip}.json`);
-}
-
-async function needsRebuild(zip) {
-  // Check Postgres first: if no brief row exists, always rebuild
-  if (process.env.LOCAL_INTEL_DB_URL) {
-    try {
-      const { getZipBrief } = require('../lib/pgStore');
-      const existing = await getZipBrief(zip);
-      // If no brief in Postgres, rebuild
-      if (!existing) return true;
-      // If brief exists but is older than 4 hours, rebuild
-      const age = Date.now() - new Date(existing._stored_at || 0).getTime();
-      return age > 4 * 60 * 60 * 1000;
-    } catch (_) {}
-  }
-  // Flat-file fallback (local dev without DB)
-  const zipFile   = path.join(ZIPS_DIR, `${zip}.json`);
-  const briefFile = briefPath(zip);
-  if (!fs.existsSync(briefFile)) return true;
+// ── Postgres I/O ──────────────────────────────────────────────────────────────
+async function getFreshZipSet() {
+  if (FULL_REFRESH) return new Set();
   try {
-    const zipMtime   = fs.statSync(zipFile).mtimeMs;
-    const briefMtime = fs.statSync(briefFile).mtimeMs;
-    return zipMtime > briefMtime;
-  } catch { return true; }
+    const rows = await db.query(
+      `SELECT zip FROM zip_briefs WHERE generated_at > NOW() - INTERVAL '${FRESH_INTERVAL}'`
+    );
+    return new Set(rows.map(r => r.zip));
+  } catch (e) {
+    console.warn('[zip-brief] fresh-zip lookup failed:', e.message);
+    return new Set();
+  }
 }
 
-// ── Run one pass — build/rebuild all stale briefs ─────────────────────────────
-async function runBriefPass() {
-  fs.mkdirSync(BRIEFS_DIR, { recursive: true });
+async function getDistinctZips() {
+  const rows = await db.query(
+    `SELECT DISTINCT zip FROM businesses WHERE status != 'inactive' AND zip IS NOT NULL ORDER BY zip`
+  );
+  return rows.map(r => r.zip);
+}
 
-  // ZIP discovery: Postgres first, flat file fallback
-  let allZips = [];
-  let usePostgres = false;
-  if (process.env.LOCAL_INTEL_DB_URL) {
-    try {
-      const { getDistinctZips } = require('../lib/pgStore');
-      allZips = await getDistinctZips();
-      if (allZips.length > 0) {
-        usePostgres = true;
-        console.log(`[zip-brief] ZIP discovery: ${allZips.length} ZIPs from Postgres`);
-      }
-    } catch (e) {
-      console.warn('[zip-brief] Postgres ZIP discovery failed, falling back:', e.message);
-    }
-  }
-  if (!usePostgres) {
-    if (!fs.existsSync(ZIPS_DIR)) {
-      console.log('[zip-brief] data/zips/ not found — skipping');
-      return;
-    }
-    allZips = fs.readdirSync(ZIPS_DIR).filter(f => f.endsWith('.json')).map(f => f.replace('.json', ''));
-  }
+async function getBusinessesForZip(zip) {
+  return await db.query(
+    `SELECT * FROM businesses WHERE zip = $1 AND status != 'inactive'`, [zip]
+  );
+}
+
+async function saveBrief(zip, brief) {
+  await db.query(
+    `INSERT INTO zip_briefs (zip, brief_json, generated_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (zip) DO UPDATE SET brief_json = EXCLUDED.brief_json, generated_at = NOW()`,
+    [zip, JSON.stringify(brief)]
+  );
+}
+
+// ── Run one pass ──────────────────────────────────────────────────────────────
+async function runBriefPass() {
+  const allZips = await getDistinctZips();
+  const freshSet = await getFreshZipSet();
+  console.log(
+    `[zip-brief] ${allZips.length} ZIPs in businesses; ${freshSet.size} have fresh briefs ` +
+    `(FULL_REFRESH=${FULL_REFRESH})`
+  );
+
   let built = 0, skipped = 0, errors = 0;
 
-  console.log(`[zip-brief] Checking ${allZips.length} ZIPs for stale briefs`);
-
   for (const zip of allZips) {
-    if (!(await needsRebuild(zip))) { skipped++; continue; }
+    if (freshSet.has(zip)) { skipped++; continue; }
 
     try {
-      let businesses;
-      if (usePostgres) {
-        const { getBusinessesByZip } = require('../lib/pgStore');
-        businesses = await getBusinessesByZip(zip);
-      } else {
-        businesses = JSON.parse(fs.readFileSync(path.join(ZIPS_DIR, `${zip}.json`), 'utf8'));
-      }
+      const businesses = await getBusinessesForZip(zip);
       if (!Array.isArray(businesses)) { errors++; continue; }
 
       const brief = buildBrief(zip, businesses);
-      fs.writeFileSync(briefPath(zip), JSON.stringify(brief, null, 2));
-      // Mirror to Postgres so briefValidator + any agent can read without flat files
-      if (process.env.LOCAL_INTEL_DB_URL) {
-        try {
-          const { upsertZipBrief } = require('../lib/pgStore');
-          await upsertZipBrief(zip, brief);
-        } catch (pgErr) {
-          console.warn(`[zip-brief] Postgres brief write failed for ${zip}:`, pgErr.message);
-        }
-      }
+      await saveBrief(zip, brief);
       built++;
 
       if (built % 20 === 0) {
@@ -327,7 +277,6 @@ async function runBriefPass() {
       errors++;
     }
 
-    // Small yield to avoid blocking the event loop
     if (built % 10 === 0) await new Promise(r => setImmediate(r));
   }
 
@@ -337,36 +286,34 @@ async function runBriefPass() {
 
 // ── Daemon ────────────────────────────────────────────────────────────────────
 (async function main() {
-  console.log('[zip-brief] ZIP brief worker started — builds deterministic market summaries');
+  console.log('[zip-brief] ZIP brief worker started — Postgres-only deterministic builds');
   await new Promise(r => setTimeout(r, STAGGER_MS));
 
   while (true) {
     try {
-      // Build/rebuild all stale briefs
       const passResult = await runBriefPass();
 
-      // Validate every built brief — flag failures before next cycle
       if (passResult && passResult.built > 0) {
         console.log('[zip-brief] Running validation pass on all briefs');
-        const report = await validateAll();
-        if (report) {
-          const failedZips = report.failed_zips || [];
-          if (failedZips.length > 0) {
-            console.warn(`[zip-brief] ${failedZips.length} briefs failed validation: ${failedZips.join(', ')}`)
-            console.warn('[zip-brief] These ZIPs will be force-rebuilt next cycle');
-            // Touch the zip files to force rebuild on next pass
-            failedZips.forEach(zip => {
-              try {
-                const zipFile = path.join(ZIPS_DIR, `${zip}.json`);
-                if (fs.existsSync(zipFile)) {
-                  const now = new Date();
-                  fs.utimesSync(zipFile, now, now);
-                }
-              } catch (_) {}
-            });
-          } else {
-            console.log(`[zip-brief] All ${report.total_checked} briefs passed validation ✓`);
+        try {
+          const report = await validateAll();
+          if (report) {
+            const failedZips = report.failed_zips || [];
+            if (failedZips.length > 0) {
+              console.warn(`[zip-brief] ${failedZips.length} briefs failed validation: ${failedZips.join(', ')}`);
+              console.warn('[zip-brief] These ZIPs will be force-rebuilt next cycle');
+              // Force rebuild by deleting failed brief rows
+              for (const zip of failedZips) {
+                try {
+                  await db.query(`DELETE FROM zip_briefs WHERE zip = $1`, [zip]);
+                } catch (_) {}
+              }
+            } else {
+              console.log(`[zip-brief] All ${report.total_checked} briefs passed validation ✓`);
+            }
           }
+        } catch (e) {
+          console.warn('[zip-brief] Validation skipped:', e.message);
         }
       }
     } catch (err) {

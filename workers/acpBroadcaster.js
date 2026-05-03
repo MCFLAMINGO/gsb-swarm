@@ -5,25 +5,22 @@
  * Actively announces LocalIntel data availability to agent registries.
  * Runs every 4 hours. Non-blocking — if a registry is down, logs and moves on.
  *
- * Broadcasts to:
- *   1. Smithery MCP registry (POST submission ping)
- *   2. PulseMCP directory ping
- *   3. Fetch.ai Agentverse (REST announce if endpoint available)
- *   4. Internal broadcast log for dashboard visibility
+ * Postgres-only state. The Railway disk is wiped on every redeploy, so:
+ *   - Broadcast log lives in the `acp_broadcast_log` table (auto-created)
+ *   - ZIP coverage is read from the `businesses` table (DISTINCT zip)
+ *   - START → query Postgres for ZIPs broadcast in the last 30 days, skip those
+ *   - END   → INSERT one row per (zip, registry) broadcast
+ *   - FULL_REFRESH=true ignores skip logic
  *
- * Also posts "new ZIP complete" announcements when zipCoverage.json changes.
  * Port: 3008
  */
 
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
+const db      = require('../lib/db');
 
 const PORT = 3008;
-const DATA_DIR = path.join(__dirname, '../data');
-const COVERAGE_FILE = path.join(DATA_DIR, 'zipCoverage.json');
-const BROADCAST_LOG_FILE = path.join(DATA_DIR, 'broadcastLog.json');
 const BROADCAST_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
+const FULL_REFRESH = process.env.FULL_REFRESH === 'true';
 
 const SERVICE_URL = 'https://gsb-swarm-production.up.railway.app';
 const MCP_URL = `${SERVICE_URL}/api/local-intel/mcp`;
@@ -40,100 +37,84 @@ const ANNOUNCEMENT_PAYLOAD = {
   contact: 'localintel@mcflamingo.com',
 };
 
-// ── Broadcast log helpers ─────────────────────────────────────────────────────
-
-function loadBroadcastLog() {
-  try {
-    if (fs.existsSync(BROADCAST_LOG_FILE)) {
-      return JSON.parse(fs.readFileSync(BROADCAST_LOG_FILE, 'utf8'));
-    }
-  } catch (e) { /* ignore */ }
-  return [];
+// ── Schema ────────────────────────────────────────────────────────────────────
+async function ensureSchema() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS acp_broadcast_log (
+      id SERIAL PRIMARY KEY,
+      zip TEXT,
+      registry TEXT,
+      status TEXT,
+      business_count INTEGER,
+      message TEXT,
+      broadcast_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_acp_broadcast_at ON acp_broadcast_log(broadcast_at DESC)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_acp_broadcast_zip ON acp_broadcast_log(zip)`);
 }
 
-function appendBroadcastLog(entry) {
-  const log = loadBroadcastLog();
-  log.push(entry);
-  // Keep last 500 entries
-  const trimmed = log.slice(-500);
+// ── Broadcast log helpers ─────────────────────────────────────────────────────
+async function logBroadcast({ registry, status, message, zipsCount, zip }) {
   try {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(BROADCAST_LOG_FILE, JSON.stringify(trimmed, null, 2));
+    await db.query(
+      `INSERT INTO acp_broadcast_log (zip, registry, status, business_count, message)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [zip || null, registry, status, zipsCount || 0, message || '']
+    );
   } catch (e) {
     console.error('[AcpBroadcaster] Failed to write broadcast log:', e.message);
   }
-}
-
-function logBroadcast({ registry, status, message, zipsCount }) {
-  const entry = {
-    registry,
-    status,
-    timestamp: new Date().toISOString(),
-    zipsCount: zipsCount || 0,
-    message: message || '',
-  };
-  appendBroadcastLog(entry);
   console.log(`[AcpBroadcaster] [${registry}] ${status} — ${message || ''}`);
-  return entry;
 }
 
-// ── ZIP coverage watcher ─────────────────────────────────────────────────────
-
-let lastCompletedCount = 0;
-
-function getCompletedCount() {
+// ── ZIP coverage from Postgres ────────────────────────────────────────────────
+async function getCompletedCount() {
   try {
-    if (!fs.existsSync(COVERAGE_FILE)) return 0;
-    const coverage = JSON.parse(fs.readFileSync(COVERAGE_FILE, 'utf8'));
-    return Object.keys(coverage.completed || {}).length;
+    const rows = await db.query(
+      `SELECT COUNT(DISTINCT zip)::int AS n FROM businesses
+        WHERE status != 'inactive' AND zip IS NOT NULL`
+    );
+    return rows[0]?.n || 0;
   } catch (e) {
+    console.warn('[AcpBroadcaster] coverage count failed:', e.message);
     return 0;
   }
 }
 
-function getLatestZip() {
+async function getRecentlyBroadcastZipSet() {
+  if (FULL_REFRESH) return new Set();
   try {
-    if (!fs.existsSync(COVERAGE_FILE)) return null;
-    const coverage = JSON.parse(fs.readFileSync(COVERAGE_FILE, 'utf8'));
-    const completed = coverage.completed || {};
-    const zips = Object.keys(completed);
-    if (!zips.length) return null;
-    // Find most recently completed
-    return zips.reduce((latest, zip) => {
-      const t = new Date(completed[zip].completedAt || 0).getTime();
-      const lt = new Date(completed[latest].completedAt || 0).getTime();
-      return t > lt ? zip : latest;
-    });
+    const rows = await db.query(
+      `SELECT DISTINCT zip FROM acp_broadcast_log
+        WHERE broadcast_at > NOW() - INTERVAL '30 days'
+          AND zip IS NOT NULL`
+    );
+    return new Set(rows.map(r => r.zip));
   } catch (e) {
-    return null;
+    console.warn('[AcpBroadcaster] recent broadcast lookup failed:', e.message);
+    return new Set();
   }
 }
 
-function checkZipCoverageChange() {
-  const currentCount = getCompletedCount();
-  if (currentCount > lastCompletedCount) {
-    const newZip = getLatestZip();
-    const msg = `New ZIP complete: ${newZip || 'unknown'} — broadcasting to registries`;
-    console.log(`[AcpBroadcaster] ${msg}`);
-    logBroadcast({
-      registry: 'internal',
-      status: 'zip_complete_event',
-      message: msg,
-      zipsCount: currentCount,
-    });
-    // Trigger a broadcast cycle on new ZIP completion
-    runBroadcastCycle(currentCount).catch(e =>
-      console.error('[AcpBroadcaster] Zip-triggered broadcast error:', e.message)
+async function getNewlyCoveredZips() {
+  // ZIPs in businesses minus those already broadcast in the last 30 days
+  const recentSet = await getRecentlyBroadcastZipSet();
+  let coveredZips = [];
+  try {
+    const rows = await db.query(
+      `SELECT DISTINCT zip FROM businesses
+        WHERE status != 'inactive' AND zip IS NOT NULL`
     );
-    lastCompletedCount = currentCount;
+    coveredZips = rows.map(r => r.zip);
+  } catch (e) {
+    console.warn('[AcpBroadcaster] covered ZIPs lookup failed:', e.message);
   }
+  return coveredZips.filter(z => !recentSet.has(z));
 }
 
 // ── Registry announcements ───────────────────────────────────────────────────
-
 async function announceToSmithery(zipsCount) {
-  // Smithery indexes automatically from GitHub — no POST API exists (returns 404).
-  // Instead, verify the live MCP endpoint is reachable (what Smithery actually crawls).
   const registry = 'smithery';
   try {
     const res = await fetch(MCP_URL, {
@@ -143,32 +124,31 @@ async function announceToSmithery(zipsCount) {
       signal: AbortSignal.timeout(10000),
     });
     const status = res.ok ? 'mcp_reachable' : `mcp_http_${res.status}`;
-    logBroadcast({ registry, status, message: `MCP endpoint HTTP ${res.status} — Smithery auto-indexes from GitHub`, zipsCount });
+    await logBroadcast({ registry, status, message: `MCP endpoint HTTP ${res.status} — Smithery auto-indexes from GitHub`, zipsCount });
   } catch (e) {
-    logBroadcast({ registry, status: 'error', message: e.message, zipsCount });
+    await logBroadcast({ registry, status: 'error', message: e.message, zipsCount });
   }
 }
 
 async function announceToPulseMCP(zipsCount) {
-  // PulseMCP requires manual form submission — no open POST API (returns 403).
-  // Log status internally; manual submit: https://www.pulsemcp.com/submit
   const registry = 'pulsemcp';
-  logBroadcast({ registry, status: 'manual_required', message: 'PulseMCP requires manual submission at pulsemcp.com/submit — skipping auto-ping', zipsCount });
+  await logBroadcast({ registry, status: 'manual_required', message: 'PulseMCP requires manual submission at pulsemcp.com/submit — skipping auto-ping', zipsCount });
 }
 
 async function announceToFetchAi(zipsCount) {
-  // Fetch.ai Agentverse almanac requires an agent wallet/registration — returns 404 unauthenticated.
-  // Skipping until Fetch.ai agent identity is provisioned. Log status only.
   const registry = 'fetchai_agentverse';
-  logBroadcast({ registry, status: 'auth_required', message: 'Agentverse requires agent wallet — skip until provisioned', zipsCount });
+  await logBroadcast({ registry, status: 'auth_required', message: 'Agentverse requires agent wallet — skip until provisioned', zipsCount });
 }
 
 // ── Main broadcast cycle ─────────────────────────────────────────────────────
-
-async function runBroadcastCycle(zipsCount) {
-  if (zipsCount === undefined) zipsCount = getCompletedCount();
-  console.log(`[AcpBroadcaster] Starting broadcast cycle (zips covered: ${zipsCount})`);
-  logBroadcast({ registry: 'internal', status: 'cycle_start', message: 'Broadcast cycle started', zipsCount });
+async function runBroadcastCycle() {
+  const zipsCount = await getCompletedCount();
+  const newZips = await getNewlyCoveredZips();
+  console.log(
+    `[AcpBroadcaster] Starting broadcast cycle — covered ZIPs: ${zipsCount}, ` +
+    `new since last 30d: ${newZips.length} (FULL_REFRESH=${FULL_REFRESH})`
+  );
+  await logBroadcast({ registry: 'internal', status: 'cycle_start', message: 'Broadcast cycle started', zipsCount });
 
   // Fire all three registry announcements concurrently, non-blocking
   await Promise.allSettled([
@@ -177,51 +157,58 @@ async function runBroadcastCycle(zipsCount) {
     announceToFetchAi(zipsCount),
   ]);
 
+  // Per-zip rows so future cycles can skip recently-broadcast zips
+  for (const zip of newZips) {
+    await logBroadcast({
+      zip, registry: 'internal',
+      status: 'zip_announced',
+      message: `ZIP ${zip} included in registry pings`,
+      zipsCount: 1,
+    });
+  }
+
   console.log('[AcpBroadcaster] Broadcast cycle complete');
-  logBroadcast({ registry: 'internal', status: 'cycle_complete', message: 'All registry pings sent', zipsCount });
+  await logBroadcast({ registry: 'internal', status: 'cycle_complete', message: 'All registry pings sent', zipsCount });
 }
 
 // ── Express API ───────────────────────────────────────────────────────────────
-
 const app = express();
 app.use(express.json());
 
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
+  const zipsCount = await getCompletedCount().catch(() => 0);
   res.json({
     worker: 'acpBroadcaster',
     port: PORT,
     status: 'running',
-    lastCompletedCount,
+    coverageZips: zipsCount,
     broadcastIntervalHours: 4,
   });
 });
 
-app.get('/broadcast-log', (req, res) => {
-  const log = loadBroadcastLog();
-  res.json({
-    ok: true,
-    count: log.length,
-    log,
-  });
+app.get('/broadcast-log', async (req, res) => {
+  try {
+    const rows = await db.query(
+      `SELECT id, zip, registry, status, business_count, message, broadcast_at
+       FROM acp_broadcast_log ORDER BY broadcast_at DESC LIMIT 500`
+    );
+    res.json({ ok: true, count: rows.length, log: rows });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
-
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`[AcpBroadcaster] Running on port ${PORT}`);
 
-  // Initialize coverage baseline
-  lastCompletedCount = getCompletedCount();
+  try { await ensureSchema(); }
+  catch (e) { console.error('[AcpBroadcaster] schema init failed:', e.message); }
 
-  // Run immediately on boot
   runBroadcastCycle().catch(e =>
     console.error('[AcpBroadcaster] Boot broadcast error:', e.message)
   );
 
-  // Watch for new ZIPs every 2 minutes
-  setInterval(checkZipCoverageChange, 2 * 60 * 1000);
-
-  // Re-broadcast every 4 hours
   setInterval(() => {
     runBroadcastCycle().catch(e =>
       console.error('[AcpBroadcaster] Interval broadcast error:', e.message)

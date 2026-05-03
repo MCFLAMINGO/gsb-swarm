@@ -1471,34 +1471,57 @@ router.get('/osm-queue', async (req, res) => {
 });
 
 // ── GET /api/local-intel/stats — coverage stats (Florida only) ──────────────
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   // Active states only — controlled by ACTIVE_STATES env var (default: FL)
   const { isActiveZip, coverageSummary } = require('./lib/stateConfig');
-  const data = loadData().filter(b => isActiveZip(b.zip));
-  const byZip = {};
-  const byGroup = {};
+  try {
+    // Group counts directly from Postgres — never .rows, db.query returns array.
+    const zipRows = await db.query(
+      `SELECT zip, COUNT(*)::int AS count, AVG(confidence_score)::float AS avg_conf
+         FROM businesses
+        WHERE status != 'inactive' AND zip IS NOT NULL
+        GROUP BY zip`
+    );
+    const groupRows = await db.query(
+      `SELECT COALESCE(category_group, 'other') AS grp, COUNT(*)::int AS count
+         FROM businesses
+        WHERE status != 'inactive'
+        GROUP BY 1`
+    );
 
-  for (const b of data) {
-    byZip[b.zip] = (byZip[b.zip] || 0) + 1;
-    const g = getGroup(b.category);
-    byGroup[g] = (byGroup[g] || 0) + 1;
+    const byZip = {};
+    let total = 0, confSum = 0, confCount = 0;
+    for (const r of zipRows) {
+      if (!isActiveZip(r.zip)) continue;
+      byZip[r.zip] = r.count;
+      total += r.count;
+      if (r.avg_conf !== null && r.avg_conf !== undefined) {
+        confSum += r.avg_conf * r.count;
+        confCount += r.count;
+      }
+    }
+    const byGroup = {};
+    for (const r of groupRows) byGroup[r.grp] = r.count;
+
+    // Confidence is stored 0..1 in Postgres; legacy JSON returned 0..100 — keep that shape.
+    const avgConfRaw = confCount ? confSum / confCount : 0;
+    const avgConf = avgConfRaw <= 1 ? Math.round(avgConfRaw * 100) : Math.round(avgConfRaw);
+
+    res.json({
+      ok: true,
+      totalBusinesses: total,
+      avgConfidence:   avgConf,
+      coverage:        coverageSummary(),
+      byZip,
+      byGroup,
+      sources: ['OSM','Census ACS 2022','FL Sunbiz'],
+      pendingSources: ['SJC BTR','SJC Permits'],
+      lastSync: new Date().toISOString().slice(0, 10),
+    });
+  } catch (e) {
+    console.error('[stats] error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
   }
-
-  const avgConf = data.length
-    ? Math.round(data.reduce((s, b) => s + b.confidence, 0) / data.length)
-    : 0;
-
-  res.json({
-    ok: true,
-    totalBusinesses: data.length,
-    avgConfidence:   avgConf,
-    coverage:        coverageSummary(),
-    byZip,
-    byGroup,
-    sources: ['OSM','Census ACS 2022','FL Sunbiz'],
-    pendingSources: ['SJC BTR','SJC Permits'],
-    lastSync: '2026-04-20',
-  });
 });
 
 // ── GET /api/local-intel/agent-card ────────────────────────────────────────────────
@@ -1593,135 +1616,121 @@ router.get('/revenue-summary', (req, res) => {
 // These aggregate data files so the Vercel dashboard can poll one origin.
 
 // ── GET /api/local-intel/call-log — last N calls with full trace ───────────────
-router.get('/call-log', (req, res) => {
+router.get('/call-log', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
-  let ledger = [];
   try {
-    if (fs.existsSync(LEDGER_PATH)) {
-      ledger = JSON.parse(fs.readFileSync(LEDGER_PATH, 'utf8'));
-    }
-  } catch {}
+    // Auto-create per spec — no-op if existing usage_ledger has the legacy shape.
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS usage_ledger (
+        id SERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT NOW(),
+        tool TEXT, caller TEXT, entry TEXT, zip TEXT, intent TEXT,
+        latency INTEGER, cost NUMERIC, paid BOOLEAN DEFAULT false
+      )
+    `);
 
-  const sorted = [...ledger]
-    .sort((a, b) => new Date(b.ts || b.timestamp || 0) - new Date(a.ts || a.timestamp || 0))
-    .slice(0, limit)
-    .map(e => ({
-      ts:      e.ts || e.timestamp || null,
+    // Detect schema (existing schema may use called_at/tool_name/cost_path_usd).
+    const cols = await db.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'usage_ledger'`
+    );
+    const have = new Set(cols.map(c => c.column_name));
+    const tsCol     = have.has('ts')          ? 'ts'          : (have.has('called_at')     ? 'called_at'     : null);
+    const toolCol   = have.has('tool')        ? 'tool'        : (have.has('tool_name')     ? 'tool_name'     : null);
+    const costCol   = have.has('cost')        ? 'cost'        : (have.has('cost_path_usd') ? 'cost_path_usd' : null);
+    const callerCol = have.has('caller')      ? 'caller'      : (have.has('agent_token')   ? 'agent_token'   : null);
+    const latCol    = have.has('latency')     ? 'latency'     : (have.has('response_ms')   ? 'response_ms'   : null);
+    const orderCol  = tsCol || 'id';
+
+    const sql = `SELECT
+      ${tsCol     ? tsCol     + ' AS ts'      : 'NULL AS ts'},
+      ${toolCol   ? toolCol   + ' AS tool'    : "'unknown' AS tool"},
+      ${callerCol ? callerCol + ' AS caller'  : "'unknown' AS caller"},
+      ${have.has('entry')    ? 'entry'    : "'free' AS entry"},
+      ${have.has('zip')      ? 'zip'      : 'NULL AS zip'},
+      ${have.has('intent')   ? 'intent'   : 'NULL AS intent'},
+      ${latCol    ? latCol    + ' AS latency' : 'NULL AS latency'},
+      ${costCol   ? costCol   + ' AS cost'    : '0 AS cost'},
+      ${have.has('paid')     ? 'paid'     : 'false AS paid'}
+      FROM usage_ledger ORDER BY ${orderCol} DESC LIMIT $1`;
+    const rows = await db.query(sql, [limit]);
+
+    const calls = rows.map(e => ({
+      ts:      e.ts ? new Date(e.ts).toISOString() : null,
       tool:    e.tool    || 'unknown',
       caller:  e.caller  || 'unknown',
       entry:   e.entry   || 'free',
       zip:     e.zip     || null,
       intent:  e.intent  || null,
       latency: e.latency || null,
-      cost:    e.cost    || 0,
-      paid:    e.paid    || false,
+      cost:    Number(e.cost) || 0,
+      paid:    !!e.paid,
     }));
 
-  res.json({ count: sorted.length, calls: sorted, generatedAt: new Date().toISOString() });
+    res.json({ count: calls.length, calls, generatedAt: new Date().toISOString() });
+  } catch (e) {
+    console.error('[call-log] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 const DATA_DIR_AGENT = path.join(__dirname, 'data');
 
-router.get('/coverage-stats', (req, res) => {
+router.get('/coverage-stats', async (req, res) => {
   try {
-    const covFile   = path.join(DATA_DIR_AGENT, 'zipCoverage.json');
-    const queueFile = path.join(DATA_DIR_AGENT, 'zipQueue.json');
-    const zipsDir   = path.join(DATA_DIR_AGENT, 'zips');
-
-    const cov   = covFile   && fs.existsSync(covFile)   ? JSON.parse(fs.readFileSync(covFile))   : { completed: {} };
-    const queue = queueFile && fs.existsSync(queueFile) ? JSON.parse(fs.readFileSync(queueFile)) : [];
-
-    // Build completedZips from actual data/zips/ files — zipCoverage.json may only
-    // have seed entries and won't reflect 3 days of enrichment agent work.
-    // Active states only — controlled by ACTIVE_STATES env var (default: FL)
     const { isActiveZip: isActiveZip2 } = require('./lib/stateConfig');
-    let completedZips = Object.entries(cov.completed || {}).filter(([z]) => isActiveZip2(z));
-    if (fs.existsSync(zipsDir)) {
-      const zipFiles = fs.readdirSync(zipsDir).filter(f => f.endsWith('.json') && isActiveZip2(f.replace('.json','')));
-      if (zipFiles.length > completedZips.length) {
-        // Rebuild from actual files — these are the ground truth
-        const fromFiles = {};
-        // Carry over any metadata from zipCoverage.json first
-        Object.entries(cov.completed || {}).forEach(([z, v]) => { fromFiles[z] = v; });
-        zipFiles.forEach(f => {
-          const zip = f.replace('.json', '');
-          try {
-            const bizs = JSON.parse(fs.readFileSync(path.join(zipsDir, f)));
-            if (Array.isArray(bizs) && bizs.length > 0) {
-              fromFiles[zip] = Object.assign({}, fromFiles[zip] || {}, {
-                businesses: bizs.length,
-                confidence: Math.round(bizs.reduce((s, b) => s + (b.confidence || 0), 0) / bizs.length),
-                completedAt: fromFiles[zip]?.completedAt || new Date().toISOString(),
-                source: 'zips_dir',
-              });
-            }
-          } catch(e) { /* non-fatal */ }
-        });
-        completedZips = Object.entries(fromFiles);
-      }
-    }
-    let totalBusinesses = completedZips.reduce((s, [, v]) => s + (v.businesses || 0), 0);
 
-    // Average confidence from zip files
-    let confSum = 0, confCount = 0;
-    if (fs.existsSync(zipsDir)) {
-      fs.readdirSync(zipsDir).filter(f => f.endsWith('.json')).forEach(f => {
-        try {
-          const bizs = JSON.parse(fs.readFileSync(path.join(zipsDir, f)));
-          bizs.forEach(b => { confSum += (b.confidence || 0); confCount++; });
-        } catch(e) {}
+    const rows = await db.query(`
+      SELECT zip, COUNT(*)::int AS businesses,
+             AVG(confidence_score)::float AS conf,
+             MAX(created_at) AS completed_at
+        FROM businesses
+       WHERE status != 'inactive' AND zip IS NOT NULL
+       GROUP BY zip ORDER BY zip
+    `);
+
+    let totalBusinesses = 0, confSum = 0, confCount = 0;
+    const completedZips = [];
+    for (const r of rows) {
+      if (!isActiveZip2(r.zip)) continue;
+      // Persist confidence as 0..100 in the response (legacy shape).
+      const confPct = r.conf == null ? 0 : (r.conf <= 1 ? r.conf * 100 : r.conf);
+      completedZips.push({
+        zip: r.zip,
+        businesses: r.businesses,
+        confidence: Math.round(confPct),
+        completedAt: r.completed_at,
+        source: 'businesses',
       });
+      totalBusinesses += r.businesses;
+      confSum += confPct * r.businesses;
+      confCount += r.businesses;
     }
 
-    // ── Fallback: if zip files have 0 businesses, count from localIntel.json ──
-    if (totalBusinesses === 0 || confCount === 0) {
-      try {
-        const flat = JSON.parse(fs.readFileSync(DATA_PATH));
-        if (Array.isArray(flat) && flat.length > 0) {
-          totalBusinesses = flat.length;
-          flat.forEach(b => { confSum += (b.confidence || 0); confCount++; });
-          // Also synthesize completedZips from localIntel.json grouping if cov is empty
-          if (completedZips.length === 0) {
-            const byZip = {};
-            flat.forEach(b => { const z = b.zip || 'unknown'; byZip[z] = (byZip[z] || 0) + 1; });
-            Object.entries(byZip).forEach(([zip, count]) => {
-              completedZips.push([zip, { businesses: count, completedAt: new Date().toISOString(), source: 'localIntel.json' }]);
-            });
-          }
-        }
-      } catch(e) { console.warn('[coverage-stats] localIntel.json fallback failed:', e.message); }
-    }
+    // Queue progress comes from zip_queue if available.
+    let inProgress = 0, pending = 0, failed = 0, queueTotal = 0;
+    try {
+      const queueRows = await db.query(
+        `SELECT status, COUNT(*)::int AS n FROM zip_queue GROUP BY status`
+      );
+      for (const q of queueRows) {
+        queueTotal += q.n;
+        if (q.status === 'inProgress' || q.status === 'in_progress') inProgress = q.n;
+        else if (q.status === 'pending') pending = q.n;
+        else if (q.status === 'failed') failed = q.n;
+      }
+    } catch (_) {}
 
-    const inProgress = queue.filter(z => z.status === 'inProgress').length;
-    const pending    = queue.filter(z => z.status === 'pending').length;
-    const failed     = queue.filter(z => z.status === 'failed').length;
+    const queueTotalDynamic = queueTotal > 0 ? queueTotal : 1013;
 
-    // Last 20 completed zips sorted by completedAt desc
-    // Enrich with businesses + confidence from zip files if coordinator didn't capture them
-    const recentZips = completedZips
-      .map(([zip, v]) => {
-        let businesses = v.businesses;
-        let confidence = v.confidence;
-        // If count is missing or zero, try reading the zip file directly
-        if (!businesses) {
-          try {
-            const zipFile = path.join(zipsDir, `${zip}.json`);
-            if (fs.existsSync(zipFile)) {
-              const bizs = JSON.parse(fs.readFileSync(zipFile));
-              if (Array.isArray(bizs) && bizs.length > 0) {
-                businesses = bizs.length;
-                confidence = Math.round(bizs.reduce((s, b) => s + (b.confidence || 0), 0) / bizs.length);
-              }
-            }
-          } catch(e) { /* non-fatal */ }
-        }
-        return { zip, ...v, businesses: businesses || 0, confidence: confidence || 0 };
-      })
-      .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))
+    const recentZips = [...completedZips]
+      .sort((a, b) => new Date(b.completedAt || 0) - new Date(a.completedAt || 0))
       .slice(0, 20);
 
-    // Dynamic total: FL=1013 + unlocked sunbelt phases. Use queue length when available.
-    const queueTotalDynamic = queue.length > 0 ? queue.length : 1013;
+    let lastRun = null;
+    try {
+      const lr = await db.query(`SELECT MAX(updated_at) AS t FROM businesses`);
+      lastRun = lr[0]?.t ? new Date(lr[0].t).toISOString() : null;
+    } catch (_) {}
+
     res.json({
       zipsCompleted:    completedZips.length,
       zipsTotal:        queueTotalDynamic,
@@ -1731,69 +1740,109 @@ router.get('/coverage-stats', (req, res) => {
       pendingZips:      pending,
       failedZips:       failed,
       recentZips,
-      lastRun:          cov.lastRun || null,
+      lastRun,
       generatedAt:      new Date().toISOString(),
     });
   } catch(e) {
+    console.error('[coverage-stats] error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-router.get('/source-log', (req, res) => {
+router.get('/source-log', async (req, res) => {
   try {
-    const file = path.join(DATA_DIR_AGENT, 'sourceLog.json');
-    const data = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : {};
-    // Flatten to per-source latest status across all zips
+    const rows = await db.query(
+      `SELECT worker_name AS source, event_type, payload, created_at AS timestamp
+         FROM worker_events ORDER BY created_at DESC LIMIT 100`
+    );
+    // Latest status per source for legacy compatibility
     const sources = {};
-    Object.values(data).forEach(zipSources => {
-      Object.entries(zipSources).forEach(([source, entry]) => {
-        if (!sources[source] || new Date(entry.checked_at) > new Date(sources[source].checked_at)) {
-          sources[source] = entry;
-        }
-      });
-    });
-    res.json({ sources, raw: data, generatedAt: new Date().toISOString() });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-router.get('/enrichment-log', (req, res) => {
-  try {
-    const file = path.join(DATA_DIR_AGENT, 'enrichmentLog.json');
-    const log  = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : [];
-    const today = new Date(); today.setUTCHours(0,0,0,0);
-    const enrichedToday = log.filter(e => e.enrichedAt && new Date(e.enrichedAt) >= today).length;
-    const recent = [...log].sort((a,b) => new Date(b.enrichedAt) - new Date(a.enrichedAt)).slice(0, 20);
-    res.json({ enrichedToday, recent, total: log.length, generatedAt: new Date().toISOString() });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-router.get('/broadcast-log', (req, res) => {
-  try {
-    const file = path.join(DATA_DIR_AGENT, 'broadcastLog.json');
-    const log  = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : [];
-    const recent = [...log].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 10);
-    // Last successful hit per registry
-    const lastByRegistry = {};
-    log.forEach(e => {
-      if (e.status === 'ok' && (!lastByRegistry[e.registry] || new Date(e.timestamp) > new Date(lastByRegistry[e.registry]))) {
-        lastByRegistry[e.registry] = e.timestamp;
+    for (const r of rows) {
+      const cur = sources[r.source];
+      if (!cur || new Date(r.timestamp) > new Date(cur.checked_at)) {
+        sources[r.source] = {
+          checked_at: r.timestamp,
+          event_type: r.event_type,
+          payload:    r.payload,
+        };
       }
-    });
-    res.json({ recent, lastByRegistry, total: log.length, generatedAt: new Date().toISOString() });
+    }
+    res.json({ sources, raw: rows, generatedAt: new Date().toISOString() });
   } catch(e) {
+    console.error('[source-log] error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-router.get('/mcp-probe-log', (req, res) => {
+router.get('/enrichment-log', async (req, res) => {
   try {
-    const file = path.join(DATA_DIR_AGENT, 'mcp_probe_log.json');
-    const log  = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : [];
-    // Summary by persona
+    const rows = await db.query(
+      `SELECT worker_name, event_type, payload, created_at
+         FROM worker_events
+        WHERE worker_name = 'enrichmentAgent'
+        ORDER BY created_at DESC LIMIT 100`
+    );
+    const today = new Date(); today.setUTCHours(0,0,0,0);
+    const enrichedToday = rows.filter(e => e.created_at && new Date(e.created_at) >= today).length;
+    const recent = rows.slice(0, 20).map(r => ({
+      worker_name: r.worker_name,
+      event_type:  r.event_type,
+      payload:     r.payload,
+      enrichedAt:  r.created_at,
+    }));
+    res.json({ enrichedToday, recent, total: rows.length, generatedAt: new Date().toISOString() });
+  } catch(e) {
+    console.error('[enrichment-log] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/broadcast-log', async (req, res) => {
+  try {
+    // Auto-create — safe, no-op if already there.
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS acp_broadcast_log (
+        id SERIAL PRIMARY KEY, zip TEXT, registry TEXT, status TEXT,
+        business_count INTEGER, message TEXT,
+        broadcast_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    const rows = await db.query(
+      `SELECT id, zip, registry, status, business_count, message, broadcast_at
+         FROM acp_broadcast_log ORDER BY broadcast_at DESC LIMIT 50`
+    );
+    const recent = rows.slice(0, 10).map(r => ({
+      ...r,
+      timestamp: r.broadcast_at,
+    }));
+    const lastByRegistry = {};
+    for (const r of rows) {
+      const ok = (r.status || '').includes('reachable') || r.status === 'ok' || r.status === 'cycle_complete';
+      if (ok) {
+        if (!lastByRegistry[r.registry] || new Date(r.broadcast_at) > new Date(lastByRegistry[r.registry])) {
+          lastByRegistry[r.registry] = r.broadcast_at;
+        }
+      }
+    }
+    res.json({ recent, lastByRegistry, total: rows.length, generatedAt: new Date().toISOString() });
+  } catch(e) {
+    console.error('[broadcast-log] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/mcp-probe-log', async (req, res) => {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS mcp_probe_log (
+        id SERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT NOW(),
+        persona TEXT, tool TEXT, zip TEXT, score INTEGER, reason TEXT, error TEXT
+      )
+    `);
+    const log = await db.query(
+      `SELECT ts, persona, tool, zip, score, reason, error
+         FROM mcp_probe_log ORDER BY ts DESC LIMIT 500`
+    );
     const byPersona = {};
     for (const e of log) {
       if (!byPersona[e.persona]) byPersona[e.persona] = { total: 0, totalScore: 0, errors: 0, noData: 0 };
@@ -1838,24 +1887,37 @@ router.get('/briefs', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/router-learning', (req, res) => {
+router.get('/router-learning', async (req, res) => {
   try {
-    const file = path.join(DATA_DIR_AGENT, 'router_learning.json');
-    if (!fs.existsSync(file)) return res.json({ status: 'no_data_yet', message: 'Router learning worker has not run a cycle yet — check back in 35 minutes' });
-    const data = JSON.parse(fs.readFileSync(file));
-    // Surface the most useful summary
-    const lastRun   = data.runs?.[data.runs.length - 1] || null;
-    const recentPatches = (data.patches || []).slice(-20);
-    const scoreTrend    = (data.score_trend || []).slice(-10);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS router_learning_log (
+        id SERIAL PRIMARY KEY, run_at TIMESTAMPTZ DEFAULT NOW(),
+        new_terms JSONB, failing_queries JSONB,
+        improvement_rate NUMERIC, patch_summary TEXT
+      )
+    `);
+    const runs = await db.query(
+      `SELECT id, run_at, new_terms, failing_queries, improvement_rate, patch_summary
+         FROM router_learning_log ORDER BY run_at DESC LIMIT 50`
+    );
+    if (runs.length === 0) {
+      return res.json({ status: 'no_data_yet', message: 'Router learning worker has not run a cycle yet — check back in 35 minutes' });
+    }
+    const lastRun = runs[0];
+    const recentPatches = runs.slice(0, 20).flatMap(r =>
+      Array.isArray(r.new_terms) ? r.new_terms.map(p => ({ ts: r.run_at, ...p })) : []
+    );
+    const scoreTrend = runs.slice(0, 10).map(r => ({ ts: r.run_at, improvement_rate: r.improvement_rate }));
     res.json({
-      total_patches_applied: data.total_patches_applied || 0,
+      total_patches_applied: recentPatches.reduce((s, p) => s + (p.terms?.length || 0), 0),
       last_run:              lastRun,
       recent_patches:        recentPatches,
       score_trend:           scoreTrend,
-      verticals:             data.verticals,
+      verticals:             null,
       generatedAt:           new Date().toISOString(),
     });
   } catch(e) {
+    console.error('[router-learning] error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
