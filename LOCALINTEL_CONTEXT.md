@@ -303,6 +303,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 - `2926bb5` — perf: disable mcpProbeWorker; slow enrichmentAgent 10min→6hr; zipCoordinator 2min→1hr
 
 ### localintel-landing commits (2026-05-02)
+- `9261a99` — fix: remove escaped backtick `\`` in renderServiceRequest template literal — this was a JS syntax error that prevented ALL JavaScript from parsing: runSearch, renderResults, esc(), and event listeners were all dead. Root cause of search showing nothing on load and not responding to any interaction.
 - `3d45698` — fix: category option values now match DB slugs (was sending 'Restaurant', DB stores 'restaurant'); removed truncated broken `if (status === 'cla` line that was a JS syntax error killing all rendering. Deployed to www.thelocalintel.com.
 - `83cf741` — fix: complete truncated renderResults + auto-search on load and filter change (search was broken — JS file cut off mid-function)
 
