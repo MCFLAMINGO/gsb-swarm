@@ -533,269 +533,257 @@ The data we're collecting isn't just a directory. It's the intelligence layer th
 - Routing fee (0.05%–1% on confirmed transactions) triggered by future on-chain confirmation wired to `usage_ledger.tx_hash`
 - Businesses without `menu_url` fall back to `website`; future: Surge agentic API can place order directly
 
-### Basalt/Surge API Reference (from surge.basalthq.com/developers/docs — 2026-05-03)
-**Base URL:** `https://surge.basalthq.com`
-**Auth:** `Ocp-Apim-Subscription-Key: {BASALT_API_KEY}` on ALL dev requests (except /healthz)
-**CRITICAL:** Wallet identity is resolved by APIM from the subscription key automatically.
-  Clients MUST NOT send wallet identity headers (no `x-merchant-wallet` or similar).
-  The BASALT_API_KEY alone identifies McFlamingo's wallet (0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED).
+## Basalt/Surge API — Complete Reference
 
-**Endpoints used by LocalIntel:**
-- `GET /api/inventory` — list products (filtering/pagination). Requires `inventory:read` scope.
-- `POST /api/inventory` — create/update product idempotent by SKU. Requires `inventory:write`.
-- `POST /api/orders` — generate receipt/order from inventory items. Requires `orders:create`.
-  Body: `{ items: [{ sku, qty }] }`
-  Returns: `{ receipt: { receiptId }, portalLink }`
-  Payment URL: `portalLink.split(', ').pop().trim()` OR `https://surge.basalthq.com/pay/{receiptId}`
-- `GET /api/receipts/status?receiptId=...` — check payment status. Requires `receipts:read`.
-  Paid statuses: `['completed', 'tx_mined', 'recipient_validated', 'paid']`
-- `GET /api/receipts/{id}` — get receipt by ID.
-- `GET /api/shop/config` — read merchant configuration. Requires `shop:read`.
-- `GET /api/users/search` — search users. Requires `users:read`.
-- `GET /healthz` — public health check, no key needed.
+> Captured from Basalt developer docs shared in session. All endpoints use base URL `https://surge.basalthq.com`.
 
-**McFlamingo Basalt inventory:** 92 SKUs loaded (food items, beverages, wine, dressings).
-$0.00 items are modifiers/add-ons (dressings, sauces) — filter `priceUsd > 0` for orderable entrees.
-Full SKU list available via `GET /api/inventory` with BASALT_API_KEY.
+---
 
-**Payment flow pattern (proven in dashboard-server.js):**
-1. POST /api/orders → receiptId + portalLink
-2. Open portalLink in new tab (crypto payment UI)
-3. Poll GET /api/receipts/status?receiptId=... until status in paid list
-4. On confirmed → update usage_ledger, notify user
+## Auth
 
-**Agent wallet for customers:**
-Customers without a wallet → direct to surge.basalthq.com/signup (free Surge wallet)
-Future: Stripe payment intent as fallback rail for non-crypto customers
+- Header: `Ocp-Apim-Subscription-Key: <BASALT_API_KEY>` — this is the ONLY required auth header
+- APIM automatically stamps `x-subscription-id` for the backend
+- **NEVER send** `x-wallet`, `x-merchant-wallet`, or `wallet` headers — APIM strips them and returns 403
 
-### Basalt/Surge Additional API Details (surge.basalthq.com/developers/docs — 2026-05-03)
-- Payment page: `https://surge.basalthq.com/portal/{receiptId}` — confirmed canonical URL
-- `jurisdictionCode` on POST /api/orders — use `"US-FL"` for McFlamingo (Florida)
-- Split must be configured before orders work — returns `split_required` if not set
-  McFlamingo split is already configured (STATUS.ONLINE, 92 SKUs live)
-- OpenAPI spec available at: `https://surge.basalthq.com/openapi.yaml`
-- Client-supplied wallet headers are STRIPPED by APIM policy — backend resolves wallet from subscription key
-- Admin operations (shop config, subscriptions, refunds) require JWT cookie in BasaltSurge UI — not available via developer API
-- `GET /api/inventory` supports filtering/pagination — use to fetch McFlamingo's live menu
-- `GET /api/users/search` + `GET /api/users/live` — for finding customer wallets by search/live status
+---
 
-### Basalt/Surge Auth Model — Complete (surge.basalthq.com/developers/docs/auth — 2026-05-03)
-**THE ONLY HEADER NEEDED:** `Ocp-Apim-Subscription-Key: {BASALT_API_KEY}`
-- APIM stamps `x-subscription-id` for backend; backend resolves merchant wallet from that
-- Client wallet headers (`x-wallet`, `wallet`, `x-merchant-wallet`) are STRIPPED by APIM policy — never send them
-- `x-edge-secret` is AFD-only, injected by Azure Front Door — clients must NOT send it
-- JWT (`cb_auth_token` cookie) is for admin UI only — not available programmatically
+## Health
 
-**Correct axios call pattern for ALL Basalt API calls:**
-```js
-axios.post(`${BASALT_BASE}/api/orders`, {
-  items: [{ sku, qty: 1 }],
-  jurisdictionCode: 'US-FL',  // Florida for McFlamingo
-}, {
-  headers: { 'Ocp-Apim-Subscription-Key': BASALT_API_KEY }
-})
+```
+GET /healthz
+```
+- Public, no auth required
+- Returns: `{ ok: true, status: "ok", dependencies: { apim, backend, database } }`
+- Use to verify Basalt service is up
+
+---
+
+## Inventory
+
+```
+GET /api/inventory
+```
+- Fetch merchant SKU catalog
+- Query params:
+  - `priceMin=0.01` — filters out $0.00 modifier/add-on items
+  - `pack=restaurant` — restaurant-optimized response shape
+  - `q=<search term>` — full-text search
+  - `category=<category>` — filter by category
+  - `tags=<tag>` — filter by tag
+  - `limit=<n>` — max 200 per page
+  - `page=<n>` — pagination
+- `stockQty: -1` means unlimited stock
+- Returns array of SKU objects: `{ sku, name, description, price, category, tags, stockQty, imageUrl }`
+- Use `priceMin=0.01` to exclude modifiers when building order UIs
+
+---
+
+## Orders
+
+```
+POST /api/orders
+```
+- Body: `{ items: [{ sku: string, qty: number }], jurisdictionCode: 'US-FL' }`
+- `jurisdictionCode` is required — always `'US-FL'` for McFlamingo
+- Returns: `{ ok: true, receipt: { receiptId, totalUsd, lineItems, status } }`
+- Error `items_required` (400) if items array is empty
+- Error `inventory_item_not_found` (400) if SKU doesn't exist
+- Error `split_required` (403) if merchant split is not configured (McFlamingo split IS configured)
+
+---
+
+## Receipts
+
+```
+GET /api/receipts/status?receiptId=<id>
+```
+- Returns: `{ id, status, transactionHash, currency, amount }`
+- Full status flow: `generated → pending → paid → completed`
+- Other statuses: `refunded`, `tx_mined`, `recipient_validated`, `tx_mismatch`, `failed`
+- Poll for `completed` / `tx_mined` / `recipient_validated` to confirm payment
+- Webhook: Set `webhook_url` on `POST /api/receipts` for push notification on payment
+
+---
+
+## Payment Portal
+
+- Payment URL: `https://surge.basalthq.com/portal/${receiptId}`
+- Iframe embed params: `?recipient=<wallet>&embedded=1&correlationId=${receiptId}`
+- McFlamingo recipient wallet: `0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED`
+- Full iframe URL: `https://surge.basalthq.com/portal/${receiptId}?recipient=0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED&embedded=1&correlationId=${receiptId}`
+- **CSP ACTION NEEDED**: Ask Basalt team to add `thelocalintel.com` to `frame-ancestors` for `/portal/*`
+- PostMessage events from iframe:
+  - `gateway-card-success` — payment completed
+  - `gateway-card-cancel` — user cancelled
+  - `gateway-preferred-height` — iframe resize hint
+- Origin check: `event.origin !== 'https://surge.basalthq.com'` → return (ignore)
+- CSP fallback: if iframe blocked after 4s, open `paymentUrl` in new tab
+
+---
+
+## Shop Config
+
+```
+GET /api/shop/config                          (by subscription key)
+GET /api/shop/config?slug=mcflamingo         (public, no auth)
+```
+- Returns merchant configuration, branding, enabled features
+
+---
+
+## Split
+
+- Split contract MUST be configured in Admin UI before orders can be placed
+- McFlamingo split: **ALREADY CONFIGURED** — not a blocker
+- Default split: merchant 99.5% (9950 bps) / platform 0.5% (50 bps)
+- Processing fee: 0.5% base + configurable merchant add-on, applied after tax
+- Error `split_required` (403) if split not configured
+
+```
+GET /api/split/transactions    (subscription key required)
+```
+- Returns split transaction history
+
+---
+
+## Billing
+
+```
+GET /api/billing/balance
+```
+- Returns: `{ balances: [{ currency, available, reserved }], usage: { monthUsd } }`
+
+---
+
+## Tax Catalog
+
+```
+GET /api/tax/catalog
+```
+- Returns valid `jurisdictionCode` values
+- Use to validate before placing orders
+
+---
+
+## Users
+
+```
+GET /api/users/search?q=<query>&live=true
+```
+- Wallet lookup / user search
+- `live=true` for real-time results
+
+---
+
+## GraphQL
+
+```
+POST /api/graphql
+```
+- Read-only API
+- Supported queries:
+  - `user(wallet: "<addr>")` — user profile
+  - `liveUsers` — currently active users
+  - `leaderboard(limit: <n>)` — top users
+
+---
+
+## Subscriptions (Recurring Payments)
+
+```
+POST /api/subscriptions/plans
+```
+- Uses EIP-712 SpendPermission for recurring billing
+- SpendPermissionManager contract: `0xf85210B21cC50302F477BA56686d2019dC9b67Ad` (Base mainnet)
+- Base mainnet USDC: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` (6 decimals)
+
+---
+
+## Reserve
+
+```
+GET /api/reserve
+```
+- Returns reserve/liquidity data for the merchant
+
+---
+
+## Supported Cryptocurrencies
+
+- ETH, USDC, USDT, cbBTC, cbXRP
+
+---
+
+## Error Codes
+
+| Code | HTTP | Description |
+|------|------|-------------|
+| `split_required` | 403 | Merchant split contract not configured |
+| `unauthorized` | 401 | Missing or invalid subscription key |
+| `forbidden` | 403 | Wallet header present (strip it!) or other auth failure |
+| `inventory_item_not_found` | 400 | SKU not found in merchant catalog |
+| `rate_limited` | 429 | Too many requests |
+| `items_required` | 400 | Empty items array in order POST |
+| `cosmos_unavailable` | — | Basalt internal DB unavailable; `response.degraded=true` |
+
+---
+
+## Degraded Mode
+
+- When Cosmos (Basalt's internal DB) is unavailable, responses include `degraded: true`
+- Data temporarily served from memory/cache
+- Orders and payments may still work in degraded mode
+
+---
+
+## McFlamingo Reference
+
+| Field | Value |
+|-------|-------|
+| business_id | `232c34cb-ff82-4bf9-8a5c-d13306550709` |
+| Basalt slug | `mcflamingo` |
+| merchant wallet | `0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED` |
+| jurisdictionCode | `US-FL` |
+| Split configured | YES |
+| Inventory SKUs | 92 (wine, food, beverages, dressings) |
+| $0.00 items | Modifiers/add-ons — exclude from order UI |
+
+---
+
+## Three-Tier Architecture
+
+```
+Frontend (no key)
+    ↓
+gsb-swarm backend (holds BASALT_API_KEY)
+    ↓
+Basalt API (https://surge.basalthq.com)
 ```
 
-**jurisdictionCode for McFlamingo:** `US-FL` (Florida — NOT US-CA as in the docs example)
+Never expose `BASALT_API_KEY` to frontend. All Basalt calls must go through the gsb-swarm backend proxy.
 
-**Payment page URL (canonical):** `https://surge.basalthq.com/portal/{receiptId}`
+---
 
-**Wallet resolution:** APIM resolves McFlamingo wallet (0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED)
-  from the BASALT_API_KEY subscription automatically. No wallet param needed anywhere.
+## Agentic Order Flow (Implemented)
 
-**Admin operations (NOT available via developer API — must use BasaltSurge UI):**
-- Shop config writes (POST /api/shop/config)
-- Refunds (POST /api/receipts/refund)
-- Split configuration (POST /api/split/deploy)
-- Subscription lifecycle
+1. User types "order X from Y" → `ORDER_ITEM` intent detected in `localIntelAgent.js`
+2. `GET /api/local-intel/menu/:business_id?q=X` → fetches Basalt inventory, fuzzy-matches items
+3. User selects item → `POST /api/local-intel/place-order` → creates Basalt order, returns `receiptId + portalLink`
+4. Frontend shows payment iframe (`surge.basalthq.com/portal/${receiptId}`)
+5. `GET /api/local-intel/order-status/:receiptId` polls receipt status → logs to `usage_ledger` on `gateway-card-success`
 
-**Error codes:**
-- 401: Missing/invalid subscription key
-- 403: Insufficient scope OR client sent stripped wallet header (policy violation)
-- 429: Rate limit — implement exponential backoff
-- `split_required`: Split not configured — but McFlamingo's is already set up
-
-**OpenAPI spec:** `https://surge.basalthq.com/openapi.yaml`
-
-### Basalt/Surge OpenAPI Schema — Critical Details (openapi-1.yaml — 2026-05-03)
-
-**POST /api/orders — OrderCreateRequest:**
-```json
-{
-  "items": [{ "sku": "ITEM-001", "qty": 1 }],
-  "jurisdictionCode": "US-FL",
-  "taxRate": 0.07  // optional override
-}
 ```
-Response shape (GeneratedReceipt inside receipt object):
-- `receipt.receiptId` — string ID
-- `receipt.totalUsd` — float
-- `portalLink` — payment URL string (extract last segment after ', ')
-- Canonical payment URL: `https://surge.basalthq.com/portal/{receiptId}`
-
-**GET /api/receipts/status?receiptId=... — ReceiptStatus:**
-```json
-{
-  "id": "...",
-  "status": "generated|pending|completed|failed|refunded|tx_mined|recipient_validated|tx_mismatch",
-  "transactionHash": "0x...",
-  "currency": "USDC",
-  "amount": 14.50
-}
-```
-Paid statuses: `['completed', 'tx_mined', 'recipient_validated']`
-
-**GET /api/inventory — query params:**
-- `q` — search term (name, SKU, description, category, tags)
-- `category` — exact category filter
-- `priceMin` / `priceMax` — price range
-- `stock` — "in" | "out" | "any"
-- `taxable` — "true" | "false" | "any"
-- `pack` — industry pack ("restaurant" for McFlamingo)
-- `sort` — name | sku | priceUsd | stockQty | updatedAt
-- `order` — asc | desc
-Use `priceMin=0.01` to filter out $0 modifier items when fetching orderable entrees.
-
-**x402 AGENTIC COMMERCE PATH (future — for fully headless agent orders):**
-- `GET /api/directory/shops?q=mcflamingo` — discover shops by name/category
-  Returns: shopSlug, name, description, inventory preview
-- `POST /api/x402/orders` — agent sends order + x-payment proof, gets receipt back
-  Body: `{ shopSlug, items: [{sku, qty}], jurisdictionCode }`
-  Flow: POST → 402 challenge → agent pays from wallet → POST again with x-payment header → receipt
-  This is the FULLY HEADLESS path — no human payment popup needed if customer has funded agent wallet
-- `POST /api/x402/subscribe` — agent provisions its own API key via x402 payment
-  For giving customers their own agent wallet/key programmatically
-
-**McFlamingo shopSlug:** fetch via `GET /api/directory/shops?q=mcflamingo` to get exact slug
-**McFlamingo inventory filter for orderable items:** `GET /api/inventory?pack=restaurant&priceMin=0.01`
-
-**ReceiptStatus `tx_mismatch`:** payment amount doesn't match order — handle as failed, recreate order
-
-### Basalt/Surge E-commerce Integration Pattern (guides/ecommerce — 2026-05-03)
-**CONFIRMED payment URL construction:**
-```js
-const paymentUrl = `https://surge.basalthq.com/portal/${order.receipt.receiptId}`;
-// Do NOT rely on portalLink extraction — build URL directly from receiptId
+ORDER_ITEM regex: /\border(?:\s+me)?\s+(.+?)\s+(?:from|at)\s+(.+?)(?:\s+(?:in|near)\s+.+)?$/i
 ```
 
-**Confirmed order response shape:**
-```js
-order.receipt.receiptId  // string — the ID
-order.receipt.totalUsd   // float — total with tax
-```
+Fuzzy match: token overlap scoring, no LLM, STOP words filtered.
 
-**Confirmed poll pattern (5s interval, 5min max):**
-```js
-// Status values: 'completed' = paid, 'failed' = failed, else keep polling
-// tx_mined and recipient_validated also indicate payment success
-```
+---
 
-**Webhooks:** Coming soon — signature verification not yet available.
-Polling is the correct approach for now. Add webhook handler later when available.
+## Shopify Future Path
 
-**APIM key must NEVER be exposed client-side.** All Basalt API calls go through gsb-swarm backend.
-LocalIntel frontend → gsb-swarm /api/localintel/* → Basalt API (with BASALT_API_KEY server-side)
+Businesses with Shopify → Surge import can be routed via Shopify Storefront API (future feature).
 
-**Inventory POST (for syncing menu items to Basalt):**
-```js
-{
-  sku, name, priceUsd, stockQty, category, description, taxable: true, images: []
-}
-```
-
-### Basalt/Surge Payment Gateway — Embedded Portal Pattern (guides/payment-gateway — 2026-05-03)
-**USE IFRAME EMBED, NOT NEW TAB** — portal can be embedded directly in LocalIntel search thread.
-
-**Portal URL with all params:**
-```js
-const portalUrl = `https://surge.basalthq.com/portal/${receiptId}?` +
-  `recipient=${MCFL_WALLET}&embedded=1&correlationId=${receiptId}&layout=compact`;
-// recipient = McFlamingo wallet = 0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED
-// embedded=1 = transparent background (required for iframe)
-// layout=compact = mobile-optimized, max 428px (default, best for chat thread)
-// layout=wide = two-column desktop checkout
-// layout=invoice = invoice presentation
-```
-
-**PostMessage events from portal (listen on window):**
-```js
-// ALWAYS verify origin first:
-if (event.origin !== 'https://surge.basalthq.com') return;
-
-switch (event.data?.type) {
-  case 'gateway-preferred-height':
-    // Set iframe height dynamically: event.data.height (px)
-    break;
-  case 'gateway-card-success':
-    // Payment confirmed — event.data.receiptId, event.data.token
-    // token format: ppc_{receiptId}_{timestamp}
-    // NO POLLING NEEDED — this fires immediately on payment
-    break;
-  case 'gateway-card-cancel':
-    // User cancelled
-    break;
-}
-```
-
-**Iframe embed pattern for LocalIntel search thread:**
-```html
-<iframe
-  src="https://surge.basalthq.com/portal/{receiptId}?recipient={wallet}&embedded=1&correlationId={receiptId}"
-  width="100%"
-  height="600"
-  frameborder="0"
-  title="Pay for order"
-  allow="payment; clipboard-write"
-  style="border:none; border-radius:12px;"
-/>
-```
-
-**Return URL (for new-tab fallback):**
-```js
-const paymentUrl = `https://surge.basalthq.com/portal/${receiptId}?recipient=${wallet}&returnUrl=${encodeURIComponent('https://www.thelocalintel.com/search.html?confirmed=' + receiptId)}`;
-```
-
-**McFlamingo wallet (recipient param):** `0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED`
-
-**Status polling still needed as fallback** (if postMessage doesn't fire):
-Poll `GET /api/localintel/order-status/:receiptId` every 5s up to 5min.
-Prefer postMessage `gateway-card-success` as primary confirmation signal.
-
-**CSP note:** portal route `/portal/*` has `frame-ancestors 'self' https://surge.basalthq.com` —
-thelocalintel.com is NOT in this allowlist by default. If iframe embedding is blocked, fall back to
-new-tab + polling. May need Basalt to add thelocalintel.com to their CSP frame-ancestors.
-
-### Basalt/Surge POS Guide — Key Notes (guides/pos — 2026-05-03)
-**Kitchen display is LocalIntel's job, not Basalt's.**
-After `gateway-card-success` (iframe postMessage) or poll confirms payment:
-1. LocalIntel backend calls its own kitchen/dispatch endpoint
-2. For pickup: POST to McFlamingo kitchen system (MQTT signal or future KDS endpoint)
-3. For delivery: MQTT broadcast to driver pool (existing THROW/MQTT infrastructure)
-
-**QR code for in-person POS:**
-`https://surge.basalthq.com/portal/{receiptId}` — no recipient param needed for simple display
-Customer scans QR → Surge portal → pays → receipt confirmed
-
-**POS polling interval:** 2 seconds (confirmed from guide — tighter than e-commerce 5s)
-**Timeout:** 5 minutes, then clear/cancel
-
-**Receipt lineItems shape (from receipt printer example):**
-```js
-receipt.lineItems = [{ qty, label, priceUsd, itemId }]
-receipt.totalUsd   // float
-receipt.receiptId  // string
-receipt.brandName  // merchant name
-```
-
-**Delivery driver dispatch flow (LocalIntel custom — not in Basalt):**
-After payment confirmed:
-1. Insert into `delivery_jobs` table (business_id, receipt_id, items, pickup_addr, status='open')
-2. MQTT broadcast on `localintel/delivery/{zip}` topic
-3. Driver accepts → update job status, notify customer via search.html thread
-4. McFlamingo sets driver pay rate in pos_config or a new `delivery_config` column
-
-**Terminal endpoint `POST /api/receipts/terminal`** is JWT/admin only — not callable via developer API.
-Use polling or postMessage only for status confirmation.
 
 ---
 
