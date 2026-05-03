@@ -446,149 +446,6 @@ router.post('/', async (req, res) => {
   }
 });
 
-// ── GET /api/local-intel/search — public business search (used by search.html) ──
-// Maps query params: q, zip, cat, limit, page → same Postgres query as POST /
-router.get('/search', async (req, res) => {
-  const { q, zip, cat, limit = 50, page = 1 } = req.query;
-  const offset = (Math.max(1, Number(page)) - 1) * Math.min(Number(limit), 200);
-
-  try {
-    const db = require('./lib/db');
-    const nlIntent = resolveNlIntent(q);
-    const effectiveGroup = nlIntent.group;
-
-    const conditions = ["status != 'inactive'"];
-    const params = [];
-    let p = 1;
-
-    // Category expansion map — dropdown slug → all matching DB category values
-    const CAT_EXPAND = {
-      restaurant:           ['restaurant','fast_food','cafe','bar','pub','bbq','pizza','seafood','sandwich','italian','asian','steakhouse','food_court','ice_cream','fast_casual_mexican','upscale_dining','barbecue_restaurant','LocalBusiness','coffee_chain','bakery','juice_bar','smoothie','wings','sushi','thai','mediterranean','greek','indian','chinese','mexican','burger','brunch','breakfast','diner','tapas','wine_bar','brewery','gastropub'],
-      healthcare:           ['clinic','hospital','doctor','dentist','dental','pharmacy','urgent_care','therapist','veterinary','optometrist','chiropractor'],
-      retail:               ['retail','clothes','shoes','electronics','grocery','supermarket','convenience','hardware_store','nutrition_supplements'],
-      construction:         ['construction','contractor','builder','roofing','flooring'],
-      professional_services:['law_firm','legal','accountant','consulting','marketing','insurance','insurance_agency'],
-      landscaping:          ['landscaping','lawn_care','tree_service','irrigation'],
-      cleaning:             ['cleaning','maid_service','janitorial','dry_cleaning'],
-      hvac:                 ['hvac','heating','cooling','air_conditioning'],
-      plumber:              ['plumber','plumbing'],
-      electrician:          ['electrician','electrical'],
-      real_estate:          ['real_estate','real_estate_agency','estate_agent','property_management'],
-      finance:              ['finance','bank','bank_branch','atm','financial','mortgage','credit_union','investment'],
-      auto_repair:          ['auto_repair','car_wash','car_repair','tire_shop','auto_parts'],
-      beauty:               ['beauty','hair_salon','barbershop','nail_salon','spa','hair_chain'],
-      education:            ['school','college','university','tutoring','childcare','daycare'],
-      pizza:                ['pizza'],
-      bar:                  ['bar','pub','wine_bar','brewery','gastropub'],
-      cafe:                 ['cafe','coffee_chain','bakery'],
-      gym:                  ['gym_chain','fitness_centre','yoga','crossfit'],
-    };
-
-    if (zip) { conditions.push(`zip = $${p++}`); params.push(zip); }
-    if (cat) {
-      const expanded = CAT_EXPAND[cat];
-      if (expanded && expanded.length > 1) {
-        conditions.push(`category = ANY($${p++})`);
-        params.push(expanded);
-      } else {
-        conditions.push(`category ILIKE $${p++}`);
-        params.push(`%${cat}%`);
-      }
-    }
-    let orderBy = 'confidence_score DESC, name ASC';
-    let tagBoost = '';
-
-    if (q) {
-      const qLike = `%${q}%`;
-      if (effectiveGroup) {
-        // q has a category intent — match by (category group OR name) so specific names still surface
-        const groupCats = CATEGORY_GROUPS[effectiveGroup];
-        if (groupCats && groupCats.length) {
-          conditions.push(`(category = ANY($${p}) OR name ILIKE $${p + 1})`);
-          params.push(groupCats, qLike);
-          p += 2;
-        }
-      } else {
-        // pure name/address search
-        conditions.push(`(name ILIKE $${p} OR category ILIKE $${p} OR address ILIKE $${p} OR description ILIKE $${p})`);
-        params.push(qLike);
-        p++;
-      }
-      orderBy = `CASE WHEN name ILIKE $${p} THEN 0 ELSE 1 END, confidence_score DESC`;
-      params.push(qLike);
-      p++;
-    } else if (effectiveGroup) {
-      const groupCats = CATEGORY_GROUPS[effectiveGroup];
-      if (groupCats && groupCats.length) { conditions.push(`category = ANY($${p++})`); params.push(groupCats); }
-    }
-
-    if (nlIntent.tags && nlIntent.tags.length) {
-      tagBoost = `, CASE WHEN tags && $${p++}::text[] THEN 1 ELSE 0 END AS tag_score`;
-      params.push(nlIntent.tags);
-      orderBy = 'tag_score DESC, confidence_score DESC';
-    }
-
-    const lim = Math.min(Number(limit) || 50, 200);
-    const limIdx = p++;   // $p = lim
-    const offIdx = p++;   // $p = offset
-    params.push(lim, offset);
-
-    const sql = `
-      SELECT
-        business_id, name, address, city, zip, phone, website,
-        hours, category, category_group, tags, description,
-        confidence_score AS confidence, lat, lon, sunbiz_doc_number,
-        claimed_at IS NOT NULL AS claimed,
-        wallet,
-        pos_config->>'pos_type' AS pos_type
-        ${tagBoost}
-      FROM businesses
-      WHERE ${conditions.join(' AND ')}
-      ORDER BY ${orderBy}
-      LIMIT $${limIdx} OFFSET $${offIdx}
-    `;
-
-    const rawRows = await db.query(sql, params);
-    const rows = rawRows.map(r => { const e = { ...r }; delete e.pos_type; return e; });
-
-    let total = rows.length;
-    try {
-      const countParams = params.slice(0, -2);
-      const countRows = await db.query(`SELECT COUNT(*) AS total FROM businesses WHERE ${conditions.join(' AND ')}`, countParams);
-      total = parseInt(countRows[0]?.total || rows.length, 10);
-    } catch (_) {}
-
-    // Attach brief narrative when searching a single ZIP
-    let narrative = null;
-    let notableBusinesses = [];
-    if (zip && !q && !cat) {
-      try {
-        const briefRow = await pgStore.getZipBrief(zip);
-        if (briefRow) {
-          const brief = briefRow.brief_json || briefRow;
-          narrative = brief.narrative || null;
-          notableBusinesses = brief.notable_businesses || [];
-        }
-      } catch (_) {}
-    }
-
-    res.json({
-      ok: true,
-      total,
-      returned: rows.length,
-      page: Number(page),
-      zips: zip ? [zip] : [],
-      narrative,
-      notable_businesses: notableBusinesses,
-      results: rows,
-      meta: { source: 'postgres', coverage: '113,684 businesses — Florida statewide' }
-    });
-  } catch (e) {
-    console.error('[local-intel search]', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
 // ── GET /api/local-intel/zones — spending zone summary ────────────────────────
 router.get('/zones', (req, res) => {
   const zones = loadZones();
@@ -3164,19 +3021,55 @@ router.get('/search', async (req, res) => {
       }
     }
 
+    // Category expansion map — dropdown slug → all DB category values
+    const CAT_EXPAND = {
+      restaurant:           ['restaurant','fast_food','cafe','bar','pub','bbq','pizza','seafood','sandwich','italian','asian','steakhouse','food_court','ice_cream','fast_casual_mexican','upscale_dining','barbecue_restaurant','LocalBusiness','coffee_chain','bakery','juice_bar','smoothie','wings','sushi','thai','mediterranean','greek','indian','chinese','mexican','burger','brunch','breakfast','diner','tapas','wine_bar','brewery','gastropub'],
+      healthcare:           ['clinic','hospital','doctor','dentist','dental','pharmacy','urgent_care','therapist','veterinary','optometrist','chiropractor'],
+      retail:               ['retail','clothes','shoes','electronics','grocery','supermarket','convenience','hardware_store','nutrition_supplements'],
+      construction:         ['construction','contractor','builder','roofing','flooring','general_contractor'],
+      professional_services:['law_firm','legal','accountant','consulting','marketing','insurance','insurance_agency'],
+      landscaping:          ['landscaping','lawn_care','tree_service','irrigation','lawn','mowing','gardening'],
+      cleaning:             ['cleaning','maid_service','janitorial','dry_cleaning'],
+      hvac:                 ['hvac','heating','cooling','air_conditioning'],
+      plumber:              ['plumber','plumbing'],
+      electrician:          ['electrician','electrical'],
+      real_estate:          ['real_estate','real_estate_agency','estate_agent','property_management'],
+      finance:              ['finance','bank','bank_branch','atm','financial','mortgage','credit_union','investment'],
+      auto_repair:          ['auto_repair','car_wash','car_repair','tire_shop','auto_parts'],
+      beauty:               ['beauty','hair_salon','barbershop','nail_salon','spa','hair_chain'],
+      education:            ['school','college','university','tutoring','childcare','daycare'],
+      pizza:                ['pizza'],
+      bar:                  ['bar','pub','wine_bar','brewery','gastropub'],
+      cafe:                 ['cafe','coffee_chain','bakery'],
+      gym:                  ['gym_chain','fitness_centre','yoga','crossfit'],
+    };
+
     // 2. Category search (ZIP-scoped if provided)
     if (!rows.length && (cat || q)) {
-      const term = cat || q;
-      const params = zip
-        ? [`%${term}%`, zip, limit]
-        : [`%${term}%`, limit];
-      const zipClause = zip ? ' AND zip = $2' : '';
-      const lim = zip ? '$3' : '$2';
-      rows = await db.query(
-        BASE_SELECT + ` AND (category ILIKE $1 OR category_group ILIKE $1 OR name ILIKE $1)${zipClause}
-        ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT ${lim}`,
-        params
-      );
+      const term  = cat || q;
+      const expanded = CAT_EXPAND[term];
+      let catWhere, catParams;
+      if (expanded && expanded.length) {
+        if (zip) {
+          catWhere  = ` AND category = ANY($1) AND zip = $2 ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`;
+          catParams = [expanded, zip, limit];
+        } else {
+          catWhere  = ` AND category = ANY($1) ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`;
+          catParams = [expanded, limit];
+        }
+        rows = await db.query(BASE_SELECT + catWhere, catParams);
+      } else {
+        const params = zip
+          ? [`%${term}%`, zip, limit]
+          : [`%${term}%`, limit];
+        const zipClause = zip ? ' AND zip = $2' : '';
+        const lim = zip ? '$3' : '$2';
+        rows = await db.query(
+          BASE_SELECT + ` AND (category ILIKE $1 OR category_group ILIKE $1 OR name ILIKE $1)${zipClause}
+          ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT ${lim}`,
+          params
+        );
+      }
     }
 
     // 3. ZIP-only browse
@@ -3320,13 +3213,29 @@ router.get('/search', async (req, res) => {
     }
     // ── end narrative ────────────────────────────────────────────────────────
 
+    // Brief narrative for ZIP-only queries (no search term, no category filter)
+    let notableBusinesses = [];
+    if (zip && !raw && !cat) {
+      try {
+        const briefRow = await pgStore.getZipBrief(zip);
+        if (briefRow) {
+          const brief = briefRow.brief_json || briefRow;
+          narrative = narrative || brief.narrative || null;
+          notableBusinesses = brief.notable_businesses || [];
+        }
+      } catch (_) {}
+    }
+
     return res.json({
+      ok:         true,
       total:      results.length,
+      returned:   results.length,
       query:      q || null,
       zip:        zip || null,
       category:   cat || null,
       latency_ms: Date.now() - t0,
       narrative,
+      notable_businesses: notableBusinesses,
       results,
     });
   } catch (e) {
