@@ -702,3 +702,65 @@ LocalIntel frontend → gsb-swarm /api/localintel/* → Basalt API (with BASALT_
   sku, name, priceUsd, stockQty, category, description, taxable: true, images: []
 }
 ```
+
+### Basalt/Surge Payment Gateway — Embedded Portal Pattern (guides/payment-gateway — 2026-05-03)
+**USE IFRAME EMBED, NOT NEW TAB** — portal can be embedded directly in LocalIntel search thread.
+
+**Portal URL with all params:**
+```js
+const portalUrl = `https://surge.basalthq.com/portal/${receiptId}?` +
+  `recipient=${MCFL_WALLET}&embedded=1&correlationId=${receiptId}&layout=compact`;
+// recipient = McFlamingo wallet = 0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED
+// embedded=1 = transparent background (required for iframe)
+// layout=compact = mobile-optimized, max 428px (default, best for chat thread)
+// layout=wide = two-column desktop checkout
+// layout=invoice = invoice presentation
+```
+
+**PostMessage events from portal (listen on window):**
+```js
+// ALWAYS verify origin first:
+if (event.origin !== 'https://surge.basalthq.com') return;
+
+switch (event.data?.type) {
+  case 'gateway-preferred-height':
+    // Set iframe height dynamically: event.data.height (px)
+    break;
+  case 'gateway-card-success':
+    // Payment confirmed — event.data.receiptId, event.data.token
+    // token format: ppc_{receiptId}_{timestamp}
+    // NO POLLING NEEDED — this fires immediately on payment
+    break;
+  case 'gateway-card-cancel':
+    // User cancelled
+    break;
+}
+```
+
+**Iframe embed pattern for LocalIntel search thread:**
+```html
+<iframe
+  src="https://surge.basalthq.com/portal/{receiptId}?recipient={wallet}&embedded=1&correlationId={receiptId}"
+  width="100%"
+  height="600"
+  frameborder="0"
+  title="Pay for order"
+  allow="payment; clipboard-write"
+  style="border:none; border-radius:12px;"
+/>
+```
+
+**Return URL (for new-tab fallback):**
+```js
+const paymentUrl = `https://surge.basalthq.com/portal/${receiptId}?recipient=${wallet}&returnUrl=${encodeURIComponent('https://www.thelocalintel.com/search.html?confirmed=' + receiptId)}`;
+```
+
+**McFlamingo wallet (recipient param):** `0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED`
+
+**Status polling still needed as fallback** (if postMessage doesn't fire):
+Poll `GET /api/localintel/order-status/:receiptId` every 5s up to 5min.
+Prefer postMessage `gateway-card-success` as primary confirmation signal.
+
+**CSP note:** portal route `/portal/*` has `frame-ancestors 'self' https://surge.basalthq.com` —
+thelocalintel.com is NOT in this allowlist by default. If iframe embedding is blocked, fall back to
+new-tab + polling. May need Basalt to add thelocalintel.com to their CSP frame-ancestors.
