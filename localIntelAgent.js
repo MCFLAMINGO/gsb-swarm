@@ -2923,6 +2923,47 @@ function detectServiceRequest(raw) {
   return { isRequest: true, category };
 }
 
+// ── ORDER_ITEM intent: route "order ITEM at/from BIZ" → menu fetch + match ────
+// User specifies what they want (item) AND where (biz) — agent will fuzzy-match
+// against the live Basalt inventory. Distinct from _ORDER_INTENT_RE (routing).
+// "order me chicken and broccoli on rice at McFlamingo"
+// "order [item] from [biz]" / "I want [item] from [biz]" / "I'd like [item] at [biz]"
+// "get me [item] from [biz]" / "can I get [item] from [biz]" / "bring me [item] from [biz]"
+const _ORDER_ITEM_RE = /\border(?:\s+me)?\s+(.+?)\s+(?:from|at)\s+(.+?)(?:\s+(?:in|near)\s+.+)?$/i;
+const _WANT_ITEM_RE  = /\b(?:i(?:'d| would)?(?:\s+like)?|(?:can|could)\s+i(?:\s+get)?|get\s+me|bring\s+me)\s+(.+?)\s+(?:from|at)\s+(.+?)$/i;
+
+function detectOrderItemIntent(raw) {
+  if (!raw) return { isOrderItem: false, itemQuery: null, bizName: null };
+  const trimmed = raw.trim();
+  // Skip if it's a bare "order food from X" / "order from X" — that's the routing
+  // intent below, not item-level. We require an item phrase between "order" and "from/at".
+  // Pre-check: rule out queries where the only thing between order and from/at is
+  // "food" / "some food" / "from" (ie. routing).
+  const routingOnly = /^\s*(?:i(?:'d| would| wanna| want to| 'd like to| would like to)?\s+(?:like\s+to\s+)?)?(?:place\s+an?\s+order|order(?:\s+(?:some\s+)?food)?|get\s+(?:some\s+)?food|grab\s+(?:some\s+)?food|food)\s+(?:from|at)\s+/i;
+  if (routingOnly.test(trimmed)) return { isOrderItem: false, itemQuery: null, bizName: null };
+
+  let m = trimmed.match(_ORDER_ITEM_RE);
+  if (!m) m = trimmed.match(_WANT_ITEM_RE);
+  if (!m) return { isOrderItem: false, itemQuery: null, bizName: null };
+
+  let itemQuery = (m[1] || '').trim();
+  let bizName   = (m[2] || '').trim();
+  // Strip trailing punctuation / "please" / "now" / "in <zip>"
+  bizName = bizName
+    .replace(/\s+(?:please|now|today|tonight)\.?\s*$/i, '')
+    .replace(/\s+in\s+\d{5}\s*$/i, '')
+    .replace(/[?.!,]+$/, '')
+    .trim();
+  itemQuery = itemQuery.replace(/[?.!,]+$/, '').trim();
+
+  if (!itemQuery || !bizName) return { isOrderItem: false, itemQuery: null, bizName: null };
+  // Reject obviously-too-short item or biz names (avoid false positives)
+  if (itemQuery.length < 2 || bizName.length < 2) {
+    return { isOrderItem: false, itemQuery: null, bizName: null };
+  }
+  return { isOrderItem: true, itemQuery, bizName };
+}
+
 // ── ORDER intent: route "order food from X" → focused order CTA ───────────────
 // Patterns recognized: "order food from X", "order from X", "place an order at X",
 // "i want to order [from X]", "get food from X", "i'd like to order [from X]",
@@ -2971,6 +3012,59 @@ router.get('/search', async (req, res) => {
 
   try {
     const db = require('./lib/db');
+
+    // ── ORDER_ITEM intent detection ────────────────────────────────────────────
+    // Matches "order ITEM at BIZ" — user specifies an item. Frontend will then
+    // fetch the menu and fuzzy-match. Checked BEFORE generic order-routing so
+    // "order chicken and broccoli at McFlamingo" returns an item-search intent
+    // (not the simple routing card).
+    if (raw) {
+      const itemDetect = detectOrderItemIntent(raw);
+      if (itemDetect.isOrderItem) {
+        const nameLike = `%${itemDetect.bizName}%`;
+        let bizRows = [];
+        if (zip) {
+          bizRows = await db.query(
+            `SELECT business_id, name, zip
+               FROM businesses
+              WHERE status != 'inactive'
+                AND name ILIKE $1
+                AND zip = $2
+              ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+              LIMIT 1`,
+            [nameLike, zip]
+          );
+        }
+        if (!bizRows.length) {
+          bizRows = await db.query(
+            `SELECT business_id, name, zip
+               FROM businesses
+              WHERE status != 'inactive'
+                AND name ILIKE $1
+                AND zip BETWEEN '32004' AND '34997'
+              ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+              LIMIT 1`,
+            [nameLike]
+          );
+        }
+        if (!bizRows.length) {
+          return res.json({
+            intent: 'order_not_found',
+            message: `I couldn't find '${itemDetect.bizName}' in this area.`,
+            latency_ms: Date.now() - t0,
+          });
+        }
+        const b = bizRows[0];
+        return res.json({
+          intent:        'order_item_search',
+          business_id:   b.business_id,
+          business_name: b.name,
+          item_query:    itemDetect.itemQuery,
+          message:       `Looking up ${b.name}'s menu for '${itemDetect.itemQuery}'...`,
+          latency_ms:    Date.now() - t0,
+        });
+      }
+    }
 
     // ── ORDER intent detection ─────────────────────────────────────────────────
     // Checked BEFORE service-request and name search so "order food from McFlamingo"
@@ -3791,6 +3885,198 @@ router.patch('/tasks/:business_id/:task_id', express.json(), async (req, res) =>
   } catch (e) {
     console.error('[/tasks PATCH] error:', e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Agentic Food Order flow: menu fetch + place order + status poll ─────────
+// Mounted at /api/local-intel/{menu,place-order,order-status}
+// Backed by Basalt inventory + orders API (Surge). All deterministic (no LLM).
+const _BASALT_BASE = 'https://surge.basalthq.com';
+
+// GET /api/local-intel/menu/:business_id?q=<item-query>
+// Fetches Basalt inventory for the business's wallet. If q is provided, returns
+// top-3 fuzzy matches (token-overlap) sorted by score desc. Otherwise returns all.
+router.get('/menu/:business_id', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const { business_id } = req.params;
+  const q = (req.query.q || '').trim();
+  if (!business_id) return res.status(400).json({ error: 'business_id required' });
+  const apiKey = process.env.BASALT_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'ordering not configured' });
+
+  try {
+    const [biz] = await db.query(
+      `SELECT business_id, name, wallet, pos_config
+         FROM businesses
+        WHERE business_id = $1
+        LIMIT 1`,
+      [business_id]
+    );
+    if (!biz)        return res.status(404).json({ error: 'business not found' });
+    if (!biz.wallet) return res.status(409).json({ error: 'business has no wallet — ordering unavailable' });
+
+    const invRes = await fetch(`${_BASALT_BASE}/api/inventory`, {
+      headers: {
+        'Ocp-Apim-Subscription-Key': apiKey,
+        'x-merchant-wallet':         biz.wallet,
+      },
+    });
+    if (!invRes.ok) {
+      const text = await invRes.text().catch(() => '');
+      console.error(`[menu] basalt inventory ${invRes.status}: ${text.slice(0,200)}`);
+      return res.status(502).json({ error: 'inventory fetch failed' });
+    }
+    const invJson = await invRes.json();
+    const rawItems = Array.isArray(invJson) ? invJson : (invJson.items || invJson.data || []);
+
+    // Skip $0 modifier items — they're add-ons/dressings, not orderable as a top-level item.
+    const items = rawItems
+      .filter(it => Number(it.priceUsd ?? it.price_usd ?? it.price ?? 0) > 0)
+      .map(it => ({
+        sku:      it.sku || it.SKU || it.id || '',
+        name:     it.name || it.title || '',
+        priceUsd: Number(it.priceUsd ?? it.price_usd ?? it.price ?? 0),
+        category: it.category || it.cat || '',
+      }))
+      .filter(it => it.sku && it.name);
+
+    // Fuzzy match by token overlap if q provided
+    if (q) {
+      const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\s]+/g, ' ').replace(/\s+/g, ' ').trim();
+      const STOP = new Set(['and','or','the','a','an','of','on','in','with','to','for']);
+      const tok  = (s) => norm(s).split(' ').filter(t => t && !STOP.has(t));
+      const qToks = tok(q);
+      const scored = items
+        .map(it => {
+          const nToks = new Set(tok(it.name));
+          let score = 0;
+          for (const t of qToks) if (nToks.has(t)) score++;
+          return { ...it, _score: score };
+        })
+        .filter(it => it._score > 0)
+        .sort((a, b) => b._score - a._score)
+        .slice(0, 3)
+        .map(({ _score, ...rest }) => rest);
+
+      if (scored.length) {
+        return res.json({ items: scored, query: q, matched: true });
+      }
+      return res.json({ items, query: q, matched: false });
+    }
+
+    return res.json({ items, query: null, matched: false });
+  } catch (err) {
+    console.error('[menu]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/local-intel/place-order
+// Body: { business_id, sku, qty, fulfillment }
+router.post('/place-order', express.json(), async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const { business_id, sku, qty, fulfillment } = req.body || {};
+  if (!business_id) return res.status(400).json({ error: 'business_id required' });
+  if (!sku)         return res.status(400).json({ error: 'sku required' });
+  if (fulfillment !== 'pickup' && fulfillment !== 'delivery') {
+    return res.status(400).json({ error: 'fulfillment must be pickup or delivery' });
+  }
+  const apiKey = process.env.BASALT_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'ordering not configured' });
+
+  try {
+    const [biz] = await db.query(
+      `SELECT business_id, name, zip FROM businesses WHERE business_id = $1 LIMIT 1`,
+      [business_id]
+    );
+    if (!biz) return res.status(404).json({ error: 'business not found' });
+
+    const orderRes = await fetch(`${_BASALT_BASE}/api/orders`, {
+      method:  'POST',
+      headers: {
+        'Ocp-Apim-Subscription-Key': apiKey,
+        'Content-Type':              'application/json',
+      },
+      body: JSON.stringify({ items: [{ sku, qty: Number(qty) || 1 }] }),
+    });
+    if (!orderRes.ok) {
+      const text = await orderRes.text().catch(() => '');
+      console.error(`[place-order] basalt orders ${orderRes.status}: ${text.slice(0,200)}`);
+      return res.status(502).json({ error: 'order creation failed' });
+    }
+    const data       = await orderRes.json();
+    const receiptId  = data?.receipt?.receiptId || data?.receiptId;
+    const portalLink = data?.portalLink || '';
+    const paymentUrl = portalLink.split(', ').pop().trim();
+    if (!receiptId || !paymentUrl) {
+      console.error('[place-order] missing receiptId/paymentUrl', data);
+      return res.status(502).json({ error: 'order created but no payment URL returned' });
+    }
+
+    // Log to usage_ledger — non-blocking on failure
+    try {
+      const reqIp = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || 'unknown').toString().split(',')[0].trim();
+      await db.query(
+        `INSERT INTO usage_ledger (id, caller_id, zip, query_type, tool_name, cost_path_usd, called_at)
+         VALUES (gen_random_uuid(), $1, $2, 'food_order', $3, 0, NOW())`,
+        [reqIp, biz.zip || null, biz.name]
+      );
+    } catch (ledgerErr) {
+      console.error('[place-order] usage_ledger insert error:', ledgerErr.message);
+    }
+
+    return res.json({ receiptId, paymentUrl, fulfillment });
+  } catch (err) {
+    console.error('[place-order]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/local-intel/order-status/:receiptId
+router.get('/order-status/:receiptId', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const { receiptId } = req.params;
+  if (!receiptId) return res.status(400).json({ error: 'receiptId required' });
+  const apiKey = process.env.BASALT_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'ordering not configured' });
+
+  try {
+    const statusRes = await fetch(`${_BASALT_BASE}/api/receipts/status?receiptId=${encodeURIComponent(receiptId)}`, {
+      headers: { 'Ocp-Apim-Subscription-Key': apiKey },
+    });
+    if (!statusRes.ok) {
+      const text = await statusRes.text().catch(() => '');
+      console.error(`[order-status] basalt status ${statusRes.status}: ${text.slice(0,200)}`);
+      return res.status(502).json({ error: 'status fetch failed' });
+    }
+    const data = await statusRes.json();
+    const PAID_STATUSES = ['completed', 'tx_mined', 'recipient_validated', 'paid'];
+    const paid = PAID_STATUSES.includes(data?.status);
+
+    if (paid) {
+      // 0.5% routing fee placeholder — applied to most recent food_order for this caller.
+      try {
+        const reqIp = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || 'unknown').toString().split(',')[0].trim();
+        await db.query(
+          `UPDATE usage_ledger
+              SET cost_path_usd = 0.005
+            WHERE id = (
+              SELECT id FROM usage_ledger
+               WHERE caller_id = $1 AND query_type = 'food_order'
+               ORDER BY called_at DESC
+               LIMIT 1
+            )`,
+          [reqIp]
+        );
+      } catch (ledgerErr) {
+        console.error('[order-status] usage_ledger update error:', ledgerErr.message);
+      }
+    }
+
+    return res.json({ paid, status: data?.status || null, receiptId });
+  } catch (err) {
+    console.error('[order-status]', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
