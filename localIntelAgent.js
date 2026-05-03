@@ -558,7 +558,31 @@ router.get('/search', async (req, res) => {
       total = parseInt(countRows[0]?.total || rows.length, 10);
     } catch (_) {}
 
-    res.json({ ok: true, total, returned: rows.length, page: Number(page), zips: zip ? [zip] : [], results: rows, meta: { source: 'postgres', coverage: '113,684 businesses — Florida statewide' } });
+    // Attach brief narrative when searching a single ZIP
+    let narrative = null;
+    let notableBusinesses = [];
+    if (zip && !q && !cat) {
+      try {
+        const briefRow = await pgStore.getZipBrief(zip);
+        if (briefRow) {
+          const brief = briefRow.brief_json || briefRow;
+          narrative = brief.narrative || null;
+          notableBusinesses = brief.notable_businesses || [];
+        }
+      } catch (_) {}
+    }
+
+    res.json({
+      ok: true,
+      total,
+      returned: rows.length,
+      page: Number(page),
+      zips: zip ? [zip] : [],
+      narrative,
+      notable_businesses: notableBusinesses,
+      results: rows,
+      meta: { source: 'postgres', coverage: '113,684 businesses — Florida statewide' }
+    });
   } catch (e) {
     console.error('[local-intel search]', e.message);
     res.status(500).json({ ok: false, error: e.message });
@@ -1933,26 +1957,23 @@ router.get('/mcp-probe-log', (req, res) => {
   }
 });
 
-router.get('/brief/:zip', (req, res) => {
+router.get('/brief/:zip', async (req, res) => {
   try {
     const zip  = (req.params.zip || '').replace(/\D/g, '').slice(0, 5);
-    const file = path.join(DATA_DIR_AGENT, 'briefs', `${zip}.json`);
-    if (!fs.existsSync(file)) return res.status(404).json({ error: `No brief for ZIP ${zip} yet — check back after next brief worker cycle` });
+    const row  = await pgStore.getZipBrief(zip);
+    if (!row) return res.status(404).json({ error: `No brief for ZIP ${zip} yet — check back after next brief worker cycle` });
     logUsage(getCallerId(req), 'brief', zip, 1);
-    res.json(JSON.parse(fs.readFileSync(file)));
+    res.json(row.brief_json || row);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/briefs', (req, res) => {
+router.get('/briefs', async (req, res) => {
   try {
-    const dir = path.join(DATA_DIR_AGENT, 'briefs');
-    if (!fs.existsSync(dir)) return res.json({ count: 0, zips: [] });
-    const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
-    const summaries = files.map(f => {
-      try {
-        const b = JSON.parse(fs.readFileSync(path.join(dir, f)));
-        return { zip: b.zip, label: b.label, total: b.total, data_grade: b.data_grade, generated_at: b.generated_at };
-      } catch { return null; }
+    const rows = await pgStore.getAllZipBriefs ? await pgStore.getAllZipBriefs() :
+      await db.query('SELECT zip, brief_json, generated_at FROM zip_briefs ORDER BY zip');
+    const summaries = rows.map(r => {
+      const b = r.brief_json || r;
+      return { zip: b.zip || r.zip, label: b.label, total: b.total, data_grade: b.data_grade, generated_at: r.generated_at || b.generated_at };
     }).filter(Boolean).sort((a,b) => (b.total||0)-(a.total||0));
     res.json({ count: summaries.length, zips: summaries });
   } catch(e) { res.status(500).json({ error: e.message }); }

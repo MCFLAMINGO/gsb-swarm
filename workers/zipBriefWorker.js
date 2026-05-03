@@ -165,8 +165,28 @@ function buildBrief(zip, businesses) {
   // ── Notable businesses (anchors) ──────────────────────────────────────────
   const notables = anchors
     .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
-    .slice(0, 5)
-    .map(b => ({ name: b.name, category: b.category, address: b.address, phone: b.phone, claimed: !!b.claimed }));
+    .slice(0, 8)
+    .map(b => ({
+      name:        b.name,
+      category:    b.category,
+      address:     b.address,
+      phone:       b.phone,
+      website:     b.website || null,
+      claimed:     !!b.claimed,
+      description: b.description || null,
+      tags:        Array.isArray(b.tags) ? b.tags : [],
+    }));
+
+  // Build a human-readable spotlight from claimed/described businesses
+  const spotlightLines = notables
+    .filter(b => b.description || b.tags.length > 0)
+    .slice(0, 3)
+    .map(b => {
+      const parts = [];
+      if (b.description) parts.push(b.description);
+      else if (b.tags.length) parts.push(`Known for: ${b.tags.slice(0,4).join(', ')}`);
+      return `${b.name}: ${parts.join(' ')}`;
+    });
 
   // ── Plain-English narrative ───────────────────────────────────────────────
   const dominantGroup = Object.entries(byGroup).sort((a, b) => b[1] - a[1])[0];
@@ -174,24 +194,18 @@ function buildBrief(zip, businesses) {
   const satList       = signals.map(s => s.group).join(', ') || 'none identified';
   const gapList       = gaps.filter(g => g.type === 'gap').map(g => g.group).join(', ') || 'none identified';
 
+  const foodCount = byGroup.food || 0;
   const narrative = [
-    `${label} (${zip}) has ${total.toLocaleString()} mapped businesses across ${Object.keys(byGroup).length} market segments.`,
-    dominantGroup
-      ? `The dominant segment is ${dominantGroup[0]} with ${dominantGroup[1]} businesses (${Math.round(dominantGroup[1]/total*100)}% of the market).`
+    `${label} (${zip}) has ${total.toLocaleString()} verified businesses.`,
+    foodCount > 0
+      ? `${foodCount} food & dining options.`
       : '',
-    topCats.length > 1
-      ? `Top categories: ${topCats.slice(0,4).map(c => `${c.cat} (${c.count})`).join(', ')}.`
+    spotlightLines.length > 0
+      ? spotlightLines.join(' ')
       : '',
-    signals.length > 0
-      ? `Saturation signals: ${satList} — these segments are well-covered relative to population.`
-      : 'No segments appear oversaturated relative to population.',
     gaps.filter(g => g.type === 'gap').length > 0
-      ? `Opportunity gaps: ${gapList} — undersupplied relative to estimated population of ${pop.toLocaleString()}.`
+      ? `Local gaps: ${gapList} — undersupplied relative to ${pop.toLocaleString()} residents.`
       : '',
-    maybeClosed > 0
-      ? `${maybeClosed} businesses flagged as possibly closed — re-verification queued.`
-      : '',
-    `Data quality: grade ${dataGrade} — avg confidence ${avgConf}%, ${coveragePct}% have phone numbers, ${Math.round(withHours/total*100)}% have hours.`,
   ].filter(Boolean).join(' ');
 
   return {
