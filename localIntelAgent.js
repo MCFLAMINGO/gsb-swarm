@@ -3452,4 +3452,136 @@ router.get('/search', async (req, res) => {
   }
 });
 
+// ── Business Profile + Tasks API ────────────────────────────────────────────
+// Internal-use endpoints for the LocalIntel enrichment + tasks layer.
+// All routes deterministic, no LLM. business_tasks table seeded by taskSeedWorker.
+
+router.get('/profile/:business_id', async (req, res) => {
+  const { business_id } = req.params;
+  if (!business_id) return res.status(400).json({ error: 'business_id required' });
+  try {
+    const biz = await db.queryOne(
+      `SELECT * FROM businesses WHERE business_id = $1`,
+      [business_id]
+    );
+    if (!biz) return res.status(404).json({ error: 'business not found' });
+
+    const tasks = await db.query(
+      `SELECT id, business_id, title, status, task_type, template_key,
+              metadata, created_at, updated_at
+         FROM business_tasks
+        WHERE business_id = $1
+        ORDER BY created_at ASC`,
+      [business_id]
+    );
+
+    const summary = { total: tasks.length, pending: 0, done: 0, skipped: 0 };
+    for (const t of tasks) {
+      if (t.status === 'pending') summary.pending++;
+      else if (t.status === 'done') summary.done++;
+      else if (t.status === 'skipped') summary.skipped++;
+    }
+
+    res.json({ business: biz, tasks, task_summary: summary });
+  } catch (e) {
+    console.error('[/profile] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/tasks/:business_id', async (req, res) => {
+  const { business_id } = req.params;
+  if (!business_id) return res.status(400).json({ error: 'business_id required' });
+  try {
+    const biz = await db.queryOne(
+      `SELECT business_id FROM businesses WHERE business_id = $1`,
+      [business_id]
+    );
+    if (!biz) return res.status(404).json({ error: 'business not found' });
+
+    const tasks = await db.query(
+      `SELECT id, business_id, title, status, task_type, template_key,
+              metadata, created_at, updated_at
+         FROM business_tasks
+        WHERE business_id = $1
+        ORDER BY created_at ASC`,
+      [business_id]
+    );
+    res.json({ business_id, tasks });
+  } catch (e) {
+    console.error('[/tasks GET] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/tasks/:business_id', express.json(), async (req, res) => {
+  const { business_id } = req.params;
+  if (!business_id) return res.status(400).json({ error: 'business_id required' });
+  const { id, title, status, task_type, template_key, metadata } = req.body || {};
+  try {
+    const biz = await db.queryOne(
+      `SELECT business_id FROM businesses WHERE business_id = $1`,
+      [business_id]
+    );
+    if (!biz) return res.status(404).json({ error: 'business not found' });
+
+    if (id) {
+      const updated = await db.queryOne(
+        `UPDATE business_tasks
+            SET title = COALESCE($3, title),
+                status = COALESCE($4, status),
+                task_type = COALESCE($5, task_type),
+                template_key = COALESCE($6, template_key),
+                metadata = COALESCE($7, metadata),
+                updated_at = NOW()
+          WHERE id = $1 AND business_id = $2
+          RETURNING *`,
+        [
+          id, business_id, title || null, status || null,
+          task_type || null, template_key || null,
+          metadata ? JSON.stringify(metadata) : null,
+        ]
+      );
+      if (!updated) return res.status(404).json({ error: 'task not found' });
+      return res.json(updated);
+    }
+
+    if (!title) return res.status(400).json({ error: 'title required' });
+    const created = await db.queryOne(
+      `INSERT INTO business_tasks (business_id, title, status, task_type, template_key, metadata)
+       VALUES ($1, $2, COALESCE($3,'pending'), COALESCE($4,'setup'), $5, $6)
+       RETURNING *`,
+      [
+        business_id, title, status || null, task_type || null,
+        template_key || null,
+        metadata ? JSON.stringify(metadata) : null,
+      ]
+    );
+    res.json(created);
+  } catch (e) {
+    console.error('[/tasks POST] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.patch('/tasks/:business_id/:task_id', express.json(), async (req, res) => {
+  const { business_id, task_id } = req.params;
+  const { status } = req.body || {};
+  if (!status) return res.status(400).json({ error: 'status required' });
+  try {
+    const updated = await db.queryOne(
+      `UPDATE business_tasks
+          SET status = $3, updated_at = NOW()
+        WHERE id = $2 AND business_id = $1
+        RETURNING *`,
+      [business_id, task_id, status]
+    );
+    if (!updated) return res.status(404).json({ error: 'task not found' });
+    res.json(updated);
+  } catch (e) {
+    console.error('[/tasks PATCH] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
