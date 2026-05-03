@@ -3363,12 +3363,40 @@ router.get('/search', async (req, res) => {
       if (filtered.length >= 2) rows = filtered;
     }
 
-    // Dedupe: same business may appear under multiple ZIPs (e.g. chain enriched from multiple sources)
-    const _seen = new Set();
+    // Dedupe: same business may appear under multiple rows from different data sources.
+    // Strategy: a row is a duplicate if ANY of these keys match a previously seen row:
+    //   1. name + phone (same biz, same number)
+    //   2. name + normalized street address (same biz, same street)
+    //   3. name + lat/lon rounded to 3dp (same biz, essentially same pin)
+    // When duplicates exist, the row with more data (wallet > claimed > website > phone) wins.
+    // Pre-sort so richest rows come first (wallet > claimed_at > website > phone > address).
+    rows.sort((a, b) => {
+      const score = r => (r.wallet ? 8 : 0) + (r.claimed_at ? 4 : 0) + (r.website ? 2 : 0) + (r.phone ? 1 : 0);
+      return score(b) - score(a);
+    });
+    const _seenPhone   = new Set();
+    const _seenAddr    = new Set();
+    const _seenLatLon  = new Set();
+    const normName = n => (n||'').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20);
+    const normAddr = a => (a||'').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,25);
+    const normPhone = p => (p||'').replace(/\D/g,'').slice(-10);
     rows = rows.filter(r => {
-      const key = `${(r.name||'').toLowerCase()}|${r.lat ? parseFloat(r.lat).toFixed(4) : ''}|${r.lon ? parseFloat(r.lon).toFixed(4) : ''}`;
-      if (_seen.has(key)) return false;
-      _seen.add(key);
+      const nm = normName(r.name);
+      const ph = normPhone(r.phone);
+      const ad = normAddr(r.address);
+      const ll = `${r.lat ? parseFloat(r.lat).toFixed(3) : 'x'}|${r.lon ? parseFloat(r.lon).toFixed(3) : 'x'}`;
+      // Phone alone is a strong unique key — two different businesses rarely share a number
+      const kPhone  = (ph && ph.length >= 10)  ? ph                 : null;
+      // Address needs name prefix to avoid false matches (e.g. strip mall same address)
+      const kAddr   = (ad && ad.length >= 6)   ? `${nm}|${ad}`      : null;
+      // Lat/lon at 3dp ~111m radius — same name at same pin = duplicate
+      const kLatLon = (r.lat && r.lon)          ? `${nm}|${ll}`      : null;
+      if (kPhone  && _seenPhone.has(kPhone))   return false;
+      if (kAddr   && _seenAddr.has(kAddr))     return false;
+      if (kLatLon && _seenLatLon.has(kLatLon)) return false;
+      if (kPhone)  _seenPhone.add(kPhone);
+      if (kAddr)   _seenAddr.add(kAddr);
+      if (kLatLon) _seenLatLon.add(kLatLon);
       return true;
     });
 
