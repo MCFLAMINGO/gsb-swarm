@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-02 (session 5 — conversational thread UI live; search.html full rewrite; category expansion, about-business queries, duplicate route, brief narratives all fixed)
+> Last updated: 2026-05-02 (session 6 — shared NL intent layer live; intentMap.js unifies web + voice; rich business cards with hours/description/price_tier; McFlamingo data updated)
 
 ---
 
@@ -270,6 +270,81 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 
 ---
 
+## Intent Layer — lib/intentMap.js
+
+**The single source of truth for NL intent resolution. Both web search and Twilio voice import this module.**
+
+`resolveIntent(text)` → `{ cat, tags, deflect, confidence }`
+- `cat` — CAT_EXPAND key (e.g. `restaurant`, `landscaping`, `healthcare`)
+- `tags` — optional filter hints (e.g. `['healthy','vegan']` for dietary queries)
+- `deflect` — true for out-of-scope: home automation, weather, flights, recipes
+- `confidence` — `'high'` (regex/NL match) | `'keyword'` (substring) | `null`
+
+**Two-pass resolution:**
+1. Regex rules — NL phrases and questions ("where should I eat", "I need a plumber")
+2. Keyword map — voice-style substring match ("lawn", "eat", "hvac")
+
+**Covers the 50 common human prompts deterministically. Zero LLM.**
+
+Adding new intent = add one entry to `intentMap.js`. Voice + web both benefit instantly.
+
+---
+
+## Payment Model (locked in)
+
+**Businesses pay micro-fees to be in the routing flow — not consumers.**
+- `$0.001–$0.05` per agent/human query routed to them (compute cost for being surfaced)
+- `0.05%–1%` on confirmed transactions (purchase, booking, RFQ accepted)
+- `wallet IS NOT NULL` = in the paid routing tier. No wallet = in DB but agents skip you.
+- x402 middleware flips from "consumer pays to query" → "business pays to be found"
+- Payment rail: Tempo mainnet pathUSD
+
+This means the claimed+wallet businesses are the product. The data layer is the engine.
+
+---
+
+## Data Layer — What's Actually In Postgres (corrected)
+
+### businesses table — key enrichment columns
+| Column | Status | Notes |
+|---|---|---|
+| `hours` | 72k rows populated (50k FL) | OSM string format `Mo-Fr 09:00-17:00` |
+| `hours_json` | Column exists, mostly null | Parse pass needed to activate "open now" |
+| `price_tier` | Column exists, mostly null | `casual` / `upscale` / `fine_dining` |
+| `services_text` | Column exists, sparse | Free text from website scrape |
+| `services_json` | Column exists, sparse | Structured services array |
+| `tags` | Populated for claimed only | TEXT[] — used for dietary/specialty filters |
+| `description` | Populated for claimed only | Business voice from website |
+| `menu_url` | Sparse | Links to menu page |
+| `wallet` | Claimed businesses only | Routing gate — no wallet = not in paid tier |
+
+### zip_intelligence — rich ZIP-level data already live
+`population`, `median_household_income`, `median_home_value`, `consumer_profile`,
+`saturation_status`, `growth_state`, `sector_counts`, `market_opportunity_score`,
+`dominant_sector`, `business_density` — all populated for FL ZIPs
+
+---
+
+## Roadmap (next sessions)
+
+### Tier 2 — Data Activation (hours + enrichment)
+1. **Parse `hours` string → `hours_json`** — one-time worker pass converts OSM strings to structured JSONB. Unlocks "open now" / "open late" answers for 72k businesses.
+2. **Populate `price_tier`** — deterministic from `category` + `tags` signals (fast_food→$, upscale_dining→$$$)
+3. **Populate `tags` for unclaimed businesses** — from `category` + `services_text` signals, no LLM
+4. **Surface `zip_intelligence` fields** in ZIP-level queries — answers WHY (income, saturation, consumer profile)
+
+### Tier 3 — Wallet Routing Priority
+1. `wallet IS NOT NULL` businesses get sort priority in results
+2. Micro-fee debit on each routing event (x402 pathUSD `$0.001–$0.05`)
+3. Transaction fee hook in RFQ confirmation (`0.05%–1%`)
+4. Dashboard shows routing revenue per ZIP
+
+### Tier 4 — "Open Now" Query Path
+Once `hours_json` is parsed: detect "open now" / "open late" / "open Sunday" in `intentMap.js`,
+compute current day/time server-side, filter `hours_json` accordingly.
+
+---
+
 ## Conversational Search — Design Philosophy
 
 LocalIntel search is built around how humans actually think and talk. A person asking "can you get me a landscaper at 205 Odoms Mill Blvd in Ponte Vedra" isn't running a database query — they're starting a conversation. They expect to follow up: "what kind of work do they do?" or "ok call them." That's the flow we support.
@@ -300,6 +375,12 @@ The data we're collecting isn't just a directory. It's the intelligence layer th
 ---
 
 ## Session History (what's been built)
+
+### gsb-swarm commits (2026-05-02, session 6)
+- `0aae74f` — feat: shared NL intent layer (lib/intentMap.js) — web + voice unified. resolveIntent() covers 50 human prompts deterministically. localIntelAgent.js and voiceIntake.js both import it. BASE_SELECT now returns hours, hours_json, price_tier, services_text. McFlamingo record updated with real website description, mcflamingo.com URL, services_text, expanded tags.
+
+### localintel-landing commits (2026-05-02, session 6)
+- `3448e72` — feat: rich business cards (description/services blurb, hours, price_tier badge) + auto-seed changed to 'Where should I eat in Ponte Vedra?' + out_of_scope deflect message
 
 ### gsb-swarm commits (2026-05-02, session 5)
 - `a7f7437` — docs: context update (session 4 close)
