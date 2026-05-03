@@ -3109,14 +3109,14 @@ router.get('/search', async (req, res) => {
       // Prefer Florida results when no ZIP given
       const zipWhere = zip ? ` AND zip = '${zip.replace(/'/g,"\'")}' ` : ` AND zip BETWEEN '32004' AND '34997' `;
       rows = await db.query(
-        BASE_SELECT + zipWhere + ` AND name ILIKE $1 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+        BASE_SELECT + zipWhere + ` AND (name ILIKE $1 OR services_text ILIKE $1 OR description ILIKE $1) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
         [`%${q}%`, limit * 2]
       );
 
       // Widen to all FL if ZIP-scoped returned nothing
       if (!rows.length && zip) {
         rows = await db.query(
-          BASE_SELECT + ` AND zip BETWEEN '32004' AND '34997' AND name ILIKE $1 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+          BASE_SELECT + ` AND zip BETWEEN '32004' AND '34997' AND (name ILIKE $1 OR services_text ILIKE $1 OR description ILIKE $1) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
           [`%${q}%`, limit * 2]
         );
       }
@@ -3129,7 +3129,7 @@ router.get('/search', async (req, res) => {
           .sort((a,b) => b.length - a.length); // longest first = most specific
         for (const tok of tokens) {
           const r = await db.query(
-            BASE_SELECT + ` AND zip BETWEEN '32004' AND '34997' AND name ILIKE $1 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+            BASE_SELECT + ` AND zip BETWEEN '32004' AND '34997' AND (name ILIKE $1 OR services_text ILIKE $1 OR description ILIKE $1) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
             [`%${tok}%`, limit * 2]
           );
           if (r.length) { rows = r; break; }
@@ -3228,7 +3228,13 @@ router.get('/search', async (req, res) => {
       } catch(_) {}
     }
 
-    // ── Tier 3: Wallet priority — handled in SQL ORDER BY (wallet IS NOT NULL) DESC. Postgres is king.
+    // ── Tier 3: Wallet priority — re-apply after proximity sort (stable, preserves distance within each tier)
+    if (rows.length > 1) {
+      // Stable sort: wallet businesses float to top, distance order preserved within each tier
+      const withWallet    = rows.filter(r => r.wallet);
+      const withoutWallet = rows.filter(r => !r.wallet);
+      rows = [...withWallet, ...withoutWallet];
+    }
     // ── Tier 4: Open-now filter ────────────────────────────────────
     // If the query contains open-now/late/early intent AND we have hours_json data,
     // filter to only open businesses. Fall back to full list if filter leaves < 3.
@@ -3283,6 +3289,15 @@ router.get('/search', async (req, res) => {
       // Only apply filter if it returns meaningful results; otherwise keep full list
       if (filtered.length >= 2) rows = filtered;
     }
+
+    // Dedupe: same business may appear under multiple ZIPs (e.g. chain enriched from multiple sources)
+    const _seen = new Set();
+    rows = rows.filter(r => {
+      const key = `${(r.name||'').toLowerCase()}|${r.lat ? parseFloat(r.lat).toFixed(4) : ''}|${r.lon ? parseFloat(r.lon).toFixed(4) : ''}`;
+      if (_seen.has(key)) return false;
+      _seen.add(key);
+      return true;
+    });
 
     const results = rows.slice(0, limit).map(r => ({
       name:          r.name,
