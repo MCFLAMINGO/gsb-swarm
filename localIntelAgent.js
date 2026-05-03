@@ -3918,7 +3918,6 @@ router.get('/menu/:business_id', async (req, res) => {
     const invRes = await fetch(`${_BASALT_BASE}/api/inventory`, {
       headers: {
         'Ocp-Apim-Subscription-Key': apiKey,
-        'x-merchant-wallet':         biz.wallet,
       },
     });
     if (!invRes.ok) {
@@ -3997,7 +3996,7 @@ router.post('/place-order', express.json(), async (req, res) => {
         'Ocp-Apim-Subscription-Key': apiKey,
         'Content-Type':              'application/json',
       },
-      body: JSON.stringify({ items: [{ sku, qty: Number(qty) || 1 }] }),
+      body: JSON.stringify({ items: [{ sku, qty: Number(qty) || 1 }], jurisdictionCode: 'US-FL' }),
     });
     if (!orderRes.ok) {
       const text = await orderRes.text().catch(() => '');
@@ -4006,12 +4005,11 @@ router.post('/place-order', express.json(), async (req, res) => {
     }
     const data       = await orderRes.json();
     const receiptId  = data?.receipt?.receiptId || data?.receiptId;
-    const portalLink = data?.portalLink || '';
-    const paymentUrl = portalLink.split(', ').pop().trim();
-    if (!receiptId || !paymentUrl) {
-      console.error('[place-order] missing receiptId/paymentUrl', data);
-      return res.status(502).json({ error: 'order created but no payment URL returned' });
+    if (!receiptId) {
+      console.error('[place-order] missing receiptId', data);
+      return res.status(502).json({ error: 'order created but no receiptId returned' });
     }
+    const paymentUrl = `https://surge.basalthq.com/portal/${receiptId}?recipient=0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED&embedded=1&correlationId=${receiptId}`;
 
     // Log to usage_ledger — non-blocking on failure
     try {
