@@ -796,3 +796,19 @@ After payment confirmed:
 
 **Terminal endpoint `POST /api/receipts/terminal`** is JWT/admin only — not callable via developer API.
 Use polling or postMessage only for status confirmation.
+
+---
+
+## Patches Applied 2026-05-03 (session 11 — Basalt API correctness pass)
+
+Three fixes to the agentic order flow in `localIntelAgent.js` (commit `7aab661`):
+
+1. **Removed `x-merchant-wallet` header from menu fetch** — APIM resolves merchant wallet from the subscription key automatically. Sending the header causes 403. Inventory call now sends only `Ocp-Apim-Subscription-Key`.
+2. **Canonical `paymentUrl` construction** — no longer parses `portalLink` from the order response. Always built from `receiptId`:
+   ```js
+   const paymentUrl = `https://surge.basalthq.com/portal/${receiptId}?recipient=0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED&embedded=1&correlationId=${receiptId}`;
+   ```
+   Uses LocalIntel routing wallet `0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED` and `embedded=1` for iframe mode.
+3. **`jurisdictionCode: 'US-FL'` added to POST `/api/orders` body** — required for all McFlamingo orders. Body shape is now `{ items: [{sku, qty}], jurisdictionCode: 'US-FL' }`.
+
+Frontend (localintel-landing) was upgraded to embedded iframe with PostMessage origin verification (`event.origin !== 'https://surge.basalthq.com'`), handling `gateway-card-success`, `gateway-card-cancel`, and `gateway-preferred-height`. Falls back to new tab if iframe load fails (CSP).
