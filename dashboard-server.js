@@ -6362,11 +6362,35 @@ app.post('/api/voice/process', express.urlencoded({ extended: false }), async (r
 // ────────────────────────────────────────────────────────────────────────────
 
 async function handleSmsInbound(req, res) {
+  const from = req.body.From || req.body.from || '';
+  const body = (req.body.Body || req.body.body || '').trim();
+
+  // ── Task dispatch reply check (FIRST) ─────────────────────────────────────
+  // If this SMS is a YES/NO/DONE/FAIL reply from a registered agent, the task
+  // dispatch layer claims it and we respond with TwiML inline. Falls through
+  // to existing RFQ logic below if not a task reply.
+  if (from && body) {
+    try {
+      const { handleAgentReply } = require('./lib/taskDispatch');
+      const taskResult = await handleAgentReply(from, body);
+      if (taskResult) {
+        res.set('Content-Type', 'text/xml');
+        const replyMsg = taskResult.reply
+          ? `<Message>${String(taskResult.reply).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</Message>`
+          : '';
+        res.send(`<?xml version="1.0" encoding="UTF-8"?><Response>${replyMsg}</Response>`);
+        console.log(`[sms-inbound] task dispatch handled action=${taskResult.action} from=${from}`);
+        return;
+      }
+    } catch (taskErr) {
+      console.error('[sms-inbound] taskDispatch handleAgentReply error:', taskErr.message);
+      // fall through to existing RFQ flow — never block
+    }
+  }
+
   res.set('Content-Type', 'text/xml');
   res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
 
-  const from = req.body.From || req.body.from || '';
-  const body = (req.body.Body || req.body.body || '').trim();
   if (!from || !body) return;
 
   console.log(`[sms-inbound] From: ${from} | Body: ${body}`);

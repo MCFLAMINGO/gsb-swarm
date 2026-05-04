@@ -100,6 +100,7 @@ const db = require('./lib/db');
 const { resolveIntent, detectOpenIntent } = require('./lib/intentMap');
 const { isOpenNow } = require('./workers/hoursParseWorker');
 const { classifyIntent } = require('./workers/intentRouter');
+const { dispatchTask } = require('./lib/taskDispatch');
 const apiKeyMiddleware = createApiKeyMiddleware(db);
 
 // Phase 2 — multi-ZIP fanout when caller doesn't pin a ZIP
@@ -479,6 +480,27 @@ router.post('/', async (req, res) => {
                 coverage:      '113,684 businesses — Florida statewide',
               },
             });
+          }
+          // 0 rows from Phase 2 → dispatch as a task to the agent network.
+          // ORDER_ITEM intent stays out of the dispatch loop (Basalt order flow handles it).
+          if (intent && intent.type !== 'ORDER_ITEM') {
+            try {
+              const task = await dispatchTask(intent, query, zip);
+              return res.json({
+                ok: true,
+                taskCreated: true,
+                taskId: task.task_id,
+                message: `We're on it — looking for "${query}" in ${zip || 'your area'}. You'll hear back shortly.`,
+                businesses: [],
+                results: [],
+                total: 0,
+                returned: 0,
+                meta: { source: 'task_dispatch' },
+              });
+            } catch (taskErr) {
+              console.error('[taskDispatch] failed to create task:', taskErr.message);
+              // Fall through to normal empty/legacy response — never block the user.
+            }
           }
           // 0 rows → fall through to legacy ILIKE path below
         } catch (phase2Err) {
