@@ -2929,8 +2929,18 @@ function detectServiceRequest(raw) {
 // "order me chicken and broccoli on rice at McFlamingo"
 // "order [item] from [biz]" / "I want [item] from [biz]" / "I'd like [item] at [biz]"
 // "get me [item] from [biz]" / "can I get [item] from [biz]" / "bring me [item] from [biz]"
-const _ORDER_ITEM_RE = /\border(?:\s+me)?\s+(.+?)\s+(?:from|at)\s+(.+?)(?:\s+(?:in|near)\s+.+)?$/i;
+const _ORDER_ITEM_RE = /(?:\border(?:\s+me)?\s+|\bI(?:'d|\s+would)\s+like\s+|\bI\s+want\s+|\bget\s+me\s+|\bcan\s+I\s+(?:get|order)\s+)(?:a\s+|an\s+|some\s+)?(.+?)\s+(?:from|at)\s+(.+?)(?:\s+(?:in|near)\s+.+)?$/i;
 const _WANT_ITEM_RE  = /\b(?:i(?:'d| would)?(?:\s+like)?|(?:can|could)\s+i(?:\s+get)?|get\s+me|bring\s+me)\s+(.+?)\s+(?:from|at)\s+(.+?)$/i;
+
+// Item-only (no business yet) — used for two-turn pending intent flow.
+const _ORDER_ITEM_PARTIAL_RE = /(?:\border(?:\s+me)?\s+|\bI(?:'d|\s+would)\s+like\s+|\bI\s+want\s+|\bget\s+me\s+|\bcan\s+I\s+(?:get|order)\s+)(?:a\s+|an\s+|some\s+)?(.+?)(?:\s+(?:in|near)\s+.+)?$/i;
+// "at McFlamingo" / "from McFlamingo" — resolves a pending order intent.
+const _AT_BIZ_RE = /^(?:at|from)\s+(.+?)(?:\s+(?:in|near)\s+.+)?$/i;
+
+// Pending ORDER_ITEM intents awaiting business name — keyed by sessionId.
+// 5-minute TTL; stored entries: { item, ts }.
+const _pendingOrderIntent = new Map();
+const _PENDING_ORDER_TTL_MS = 300_000;
 
 function detectOrderItemIntent(raw) {
   if (!raw) return { isOrderItem: false, itemQuery: null, bizName: null };
@@ -2962,6 +2972,55 @@ function detectOrderItemIntent(raw) {
     return { isOrderItem: false, itemQuery: null, bizName: null };
   }
   return { isOrderItem: true, itemQuery, bizName };
+}
+
+// Partial: caller said an item but no business yet. Used to set up a pending
+// two-turn intent ("order chicken" → "which restaurant?" → "from McFlamingo").
+function detectOrderItemPartial(raw) {
+  if (!raw) return { isPartial: false, itemQuery: null };
+  const trimmed = raw.trim();
+  // Don't treat full matches as partial — caller should check full first.
+  if (_ORDER_ITEM_RE.test(trimmed) || _WANT_ITEM_RE.test(trimmed)) {
+    return { isPartial: false, itemQuery: null };
+  }
+  // Skip routing-only phrases.
+  const routingOnly = /^\s*(?:i(?:'d| would| wanna| want to| 'd like to| would like to)?\s+(?:like\s+to\s+)?)?(?:place\s+an?\s+order|order(?:\s+(?:some\s+)?food)?|get\s+(?:some\s+)?food|grab\s+(?:some\s+)?food|food)\s*$/i;
+  if (routingOnly.test(trimmed)) return { isPartial: false, itemQuery: null };
+
+  const m = trimmed.match(_ORDER_ITEM_PARTIAL_RE);
+  if (!m) return { isPartial: false, itemQuery: null };
+  let itemQuery = (m[1] || '')
+    .replace(/[?.!,]+$/, '')
+    .replace(/\s+(?:please|now|today|tonight)$/i, '')
+    .trim();
+  if (!itemQuery || itemQuery.length < 2) return { isPartial: false, itemQuery: null };
+  // Reject pure routing words.
+  if (/^(?:food|some\s+food)$/i.test(itemQuery)) return { isPartial: false, itemQuery: null };
+  return { isPartial: true, itemQuery };
+}
+
+function detectAtBiz(raw) {
+  if (!raw) return { isAtBiz: false, bizName: null };
+  const m = raw.trim().match(_AT_BIZ_RE);
+  if (!m) return { isAtBiz: false, bizName: null };
+  let bizName = (m[1] || '')
+    .replace(/\s+(?:please|now|today|tonight)\.?\s*$/i, '')
+    .replace(/\s+in\s+\d{5}\s*$/i, '')
+    .replace(/[?.!,]+$/, '')
+    .trim();
+  if (!bizName || bizName.length < 2) return { isAtBiz: false, bizName: null };
+  return { isAtBiz: true, bizName };
+}
+
+function _getPendingOrderIntent(sessionId) {
+  if (!sessionId) return null;
+  const entry = _pendingOrderIntent.get(sessionId);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > _PENDING_ORDER_TTL_MS) {
+    _pendingOrderIntent.delete(sessionId);
+    return null;
+  }
+  return entry;
 }
 
 // ── ORDER intent: route "order food from X" → focused order CTA ───────────────
@@ -3018,50 +3077,83 @@ router.get('/search', async (req, res) => {
     // fetch the menu and fuzzy-match. Checked BEFORE generic order-routing so
     // "order chicken and broccoli at McFlamingo" returns an item-search intent
     // (not the simple routing card).
+    //
+    // Two-turn flow: if only the item is given, we store a pending intent keyed
+    // by sessionId and ask which restaurant. The next message ("at McFlamingo")
+    // is resolved against the pending intent.
+    const sessionId = (req.headers['x-session-id'] || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || '').toString().split(',')[0].trim() || null;
+
+    const _resolveOrderItem = async (itemQuery, bizName) => {
+      const nameLike = `%${bizName}%`;
+      let bizRows = [];
+      if (zip) {
+        bizRows = await db.query(
+          `SELECT business_id, name, zip
+             FROM businesses
+            WHERE status != 'inactive'
+              AND name ILIKE $1
+              AND zip = $2
+            ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+            LIMIT 1`,
+          [nameLike, zip]
+        );
+      }
+      if (!bizRows.length) {
+        bizRows = await db.query(
+          `SELECT business_id, name, zip
+             FROM businesses
+            WHERE status != 'inactive'
+              AND name ILIKE $1
+              AND zip BETWEEN '32004' AND '34997'
+            ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+            LIMIT 1`,
+          [nameLike]
+        );
+      }
+      if (!bizRows.length) {
+        return res.json({
+          intent: 'order_not_found',
+          message: `I couldn't find '${bizName}' in this area.`,
+          latency_ms: Date.now() - t0,
+        });
+      }
+      const b = bizRows[0];
+      return res.json({
+        intent:        'order_item_search',
+        business_id:   b.business_id,
+        business_name: b.name,
+        item_query:    itemQuery,
+        message:       `Looking up ${b.name}'s menu for '${itemQuery}'...`,
+        latency_ms:    Date.now() - t0,
+      });
+    };
+
     if (raw) {
       const itemDetect = detectOrderItemIntent(raw);
       if (itemDetect.isOrderItem) {
-        const nameLike = `%${itemDetect.bizName}%`;
-        let bizRows = [];
-        if (zip) {
-          bizRows = await db.query(
-            `SELECT business_id, name, zip
-               FROM businesses
-              WHERE status != 'inactive'
-                AND name ILIKE $1
-                AND zip = $2
-              ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
-              LIMIT 1`,
-            [nameLike, zip]
-          );
+        if (sessionId) _pendingOrderIntent.delete(sessionId);
+        return _resolveOrderItem(itemDetect.itemQuery, itemDetect.bizName);
+      }
+
+      // Business-only follow-up resolves a pending item.
+      const atBiz = detectAtBiz(raw);
+      if (atBiz.isAtBiz) {
+        const pending = _getPendingOrderIntent(sessionId);
+        if (pending) {
+          _pendingOrderIntent.delete(sessionId);
+          return _resolveOrderItem(pending.item, atBiz.bizName);
         }
-        if (!bizRows.length) {
-          bizRows = await db.query(
-            `SELECT business_id, name, zip
-               FROM businesses
-              WHERE status != 'inactive'
-                AND name ILIKE $1
-                AND zip BETWEEN '32004' AND '34997'
-              ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
-              LIMIT 1`,
-            [nameLike]
-          );
-        }
-        if (!bizRows.length) {
-          return res.json({
-            intent: 'order_not_found',
-            message: `I couldn't find '${itemDetect.bizName}' in this area.`,
-            latency_ms: Date.now() - t0,
-          });
-        }
-        const b = bizRows[0];
+      }
+
+      // Item-only: store pending intent and ask which restaurant.
+      const partial = detectOrderItemPartial(raw);
+      if (partial.isPartial && sessionId) {
+        _pendingOrderIntent.set(sessionId, { item: partial.itemQuery, ts: Date.now() });
         return res.json({
-          intent:        'order_item_search',
-          business_id:   b.business_id,
-          business_name: b.name,
-          item_query:    itemDetect.itemQuery,
-          message:       `Looking up ${b.name}'s menu for '${itemDetect.itemQuery}'...`,
-          latency_ms:    Date.now() - t0,
+          intent: 'ORDER_ITEM_PARTIAL',
+          item_query: partial.itemQuery,
+          message: `Which restaurant would you like ${partial.itemQuery} from?`,
+          latency_ms: Date.now() - t0,
         });
       }
     }
