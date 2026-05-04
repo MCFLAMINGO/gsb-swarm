@@ -813,3 +813,4 @@ Frontend (localintel-landing) was upgraded to embedded iframe with PostMessage o
 
 - `f31444d` — fix: fault-tolerant ensureSchema (per-stmt catch), migration_002 dollar-quoting
 - `d18c59a` — feat: broader ORDER_ITEM regex + pending session intent
+- `44a8348` — fix: agentic order routes use surgeAgent per-biz key (not global env var)
