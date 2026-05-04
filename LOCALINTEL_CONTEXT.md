@@ -1014,3 +1014,51 @@ Tidal Q&A) can share the same registry without re-importing the entire
 agent module. The Phase 2 `KEYWORD_CATEGORY_MAP` in
 `workers/intentRouter.js` is a candidate to fold into the same registry,
 but that consolidation is a separate follow-up.
+
+## ADR-001: Phases 2-4 Parallel System Mistake (May 2026)
+
+**What happened:**
+Phases 2-4 were built as a parallel system alongside the live handler instead of improving it. `classifyIntent` and `KEYWORD_CATEGORY_MAP` landed in `localIntelTidalTools.js` — the wrong file — and were never wired to `router.post('/')`. `buildMatchReason` was built but not called. `dispatchTask` was built but the 0-result fallback was never connected. The result was dead code that cost credits and left the live handler unchanged.
+
+**Why it happened:**
+Each phase was scoped and implemented in isolation without reading the live handler first. The correct approach is always: read the live system, understand the single code path, then enhance it in place.
+
+**How it was corrected (Step 1 merge — commits 13b054d + 0fd6172):**
+- `NL_INTENT_MAP` in `localIntelAgent.js` expanded with `taskClass` on every entry + 21 new cuisine/bar/utility rules
+- Cuisine SQL filter added to the live ILIKE query
+- tsvector fallback (`search_vector @@ to_tsquery`) added on 0 ILIKE results
+- `dispatchTask` wired non-blocking on subsequent 0 results (skips ORDER/STATUS intents)
+- `buildMatchReason` applied to every result with try/catch fallback
+- Response `meta` now exposes `intent_class`, `intent_group`, `intent_cuisine`, `ts_fallback`
+- `classifyIntent` in `localIntelTidalTools.js` was confirmed as the `/ask` Q&A router (line 1239) — NOT dead code — intentionally preserved
+
+**Spec deviations caught during merge (document for future sessions):**
+- Table is `businesses`, not `local_businesses`
+- No `services_text` column — ILIKE runs on `description` instead
+- No `distance` column — ordering uses `ts_rank` matching the existing Phase 2 helper
+
+**Rule going forward:**
+> Always read the live handler before writing any new code. One system. Enhance in place. Never build parallel.
+
+## North Star: W5 Intent Reasoning (Who / What / When / Where / How / Why)
+
+Every user query is a task expression with five dimensions. LocalIntel must eventually resolve all five — not just category matching.
+
+| Dimension | Current State | Target State |
+|---|---|---|
+| **What** | taskClass (DISCOVER/ORDER/STATUS) in NL_INTENT_MAP | Full task class registry in `lib/intentRegistry.js` |
+| **Where** | ZIP detection, proximity sort | Named place, geofenced zones, travel radius |
+| **When** | isOpenNow pre-check on ORDER | Temporal intent: "happy hour", "Sunday brunch", "late night", scheduled tasks |
+| **Who** | Stateless — no customer identity | Customer profile + task history in Postgres; personalized ranking |
+| **How** | DISCOVER → results, ORDER → Surge | Resolution path per task class: RESERVE → reservation agent, COMPARE → aggregate, QUOTE → dispatch |
+| **Why** | dispatchTask fires on 0 results | Gap detection: log unresolved intents → surface acquisition targets |
+
+**Roadmap:**
+- **Step 2 (next session):** Extract combined NL_INTENT_MAP into `lib/intentRegistry.js` — taskClass as first-class field, one front door for all future intent growth
+- **Step 3:** Resolution history table in Postgres — every resolved task writes a signal back; system knows its own failure rate
+- **Step 4:** Temporal intent — `temporalContext` field on registry entries; time-aware SQL filter against business hours
+- **Step 5:** Customer profile + relationship graph — `task_history` table; personalized ranking
+- **Step 6:** Resolution path per task class — registry owns the routing, handler just reads it
+- **Step 7:** Gap detection — unresolved `dispatchTask` calls aggregated into acquisition intelligence
+
+**The moat:** Every resolved task = enrichment signal. Every unresolved task = gap signal. Postgres holds both. The graph deepens with every query.
