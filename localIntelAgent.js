@@ -99,7 +99,78 @@ const { createApiKeyMiddleware } = require('./lib/apiKeyMiddleware');
 const db = require('./lib/db');
 const { resolveIntent, detectOpenIntent } = require('./lib/intentMap');
 const { isOpenNow } = require('./workers/hoursParseWorker');
+const { classifyIntent } = require('./workers/intentRouter');
 const apiKeyMiddleware = createApiKeyMiddleware(db);
+
+// Phase 2 — multi-ZIP fanout when caller doesn't pin a ZIP
+const TARGET_ZIPS = ['32082','32081','32250','32266','32233','32259','32034'];
+
+// Coerce hours from row → object so isOpenNow can read it. The DB can hand back
+// either a JSON string (jsonb-as-text) or a parsed object depending on the column.
+function _parseHours(h) {
+  if (!h) return null;
+  if (typeof h === 'object') return h;
+  try { return JSON.parse(h); } catch (_) { return null; }
+}
+
+// Phase 2 — category-filter search. Returns flat array (db.query returns array).
+async function searchByCategory(intent, zip, limit = 50) {
+  const cats = intent.categories;
+  const zips = (!zip || zip === 'all') ? TARGET_ZIPS : [zip];
+  const sql = `
+    SELECT
+      business_id, name, address, city, zip, phone, website,
+      hours, category, category_group, tags, description,
+      confidence_score AS confidence, lat, lon, sunbiz_doc_number,
+      claimed_at IS NOT NULL AS claimed,
+      wallet,
+      pos_config->>'pos_type' AS pos_type,
+      CASE WHEN wallet IS NOT NULL THEN 1 ELSE 0 END AS has_wallet
+    FROM businesses
+    WHERE status != 'inactive'
+      AND zip = ANY($1::text[])
+      AND category = ANY($2::text[])
+    ORDER BY has_wallet DESC, confidence_score DESC, name ASC
+    LIMIT $3
+  `;
+  const rows = await db.query(sql, [zips, cats, limit]);
+  if (intent.needsOpenNow) {
+    return rows.filter(r => {
+      const parsed = _parseHours(r.hours);
+      const open   = isOpenNow(parsed);
+      // Treat unknown (null) as "maybe open" so we don't hide everything
+      return open === null || open === true;
+    });
+  }
+  return rows;
+}
+
+// Phase 2 — tsvector full-text search.
+async function searchByText(query, zip, limit = 50) {
+  const tokens = String(query || '').trim().toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+  if (!tokens.length) return [];
+  const tsq = tokens.join(' & ');
+  const zips = (!zip || zip === 'all') ? TARGET_ZIPS : [zip];
+  const sql = `
+    SELECT
+      business_id, name, address, city, zip, phone, website,
+      hours, category, category_group, tags, description,
+      confidence_score AS confidence, lat, lon, sunbiz_doc_number,
+      claimed_at IS NOT NULL AS claimed,
+      wallet,
+      pos_config->>'pos_type' AS pos_type,
+      ts_rank(search_vector, to_tsquery('english', $2)) AS rank,
+      CASE WHEN wallet IS NOT NULL THEN 1 ELSE 0 END AS has_wallet
+    FROM businesses
+    WHERE status != 'inactive'
+      AND zip = ANY($1::text[])
+      AND search_vector @@ to_tsquery('english', $2)
+    ORDER BY has_wallet DESC, rank DESC, confidence_score DESC
+    LIMIT $3
+  `;
+  return db.query(sql, [zips, tsq, limit]);
+}
 
 // ── x402 payment config ───────────────────────────────────────────────
 // TREASURY receives USDC on Base mainnet.
@@ -316,6 +387,55 @@ router.post('/', async (req, res) => {
 
   try {
     const db = require('./lib/db');
+
+    // ── Phase 2 — intent-aware search bar path ──────────────────────────────
+    // Only kicks in for free-text queries (no explicit category/group filter).
+    // ORDER_ITEM falls through to the legacy handler (Basalt order flow lives there).
+    if (query && !category && !group) {
+      const intent = classifyIntent(query);
+      if (intent.type === 'CATEGORY_SEARCH' || intent.type === 'TEXT_SEARCH') {
+        try {
+          const lim = Math.min(Number(limit) || 50, 200);
+          const phase2Rows = intent.type === 'CATEGORY_SEARCH'
+            ? await searchByCategory(intent, zip, lim)
+            : await searchByText(intent.raw, zip, lim);
+
+          if (phase2Rows && phase2Rows.length > 0) {
+            const enriched = phase2Rows.map(r => {
+              const out = { ...r };
+              if (r.pos_type === 'other' && r.wallet) {
+                out.ucp_order_url = 'https://surge.basalthq.com/api/ucp/checkout-sessions';
+                out.ucp_wallet    = r.wallet;
+                out.ucp_note      = 'POST ucp_order_url with shopSlug resolved via GET https://surge.basalthq.com/api/directory/shops?q=' + encodeURIComponent(r.name);
+              }
+              delete out.pos_type;
+              delete out.has_wallet;
+              return out;
+            });
+            return res.json({
+              ok:       true,
+              total:    enriched.length,
+              returned: enriched.length,
+              zips:     zip ? [zip] : TARGET_ZIPS,
+              results:  enriched,
+              meta: {
+                source:        'postgres+intent',
+                intent_type:   intent.type,
+                categories:    intent.categories || null,
+                needs_open:    !!intent.needsOpenNow,
+                matched_keyword: intent.matchedKeyword || null,
+                coverage:      '113,684 businesses — Florida statewide',
+              },
+            });
+          }
+          // 0 rows → fall through to legacy ILIKE path below
+        } catch (phase2Err) {
+          console.error('[local-intel phase2 search]', phase2Err.message);
+          // fall through to legacy path
+        }
+      }
+    }
+
     // ── Resolve NL intent ────────────────────────────────────────────────────
     const nlIntent = (!group && !category) ? resolveNlIntent(query) : { group: null, tags: null };
     const effectiveGroup = group || nlIntent.group;

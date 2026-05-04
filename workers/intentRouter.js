@@ -348,4 +348,142 @@ function route(query) {
   };
 }
 
-module.exports = { route, detectVertical, detectZip, detectRegion, rankZipsForVertical, detectIntent };
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 2 — Local search engine intent classifier
+// Deterministic keyword → category map for the consumer search bar. Zero LLM.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const KEYWORD_CATEGORY_MAP = {
+  // Drinks & alcohol
+  whiskey: ['bar','liquor_store'], bourbon: ['bar','liquor_store'],
+  cocktail: ['bar'], cocktails: ['bar'], beer: ['bar','liquor_store'],
+  wine: ['bar','liquor_store','restaurant'], spirits: ['bar','liquor_store'],
+  liquor: ['liquor_store','bar'], alcohol: ['liquor_store','bar'],
+  drinks: ['bar','cafe','restaurant'], nightcap: ['bar'],
+  // Coffee
+  coffee: ['cafe','coffee_chain'], espresso: ['cafe'], latte: ['cafe'],
+  cappuccino: ['cafe'], 'cold brew': ['cafe'],
+  // Food — general
+  food: ['restaurant','fast_food','cafe'], eat: ['restaurant','fast_food'],
+  lunch: ['restaurant','fast_food','cafe'], dinner: ['restaurant'],
+  breakfast: ['cafe','restaurant'], brunch: ['cafe','restaurant'],
+  snack: ['cafe','convenience','fast_food'],
+  // Food — specific
+  pizza: ['restaurant','fast_food'], burger: ['restaurant','fast_food'],
+  burgers: ['restaurant','fast_food'], tacos: ['restaurant','fast_food'],
+  sushi: ['restaurant'], chinese: ['restaurant'], thai: ['restaurant'],
+  indian: ['restaurant'], italian: ['restaurant'], mexican: ['restaurant'],
+  seafood: ['restaurant'], bbq: ['restaurant'], barbecue: ['restaurant'],
+  wings: ['restaurant','fast_food'], sandwich: ['restaurant','fast_food','cafe'],
+  salad: ['restaurant','cafe'], soup: ['restaurant','cafe'],
+  // Groceries & convenience
+  groceries: ['grocery','supermarket'], grocery: ['grocery','supermarket'],
+  milk: ['grocery','convenience'], bread: ['grocery','convenience'],
+  eggs: ['grocery','convenience'], snacks: ['grocery','convenience'],
+  'toilet paper': ['grocery','convenience'], 'paper towels': ['grocery','convenience'],
+  'laundry detergent': ['grocery','supermarket'], cleaning: ['grocery','convenience'],
+  toiletries: ['grocery','pharmacy','convenience'],
+  // Pharmacy & health
+  pharmacy: ['pharmacy'], prescription: ['pharmacy'], meds: ['pharmacy'],
+  medicine: ['pharmacy'], vitamins: ['pharmacy','grocery'],
+  bandaids: ['pharmacy'], firstaid: ['pharmacy'],
+  // Hardware & home repair
+  hardware: ['hardware'], tools: ['hardware'], lumber: ['hardware'],
+  plumbing: ['hardware','plumber'], drywall: ['hardware'],
+  paint: ['hardware'], lightbulb: ['hardware','grocery','convenience'],
+  batteries: ['hardware','grocery','convenience'], drill: ['hardware'],
+  screws: ['hardware'], 'nails': ['hardware'],
+  // Auto
+  gas: ['gas_station'], gasoline: ['gas_station'], fuel: ['gas_station'],
+  'oil change': ['automotive','car_repair'], tires: ['automotive','car_repair'],
+  mechanic: ['car_repair','automotive'], carwash: ['car_wash'],
+  // Pet
+  'dog food': ['pet','veterinary'], 'cat food': ['pet','veterinary'],
+  'pet food': ['pet','veterinary'], 'pet supplies': ['pet'],
+  vet: ['veterinary'], veterinary: ['veterinary'],
+  // Beauty & wellness
+  haircut: ['hairdresser','beauty'], salon: ['beauty','hairdresser'],
+  spa: ['wellness','beauty'], massage: ['wellness'],
+  // Laundry
+  laundry: ['laundry'], 'dry cleaning': ['laundry'], drycleaning: ['laundry'],
+  // Bank & ATM
+  atm: ['bank'], cash: ['bank'], bank: ['bank'],
+  // Florist
+  flowers: ['florist'], florist: ['florist'],
+  // Fitness
+  gym: ['fitness','fitness_centre'], workout: ['fitness','fitness_centre'],
+  // Urgent home
+  plumber: ['plumber'], electrician: ['electrician'], hvac: ['hvac'],
+  locksmith: ['locksmith'],
+};
+
+// Pre-compute keyword list sorted by length desc so multi-word keys win
+const _KEYWORD_KEYS_SORTED = Object.keys(KEYWORD_CATEGORY_MAP)
+  .sort((a, b) => b.length - a.length);
+
+// Lightweight ORDER_ITEM detector — mirrors the (looser) regex in localIntelAgent
+// so callers can short-circuit before the heavier flow runs there.
+const _ORDER_ITEM_HINT = /(?:\border(?:\s+me)?\s+|\bI(?:'d|\s+would)\s+like\s+|\bI\s+want\s+|\bget\s+me\s+|\bcan\s+I\s+(?:get|order)\s+)/i;
+
+const _NEEDS_OPEN_RE = /\b(right now|open now|open right now|currently open|near me|nearby|tonight|now)\b/i;
+
+/**
+ * classifyIntent(query) →
+ *   { type: 'ORDER_ITEM', raw }
+ *   | { type: 'CATEGORY_SEARCH', categories, cuisines, needsOpenNow, raw }
+ *   | { type: 'TEXT_SEARCH', raw }
+ */
+function classifyIntent(query) {
+  const raw = String(query || '');
+  const q   = raw.toLowerCase().trim();
+
+  if (!q) return { type: 'TEXT_SEARCH', raw };
+
+  // 1) ORDER_ITEM short-circuit — keep Basalt order flow intact
+  if (_ORDER_ITEM_HINT.test(raw)) {
+    return { type: 'ORDER_ITEM', raw };
+  }
+
+  // 2) Keyword → category lookup, longest match wins
+  let matched = null;
+  for (const kw of _KEYWORD_KEYS_SORTED) {
+    const idx = q.indexOf(kw);
+    if (idx === -1) continue;
+    // word-boundary-ish: char before/after must NOT be alphanumeric
+    const before = idx === 0 ? '' : q[idx - 1];
+    const after  = idx + kw.length === q.length ? '' : q[idx + kw.length];
+    if (before && /[a-z0-9]/.test(before)) continue;
+    if (after && /[a-z0-9]/.test(after)) continue;
+    matched = kw;
+    break;
+  }
+
+  if (matched) {
+    const categories = KEYWORD_CATEGORY_MAP[matched].slice();
+    const hour = new Date().getHours();
+    const lateNightCats = categories.includes('bar') || categories.includes('liquor_store');
+    const needsOpenNow = _NEEDS_OPEN_RE.test(q) || (lateNightCats && hour >= 21);
+    return {
+      type: 'CATEGORY_SEARCH',
+      categories,
+      cuisines: [],
+      needsOpenNow,
+      matchedKeyword: matched,
+      raw,
+    };
+  }
+
+  // 3) Fallback — full-text search
+  return { type: 'TEXT_SEARCH', raw };
+}
+
+module.exports = {
+  route,
+  detectVertical,
+  detectZip,
+  detectRegion,
+  rankZipsForVertical,
+  detectIntent,
+  classifyIntent,
+  KEYWORD_CATEGORY_MAP,
+};
