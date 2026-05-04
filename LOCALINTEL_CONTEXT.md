@@ -267,6 +267,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 ## Architecture Decisions (locked in — don't revisit)
 
 - **Phase 1 search foundation**: `search_vector` tsvector GIN index on businesses, `cuisine` column, `searchVectorBackfillWorker` runs on startup. Builder is `businesses_search_vector_build(name, category, description, services_text, tags, cuisine)` — weights A/B/B/C/C/D. Migration `migrations/005_search_vector.sql`; `lib/dbMigrate.js` now scans both `db/` and `migrations/`.
+- **Phase 2 search**: `classifyIntent()` in `workers/intentRouter.js` (deterministic, zero LLM) → `CATEGORY_SEARCH` (category filter + isOpenNow when needed) or `TEXT_SEARCH` (tsvector `ts_rank`). Wired into `POST /api/local-intel`. `ORDER_ITEM` intent passes through to legacy handler so Basalt order flow is untouched. Fallback to ILIKE on 0 results. `has_wallet` boost in both paths. Multi-ZIP fanout across `['32082','32081','32250','32266','32233','32259','32034']` when no ZIP pinned.
 - **No LLM on the hot path** — zero LLM API calls for LocalIntel intelligence. Deterministic vocabulary scoring only.
 - **Postgres is king** — all state lives in Postgres. No in-memory state across requests.
 - **`db.query()` returns array directly** — never `.rows`. This is a custom wrapper.
@@ -817,3 +818,4 @@ Frontend (localintel-landing) was upgraded to embedded iframe with PostMessage o
 - `44a8348` — fix: agentic order routes use surgeAgent per-biz key (not global env var)
 - `8512ee5` — feat: isOpenNow pre-check on place-order, friendly closed message
 - `72bfcde` — feat: Phase 1 tsvector GIN index + cuisine + backfill worker
+- `e7e9ddd` — feat: Phase 2 intent router + tsvector search wired to search bar
