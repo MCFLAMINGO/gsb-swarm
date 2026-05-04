@@ -773,8 +773,12 @@ Never expose `BASALT_API_KEY` to frontend. All Basalt calls must go through the 
 5. `GET /api/local-intel/order-status/:receiptId` polls receipt status → logs to `usage_ledger` on `gateway-card-success`
 
 ```
-ORDER_ITEM regex: /\border(?:\s+me)?\s+(.+?)\s+(?:from|at)\s+(.+?)(?:\s+(?:in|near)\s+.+)?$/i
+ORDER_ITEM regex (full):    /(?:\border(?:\s+me)?\s+|\bI(?:'d|\s+would)\s+like\s+|\bI\s+want\s+|\bget\s+me\s+|\bcan\s+I\s+(?:get|order)\s+)(?:a\s+|an\s+|some\s+)?(.+?)\s+(?:from|at)\s+(.+?)(?:\s+(?:in|near)\s+.+)?$/i
+ORDER_ITEM regex (partial): /(?:\border(?:\s+me)?\s+|\bI(?:'d|\s+would)\s+like\s+|\bI\s+want\s+|\bget\s+me\s+|\bcan\s+I\s+(?:get|order)\s+)(?:a\s+|an\s+|some\s+)?(.+?)(?:\s+(?:in|near)\s+.+)?$/i
+AT_BIZ regex (resolves pending intent): /^(?:at|from)\s+(.+?)(?:\s+(?:in|near)\s+.+)?$/i
 ```
+
+Two-turn flow: a partial match ("I want chicken") returns `intent: 'ORDER_ITEM_PARTIAL'` and stores the item in an in-memory `_pendingOrderIntent` Map keyed by sessionId (5-min TTL). The next message ("at McFlamingo") matches `AT_BIZ`, pulls the pending item, and runs the normal ORDER_ITEM resolver. SessionId derives from `x-session-id` header or falls back to forwarded-for/remoteAddress IP.
 
 Fuzzy match: token overlap scoring, no LLM, STOP words filtered.
 
@@ -808,3 +812,4 @@ Frontend (localintel-landing) was upgraded to embedded iframe with PostMessage o
 ## Patches Applied 2026-05-04
 
 - `f31444d` — fix: fault-tolerant ensureSchema (per-stmt catch), migration_002 dollar-quoting
+- `d18c59a` — feat: broader ORDER_ITEM regex + pending session intent
