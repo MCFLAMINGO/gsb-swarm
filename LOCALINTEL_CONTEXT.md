@@ -902,3 +902,115 @@ phone if no prefix.
     ORDER_ITEM stays out of dispatch loop.
   - Twilio inbound webhook unchanged externally; task replies handled
     transparently before existing RFQ logic.
+
+---
+
+## 2026-05-04 — Step 1 merge: Phase 2-4 surgically merged into the live handler
+
+The live POST `/api/local-intel/` handler in `localIntelAgent.js` already wires
+the Phase 2 keyword classifier + tsvector + dispatchTask + buildMatchReason
+along its **Phase 2 path** (lines ~445-510). The **legacy ILIKE path**
+underneath it was running without those pieces, so free-text searches that
+fell through Phase 2 produced thin results with no matchReason, no tsvector
+fallback, and no task dispatch on miss.
+
+This patch promotes Phase 2-4 features into the legacy path so the live
+handler is uniformly enhanced — no parallel system, no new files (context doc
+only).
+
+### Changes
+
+1. **`NL_INTENT_MAP` expanded** (`localIntelAgent.js` ~line 416):
+   - Every existing entry now carries a `taskClass` field (`DISCOVER`,
+     `ORDER`, or `STATUS`) so callers can read intent class straight off
+     the rule, alongside `group` / `tags` / new `cuisine` / new `category`.
+   - New cuisine entries (taskClass `DISCOVER`, group `food`):
+     chinese, japanese (sushi/japanese/ramen), italian (italian/pasta/pizza),
+     thai, indian, mexican (mexican/tacos/burritos), bbq (bbq/barbecue/
+     smokehouse), seafood (seafood/fish/oysters/crab/lobster), american
+     (burger/burgers/hamburger), steakhouse (steakhouse/steak).
+   - New bar/drink entries (taskClass `DISCOVER`, group `bar`):
+     bar (whiskey/bourbon/scotch/cocktail/cocktails/bar/nightlife/happy hour),
+     brewery (beer/craft beer/brewery/tap room),
+     wine_bar (wine/winery/wine bar).
+   - New utility/errand entries (taskClass `DISCOVER`):
+     pharmacy (pharmacy/drugstore — group health),
+     hardware (hardware/home depot/lumber — group home),
+     grocery (grocery/supermarket/food store — group food),
+     gas_station (gas/fuel/gas station — group auto),
+     pet (pets/dog/cat/vet/veterinarian — group pet),
+     laundry (laundry/dry cleaning/laundromat — group home),
+     florist (florist/flowers — group retail),
+     bank (atm/cash/bank — group finance).
+   - ORDER and STATUS sentinel rules added at the tail of the map for
+     completeness (the ORDER_ITEM short-circuit lives in
+     `workers/intentRouter.js` `_ORDER_ITEM_HINT` and still runs first
+     inside `classifyIntent`).
+   - `resolveNlIntent(query)` now returns
+     `{ taskClass, group, tags, cuisine, category }`.
+
+2. **Cuisine SQL filter** added inside the legacy WHERE-clause builder:
+   ```
+   AND (cuisine = $n OR cuisine ILIKE $n+1 OR description ILIKE $n+1)
+   ```
+   exact match on the `cuisine` column (migration 005), falling back to
+   ILIKE on `cuisine` and `description`. Additive — does not replace the
+   existing ILIKE name/category/address/description condition.
+
+3. **tsvector fallback** runs after the legacy ILIKE query when:
+   - the main query returned 0 rows AND
+   - the user typed a free-text `query` (string).
+
+   It tokenizes, strips stopwords (`the, a, an, is, are, can, i, where, get,
+   find, nearest, closest, me, my, to, for, of, in, on, at, or, and, do, you,
+   any, some`), joins with `&`, and runs:
+   ```
+   SELECT ... FROM businesses
+    WHERE status != 'inactive'
+      AND zip = ANY($zips)
+      AND search_vector @@ to_tsquery('english', $tsq)
+    ORDER BY ts_rank(...) DESC, confidence_score DESC
+    LIMIT 20
+   ```
+   Bad tsquery syntax is caught and treated as 0 rows. When the fallback
+   produces rows, response `meta.source = 'postgres+tsvector'` and
+   `meta.ts_fallback = true`. The COUNT(*) total query is skipped because
+   its WHERE clause does not match the tsvector path.
+
+4. **dispatchTask wired** to the legacy 0-result path. After the tsvector
+   fallback, if results are still empty AND the caller did not pin
+   `category` / `group` AND the NL intent is not `ORDER` / `STATUS`,
+   `dispatchTask({type:'TEXT_SEARCH', categories, cuisines, group,
+   taskClass, raw}, query, zip)` is fired non-blocking
+   (`Promise.resolve().then(...).catch(...)`). The empty results are still
+   returned to the user — dispatch never blocks the response.
+
+5. **buildMatchReason wired** into the legacy result map. Every row now
+   gets a `matchReason` field. Wrapped in try/catch so a builder throw
+   sets `matchReason: null` instead of breaking the response.
+
+6. **Response meta enriched** — `intent_class`, `intent_group`,
+   `intent_cuisine`, `ts_fallback` now exposed on the legacy path's
+   response payload, mirroring what the Phase 2 path already returns.
+
+### Not changed (intentional)
+
+- **`classifyIntent` in `localIntelTidalTools.js`** is **NOT deleted**.
+  Despite its name it has nothing to do with Phase 2 search — it routes
+  `/ask` Q&A questions across `ASK_ROUTES` (zone, oracle, demographics,
+  bedrock, etc.) and is called at line 1239 of the same file. Deleting it
+  would break the entire `/ask` endpoint. The Phase 2 keyword classifier
+  lives in `workers/intentRouter.js` and is unaffected.
+
+- The original Phase 2 path (lines ~445-510) is unchanged — these patches
+  only enhance the legacy path so both paths now behave consistently.
+
+### Next planned step (Step 2 in roadmap)
+
+Extract `NL_INTENT_MAP` + `resolveNlIntent` from `localIntelAgent.js` into
+`lib/intentRegistry.js`. Currently the map lives inline alongside the
+handler; the next refactor splits it out so other entry points (MCP, ACP,
+Tidal Q&A) can share the same registry without re-importing the entire
+agent module. The Phase 2 `KEYWORD_CATEGORY_MAP` in
+`workers/intentRouter.js` is a candidate to fold into the same registry,
+but that consolidation is a separate follow-up.
