@@ -58,6 +58,22 @@ function inferCategoryFromName(name) {
   if (/self.?storage|storage unit/.test(n))                                         return 'storage';
   if (/dry.?clean|laundry/.test(n))                                                 return 'dry_cleaning';
   if (/\bchurch\b|lutheran|baptist|presbyterian|methodist|catholic|episcopal|worship/.test(n)) return 'place_of_worship';
+  if (/liquor|spirits|wine shop|bottle shop|abc store|total wine|abc fine/.test(n)) return 'liquor_store';
+  if (/hardware|home depot|lowe'?s|ace hardware|true value|menards/.test(n))         return 'hardware';
+  if (/pet supply|petco|petsmart|pet store|animal feed/.test(n))                     return 'pet';
+  if (/\bvet\b|animal hosp|pet clinic|animal clinic/.test(n))                        return 'veterinary';
+  if (/\blaundry\b|laundromat|dry.?clean|wash.?fold/.test(n))                        return 'laundry';
+  if (/florist|flower shop|flowers/.test(n))                                          return 'florist';
+  if (/\batm\b|cash machine/.test(n))                                                return 'bank';
+  if (/gym|fitness center|crossfit|planet fitness|anytime fitness|orangetheory/.test(n)) return 'fitness';
+  if (/auto parts|napa auto|o'reilly|advance auto|autozone/.test(n))                return 'automotive';
+  if (/car wash|auto wash|express wash/.test(n))                                     return 'car_wash';
+  if (/locksmith|lock.?key|lock service/.test(n))                                    return 'locksmith';
+  if (/childcare|day care|daycare|preschool|montessori/.test(n))                    return 'childcare';
+  if (/grocery|supermarket|whole foods|publix|winn.?dixie|aldi|kroger|safeway/.test(n)) return 'grocery';
+  if (/convenience|7-eleven|seven.?eleven|circle k|wawa|gate gas|kangaroo/.test(n)) return 'convenience';
+  if (/bakery|bake shop|pastry|patisserie/.test(n))                                  return 'bakery';
+  if (/deli|delicatessen/.test(n))                                                   return 'deli';
   return null; // keep as LocalBusiness if unknown
 }
 const DELAY_MS = 1500;

@@ -128,6 +128,7 @@ async function mergeCluster(cluster) {
 
   // Build merged field values — best non-null from all members
   const merged = {
+    name:          canonical.name,
     phone:         canonical.phone,
     website:       canonical.website,
     hours_json:    canonical.hours_json,
@@ -171,6 +172,17 @@ async function mergeCluster(cluster) {
     merged.confidence_score = Math.min(1.0, merged.confidence_score + 0.1);
   }
 
+  // OSM source wins on name and category — most reliable ground truth
+  const osmRow = cluster.find(r =>
+    r.source_id && (r.source_id.startsWith('osm') || r.source_id === 'overpass')
+  );
+  if (osmRow) {
+    if (osmRow.name) merged.name = osmRow.name;
+    if (osmRow.category && osmRow.category !== 'LocalBusiness') {
+      merged.category = osmRow.category;
+    }
+  }
+
   // Within a transaction:
   // 1. Reassign tasks from dupes to canonical
   // 2. Update canonical with merged data
@@ -201,6 +213,7 @@ async function mergeCluster(cluster) {
     // Update canonical with merged data
     await db.query(
       `UPDATE businesses SET
+         name             = COALESCE($13, name),
          phone            = COALESCE($2,  phone),
          website          = COALESCE($3,  website),
          hours_json       = COALESCE($4,  hours_json),
@@ -227,6 +240,7 @@ async function mergeCluster(cluster) {
         merged.address     || null,
         merged.city        || null,
         merged.confidence_score,
+        merged.name        || null,
       ]
     );
 
@@ -260,7 +274,7 @@ async function runMerge() {
     `SELECT business_id, name, phone, address, city, zip,
             website, hours_json, description, services_text,
             category, lat, lon, confidence_score,
-            claimed_at, wallet
+            claimed_at, wallet, source_id
      FROM businesses
      WHERE zip IN (${zipPlaceholders})
        AND (phone IS NOT NULL OR address IS NOT NULL)`,

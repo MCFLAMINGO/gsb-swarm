@@ -306,6 +306,79 @@ const OSM_CATEGORY_MAP = {
   'office=lawyer': 'legal',            'leisure=fitness_centre': 'fitness',
   'leisure=spa': 'wellness',           'tourism=hotel': 'hotel',
   'tourism=motel': 'hotel',
+  // Alcohol & nightlife
+  'shop=alcohol':      'liquor_store',
+  'shop=wine':         'liquor_store',
+  'shop=beer':         'liquor_store',
+  'amenity=pub':       'bar',
+  'amenity=nightclub': 'bar',
+  'amenity=brewery':   'bar',
+  // Food & drink additions
+  'shop=bakery':       'bakery',
+  'shop=deli':         'deli',
+  'shop=coffee':       'cafe',
+  'amenity=ice_cream': 'cafe',
+  'amenity=food_court':'fast_food',
+  // Grocery & convenience
+  'shop=grocery':      'grocery',
+  'shop=supermarket':  'grocery',
+  'shop=convenience':  'convenience',
+  'shop=kiosk':        'convenience',
+  // Health & pharmacy
+  'amenity=pharmacy':  'pharmacy',
+  'healthcare=pharmacy':'pharmacy',
+  'shop=chemist':      'pharmacy',
+  'amenity=hospital':  'healthcare',
+  'amenity=urgent_care':'healthcare',
+  // Auto
+  'shop=car_repair':   'car_repair',
+  'amenity=car_wash':  'car_wash',
+  'amenity=car_rental':'automotive',
+  'shop=tyres':        'automotive',
+  'shop=auto_parts':   'automotive',
+  // Pet
+  'shop=pet':          'pet',
+  'shop=pet_food':     'pet',
+  'amenity=animal_shelter':'pet',
+  // Hardware & home
+  'shop=doityourself': 'hardware',
+  'shop=hardware':     'hardware',
+  'shop=building_materials':'hardware',
+  'shop=lumber':       'hardware',
+  'shop=paint':        'hardware',
+  // Beauty & wellness
+  'shop=hairdresser':  'hairdresser',
+  'shop=cosmetics':    'beauty',
+  'shop=beauty':       'beauty',
+  'shop=massage':      'wellness',
+  'leisure=spa':       'wellness',
+  // Laundry
+  'shop=laundry':      'laundry',
+  'amenity=laundry':   'laundry',
+  'shop=dry_cleaning': 'laundry',
+  // Florist
+  'shop=florist':      'florist',
+  // Finance
+  'amenity=atm':       'bank',
+  'amenity=bank':      'bank',
+  'office=financial':  'financial',
+  // Fitness
+  'leisure=fitness_centre':'fitness',
+  'leisure=sports_centre': 'fitness',
+  'leisure=gym':       'fitness',
+  // Childcare & education
+  'amenity=childcare': 'childcare',
+  'amenity=school':    'education',
+  'amenity=college':   'education',
+  // Lodging
+  'tourism=hotel':     'hotel',
+  'tourism=motel':     'hotel',
+  'tourism=hostel':    'hotel',
+  // Services
+  'shop=locksmith':    'locksmith',
+  'craft=electrician': 'electrician',
+  'craft=plumber':     'plumber',
+  'craft=hvac':        'hvac',
 };
 
 async function fetchOSM() {
