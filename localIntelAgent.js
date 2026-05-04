@@ -120,8 +120,8 @@ async function searchByCategory(intent, zip, limit = 50) {
   const sql = `
     SELECT
       business_id, name, address, city, zip, phone, website,
-      hours, category, category_group, tags, description,
-      confidence_score AS confidence, lat, lon, sunbiz_doc_number,
+      hours, category, category_group, tags, description, cuisine,
+      confidence_score AS confidence, confidence_score, lat, lon, sunbiz_doc_number,
       claimed_at IS NOT NULL AS claimed,
       wallet,
       pos_config->>'pos_type' AS pos_type,
@@ -155,8 +155,8 @@ async function searchByText(query, zip, limit = 50) {
   const sql = `
     SELECT
       business_id, name, address, city, zip, phone, website,
-      hours, category, category_group, tags, description,
-      confidence_score AS confidence, lat, lon, sunbiz_doc_number,
+      hours, category, category_group, tags, description, cuisine,
+      confidence_score AS confidence, confidence_score, lat, lon, sunbiz_doc_number,
       claimed_at IS NOT NULL AS claimed,
       wallet,
       pos_config->>'pos_type' AS pos_type,
@@ -170,6 +170,55 @@ async function searchByText(query, zip, limit = 50) {
     LIMIT $3
   `;
   return db.query(sql, [zips, tsq, limit]);
+}
+
+// Phase 4 — human-readable reason a business matched the query.
+const _CATEGORY_LABELS = {
+  bar: 'Bar & cocktails', liquor_store: 'Liquor store',
+  restaurant: 'Restaurant', cafe: 'Café', fast_food: 'Fast food',
+  grocery: 'Grocery', convenience: 'Convenience store',
+  pharmacy: 'Pharmacy', hardware: 'Hardware store',
+  gas_station: 'Gas station', car_repair: 'Auto repair',
+  pet: 'Pet supplies', veterinary: 'Veterinary',
+  beauty: 'Beauty & salon', hairdresser: 'Hair salon',
+  fitness: 'Gym & fitness', wellness: 'Spa & wellness',
+  laundry: 'Laundry & dry cleaning', florist: 'Florist',
+  bank: 'Bank & ATM', hotel: 'Hotel',
+  bakery: 'Bakery', deli: 'Deli',
+};
+
+function buildMatchReason(biz, intent, query) {
+  const parts = [];
+  const hours = _parseHours(biz.hours);
+  if (hours && isOpenNow(hours) === true) parts.push('Open now');
+  if (biz.category && biz.category !== 'LocalBusiness') {
+    parts.push(_CATEGORY_LABELS[biz.category] || biz.category);
+  }
+  if (biz.cuisine) {
+    parts.push(biz.cuisine.charAt(0).toUpperCase() + biz.cuisine.slice(1));
+  }
+  if (biz.wallet) parts.push('✓ Accepts crypto');
+  const conf = biz.confidence_score != null ? biz.confidence_score : biz.confidence;
+  if (conf != null && conf >= 0.8) parts.push('Verified');
+  return parts.slice(0, 3).join(' · ') || null;
+}
+
+// Phase 4 — sort results: open first, then claimed (wallet), then confidence.
+function sortResults(rows) {
+  rows.sort((a, b) => {
+    const aHours = _parseHours(a.hours);
+    const bHours = _parseHours(b.hours);
+    const aOpen = aHours && isOpenNow(aHours) === true ? 1 : 0;
+    const bOpen = bHours && isOpenNow(bHours) === true ? 1 : 0;
+    if (bOpen !== aOpen) return bOpen - aOpen;
+    const aWallet = a.wallet ? 1 : 0;
+    const bWallet = b.wallet ? 1 : 0;
+    if (bWallet !== aWallet) return bWallet - aWallet;
+    const aConf = a.confidence_score != null ? a.confidence_score : (a.confidence || 0);
+    const bConf = b.confidence_score != null ? b.confidence_score : (b.confidence || 0);
+    return bConf - aConf;
+  });
+  return rows;
 }
 
 // ── x402 payment config ───────────────────────────────────────────────
@@ -401,15 +450,18 @@ router.post('/', async (req, res) => {
             : await searchByText(intent.raw, zip, lim);
 
           if (phase2Rows && phase2Rows.length > 0) {
-            const enriched = phase2Rows.map(r => {
+            const sorted = sortResults(phase2Rows.slice());
+            const enriched = sorted.map(r => {
               const out = { ...r };
               if (r.pos_type === 'other' && r.wallet) {
                 out.ucp_order_url = 'https://surge.basalthq.com/api/ucp/checkout-sessions';
                 out.ucp_wallet    = r.wallet;
                 out.ucp_note      = 'POST ucp_order_url with shopSlug resolved via GET https://surge.basalthq.com/api/directory/shops?q=' + encodeURIComponent(r.name);
               }
+              out.matchReason = buildMatchReason(r, intent, query);
               delete out.pos_type;
               delete out.has_wallet;
+              delete out.confidence_score;
               return out;
             });
             return res.json({
