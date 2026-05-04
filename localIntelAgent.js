@@ -3993,8 +3993,7 @@ router.get('/menu/:business_id', async (req, res) => {
   const { business_id } = req.params;
   const q = (req.query.q || '').trim();
   if (!business_id) return res.status(400).json({ error: 'business_id required' });
-  const apiKey = process.env.BASALT_API_KEY;
-  if (!apiKey) return res.status(503).json({ error: 'ordering not configured' });
+  const surge = require('./lib/surgeAgent');
 
   try {
     const [biz] = await db.query(
@@ -4007,18 +4006,14 @@ router.get('/menu/:business_id', async (req, res) => {
     if (!biz)        return res.status(404).json({ error: 'business not found' });
     if (!biz.wallet) return res.status(409).json({ error: 'business has no wallet — ordering unavailable' });
 
-    const invRes = await fetch(`${_BASALT_BASE}/api/inventory`, {
-      headers: {
-        'Ocp-Apim-Subscription-Key': apiKey,
-      },
-    });
-    if (!invRes.ok) {
-      const text = await invRes.text().catch(() => '');
-      console.error(`[menu] basalt inventory ${invRes.status}: ${text.slice(0,200)}`);
+    let menuData;
+    try {
+      menuData = await surge.fetchMenu(business_id);
+    } catch (fetchErr) {
+      console.error(`[menu] surge.fetchMenu failed: ${fetchErr.message}`);
       return res.status(502).json({ error: 'inventory fetch failed' });
     }
-    const invJson = await invRes.json();
-    const rawItems = Array.isArray(invJson) ? invJson : (invJson.items || invJson.data || []);
+    const rawItems = Array.isArray(menuData) ? menuData : (menuData.items || menuData.data || []);
 
     // Skip $0 modifier items — they're add-ons/dressings, not orderable as a top-level item.
     const items = rawItems
@@ -4066,14 +4061,13 @@ router.get('/menu/:business_id', async (req, res) => {
 // Body: { business_id, sku, qty, fulfillment }
 router.post('/place-order', express.json(), async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  const { business_id, sku, qty, fulfillment } = req.body || {};
+  const { business_id, sku, qty, fulfillment, jurisdictionCode } = req.body || {};
   if (!business_id) return res.status(400).json({ error: 'business_id required' });
   if (!sku)         return res.status(400).json({ error: 'sku required' });
   if (fulfillment !== 'pickup' && fulfillment !== 'delivery') {
     return res.status(400).json({ error: 'fulfillment must be pickup or delivery' });
   }
-  const apiKey = process.env.BASALT_API_KEY;
-  if (!apiKey) return res.status(503).json({ error: 'ordering not configured' });
+  const surge = require('./lib/surgeAgent');
 
   try {
     const [biz] = await db.query(
@@ -4082,26 +4076,23 @@ router.post('/place-order', express.json(), async (req, res) => {
     );
     if (!biz) return res.status(404).json({ error: 'business not found' });
 
-    const orderRes = await fetch(`${_BASALT_BASE}/api/orders`, {
-      method:  'POST',
-      headers: {
-        'Ocp-Apim-Subscription-Key': apiKey,
-        'Content-Type':              'application/json',
-      },
-      body: JSON.stringify({ items: [{ sku, qty: Number(qty) || 1 }], jurisdictionCode: 'US-FL' }),
-    });
-    if (!orderRes.ok) {
-      const text = await orderRes.text().catch(() => '');
-      console.error(`[place-order] basalt orders ${orderRes.status}: ${text.slice(0,200)}`);
+    let order;
+    try {
+      order = await surge.createOrder(
+        business_id,
+        [{ sku, qty: Number(qty) || 1 }],
+        jurisdictionCode || 'US-FL'
+      );
+    } catch (orderErr) {
+      console.error(`[place-order] surge.createOrder failed: ${orderErr.message}`);
       return res.status(502).json({ error: 'order creation failed' });
     }
-    const data       = await orderRes.json();
-    const receiptId  = data?.receipt?.receiptId || data?.receiptId;
+    const receiptId  = order?.receiptId || order?.receipt?.receiptId || order?.id;
     if (!receiptId) {
-      console.error('[place-order] missing receiptId', data);
+      console.error('[place-order] missing receiptId', order);
       return res.status(502).json({ error: 'order created but no receiptId returned' });
     }
-    const paymentUrl = `https://surge.basalthq.com/portal/${receiptId}?recipient=0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED&embedded=1&correlationId=${receiptId}`;
+    const paymentUrl = surge.getPaymentUrl(receiptId);
 
     // Log to usage_ledger — non-blocking on failure
     try {
@@ -4127,19 +4118,18 @@ router.get('/order-status/:receiptId', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   const { receiptId } = req.params;
   if (!receiptId) return res.status(400).json({ error: 'receiptId required' });
-  const apiKey = process.env.BASALT_API_KEY;
-  if (!apiKey) return res.status(503).json({ error: 'ordering not configured' });
+  const business_id = (req.query.business_id || '').toString().trim();
+  if (!business_id) return res.status(400).json({ error: 'business_id query param required' });
+  const surge = require('./lib/surgeAgent');
 
   try {
-    const statusRes = await fetch(`${_BASALT_BASE}/api/receipts/status?receiptId=${encodeURIComponent(receiptId)}`, {
-      headers: { 'Ocp-Apim-Subscription-Key': apiKey },
-    });
-    if (!statusRes.ok) {
-      const text = await statusRes.text().catch(() => '');
-      console.error(`[order-status] basalt status ${statusRes.status}: ${text.slice(0,200)}`);
+    let data;
+    try {
+      data = await surge.getReceiptStatus(business_id, receiptId);
+    } catch (statusErr) {
+      console.error(`[order-status] surge.getReceiptStatus failed: ${statusErr.message}`);
       return res.status(502).json({ error: 'status fetch failed' });
     }
-    const data = await statusRes.json();
     const PAID_STATUSES = ['completed', 'tx_mined', 'recipient_validated', 'paid'];
     const paid = PAID_STATUSES.includes(data?.status);
 
