@@ -266,6 +266,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 
 ## Architecture Decisions (locked in — don't revisit)
 
+- **Phase 1 search foundation**: `search_vector` tsvector GIN index on businesses, `cuisine` column, `searchVectorBackfillWorker` runs on startup. Builder is `businesses_search_vector_build(name, category, description, services_text, tags, cuisine)` — weights A/B/B/C/C/D. Migration `migrations/005_search_vector.sql`; `lib/dbMigrate.js` now scans both `db/` and `migrations/`.
 - **No LLM on the hot path** — zero LLM API calls for LocalIntel intelligence. Deterministic vocabulary scoring only.
 - **Postgres is king** — all state lives in Postgres. No in-memory state across requests.
 - **`db.query()` returns array directly** — never `.rows`. This is a custom wrapper.
@@ -815,3 +816,4 @@ Frontend (localintel-landing) was upgraded to embedded iframe with PostMessage o
 - `d18c59a` — feat: broader ORDER_ITEM regex + pending session intent
 - `44a8348` — fix: agentic order routes use surgeAgent per-biz key (not global env var)
 - `8512ee5` — feat: isOpenNow pre-check on place-order, friendly closed message
+- `72bfcde` — feat: Phase 1 tsvector GIN index + cuisine + backfill worker
