@@ -823,3 +823,82 @@ Frontend (localintel-landing) was upgraded to embedded iframe with PostMessage o
 - `5560af7` — feat: Phase 3 data quality — 50+ OSM tags, YP infer expansion, OSM name/category wins merge
 - `f9122a5` — feat: Phase 4 matchReason + open/claimed/confidence sort
 - `7f1ab3c` — feat: categoryReclassWorker backfill
+- `a520f3f` — feat: task dispatch layer — tasks/agents/task_events, dispatchTask, Twilio reply handler
+
+## Architecture: Task dispatch layer (2026-05-04)
+
+When LocalIntel search returns 0 results for a non-ORDER_ITEM intent, the
+query is converted into a real-world task and dispatched to a registered
+agent over SMS. The agent responds YES/NO/DONE/FAIL and the task moves
+through `open → assigned → accepted → completed/failed`.
+
+**Tier model (locked in):**
+- `owner` — core operator (Erik). Always matches first when ZIP+category fit.
+- `vetted` — invited/verified humans. Match second.
+- `open` — public signups. Match last.
+
+**Match policy (deterministic SQL, zero LLM):**
+1. `available = true`
+2. `task.zip = ANY(zips_served) OR zip = task.zip`
+3. `'*' = ANY(categories) OR task.top_category = ANY(categories)`
+4. ORDER BY tier ASC, verified DESC, rating DESC, tasks_completed DESC LIMIT 1
+
+**Tables (migration `006_tasks_agents.sql`):**
+- `agents` — agent_id UUID PK, name, phone (E.164), wallet, zip, zips_served TEXT[],
+  categories TEXT[] default '{*}', available, verified, tier, source, rating,
+  tasks_completed, created_at.
+- `tasks` — task_id UUID PK, user_query, top_category, sub_category, entities_json,
+  urgency ('now'|'today'|'low'), zip, status ('open'|'assigned'|'accepted'|
+  'in_progress'|'completed'|'failed'|'cancelled'), assigned_agent_id FK→agents,
+  business_id, result_json, created_at, assigned_at, completed_at, fee_usd, payment_tx.
+- `task_events` — extended additively from migration 004 with `event_id UUID`,
+  `agent_id` (TEXT in legacy, UUID values still valid), `event_type`, `meta`,
+  `created_at`. `task_type` was relaxed to nullable so dispatch INSERTs
+  (which only set event_type) coexist with the intelligence-signal layer.
+
+**Seed agent:** Erik Osol, +19045846665, wallet `0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED`,
+home ZIP 32082, zips_served = the 7 NE-FL target ZIPs, categories `{*}`, tier='owner'.
+
+**SMS message format:**
+```
+[TASK-xxxxxxxx] 🚨 URGENT: "<user_query>" in <zip>. Reply YES to accept or NO to pass.
+```
+- `xxxxxxxx` = first 8 chars of task_id
+- urgency label: `🚨 URGENT` (now), `Today` (today/tonight), `New task` (otherwise)
+
+**Agent reply commands (handled by `lib/taskDispatch.handleAgentReply`):**
+- `YES` → status='accepted', agent gets DONE/FAIL prompt
+- `NO`  → status='open', assigned_agent_id=NULL (free for re-dispatch)
+- `DONE <notes>` → status='completed', tasks_completed++, result_json={notes,completed_by}
+- `FAIL <reason>` → status='failed', result_json={reason}
+
+Reply resolution: extracts `[TASK-xxxx]` prefix → exact match on assigned task;
+falls back to most recent assigned/accepted/in_progress task for that agent
+phone if no prefix.
+
+**Wiring:**
+- `localIntelAgent.js` Phase 2 search — if `phase2Rows.length === 0` AND
+  `intent.type !== 'ORDER_ITEM'`, calls `dispatchTask(intent, query, zip)`
+  inside try/catch. Returns `{ taskCreated: true, taskId, message, ... }`.
+  Failures fall through to the legacy ILIKE path so the user is never blocked.
+- `dashboard-server.js` `handleSmsInbound` (`/api/rfq/sms-reply` +
+  `/api/rfq/sms-inbound`) — `handleAgentReply` runs FIRST. If it returns a
+  result, TwiML `<Message>` reply is sent inline and the existing RFQ flow is
+  skipped. If null, the existing RFQ logic (YES-CODE, CONFIRM, WALLET, etc.)
+  runs unchanged.
+- Twilio outbound: reuses `lib/rfqBroadcast.sendSms` — no new Twilio client.
+
+**Patches Applied 2026-05-04 (task dispatch):**
+- `a520f3f` — feat: task dispatch layer
+  - `migrations/006_tasks_agents.sql` adds agents + tasks tables, extends
+    task_events additively (event_id/agent_id/event_type/meta/created_at;
+    task_type relaxed to nullable). Seeds owner agent. Indexed on
+    tasks.status, (tasks.zip, top_category), tasks.created_at,
+    agents.available WHERE available=true, task_events.task_id, task_events.event_type.
+  - `lib/taskDispatch.js` — createTask, matchAgent, assignTask, notifyAgent,
+    handleAgentReply, dispatchTask. Re-uses existing Twilio client via
+    rfqBroadcast.sendSms.
+  - 0-result fallback wired into Phase 2 search (POST /api/local-intel),
+    ORDER_ITEM stays out of dispatch loop.
+  - Twilio inbound webhook unchanged externally; task replies handled
+    transparently before existing RFQ logic.
