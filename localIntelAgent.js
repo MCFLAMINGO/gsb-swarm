@@ -4071,10 +4071,23 @@ router.post('/place-order', express.json(), async (req, res) => {
 
   try {
     const [biz] = await db.query(
-      `SELECT business_id, name, zip FROM businesses WHERE business_id = $1 LIMIT 1`,
+      `SELECT business_id, name, zip, hours_json FROM businesses WHERE business_id = $1 LIMIT 1`,
       [business_id]
     );
     if (!biz) return res.status(404).json({ error: 'business not found' });
+
+    // Check business hours — don't attempt order if closed (fail open if hours unknown)
+    const hoursJson = biz.hours_json || null;
+    if (hoursJson) {
+      const open = isOpenNow(hoursJson);
+      if (open === false) {
+        return res.status(409).json({
+          error: 'business_closed',
+          message: `${biz.name} is currently closed. Check their hours and try again.`,
+          hours: hoursJson,
+        });
+      }
+    }
 
     let order;
     try {
