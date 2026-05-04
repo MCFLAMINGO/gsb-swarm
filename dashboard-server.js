@@ -6659,6 +6659,7 @@ app.use((req, res, next) => {
     { name: 'Sunbiz Import Worker',        file: 'workers/sunbizWorker.js'          },
     { name: 'Business Merge Worker',       file: 'workers/businessMergeWorker.js'   },
     { name: 'Search Vector Backfill',      file: 'workers/searchVectorBackfillWorker.js' },
+    { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' },
   ];
 
   function spawnLocalIntelWorker(w, attempt = 0) {
