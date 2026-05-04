@@ -802,3 +802,9 @@ Three fixes to the agentic order flow in `localIntelAgent.js` (commit `7aab661`)
 Frontend (localintel-landing) was upgraded to embedded iframe with PostMessage origin verification (`event.origin !== 'https://surge.basalthq.com'`), handling `gateway-card-success`, `gateway-card-cancel`, and `gateway-preferred-height`. Falls back to new tab if iframe load fails (CSP).
 
 2026-05-03 patch 2: removed x-merchant-wallet from GET /api/inventory call in menu endpoint
+
+---
+
+## Patches Applied 2026-05-04
+
+- `f31444d` — fix: fault-tolerant ensureSchema (per-stmt catch), migration_002 dollar-quoting
