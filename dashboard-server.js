@@ -6658,6 +6658,7 @@ app.use((req, res, next) => {
     { name: 'ACS Demographics Worker',    file: 'workers/acsWorker.js'             },
     { name: 'Sunbiz Import Worker',        file: 'workers/sunbizWorker.js'          },
     { name: 'Business Merge Worker',       file: 'workers/businessMergeWorker.js'   },
+    { name: 'Search Vector Backfill',      file: 'workers/searchVectorBackfillWorker.js' },
   ];
 
   function spawnLocalIntelWorker(w, attempt = 0) {
