@@ -267,6 +267,7 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 ## Architecture Decisions (locked in — don't revisit)
 
 - **Phase 1 search foundation**: `search_vector` tsvector GIN index on businesses, `cuisine` column, `searchVectorBackfillWorker` runs on startup. Builder is `businesses_search_vector_build(name, category, description, services_text, tags, cuisine)` — weights A/B/B/C/C/D. Migration `migrations/005_search_vector.sql`; `lib/dbMigrate.js` now scans both `db/` and `migrations/`.
+- **categoryReclassWorker**: runs on startup (forked alongside searchVectorBackfillWorker, 90s stagger), fixes rows where `category='LocalBusiness'` or `NULL` using `inferCategoryFromName` (copied from `workers/yellowPagesScraper.js`). Keyset-paged batches of 200 on `business_id`. Sets `category_source='inferred_backfill'` if column exists; rebuilds `search_vector` per row (try/catch). 24h skip-set via `worker_events`; `FULL_REFRESH=true` overrides.
 - **Phase 2 search**: `classifyIntent()` in `workers/intentRouter.js` (deterministic, zero LLM) → `CATEGORY_SEARCH` (category filter + isOpenNow when needed) or `TEXT_SEARCH` (tsvector `ts_rank`). Wired into `POST /api/local-intel`. `ORDER_ITEM` intent passes through to legacy handler so Basalt order flow is untouched. Fallback to ILIKE on 0 results. `has_wallet` boost in both paths. Multi-ZIP fanout across `['32082','32081','32250','32266','32233','32259','32034']` when no ZIP pinned.
 - **No LLM on the hot path** — zero LLM API calls for LocalIntel intelligence. Deterministic vocabulary scoring only.
 - **Postgres is king** — all state lives in Postgres. No in-memory state across requests.
@@ -821,3 +822,4 @@ Frontend (localintel-landing) was upgraded to embedded iframe with PostMessage o
 - `e7e9ddd` — feat: Phase 2 intent router + tsvector search wired to search bar
 - `5560af7` — feat: Phase 3 data quality — 50+ OSM tags, YP infer expansion, OSM name/category wins merge
 - `f9122a5` — feat: Phase 4 matchReason + open/claimed/confidence sort
+- `7f1ab3c` — feat: categoryReclassWorker backfill
