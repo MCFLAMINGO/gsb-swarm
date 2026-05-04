@@ -414,22 +414,62 @@ function getGroup(cat) {
 // ── POST /api/local-intel — main query endpoint ───────────────────────────────
 // NIM-powered intent → group/tag mapping for human queries
 const NL_INTENT_MAP = [
-  { patterns: [/healthy|health food|organic|clean eat|nutritious|salad|vegan|vegetarian|juice|smoothie/i], group: 'food', tags: ['healthy','organic','vegan','vegetarian','juice','salad'] },
-  { patterns: [/restaurant|eat|dining|food|lunch|dinner|breakfast|cafe|coffee|pizza|sushi|burger|taco|bbq|bar/i], group: 'food', tags: null },
-  { patterns: [/doctor|dentist|clinic|medical|health|urgent care|physic|therapy|chiro|optom/i], group: 'health', tags: null },
-  { patterns: [/lawyer|attorney|legal|law firm/i], group: 'legal', tags: null },
-  { patterns: [/bank|finance|invest|insurance|mortgage|credit/i], group: 'finance', tags: null },
-  { patterns: [/shop|store|retail|boutique|salon|spa|beauty|gym|fitness/i], group: 'retail', tags: null },
+  // ── Cuisine (DISCOVER · food) ──────────────────────────────────────────────
+  { patterns: [/\bchinese\b/i],                                      taskClass: 'DISCOVER', group: 'food', cuisine: 'chinese',   tags: null },
+  { patterns: [/\bsushi\b|\bjapanese\b|\bramen\b/i],                 taskClass: 'DISCOVER', group: 'food', cuisine: 'japanese',  tags: null },
+  { patterns: [/\bitalian\b|\bpasta\b|\bpizza\b/i],                  taskClass: 'DISCOVER', group: 'food', cuisine: 'italian',   tags: null },
+  { patterns: [/\bthai\b/i],                                         taskClass: 'DISCOVER', group: 'food', cuisine: 'thai',      tags: null },
+  { patterns: [/\bindian\b/i],                                       taskClass: 'DISCOVER', group: 'food', cuisine: 'indian',    tags: null },
+  { patterns: [/\bmexican\b|\btacos?\b|\bburritos?\b/i],             taskClass: 'DISCOVER', group: 'food', cuisine: 'mexican',   tags: null },
+  { patterns: [/\bbbq\b|\bbarbecue\b|\bsmokehouse\b/i],              taskClass: 'DISCOVER', group: 'food', cuisine: 'bbq',       tags: null },
+  { patterns: [/\bseafood\b|\bfish\b|\boysters?\b|\bcrab\b|\blobster\b/i], taskClass: 'DISCOVER', group: 'food', cuisine: 'seafood', tags: null },
+  { patterns: [/\bburgers?\b|\bhamburger\b/i],                       taskClass: 'DISCOVER', group: 'food', cuisine: 'american',  tags: null },
+  { patterns: [/\bsteakhouse\b|\bsteak\b/i],                         taskClass: 'DISCOVER', group: 'food', cuisine: 'steakhouse', tags: null },
+
+  // ── Bar / drink (DISCOVER · bar) ───────────────────────────────────────────
+  { patterns: [/\bwhiskey\b|\bbourbon\b|\bscotch\b|\bcocktails?\b|\bbar\b|\bnightlife\b|\bhappy hour\b/i], taskClass: 'DISCOVER', group: 'bar', category: 'bar',       tags: null },
+  { patterns: [/\bbeer\b|\bcraft beer\b|\bbrewery\b|\btap room\b/i],                                       taskClass: 'DISCOVER', group: 'bar', category: 'brewery',   tags: null },
+  { patterns: [/\bwine\b|\bwinery\b|\bwine bar\b/i],                                                       taskClass: 'DISCOVER', group: 'bar', category: 'wine_bar',  tags: null },
+
+  // ── Utility / errand (DISCOVER) ────────────────────────────────────────────
+  { patterns: [/\bpharmacy\b|\bdrugstore\b/i],                       taskClass: 'DISCOVER', group: 'health',  category: 'pharmacy',    tags: null },
+  { patterns: [/\bhardware\b|\bhome depot\b|\blumber\b/i],           taskClass: 'DISCOVER', group: 'home',    category: 'hardware',    tags: null },
+  { patterns: [/\bgrocery\b|\bsupermarket\b|\bfood store\b/i],       taskClass: 'DISCOVER', group: 'food',    category: 'grocery',     tags: null },
+  { patterns: [/\bgas\b|\bfuel\b|\bgas station\b/i],                 taskClass: 'DISCOVER', group: 'auto',    category: 'gas_station', tags: null },
+  { patterns: [/\bpets?\b|\bdog\b|\bcat\b|\bvet\b|\bveterinarian\b/i], taskClass: 'DISCOVER', group: 'pet',   category: 'pet',         tags: null },
+  { patterns: [/\blaundry\b|\bdry cleaning\b|\blaundromat\b/i],      taskClass: 'DISCOVER', group: 'home',    category: 'laundry',     tags: null },
+  { patterns: [/\bflorist\b|\bflowers\b/i],                          taskClass: 'DISCOVER', group: 'retail',  category: 'florist',     tags: null },
+  { patterns: [/\batm\b|\bcash\b|\bbank\b/i],                        taskClass: 'DISCOVER', group: 'finance', category: 'bank',        tags: null },
+
+  // ── Legacy broad-group fallbacks (DISCOVER) ────────────────────────────────
+  { patterns: [/healthy|health food|organic|clean eat|nutritious|salad|vegan|vegetarian|juice|smoothie/i], taskClass: 'DISCOVER', group: 'food', tags: ['healthy','organic','vegan','vegetarian','juice','salad'] },
+  { patterns: [/restaurant|eat|dining|food|lunch|dinner|breakfast|cafe|coffee|pizza|sushi|burger|taco|bbq|bar/i], taskClass: 'DISCOVER', group: 'food', tags: null },
+  { patterns: [/doctor|dentist|clinic|medical|health|urgent care|physic|therapy|chiro|optom/i], taskClass: 'DISCOVER', group: 'health', tags: null },
+  { patterns: [/lawyer|attorney|legal|law firm/i],                   taskClass: 'DISCOVER', group: 'legal',   tags: null },
+  { patterns: [/bank|finance|invest|insurance|mortgage|credit/i],    taskClass: 'DISCOVER', group: 'finance', tags: null },
+  { patterns: [/shop|store|retail|boutique|salon|spa|beauty|gym|fitness/i], taskClass: 'DISCOVER', group: 'retail', tags: null },
+
+  // ── ORDER / STATUS hints (kept for future routing — Basalt order flow lives in legacy handler) ──
+  // ORDER intent is detected separately in workers/intentRouter via _ORDER_ITEM_HINT; these are tagged
+  // here only so callers reading NL_INTENT_MAP see the full taxonomy.
+  { patterns: [/\border\s+(?:me|a|an)\b|\bI(?:'d| would) like\b|\bI want\b|\bget me\b|\bcan I (?:get|order)\b/i], taskClass: 'ORDER',  group: null, tags: null },
+  { patterns: [/\b(?:order|delivery)\s+status\b|\bwhere(?:'s| is) my order\b|\btrack\s+(?:my\s+)?order\b/i],     taskClass: 'STATUS', group: null, tags: null },
 ];
 
 function resolveNlIntent(query) {
-  if (!query) return { group: null, tags: null };
+  if (!query) return { taskClass: null, group: null, tags: null, cuisine: null, category: null };
   for (const rule of NL_INTENT_MAP) {
     if (rule.patterns.some(p => p.test(query))) {
-      return { group: rule.group, tags: rule.tags };
+      return {
+        taskClass: rule.taskClass || null,
+        group:     rule.group     || null,
+        tags:      rule.tags      || null,
+        cuisine:   rule.cuisine   || null,
+        category:  rule.category  || null,
+      };
     }
   }
-  return { group: null, tags: null };
+  return { taskClass: null, group: null, tags: null, cuisine: null, category: null };
 }
 
 router.post('/', async (req, res) => {
@@ -511,8 +551,11 @@ router.post('/', async (req, res) => {
     }
 
     // ── Resolve NL intent ────────────────────────────────────────────────────
-    const nlIntent = (!group && !category) ? resolveNlIntent(query) : { group: null, tags: null };
-    const effectiveGroup = group || nlIntent.group;
+    const nlIntent = (!group && !category)
+      ? resolveNlIntent(query)
+      : { taskClass: null, group: null, tags: null, cuisine: null, category: null };
+    const effectiveGroup    = group || nlIntent.group;
+    const effectiveCategory = category || nlIntent.category;
 
     // ── Build Postgres query — all filtering in SQL ──────────────────────────
     const conditions = ["status != 'inactive'"]; // matches active + null, excludes only explicitly inactive
@@ -523,11 +566,11 @@ router.post('/', async (req, res) => {
       conditions.push(`zip = $${p++}`);
       params.push(zip);
     }
-    if (category) {
+    if (effectiveCategory) {
       conditions.push(`category = $${p++}`);
-      params.push(category);
+      params.push(effectiveCategory);
     }
-    if (effectiveGroup) {
+    if (effectiveGroup && !effectiveCategory) {
       // Use the CATEGORY_GROUPS mapping — pass the categories that belong to this group
       const groupCats = CATEGORY_GROUPS[effectiveGroup];
       if (groupCats && groupCats.length) {
@@ -540,9 +583,17 @@ router.post('/', async (req, res) => {
       params.push(minConfidence);
     }
 
+    // Cuisine filter — additive when NL intent resolved a cuisine
+    if (nlIntent.cuisine) {
+      conditions.push(`(cuisine = $${p} OR cuisine ILIKE $${p + 1} OR description ILIKE $${p + 1})`);
+      params.push(nlIntent.cuisine);
+      params.push(`%${nlIntent.cuisine}%`);
+      p += 2;
+    }
+
     // Name/address text search
     let orderBy = 'confidence_score DESC, name ASC';
-    if (query && !effectiveGroup) {
+    if (query && !effectiveGroup && !effectiveCategory) {
       conditions.push(`(
         name ILIKE $${p} OR
         category ILIKE $${p} OR
@@ -567,8 +618,8 @@ router.post('/', async (req, res) => {
     const sql = `
       SELECT
         business_id, name, address, city, zip, phone, website,
-        hours, category, category_group, tags, description,
-        confidence_score AS confidence, lat, lon, sunbiz_doc_number,
+        hours, category, category_group, tags, description, cuisine,
+        confidence_score AS confidence, confidence_score, lat, lon, sunbiz_doc_number,
         claimed_at IS NOT NULL AS claimed,
         wallet,
         pos_config->>'pos_type' AS pos_type
@@ -579,10 +630,75 @@ router.post('/', async (req, res) => {
       LIMIT $${p}
     `;
 
-    const rawRows = await db.query(sql, params);
+    let rawRows = await db.query(sql, params);
 
-    // Enrich rows with UCP order URL for Surge-connected businesses
-    const rows = rawRows.map(r => {
+    // ── tsvector fallback — main ILIKE returned 0 rows but the user typed a meaningful query ──
+    let usedTsFallback = false;
+    if ((!rawRows || rawRows.length === 0) && query && typeof query === 'string') {
+      const _STOPWORDS = new Set([
+        'the','a','an','is','are','can','i','where','get','find','nearest','closest',
+        'me','my','to','for','of','in','on','at','or','and','do','you','any','some',
+      ]);
+      const tokens = String(query).toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(t => t && !_STOPWORDS.has(t));
+      if (tokens.length) {
+        const tsq = tokens.join(' & ');
+        const fbZips = zip ? [zip] : TARGET_ZIPS;
+        const fbSql = `
+          SELECT
+            business_id, name, address, city, zip, phone, website,
+            hours, category, category_group, tags, description, cuisine,
+            confidence_score AS confidence, confidence_score, lat, lon, sunbiz_doc_number,
+            claimed_at IS NOT NULL AS claimed,
+            wallet,
+            pos_config->>'pos_type' AS pos_type,
+            ts_rank(search_vector, to_tsquery('english', $1)) AS rank
+          FROM businesses
+          WHERE status != 'inactive'
+            AND zip = ANY($2::text[])
+            AND search_vector @@ to_tsquery('english', $1)
+          ORDER BY rank DESC, confidence_score DESC
+          LIMIT 20
+        `;
+        try {
+          rawRows = await db.query(fbSql, [tsq, fbZips]);
+          usedTsFallback = (rawRows && rawRows.length > 0);
+        } catch (tsErr) {
+          // Bad tsquery (e.g. reserved chars) — non-fatal, keep empty results
+          console.error('[local-intel ts-fallback]', tsErr.message);
+          rawRows = [];
+        }
+      }
+    }
+
+    // ── 0-result task dispatch — open the loop to the agent network ──
+    // Skip when caller pinned a category/group filter (they got an empty page from a real filter,
+    // not a free-text search miss) and when the NL intent looks like ORDER/STATUS (Basalt order
+    // flow handles those separately).
+    if ((!rawRows || rawRows.length === 0) && query && !category && !group
+        && nlIntent.taskClass !== 'ORDER' && nlIntent.taskClass !== 'STATUS') {
+      try {
+        const dispatchIntent = {
+          type: 'TEXT_SEARCH',
+          categories: nlIntent.category ? [nlIntent.category] : [],
+          cuisines:   nlIntent.cuisine  ? [nlIntent.cuisine]  : [],
+          group:      nlIntent.group    || null,
+          taskClass:  nlIntent.taskClass || 'DISCOVER',
+          raw:        query,
+        };
+        // Fire and forget — never block the user response on dispatch.
+        Promise.resolve()
+          .then(() => dispatchTask(dispatchIntent, query, zip))
+          .catch(e => console.error('[taskDispatch legacy 0-result]', e.message));
+      } catch (dispatchInitErr) {
+        console.error('[taskDispatch legacy init]', dispatchInitErr.message);
+      }
+    }
+
+    // Enrich rows with UCP order URL for Surge-connected businesses + matchReason
+    const rows = (rawRows || []).map(r => {
       const enriched = { ...r };
       if (r.pos_type === 'other' && r.wallet) {
         // Surge shop slug derived from wallet — agents can also use /api/directory/shops to discover
@@ -590,8 +706,14 @@ router.post('/', async (req, res) => {
         enriched.ucp_wallet    = r.wallet;
         enriched.ucp_note      = 'POST ucp_order_url with shopSlug resolved via GET https://surge.basalthq.com/api/directory/shops?q=' + encodeURIComponent(r.name);
       }
+      try {
+        enriched.matchReason = buildMatchReason(r, nlIntent, query);
+      } catch (_) {
+        enriched.matchReason = null;
+      }
       // Remove internal fields agents don't need
       delete enriched.pos_type;
+      delete enriched.confidence_score;
       return enriched;
     });
 
@@ -615,15 +737,19 @@ router.post('/', async (req, res) => {
       }
     }
 
-    // Real total: COUNT(*) with same WHERE but no LIMIT — so callers know the full set size
+    // Real total: COUNT(*) with same WHERE but no LIMIT — so callers know the full set size.
+    // Skip when the tsvector fallback ran (those rows were resolved via search_vector, not the
+    // ILIKE WHERE clause built above, so the COUNT would not represent that result set).
     let realTotal = rows.length;
-    try {
-      // countParams = everything except the final LIMIT param
-      const countParams  = params.slice(0, -1);
-      const countSql     = `SELECT COUNT(*) AS total FROM businesses WHERE ${conditions.join(' AND ')}`;
-      const countRows    = await db.query(countSql, countParams);
-      realTotal          = parseInt(countRows[0]?.total || rows.length, 10);
-    } catch (_) { /* non-fatal — fall back to page size */ }
+    if (!usedTsFallback) {
+      try {
+        // countParams = everything except the final LIMIT param
+        const countParams  = params.slice(0, -1);
+        const countSql     = `SELECT COUNT(*) AS total FROM businesses WHERE ${conditions.join(' AND ')}`;
+        const countRows    = await db.query(countSql, countParams);
+        realTotal          = parseInt(countRows[0]?.total || rows.length, 10);
+      } catch (_) { /* non-fatal — fall back to page size */ }
+    }
 
     res.json({
       ok:       true,
@@ -632,8 +758,12 @@ router.post('/', async (req, res) => {
       zips:     zip ? [zip] : [],
       results:  rows,
       meta: {
-        source:   'postgres',
-        coverage: '113,684 businesses — Florida statewide',
+        source:        usedTsFallback ? 'postgres+tsvector' : 'postgres',
+        intent_class:  nlIntent.taskClass || null,
+        intent_group:  nlIntent.group     || null,
+        intent_cuisine: nlIntent.cuisine  || null,
+        ts_fallback:   usedTsFallback,
+        coverage:      '113,684 businesses — Florida statewide',
       },
     });
   } catch (e) {
