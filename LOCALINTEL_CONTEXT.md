@@ -819,3 +819,4 @@ Frontend (localintel-landing) was upgraded to embedded iframe with PostMessage o
 - `8512ee5` — feat: isOpenNow pre-check on place-order, friendly closed message
 - `72bfcde` — feat: Phase 1 tsvector GIN index + cuisine + backfill worker
 - `e7e9ddd` — feat: Phase 2 intent router + tsvector search wired to search bar
+- `5560af7` — feat: Phase 3 data quality — 50+ OSM tags, YP infer expansion, OSM name/category wins merge
