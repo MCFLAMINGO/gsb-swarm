@@ -820,3 +820,4 @@ Frontend (localintel-landing) was upgraded to embedded iframe with PostMessage o
 - `72bfcde` — feat: Phase 1 tsvector GIN index + cuisine + backfill worker
 - `e7e9ddd` — feat: Phase 2 intent router + tsvector search wired to search bar
 - `5560af7` — feat: Phase 3 data quality — 50+ OSM tags, YP infer expansion, OSM name/category wins merge
+- `f9122a5` — feat: Phase 4 matchReason + open/claimed/confidence sort
