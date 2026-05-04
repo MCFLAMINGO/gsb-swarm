@@ -74,16 +74,16 @@ ON CONFLICT (state) DO UPDATE SET
 
 -- Trigger: auto-update updated_at + recompute zip_pct on state_registry
 CREATE OR REPLACE FUNCTION update_state_registry_pct()
-RETURNS TRIGGER AS $
+RETURNS TRIGGER AS $$
 BEGIN
   NEW.updated_at = NOW();
   NEW.zip_pct = CASE WHEN NEW.zip_total > 0 THEN NEW.zip_covered::float / NEW.zip_total * 100.0 ELSE 0 END;
   RETURN NEW;
 END;
-$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql;
 
-DO $ BEGIN
+DO $$ BEGIN
   CREATE TRIGGER trg_state_registry_updated
     BEFORE UPDATE ON state_registry
     FOR EACH ROW EXECUTE FUNCTION update_state_registry_pct();
-EXCEPTION WHEN duplicate_object THEN NULL; END $;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
