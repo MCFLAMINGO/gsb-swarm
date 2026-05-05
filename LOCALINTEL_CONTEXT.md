@@ -1473,3 +1473,34 @@ Two public-facing SEO landing pages on `www.thelocalintel.com`:
 
 ### Session Commits (gsb-swarm)
 - `d61640f` — fix: foodBiz category_group, ORDER_ITEM anchor, needsOpenNow safety valve, tsvector scope guard
+
+---
+
+## Session — Data Quality Workers (2026-05-05)
+
+### What Was Built
+
+#### `workers/reclassifyWorker.js`
+Deterministic name-signal reclassifier. 75+ rules matching business name patterns → correct `category` + `category_group`. Targets `category = 'LocalBusiness'` only (safe by default). `FULL_REFRESH=true` to rerun on all records.
+- **480 records reclassified** this run
+- ~17,595 `LocalBusiness` records remain — generic names with no inferrable signal, need website enrichment
+
+#### `workers/descriptionCleanerWorker.js`
+Boilerplate description cleaner. Replaces YP "X is a local business serving the XXXXX area" with deterministic template: `"[Name] is [a/an category label] in [City], FL [ZIP]."` Never touches real descriptions.
+- **2,344 boilerplate descriptions cleaned** (0 remaining)
+- 381 records have own websites for future richer enrichment
+
+### Data Quality State (post-run)
+| Metric | Before | After |
+|---|---|---|
+| Boilerplate descriptions | 2,344 | 0 |
+| LocalBusiness uncategorized | 18,115 | 17,595 |
+| fine_dining counted in oracle | 0 (filter bug) | 4–5 (real) |
+
+### Known Remaining Data Issues
+- 17,595 `LocalBusiness` with generic names — need website enrichment worker
+- "Country Club Real Estate" miscategorized as `fine_dining` in source data — pre-existing YP mis-tag
+- `census_layer` table empty — no predictive sector_gaps yet
+
+### Session Commits (gsb-swarm)
+- `(see next push)` — feat: reclassify + description cleaner workers
