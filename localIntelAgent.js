@@ -564,6 +564,12 @@ router.post('/', async (req, res) => {
   try {
     const db = require('./lib/db');
 
+    // Resolve NL intent up front so every path (Phase 2 + legacy) can read
+    // shared fields like `temporalContext`. Cheap, deterministic, no I/O.
+    const nlIntentEarly = (query && !group && !category)
+      ? resolveNlIntentFromRegistry(query)
+      : { taskClass: null, group: null, tags: null, cuisine: null, category: null, resolvesVia: 'search', temporalContext: null };
+
     // ── Phase 2 — intent-aware search bar path ──────────────────────────────
     // Only kicks in for free-text queries (no explicit category/group filter).
     // ORDER_ITEM falls through to the legacy handler (Basalt order flow lives there).
@@ -572,9 +578,17 @@ router.post('/', async (req, res) => {
       if (intent.type === 'CATEGORY_SEARCH' || intent.type === 'TEXT_SEARCH') {
         try {
           const lim = Math.min(Number(limit) || 50, 200);
-          const phase2Rows = intent.type === 'CATEGORY_SEARCH'
+          let phase2Rows = intent.type === 'CATEGORY_SEARCH'
             ? await searchByCategory(intent, zip, lim)
             : await searchByText(intent.raw, zip, lim);
+
+          // Step 4 — temporal post-filter (When dimension). Same data-hole
+          // protection as legacy path: if the filter would drop every row,
+          // keep originals (missing hours data must not silently exclude).
+          if (nlIntentEarly.temporalContext && phase2Rows && phase2Rows.length > 0) {
+            const filtered = phase2Rows.filter(b => isOpenDuringWindow(b, nlIntentEarly.temporalContext));
+            if (filtered.length > 0) phase2Rows = filtered;
+          }
 
           if (phase2Rows && phase2Rows.length > 0) {
             const sorted = sortResults(phase2Rows.slice());
@@ -613,6 +627,7 @@ router.post('/', async (req, res) => {
                 categories:    intent.categories || null,
                 needs_open:    !!intent.needsOpenNow,
                 matched_keyword: intent.matchedKeyword || null,
+                temporal:      nlIntentEarly.temporalContext ?? null,
                 coverage:      '113,684 businesses — Florida statewide',
               },
             });
@@ -646,6 +661,7 @@ router.post('/', async (req, res) => {
                   gap:        true,
                   gap_query:  query,
                   gap_intent: intent.type || 'DISCOVER',
+                  temporal:   nlIntentEarly.temporalContext ?? null,
                 },
               });
             } catch (taskErr) {
