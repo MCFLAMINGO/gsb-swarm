@@ -1205,3 +1205,24 @@ Every user query is a task expression with five dimensions. LocalIntel must even
 - LocalIntel moat: local merchant graph in Postgres + Tempo payment rails + W5 intent router + task completion loop. Deepens with every resolved query.
 
 **The demo that closes investors:** Someone orders dinner through a text message and feels like they have a concierge. One complete flow, flawless execution, filmed.
+
+---
+### pgvector Session A — Infrastructure Complete (May 2026)
+
+**pgvector availability check:** Confirmed on Railway Postgres 18.3 — `pg_available_extensions` shows vector v0.8.2 available, not yet installed. Migration 009 enables it via `CREATE EXTENSION IF NOT EXISTS vector`. No Railway dashboard intervention needed.
+
+**Files added (Session A):**
+- `migrations/009_pgvector.sql` — pgvector extension + `embedding vector(768)` column on businesses. Auto-discovered by `lib/dbMigrate.js` (alphabetical sort under `migrations/`). ivfflat index commented out — Session B adds it after backfill (needs row count to set `lists` correctly).
+- `services/embedder/` — nomic-embed-text sidecar (Node/Express, `@xenova/transformers`, quantized CPU model). Standalone Railway service. Endpoints: `GET /health`, `POST /embed { text }`, `POST /embed-batch { texts }`. Returns 768-dim vectors.
+- `lib/embedderClient.js` — `embedText(text)` and `embedBatch(texts)`. **Always returns null on failure**, never throws, never blocks search. Reads `EMBEDDING_SERVICE_URL` env var.
+
+**Operational requirements:**
+- `EMBEDDING_SERVICE_URL` env var must be set in Railway main Node service pointing to sidecar URL (e.g. `https://localintel-embedder.up.railway.app`).
+- If env var missing → semantic search silently disabled, normal search still works.
+- Sidecar deploys separately to Railway — point new service at `services/embedder/` directory.
+
+**Boundaries:**
+- Search handler (`localIntelAgent.js router.post('/')`) NOT modified in Session A — pure infrastructure session.
+- Session B will: (1) wire `embedderClient` into the search query chain as third fallback after registry/tsvector, (2) build `embeddingBackfillWorker` to populate the `embedding` column for existing businesses, (3) create the ivfflat index once data is in.
+
+**Next:** Session B — embeddingBackfillWorker + pgvector as third search fallback in localIntelAgent.
