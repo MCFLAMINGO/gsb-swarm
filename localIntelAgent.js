@@ -5371,6 +5371,9 @@ router.get('/acquisition-targets', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Fee Events API (internal dashboard only) ──────────────────────────
 // GET /api/local-intel/fee-events?hours=24&limit=100
 router.get('/fee-events', async (req, res) => {
