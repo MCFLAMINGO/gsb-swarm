@@ -941,24 +941,30 @@ router.post('/', async (req, res) => {
               businessId: enriched[0]?.business_id ?? null,
               group: nlIntentEarly.group
             });
+            const _phase2Meta = {
+              source:        'postgres+intent',
+              intent_type:   intent.type,
+              categories:    intent.categories || null,
+              needs_open:    !!intent.needsOpenNow,
+              matched_keyword: intent.matchedKeyword || null,
+              temporal:      nlIntentEarly.temporalContext ?? null,
+              personalized:  !!customerSession,
+              customer_query_count: customerSession?.query_count ?? null,
+              resolves_via:  resolvesVia,
+              coverage:      '113,684 businesses — Florida statewide',
+            };
+            _phase2Meta.narrative = buildNarrative(
+              enriched,
+              { ...nlIntentEarly, category: (intent.categories && intent.categories[0]) || nlIntentEarly.category },
+              { ..._phase2Meta, zip }
+            );
             return res.json({
               ok:       true,
               total:    enriched.length,
               returned: enriched.length,
               zips:     zip ? [zip] : TARGET_ZIPS,
               results:  enriched,
-              meta: {
-                source:        'postgres+intent',
-                intent_type:   intent.type,
-                categories:    intent.categories || null,
-                needs_open:    !!intent.needsOpenNow,
-                matched_keyword: intent.matchedKeyword || null,
-                temporal:      nlIntentEarly.temporalContext ?? null,
-                personalized:  !!customerSession,
-                customer_query_count: customerSession?.query_count ?? null,
-                resolves_via:  resolvesVia,
-                coverage:      '113,684 businesses — Florida statewide',
-              },
+              meta:     _phase2Meta,
             });
           }
           // 0 rows from Phase 2 → dispatch as a task to the agent network.
@@ -983,6 +989,17 @@ router.post('/', async (req, res) => {
                 businessId: null,
                 group: nlIntentEarly.group
               });
+              const _gapMeta = {
+                source:     'task_dispatch',
+                gap:        true,
+                gap_query:  query,
+                gap_intent: intent.type || 'DISCOVER',
+                temporal:   nlIntentEarly.temporalContext ?? null,
+                personalized:  !!customerSession,
+                customer_query_count: customerSession?.query_count ?? null,
+                resolves_via: resolvesVia,
+              };
+              _gapMeta.narrative = buildNarrative([], nlIntentEarly, { ..._gapMeta, zip });
               return res.json({
                 ok: true,
                 taskCreated: true,
@@ -992,16 +1009,7 @@ router.post('/', async (req, res) => {
                 results: [],
                 total: 0,
                 returned: 0,
-                meta: {
-                  source:     'task_dispatch',
-                  gap:        true,
-                  gap_query:  query,
-                  gap_intent: intent.type || 'DISCOVER',
-                  temporal:   nlIntentEarly.temporalContext ?? null,
-                  personalized:  !!customerSession,
-                  customer_query_count: customerSession?.query_count ?? null,
-                  resolves_via: resolvesVia,
-                },
+                meta: _gapMeta,
               });
             } catch (taskErr) {
               console.error('[taskDispatch] failed to create task:', taskErr.message);
@@ -1642,8 +1650,8 @@ router.post('/merchant/request-link', express.json(), async (req, res) => {
         });
       }
       const [inserted] = await db.query(
-        `INSERT INTO businesses (name, phone, zip, category, merchant_email, claimed, source)
-         VALUES ($1, $2, $3, $4, $5, true, 'claimed')
+        `INSERT INTO businesses (name, phone, zip, category, merchant_email, claimed, status)
+         VALUES ($1, $2, $3, $4, $5, true, 'active')
          RETURNING *`,
         [name, phone ?? null, zip, category ?? 'general', normEmail]
       );
