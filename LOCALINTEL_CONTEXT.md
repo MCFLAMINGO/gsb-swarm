@@ -1165,3 +1165,17 @@ Every user query is a task expression with five dimensions. LocalIntel must even
   - Post-deploy: both should additionally carry `meta.resolves_via = 'search'`.
 
 **Next step — Step 7:** Gap detection intelligence (aggregate unresolved `dispatchTask` calls → acquisition targets).
+
+---
+
+## Step 7 — Acquisition intelligence + self-monitoring (2026-05-05)
+
+**Shipped:**
+- `GET /api/local-intel/acquisition-targets` — top 50 unresolved intent_group + cuisine + ZIP groups from `resolution_history`. Priority assigned by demand_count: `high` (5+), `medium` (2-4), `low` (1). Response shape: `{ acquisition_targets, total_targets, high_priority, recent_gaps }`.
+- `[GAP ALERT]` console warning — fires from `router.post('/')` when the same `intent_group + zip` combination has 5+ unresolved queries in `resolution_history`. Fire-and-forget via `db.query(...).then(...).catch(() => {})` — never blocks the user response, never throws.
+- `meta.acquisition_signal = true` — added to the response when `dispatchTask` fires (resolved=false, 0-result path), alongside the existing `meta.gap = true`. Frontend / consumer agents now know the query contributed to a gap signal.
+- **W5 reasoning complete:** What (taskClass), Where (zip), When (temporalContext), Who (customerSession), How (resolvesVia), Why (acquisition_signal / gap intelligence).
+- **Self-monitoring loop:** the system knows its success rate (`/resolution-stats`), knows its gaps (`/acquisition-targets`), and alerts on repeated failures (`[GAP ALERT]`). No LLM calls — pure Postgres aggregation, fully deterministic.
+- **ADR-001 lesson preserved:** one system, enhanced in place, no parallel code paths. `intentRegistry.js` remains the single front door — add new intents there, nothing else changes.
+
+**System now closes the loop:** every unresolved query becomes a row in `resolution_history`; aggregations surface as acquisition signal; repeated failures page console; new businesses fill the gap; resolution rate climbs.
