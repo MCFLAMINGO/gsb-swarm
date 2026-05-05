@@ -120,35 +120,51 @@ const RULES = [
 
 // Human-readable labels for description cleaner (used by descriptionWorker)
 const CATEGORY_LABELS = {
+  // Food
   fine_dining: 'a fine dining restaurant', steakhouse: 'a steakhouse', asian: 'an Asian restaurant',
   mexican: 'a Mexican restaurant', italian: 'an Italian restaurant', pizza: 'a pizza restaurant',
   bbq: 'a BBQ & smokehouse restaurant', sandwich: 'a sandwich & deli', seafood: 'a seafood restaurant',
   bakery: 'a bakery', cafe: 'a café', bar: 'a bar & lounge', restaurant: 'a restaurant',
+  fast_food: 'a quick-service restaurant', casual_dining: 'a casual dining restaurant',
+  cuban: 'a Cuban restaurant', dessert: 'a dessert shop', coffee_chain: 'a coffee shop',
+  // Health
   dental: 'a dental practice', chiropractic: 'a chiropractic clinic', optometry: 'an optometry practice',
   physical_therapy: 'a physical therapy clinic', veterinary: 'a veterinary clinic',
   urgent_care: 'an urgent care center', pharmacy: 'a pharmacy', healthcare: 'a medical practice',
+  clinic: 'a medical clinic', spa: 'a day spa & wellness center',
+  // Professional Services
   legal: 'a law firm', accounting: 'an accounting firm', finance: 'a financial services firm',
   insurance: 'an insurance agency', real_estate: 'a real estate company',
   architecture: 'an architecture firm', marketing: 'a marketing agency', staffing: 'a staffing firm',
   title_company: 'a title company', it_services: 'an IT services company',
+  professional_services: 'a professional services firm',
+  // Construction
   plumbing: 'a plumbing contractor', electrical: 'an electrical contractor',
   hvac: 'an HVAC contractor', roofing: 'a roofing contractor',
   landscaping: 'a landscaping company', pool_service: 'a pool service company',
   painting: 'a painting contractor', flooring: 'a flooring contractor',
   pest_control: 'a pest control company', cleaning: 'a cleaning service',
   solar: 'a solar installation company', general_contractor: 'a general contractor',
-  beauty_salon: 'a beauty salon', spa: 'a day spa', fitness: 'a fitness studio',
+  // Retail
+  beauty_salon: 'a beauty salon', hair_salon: 'a beauty salon', fitness: 'a fitness studio',
   clothing: 'a clothing boutique', grocery: 'a grocery store', liquor_store: 'a wine & spirits shop',
   florist: 'a florist', jewelry: 'a jewelry store', pet_store: 'a pet supply store',
   furniture: 'a furniture & home goods store', art_gallery: 'an art gallery',
+  // Automotive
   auto_repair: 'an auto repair shop', car_wash: 'a car wash & detailing service',
   car_dealer: 'a car dealership', towing: 'a towing service', gas_station: 'a gas station',
+  // Hospitality
   hotel: 'a hotel', vacation_rental: 'a vacation rental management company',
-  event_venue: 'an event venue', childcare: 'a childcare center', tutoring: 'a tutoring center',
-  education: 'an educational institution', religious: 'a place of worship',
+  event_venue: 'an event venue',
+  // Education
+  childcare: 'a childcare center', tutoring: 'a tutoring center',
+  education: 'an educational institution',
+  // Community / Other
+  religious: 'a place of worship', nonprofit: 'a nonprofit organization',
   storage: 'a self-storage facility', shipping: 'a shipping & print center',
-  nonprofit: 'a nonprofit organization', photography: 'a photography studio',
-  funeral: 'a funeral home', LocalBusiness: 'a local business',
+  photography: 'a photography studio', funeral: 'a funeral home',
+  // Catch-all
+  LocalBusiness: 'a local business',
 };
 
 module.exports = { RULES, CATEGORY_LABELS };
