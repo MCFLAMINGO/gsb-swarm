@@ -4453,21 +4453,23 @@ router.get('/order-status/:receiptId', async (req, res) => {
 });
 
 // ── GET /api/local-intel/gaps — top unresolved queries (internal dashboard) ──
-// Groups pending tasks by intent + query + zip so the team can see what
-// the agent network has not yet been able to resolve. No auth — internal only.
+// Groups unresolved tasks by intent (top_category) + query (user_query) + zip so
+// the team can see what the agent network has not yet been able to resolve.
+// "Unresolved" = status NOT IN ('completed','failed','cancelled') — covers
+// 'open','assigned','accepted','in_progress'. No auth — internal only.
 router.get('/gaps', async (req, res) => {
   try {
     const db = require('./lib/db');
     const rows = await db.query(`
       SELECT
-        intent,
-        query,
+        top_category    AS intent,
+        user_query      AS query,
         zip,
         COUNT(*)        AS occurrences,
         MAX(created_at) AS last_seen
       FROM tasks
-      WHERE status = 'pending'
-      GROUP BY intent, query, zip
+      WHERE status NOT IN ('completed','failed','cancelled')
+      GROUP BY top_category, user_query, zip
       ORDER BY occurrences DESC, last_seen DESC
       LIMIT 50
     `);
