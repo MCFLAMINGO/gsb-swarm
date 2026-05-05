@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-03 (session 10 — businessMergeWorker wired and tested, dedupe-on-ingest live)
+> Last updated: 2026-05-05 (session 12 — dynamic multi-sector ZIP pages deployed)
 
 ---
 
@@ -1570,3 +1570,33 @@ Builds richer deterministic descriptions for records without fetchable websites.
 
 ### Session Commits
 - `(see push)` — fix: complete CATEGORY_LABELS map
+
+---
+
+## Session — Dynamic ZIP Landing Pages (2026-05-05)
+
+> Last updated: 2026-05-05 (session 12 — dynamic multi-sector ZIP pages deployed)
+
+### Problem
+ZIP landing pages (`/zip/32082`, `/zip/32081`) were hardcoded with restaurant-only gap cards — not representative of LocalIntel's multi-sector intelligence, and gave away exact counts/percentages (no gate).
+
+### Solution
+Both pages rewritten as dynamic, oracle-driven templates:
+- Fetch `market_intelligence.sector_breakdown` from live oracle on page load
+- Client-side `computeGaps()` uses population benchmarks + HHI income adjustment
+- Gap cards show **tier signal only**: "Significant Opportunity" / "Moderate Opportunity" / "Competitive Market" — no exact counts, no percentages
+- 8–10 sectors shown (non-restaurants visible), sorted by gap magnitude
+- "See Full Report →" gates to `/claim.html` (conversion)
+- Graceful fallback if oracle unavailable
+- Applies equally to 32082 (Ponte Vedra Beach) and 32081 (Nocatee)
+
+### Files Changed (localintel-landing)
+- `zip/32082.html` — rewritten (was 328 lines hardcoded, now 328 lines dynamic)
+- `zip/32081.html` — rewritten (same template, different ZIP/city metadata)
+
+### Session Commits (localintel-landing)
+- `9785bea` — feat: dynamic multi-sector gap cards — oracle-driven, gated, no hardcoded restaurant data
+
+### Live URLs
+- [thelocalintel.com/zip/32082](https://www.thelocalintel.com/zip/32082)
+- [thelocalintel.com/zip/32081](https://www.thelocalintel.com/zip/32081)
