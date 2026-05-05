@@ -1126,3 +1126,22 @@ Every user query is a task expression with five dimensions. LocalIntel must even
   - `"happy hour near me"` → `source: task_dispatch`, `temporal: 'happy_hour'`
 
 **Next step — Step 5:** Customer profile + task history (`task_history` table, personalized ranking).
+
+---
+
+## Step 5 — Customer profile + personalized ranking (Who dimension) (2026-05-05)
+
+**Shipped:**
+- `migrations/008_customer_sessions.sql` — `customer_sessions` table. Columns: `customer_id` (TEXT, phone E.164 or anonymous token), `id_type` ('phone'|'anonymous'), `last_query`, `last_business_id` (UUID), `preferred_group` (most queried group: food/bar/health/etc), `query_count` (default 1), `created_at`, `last_seen`. Unique index on `customer_id`, secondary on `preferred_group`, ordered on `last_seen DESC`. Auto-applied on startup via `lib/dbMigrate.js`.
+- `upsertCustomerSession({ customerId, idType, query, businessId, group })` helper in `localIntelAgent.js` — fire-and-forget, never awaited, never throws. Skips silently when `customerId` is null (anonymous web). `ON CONFLICT (customer_id) DO UPDATE` increments `query_count`, refreshes `last_seen`, preserves `last_business_id` via `COALESCE` when the new value is null.
+- `personalizeResults(results, customerSession)` helper — boosts `last_business_id` to position 0 (sets `_boosted: true`), then pulls all `category_group === preferred_group` matches in front of the rest. No-ops when `customerSession` is null or results have ≤1 row. Wrapped in try/catch — falls back to original order on any error.
+- Customer identity sourced from `req.body.From` (Twilio E.164) → falls back to `req.body.from` / `req.body.phone` / null. `customerIdType = 'phone'` when present, `'anonymous'` otherwise.
+- `customerSession` fetched up-front (single SELECT, best-effort — error path leaves it null) so both Phase 2 and legacy paths share the same session object.
+- Three write points wired in `router.post('/')`:
+  - **Phase 2 search hit** — personalize `enriched`, then upsert with `nlIntentEarly.group`
+  - **Phase 2 dispatch (0 results)** — upsert with null businessId + `nlIntentEarly.group`
+  - **Legacy path** — personalize `rows`, then upsert with `nlIntent.group`
+- `meta.personalized` (boolean) + `meta.customer_query_count` (integer or null) added to all three response shapes — Phase 2 success, Phase 2 dispatch, and legacy.
+- **Anonymous safety:** web queries with no `From` field get `customerSession = null`, no personalization, no upsert, `meta.personalized = false`. Never crashes. Never silent fail — every error path logs.
+
+**Next step — Step 6:** Resolution path per task class (`resolvesVia` field already present on every registry entry — drives routing: search/surge/status/dispatch).
