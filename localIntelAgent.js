@@ -932,6 +932,46 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // ── Semantic search fallback (pgvector) — fires when tsvector also returns 0 ──
+    // Only runs if EMBEDDING_SERVICE_URL is configured. Failure → rawRows stays
+    // empty → falls through to dispatchTask. Never crashes.
+    let usedSemantic = false;
+    if ((!rawRows || rawRows.length === 0) && query && typeof query === 'string'
+        && process.env.EMBEDDING_SERVICE_URL) {
+      try {
+        const { embedText } = require('./lib/embedderClient');
+        const queryVector = await embedText(query);
+        if (queryVector) {
+          const detectedZips = zip ? [zip] : TARGET_ZIPS;
+          const semanticResults = await db.query(
+            `SELECT
+                business_id, name, address, city, zip, phone, website,
+                hours, category, category_group, tags, description, cuisine,
+                confidence_score AS confidence, confidence_score, lat, lon, sunbiz_doc_number,
+                claimed_at IS NOT NULL AS claimed,
+                wallet,
+                pos_config->>'pos_type' AS pos_type,
+                (embedding <=> $1::vector) AS semantic_distance
+             FROM businesses
+             WHERE zip = ANY($2::text[])
+               AND embedding IS NOT NULL
+               AND status != 'inactive'
+             ORDER BY semantic_distance ASC
+             LIMIT 20`,
+            [`[${queryVector.join(',')}]`, detectedZips]
+          );
+          if (semanticResults && semanticResults.length > 0) {
+            rawRows = semanticResults;
+            usedSemantic = true;
+            console.log(`[localintel] semantic search found ${rawRows.length} results for: ${query}`);
+          }
+        }
+      } catch (semErr) {
+        console.error('[local-intel semantic-fallback]', semErr.message);
+        // rawRows stays empty — fall through to dispatchTask
+      }
+    }
+
     // ── Step 4 — temporal post-filter (When dimension) ──────────────────────
     // Applies after BOTH the main ILIKE (Path A) and the tsvector fallback (Path B),
     // since rawRows holds whichever produced results. Missing/unparseable hours
@@ -1030,7 +1070,7 @@ router.post('/', async (req, res) => {
     // Skip when the tsvector fallback ran (those rows were resolved via search_vector, not the
     // ILIKE WHERE clause built above, so the COUNT would not represent that result set).
     let realTotal = rows.length;
-    if (!usedTsFallback) {
+    if (!usedTsFallback && !usedSemantic) {
       try {
         // countParams = everything except the final LIMIT param
         const countParams  = params.slice(0, -1);
@@ -1062,7 +1102,7 @@ router.post('/', async (req, res) => {
         zip,
         businessId: rows[0]?.business_id ?? null,
         resolved: true,
-        resolvedVia: usedTsFallback ? 'tsvector' : 'search',
+        resolvedVia: usedSemantic ? 'pgvector' : (usedTsFallback ? 'tsvector' : 'search'),
         resultCount: rows.length,
         startTime: _reqStart
       });
@@ -1086,12 +1126,13 @@ router.post('/', async (req, res) => {
       zips:     zip ? [zip] : [],
       results:  rows,
       meta: {
-        source:        usedTsFallback ? 'postgres+tsvector' : 'postgres',
+        source:        usedSemantic ? 'postgres+pgvector' : (usedTsFallback ? 'postgres+tsvector' : 'postgres'),
         intent_class:  nlIntent.taskClass || null,
         intent_group:  nlIntent.group     || null,
         intent_cuisine: nlIntent.cuisine  || null,
         temporal:      nlIntent.temporalContext ?? null,
-        ts_fallback:   usedTsFallback,
+        ts_fallback:   usedTsFallback && !usedSemantic,
+        semantic_search: usedSemantic,
         personalized:  !!customerSession,
         customer_query_count: customerSession?.query_count ?? null,
         resolves_via:  resolvesVia,
