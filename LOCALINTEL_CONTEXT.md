@@ -1412,3 +1412,34 @@ ROUTING_ENABLED=false     # 'true' to actually charge — keep false until Tempo
 - `gsb-swarm`: docs: fee collection + agent RFQ context update
 - `gsb-swarm-dashboard`: feat: fee control dashboard — /local-intel/fees, sidebar nav
 
+
+---
+
+## Session — ZIP Landing Pages (2026-05-05)
+
+### What Was Built
+
+#### ZIP Landing Pages — `/zip/32081` and `/zip/32082`
+Two public-facing SEO landing pages on `www.thelocalintel.com`:
+
+- **`localintel-landing/zip/32081.html`** — Nocatee
+  - Hero: 1,153 businesses tracked, population 24,368
+  - Real gap data from oracle endpoint: upscale dining −13, fine dining −5
+  - Dynamic stats loaded on page load from `GET /api/local-intel/oracle?zip=32081` (Railway)
+  - Live search bar wired to Railway business search API
+  - Cross-links to nearby ZIP pages
+  - Claim CTA for business owners
+
+- **`localintel-landing/zip/32082.html`** — Ponte Vedra Beach
+  - Hero: 674 businesses tracked, population 28,697
+  - Real gap data: upscale dining −14, fine dining −6, budget −4
+  - Same dynamic oracle fetch, same claim CTA + search wiring
+
+- **`localintel-landing/vercel.json`** — added rewrites block for `/zip/32081` → `/zip/32081.html` and `/zip/32082` → `/zip/32082.html`
+
+### Deployment
+- Live at: `https://www.thelocalintel.com/zip/32081` and `https://www.thelocalintel.com/zip/32082`
+- Data source: `GET gsb-swarm-production.up.railway.app/api/local-intel/oracle?zip=XXXXX` (no LLM — deterministic Postgres query)
+
+### Session Commits (localintel-landing)
+- `77f8fea` — feat: ZIP landing pages for 32081 (Nocatee) + 32082 (Ponte Vedra Beach)
