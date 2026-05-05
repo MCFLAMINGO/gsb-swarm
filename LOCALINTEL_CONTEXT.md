@@ -1558,3 +1558,15 @@ Builds richer deterministic descriptions for records without fetchable websites.
 
 ### Session Commits (gsb-swarm)
 - `(see push)` — feat: website enricher + description template workers
+
+---
+
+## Session — Complete CATEGORY_LABELS Pass (2026-05-05)
+
+- Added 130+ OSM/YP category labels to reclassifyWorker.js CATEGORY_LABELS map
+- Covers: bank, coffee_chain, plumber, electrician, barbershop, fitness_centre, optician, yoga_studio, medical_spa, obgyn, dermatology, rv_marine, brewery, etc.
+- Wrong-label descriptions in target ZIPs: 817 → 24 (truly obscure OSM values like 'yes', 'toilets', 'fountain')
+- All records now show correct human-readable category labels in descriptions
+
+### Session Commits
+- `(see push)` — fix: complete CATEGORY_LABELS map
