@@ -1081,3 +1081,21 @@ Every user query is a task expression with five dimensions. LocalIntel must even
 - `GET /api/local-intel/gaps` endpoint live — top 50 unresolved queries grouped by `intent + query + zip`, ordered by occurrences DESC then `last_seen` DESC
 
 **Next step — Step 3:** Resolution history table, temporal intent (`temporalContext` field on registry entries).
+
+---
+
+## Step 3 — Resolution history table (2026-05-05)
+
+**Shipped:**
+- `migrations/007_resolution_history.sql` — `resolution_history` table with indexes on `intent_class`, `zip`, `resolved`, and `created_at DESC`. Auto-applied on startup via `lib/dbMigrate.js` (which discovers all `migrations/*.sql` and tracks applied files in `migrations_log`).
+- `recordResolution()` helper in `localIntelAgent.js` — fire-and-forget, never awaits, never blocks the response, never throws. Logs failures via `.catch`.
+- `_reqStart = Date.now()` added to top of `router.post('/')` for `response_ms` measurement.
+- Four write points instrumented in `router.post('/')`:
+  - **Phase 2 search hit** — `resolved=true, resolved_via='search'` (intent-aware path)
+  - **Phase 2 dispatch (0 results)** — `resolved=false, resolved_via='dispatch'`
+  - **Legacy ILIKE / tsvector hit** — `resolved=true, resolved_via='search'` or `'tsvector'` based on `usedTsFallback`
+  - **Legacy 0-result dispatch** — `resolved=false, resolved_via='dispatch'` (gated on `dispatchedGap`)
+- `GET /api/local-intel/resolution-stats` — total queries, resolved count, resolution rate %, avg response_ms, by-intent-group breakdown, top 20 unresolved gaps.
+- The system now knows its own success rate per intent group and ZIP — closing the loop on Step 1's tsvector fallback and Step 2's gap detection.
+
+**Next step — Step 4:** Temporal intent (`temporalContext` field on registry entries, time-aware SQL filter against `business_hours`).
