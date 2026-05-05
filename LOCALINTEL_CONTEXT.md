@@ -1117,7 +1117,12 @@ Every user query is a task expression with five dimensions. LocalIntel must even
   - Window definitions (24h): `happy_hour [15,19]`, `late_night [22,26]`, `morning [6,11]`, `midday [11,14]`, `evening [17,22]`. `open_now` = current time inside any of today's intervals.
   - Overnight close handled by adding 24 to `close` when `close < open` (and the alias `00:00 → 24:00`).
 - Temporal post-filter applied to `rawRows` AFTER both the main ILIKE (Path A) and the tsvector fallback (Path B) — single point of application since `rawRows` is the unified result holder.
+- **Phase 2 paths also wired** (since most live queries hit Phase 2 first and short-circuit before the legacy path runs): `nlIntentEarly` is resolved at the top of the handler and reused. The Phase 2 result-success branch applies the temporal filter to `phase2Rows` with the same data-hole guard, and both Phase 2 success + Phase 2 dispatch responses now carry `meta.temporal`.
 - **Data-hole protection:** if the temporal filter would eliminate every result (`filtered.length === 0`), originals are kept. The system never silently shows "no results" because of missing hours data.
-- `meta.temporal` added to the legacy-path response — exposes the resolved `temporalContext` (or `null`).
+- `meta.temporal` added to all three response shapes — Phase 2 success (`source: postgres+intent`), Phase 2 dispatch (`source: task_dispatch`), and legacy (`source: postgres` / `postgres+tsvector`).
+- **Live verification (2026-05-05):**
+  - `"open now food near me"` → `source: postgres+intent`, `temporal: 'open_now'`, 3 results
+  - `"where can I get chinese food"` → `source: postgres`, `temporal: null`, 0 results (unaffected baseline)
+  - `"happy hour near me"` → `source: task_dispatch`, `temporal: 'happy_hour'`
 
 **Next step — Step 5:** Customer profile + task history (`task_history` table, personalized ranking).
