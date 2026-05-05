@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-05 (session 12 — hybrid benchmark logic computed + documented, not yet in code)
+> Last updated: 2026-05-05 (session 12 — hybrid benchmarks live on ZIP pages)
 
 ---
 
@@ -1641,5 +1641,5 @@ else    → Balanced
 - 32081: Construction=competitive ✅ (Nocatee build-out), Food=significant ✅ (underserved suburb), Services=competitive ✅
 
 ### Status
-**NOT YET IN CODE** — benchmarks computed and validated, awaiting green light to update ZIP HTML files and deploy.
+**LIVE** — deployed to thelocalintel.com/zip/32082 + /zip/32081 via localintel-landing commit `5eee7c2`
 
