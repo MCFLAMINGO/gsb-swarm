@@ -249,6 +249,64 @@ function isOpenDuringWindow(business, temporalContext) {
   }
 }
 
+// Step 5 — fire-and-forget upsert into customer_sessions. Keyed on phone
+// (E.164 from Twilio) for SMS callers, skipped entirely for anonymous web.
+// Never awaited, never throws — failures log only.
+function upsertCustomerSession({ customerId, idType, query, businessId, group }) {
+  if (!customerId) return;
+  db.query(
+    `INSERT INTO customer_sessions
+       (customer_id, id_type, last_query, last_business_id, preferred_group, query_count, last_seen)
+     VALUES ($1, $2, $3, $4, $5, 1, NOW())
+     ON CONFLICT (customer_id) DO UPDATE SET
+       last_query       = EXCLUDED.last_query,
+       last_business_id = COALESCE(EXCLUDED.last_business_id, customer_sessions.last_business_id),
+       preferred_group  = EXCLUDED.preferred_group,
+       query_count      = customer_sessions.query_count + 1,
+       last_seen        = NOW()`,
+    [
+      customerId,
+      idType    ?? 'anonymous',
+      query     ?? null,
+      businessId ?? null,
+      group      ?? null
+    ]
+  ).catch(err => console.error('[customer_session] upsert failed:', err.message));
+}
+
+// Step 5 — personalize result ordering for known customers. Boosts last
+// engaged business to position 0, then pulls preferred_group matches forward.
+// Fields on result rows: business_id (UUID), category_group (text). Never
+// throws — falls back to original order on any error.
+function personalizeResults(results, customerSession) {
+  if (!customerSession || !Array.isArray(results) || results.length <= 1) return results;
+  try {
+    let out = results.slice();
+
+    if (customerSession.last_business_id) {
+      const idx = out.findIndex(r => r && r.business_id === customerSession.last_business_id);
+      if (idx > 0) {
+        const [boosted] = out.splice(idx, 1);
+        boosted._boosted = true;
+        out.unshift(boosted);
+      }
+    }
+
+    if (customerSession.preferred_group) {
+      const pg = customerSession.preferred_group;
+      const head = out.length && out[0]._boosted ? [out.shift()] : [];
+      const groupMatches = out.filter(r => r && (r.category_group === pg || r.group === pg));
+      const rest        = out.filter(r => r && r.category_group !== pg && r.group !== pg);
+      out = [...head, ...groupMatches, ...rest];
+    }
+
+    return out;
+  } catch (err) {
+    console.error('[personalize] failed:', err.message);
+    return results;
+  }
+}
+
 // Coerce hours from row → object so isOpenNow can read it. The DB can hand back
 // either a JSON string (jsonb-as-text) or a parsed object depending on the column.
 function _parseHours(h) {
@@ -561,6 +619,27 @@ router.post('/', async (req, res) => {
   const _reqStart = Date.now();
   const { zip, query, category, group, limit = 50, minConfidence = 0 } = req.body || {};
 
+  // Step 5 — customer identity. Twilio sends phone in `From` (E.164). Web
+  // callers send nothing → anonymous (no personalization, no upsert).
+  const customerId = req.body?.From || req.body?.from || req.body?.phone || null;
+  const customerIdType = customerId ? 'phone' : 'anonymous';
+
+  // Step 5 — fetch customer session up-front so both Phase 2 and legacy paths
+  // can personalize. Best-effort — any failure leaves customerSession null and
+  // every personalization call no-ops.
+  let customerSession = null;
+  if (customerId) {
+    try {
+      const csRows = await db.query(
+        'SELECT * FROM customer_sessions WHERE customer_id = $1 LIMIT 1',
+        [customerId]
+      );
+      customerSession = csRows[0] ?? null;
+    } catch (err) {
+      console.error('[customer_session] fetch failed:', err.message);
+    }
+  }
+
   try {
     const db = require('./lib/db');
 
@@ -592,7 +671,7 @@ router.post('/', async (req, res) => {
 
           if (phase2Rows && phase2Rows.length > 0) {
             const sorted = sortResults(phase2Rows.slice());
-            const enriched = sorted.map(r => {
+            let enriched = sorted.map(r => {
               const out = { ...r };
               if (r.pos_type === 'other' && r.wallet) {
                 out.ucp_order_url = 'https://surge.basalthq.com/api/ucp/checkout-sessions';
@@ -605,6 +684,10 @@ router.post('/', async (req, res) => {
               delete out.confidence_score;
               return out;
             });
+            // Step 5 — personalize ordering for known customers
+            if (customerSession) {
+              enriched = personalizeResults(enriched, customerSession);
+            }
             recordResolution({
               query,
               intent: { taskClass: intent.type, group: null, cuisine: null },
@@ -614,6 +697,14 @@ router.post('/', async (req, res) => {
               resolvedVia: 'search',
               resultCount: enriched.length,
               startTime: _reqStart
+            });
+            // Step 5 — fire-and-forget customer session upsert
+            upsertCustomerSession({
+              customerId,
+              idType: customerIdType,
+              query,
+              businessId: enriched[0]?.business_id ?? null,
+              group: nlIntentEarly.group
             });
             return res.json({
               ok:       true,
@@ -628,6 +719,8 @@ router.post('/', async (req, res) => {
                 needs_open:    !!intent.needsOpenNow,
                 matched_keyword: intent.matchedKeyword || null,
                 temporal:      nlIntentEarly.temporalContext ?? null,
+                personalized:  !!customerSession,
+                customer_query_count: customerSession?.query_count ?? null,
                 coverage:      '113,684 businesses — Florida statewide',
               },
             });
@@ -647,6 +740,13 @@ router.post('/', async (req, res) => {
                 resultCount: 0,
                 startTime: _reqStart
               });
+              upsertCustomerSession({
+                customerId,
+                idType: customerIdType,
+                query,
+                businessId: null,
+                group: nlIntentEarly.group
+              });
               return res.json({
                 ok: true,
                 taskCreated: true,
@@ -662,6 +762,8 @@ router.post('/', async (req, res) => {
                   gap_query:  query,
                   gap_intent: intent.type || 'DISCOVER',
                   temporal:   nlIntentEarly.temporalContext ?? null,
+                  personalized:  !!customerSession,
+                  customer_query_count: customerSession?.query_count ?? null,
                 },
               });
             } catch (taskErr) {
@@ -839,7 +941,7 @@ router.post('/', async (req, res) => {
     }
 
     // Enrich rows with UCP order URL for Surge-connected businesses + matchReason
-    const rows = (rawRows || []).map(r => {
+    let rows = (rawRows || []).map(r => {
       const enriched = { ...r };
       if (r.pos_type === 'other' && r.wallet) {
         // Surge shop slug derived from wallet — agents can also use /api/directory/shops to discover
@@ -892,6 +994,20 @@ router.post('/', async (req, res) => {
       } catch (_) { /* non-fatal — fall back to page size */ }
     }
 
+    // ── Step 5 — personalize ordering for known customers ───────────────────
+    if (customerSession) {
+      rows = personalizeResults(rows, customerSession);
+    }
+
+    // ── Step 5 — fire-and-forget customer session upsert ────────────────────
+    upsertCustomerSession({
+      customerId,
+      idType: customerIdType,
+      query,
+      businessId: rows[0]?.business_id ?? null,
+      group: nlIntent.group
+    });
+
     // ── Step 3 — record resolution outcome (fire-and-forget) ─────────────────
     if (rows.length > 0) {
       recordResolution({
@@ -930,6 +1046,8 @@ router.post('/', async (req, res) => {
         intent_cuisine: nlIntent.cuisine  || null,
         temporal:      nlIntent.temporalContext ?? null,
         ts_fallback:   usedTsFallback,
+        personalized:  !!customerSession,
+        customer_query_count: customerSession?.query_count ?? null,
         ...(dispatchedGap && {
           gap:        true,
           gap_query:  query,
