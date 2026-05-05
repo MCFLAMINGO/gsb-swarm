@@ -1145,3 +1145,23 @@ Every user query is a task expression with five dimensions. LocalIntel must even
 - **Anonymous safety:** web queries with no `From` field get `customerSession = null`, no personalization, no upsert, `meta.personalized = false`. Never crashes. Never silent fail — every error path logs.
 
 **Next step — Step 6:** Resolution path per task class (`resolvesVia` field already present on every registry entry — drives routing: search/surge/status/dispatch).
+
+---
+
+## Step 6 — resolvesVia routing (How dimension) (2026-05-05)
+
+**Shipped:**
+- `resolvesVia` field on every `lib/intentRegistry.js` entry is now actively read by the `router.post('/')` handler in `localIntelAgent.js` — previously declared but ignored.
+- **Routing contract** (added at the top of the handler, after `nlIntentEarly` resolution, before any SQL runs):
+  - `surge` → HTTP 400 with `{ error, redirect: '/api/local-intel/place-order', intent_class, resolves_via, meta.resolves_via }` — ORDER intents must use the dedicated order endpoint.
+  - `status` → HTTP 400 with `{ error, redirect: '/api/local-intel/order-status', intent_class, resolves_via, meta.resolves_via }` — STATUS intents must use the dedicated status endpoint.
+  - `search` / `dispatch` → fall through to existing SQL search and 0-result dispatch flow (unchanged).
+- `meta.resolves_via` added to all three success/dispatch response shapes (Phase 2 success, Phase 2 dispatch, legacy) plus the two new 400 redirect responses — every response now carries the routing dimension.
+- **Registry audit** (`lib/intentRegistry.js`): all ORDER-class entries already had `resolvesVia: 'surge'`, all STATUS-class entries already had `resolvesVia: 'status'`, all DISCOVER entries (cuisine, bar, utility, temporal triggers, fallbacks) had `resolvesVia: 'search'`. No changes required.
+- **STEP 0 finding — do ORDER/STATUS reach `router.post('/')`?** Yes. There are dedicated routes (`router.post('/place-order')` at line 4676 and `router.get('/order-status/:receiptId')` at line 4744), but `router.post('/')` had no upstream guard — free-text queries containing "order me a..." or "where's my order" would hit it. The legacy 0-result dispatch already skipped ORDER/STATUS (line 922-923) but didn't return early — they would run a useless SQL search and fall through to empty results. The Step 6 guard is a **real routing switch**, not just defensive.
+- **Live verification (2026-05-05, pre-deploy baseline):**
+  - `"where can I get seafood"` → 4 results, `meta.intent_class = DISCOVER`
+  - `"chinese food near me"` → 27 results, `source: postgres+intent`
+  - Post-deploy: both should additionally carry `meta.resolves_via = 'search'`.
+
+**Next step — Step 7:** Gap detection intelligence (aggregate unresolved `dispatchTask` calls → acquisition targets).
