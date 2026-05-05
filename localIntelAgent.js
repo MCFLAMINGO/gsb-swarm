@@ -965,6 +965,22 @@ router.post('/', async (req, res) => {
           .then(() => dispatchTask(dispatchIntent, query, zip))
           .catch(e => console.error('[taskDispatch legacy 0-result]', e.message));
         dispatchedGap = true;
+
+        // Step 7 — Self-monitoring: alert when same group+ZIP repeatedly fails.
+        // Fire-and-forget — never blocks response.
+        db.query(
+          `SELECT COUNT(*) AS cnt
+           FROM resolution_history
+           WHERE resolved = false
+             AND intent_group = $1
+             AND zip = $2`,
+          [nlIntent.group ?? null, zip ?? null]
+        ).then(rows => {
+          const cnt = Number(rows[0]?.cnt ?? 0);
+          if (cnt >= 5) {
+            console.warn(`[GAP ALERT] "${nlIntent.group}" in ZIP ${zip} has ${cnt} unresolved queries — acquisition target`);
+          }
+        }).catch(() => {}); // never throws
       } catch (dispatchInitErr) {
         console.error('[taskDispatch legacy init]', dispatchInitErr.message);
       }
@@ -1080,9 +1096,10 @@ router.post('/', async (req, res) => {
         customer_query_count: customerSession?.query_count ?? null,
         resolves_via:  resolvesVia,
         ...(dispatchedGap && {
-          gap:        true,
-          gap_query:  query,
-          gap_intent: nlIntent.taskClass || 'DISCOVER',
+          gap:                true,
+          gap_query:          query,
+          gap_intent:         nlIntent.taskClass || 'DISCOVER',
+          acquisition_signal: true,
         }),
         coverage:      '113,684 businesses — Florida statewide',
       },
@@ -4889,6 +4906,50 @@ router.get('/resolution-stats', async (req, res) => {
       avg_response_ms:     Number(totals.avg_response_ms),
       by_group:            byGroup,
       top_gaps:            topGaps
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/local-intel/acquisition-targets — Step 7 — surface unresolved demand
+// as actionable acquisition signal (intent_group + cuisine + zip aggregations).
+router.get('/acquisition-targets', async (req, res) => {
+  try {
+    const targets = await db.query(`
+      SELECT
+        intent_group,
+        cuisine,
+        zip,
+        COUNT(*)                    AS demand_count,
+        MAX(created_at)             AS last_asked,
+        CASE
+          WHEN COUNT(*) >= 5 THEN 'high'
+          WHEN COUNT(*) >= 2 THEN 'medium'
+          ELSE 'low'
+        END                         AS priority
+      FROM resolution_history
+      WHERE resolved = false
+        AND intent_group IS NOT NULL
+        AND zip IS NOT NULL
+      GROUP BY intent_group, cuisine, zip
+      ORDER BY demand_count DESC, last_asked DESC
+      LIMIT 50
+    `);
+
+    const recentGaps = await db.query(`
+      SELECT query, intent_group, cuisine, zip, created_at
+      FROM resolution_history
+      WHERE resolved = false
+      ORDER BY created_at DESC
+      LIMIT 20
+    `);
+
+    res.json({
+      acquisition_targets: targets,
+      total_targets: targets.length,
+      high_priority: targets.filter(t => t.priority === 'high').length,
+      recent_gaps: recentGaps
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
