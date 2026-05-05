@@ -612,6 +612,150 @@ function getGroup(cat) {
   return 'other';
 }
 
+// ── RFQ — Twilio SMS dispatch for non-food service verticals (Step 8) ─────────
+// Sends a bid request to up to 5 matching businesses in the caller's ZIP and
+// logs everything to rfq_requests_v2 / rfq_responses_v2. YES/NO replies are
+// handled by dashboard-server.js sms-inbound (matches by business phone +
+// pending response row).
+async function sendRfqSms(toE164, body) {
+  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER } = process.env;
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_FROM_NUMBER) {
+    console.warn('[rfq] Twilio env not configured — skipping SMS to', toE164);
+    return { sent: false, reason: 'twilio_not_configured' };
+  }
+  let twilio;
+  try { twilio = require('twilio')(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN); }
+  catch (e) {
+    console.warn('[rfq] twilio module missing:', e.message);
+    return { sent: false, reason: 'twilio_module_missing' };
+  }
+  const msg = await twilio.messages.create({ body, from: TWILIO_FROM_NUMBER, to: toE164 });
+  return { sent: true, sid: msg.sid };
+}
+
+// Normalize phone-ish strings to E.164 (US) for Twilio. Returns null if it
+// looks unusable (we just skip those businesses — no silent failure).
+function toE164(raw) {
+  if (!raw) return null;
+  const digits = String(raw).replace(/[^\d+]/g, '');
+  if (digits.startsWith('+')) return digits.length >= 11 ? digits : null;
+  const ten = digits.replace(/\D/g, '');
+  if (ten.length === 10) return `+1${ten}`;
+  if (ten.length === 11 && ten.startsWith('1')) return `+${ten}`;
+  return null;
+}
+
+async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip) {
+  const _start = Date.now();
+  try {
+    const targetZips = (!zip || zip === 'all') ? TARGET_ZIPS : [zip];
+
+    // 1. Match businesses in ZIP whose category or description mentions the
+    //    requested service. LIMIT 5 keeps SMS volume reasonable.
+    const businesses = await db.query(
+      `SELECT business_id AS id, name, phone, zip, category, wallet, description
+         FROM businesses
+        WHERE zip = ANY($1::text[])
+          AND (category ILIKE $2 OR description ILIKE $2)
+          AND phone IS NOT NULL
+          AND status != 'inactive'
+        LIMIT 5`,
+      [targetZips, `%${nlIntent.category}%`]
+    );
+
+    // 2. Insert RFQ request row (status=open, businesses_notified=0 for now)
+    const rfqRows = await db.query(
+      `INSERT INTO rfq_requests_v2
+         (customer_id, query, intent_group, category, zip, description, businesses_notified)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id`,
+      [
+        customerId ?? 'anonymous',
+        userQuery,
+        nlIntent.group,
+        nlIntent.category,
+        zip || (targetZips[0] || 'unknown'),
+        userQuery,
+        0
+      ]
+    );
+    const rfqId = rfqRows[0]?.id;
+    if (!rfqId) throw new Error('rfq insert returned no id');
+
+    // 3. Twilio fan-out — never blocks on a single failure
+    let notified = 0;
+    for (const biz of businesses) {
+      const e164 = toE164(biz.phone);
+      try {
+        await db.query(
+          `INSERT INTO rfq_responses_v2
+             (rfq_id, business_id, business_name, business_phone, response)
+           VALUES ($1, $2, $3, $4, 'pending')`,
+          [rfqId, biz.id, biz.name, e164 || biz.phone]
+        );
+
+        if (!e164) {
+          console.warn(`[rfq] skipping ${biz.name} — unparseable phone:`, biz.phone);
+          continue;
+        }
+
+        const smsBody =
+          `[LocalIntel] New job request in ${zip || 'your area'}: "${userQuery}". ` +
+          `Reply YES to connect with this customer or NO to pass. Ref: RFQ-${rfqId}`;
+        const sendResult = await sendRfqSms(e164, smsBody);
+        if (sendResult.sent) notified++;
+        else console.warn(`[rfq] SMS not sent to ${biz.name}: ${sendResult.reason}`);
+      } catch (err) {
+        console.error(`[rfq] failed to notify ${biz.name}:`, err.message);
+      }
+    }
+
+    // 4. Update notified count
+    await db.query(
+      `UPDATE rfq_requests_v2 SET businesses_notified = $1 WHERE id = $2`,
+      [notified, rfqId]
+    ).catch(err => console.error('[rfq] update notified failed:', err.message));
+
+    // 5. Customer-facing message + optional SMS reply
+    const customerMsg = notified > 0
+      ? `We found ${notified} ${nlIntent.category}(s) in your area and sent them your request. You'll hear back shortly. (RFQ-${rfqId})`
+      : `We don't have ${nlIntent.category}s in our network for ZIP ${zip || 'that area'} yet — we're working on it.`;
+
+    if (customerId && String(customerId).startsWith('+')) {
+      sendRfqSms(customerId, customerMsg).catch(err =>
+        console.error('[rfq] customer SMS failed:', err.message)
+      );
+    }
+
+    // 6. Resolution history (RFQ counts as resolved when ≥1 notified)
+    db.query(
+      `INSERT INTO resolution_history
+         (query, intent_class, intent_group, cuisine, zip, business_id, resolved, resolved_via, result_count, response_ms)
+       VALUES ($1, 'RFQ', $2, NULL, $3, NULL, $4, 'rfq', $5, $6)`,
+      [userQuery, nlIntent.group, zip || null, notified > 0, notified, Date.now() - _start]
+    ).catch(err => console.error('[rfq] resolution_history write failed:', err.message));
+
+    return res.json({
+      ok: true,
+      rfq_id: rfqId,
+      status: 'dispatched',
+      businesses_notified: notified,
+      category: nlIntent.category,
+      zip: zip || null,
+      message: customerMsg,
+      meta: {
+        intent_class: 'RFQ',
+        intent_group: nlIntent.group,
+        resolves_via: 'rfq'
+      }
+    });
+
+  } catch (err) {
+    console.error('[rfq] handleRFQ error:', err.message);
+    return res.status(500).json({ ok: false, error: 'RFQ dispatch failed', detail: err.message });
+  }
+}
+
 // ── POST /api/local-intel — main query endpoint ───────────────────────────────
 // NL intent → group/tag mapping lives in lib/intentRegistry.js (single source of truth).
 
@@ -673,6 +817,13 @@ router.post('/', async (req, res) => {
         resolves_via: 'status',
         meta: { resolves_via: 'status' },
       });
+    }
+    // ── Step 8 — RFQ routing (non-food service verticals) ──────────────────
+    // Plumber, electrician, HVAC, roofer, handyman, painter, landscaper,
+    // cleaner, mechanic, towing → handleRFQ broadcasts a Twilio SMS bid to
+    // matching businesses and notifies the customer.
+    if (resolvesVia === 'rfq') {
+      return await handleRFQ(req, res, nlIntentEarly, query, customerId, zip);
     }
     // resolvesVia === 'search' or 'dispatch' — continue to SQL search
     // 'dispatch' is handled by the existing 0-result dispatchTask path below.

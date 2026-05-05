@@ -6388,6 +6388,135 @@ async function handleSmsInbound(req, res) {
     }
   }
 
+  // ── RFQ-v2 reply check (Step 8) ──────────────────────────────────────────
+  // YES / NO from a business in response to a handleRFQ broadcast. We match
+  // by (1) explicit "RFQ-<id>" reference if present, else (2) the most-recent
+  // pending row for this business phone in rfq_responses_v2.
+  if (from && body) {
+    try {
+      const upper = body.toUpperCase();
+      const isYes = /\bYES\b/.test(upper);
+      const isNo  = /\bNO\b/.test(upper);
+      if (isYes || isNo) {
+        const db = require('./lib/db');
+        const refMatch = upper.match(/RFQ-(\d+)/);
+        let pending;
+        if (refMatch) {
+          const refId = parseInt(refMatch[1], 10);
+          const rows = await db.query(
+            `SELECT r.id AS response_id, r.rfq_id, r.business_id, r.business_name,
+                    r.business_phone, q.customer_id, q.query, q.category, q.zip,
+                    q.status AS rfq_status
+               FROM rfq_responses_v2 r
+               JOIN rfq_requests_v2 q ON q.id = r.rfq_id
+              WHERE r.business_phone = $1
+                AND r.response = 'pending'
+                AND r.rfq_id = $2
+              ORDER BY r.created_at DESC LIMIT 1`,
+            [from, refId]
+          );
+          pending = rows[0];
+        } else {
+          const rows = await db.query(
+            `SELECT r.id AS response_id, r.rfq_id, r.business_id, r.business_name,
+                    r.business_phone, q.customer_id, q.query, q.category, q.zip,
+                    q.status AS rfq_status
+               FROM rfq_responses_v2 r
+               JOIN rfq_requests_v2 q ON q.id = r.rfq_id
+              WHERE r.business_phone = $1
+                AND r.response = 'pending'
+                AND q.status = 'open'
+              ORDER BY r.created_at DESC LIMIT 1`,
+            [from]
+          );
+          pending = rows[0];
+        }
+
+        if (pending) {
+          const responseValue = isYes ? 'yes' : 'no';
+          await db.query(
+            `UPDATE rfq_responses_v2
+                SET response = $1, responded_at = NOW()
+              WHERE id = $2`,
+            [responseValue, pending.response_id]
+          );
+
+          let replyToBusiness = '';
+          if (isYes) {
+            // Mark RFQ matched on first YES (idempotent — UPDATE is harmless if already matched)
+            await db.query(
+              `UPDATE rfq_requests_v2
+                  SET status = 'matched'
+                WHERE id = $1 AND status = 'open'`,
+              [pending.rfq_id]
+            );
+
+            // Notify customer if we have an SMS-able phone
+            if (pending.customer_id && String(pending.customer_id).startsWith('+')) {
+              try {
+                const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER } = process.env;
+                if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_FROM_NUMBER) {
+                  const twilio = require('twilio')(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+                  await twilio.messages.create({
+                    body: `Good news — ${pending.business_name} is interested in your job ("${pending.query}"). They'll contact you at this number shortly. (RFQ-${pending.rfq_id})`,
+                    from: TWILIO_FROM_NUMBER,
+                    to:   pending.customer_id,
+                  });
+                }
+              } catch (e) {
+                console.error('[rfq-v2] customer notify SMS failed:', e.message);
+              }
+              replyToBusiness =
+                `Thanks! Customer contact: ${pending.customer_id}. Reach out within 30 min for best results. Good luck! (RFQ-${pending.rfq_id})`;
+            } else {
+              replyToBusiness =
+                `Thanks! We've notified the customer. They'll reach out if interested. (RFQ-${pending.rfq_id})`;
+            }
+          } else {
+            // NO — check if all responses are now non-pending non-yes; if so, tell customer
+            const remaining = await db.query(
+              `SELECT response FROM rfq_responses_v2 WHERE rfq_id = $1`,
+              [pending.rfq_id]
+            );
+            const anyYes     = remaining.some(r => r.response === 'yes');
+            const anyPending = remaining.some(r => r.response === 'pending');
+            if (!anyYes && !anyPending) {
+              await db.query(
+                `UPDATE rfq_requests_v2 SET status = 'expired' WHERE id = $1 AND status = 'open'`,
+                [pending.rfq_id]
+              );
+              if (pending.customer_id && String(pending.customer_id).startsWith('+')) {
+                try {
+                  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER } = process.env;
+                  if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_FROM_NUMBER) {
+                    const twilio = require('twilio')(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+                    await twilio.messages.create({
+                      body: `Update on RFQ-${pending.rfq_id}: no ${pending.category}s in your area accepted this request. We'll keep growing the network — try again or reply with a different need.`,
+                      from: TWILIO_FROM_NUMBER,
+                      to:   pending.customer_id,
+                    });
+                  }
+                } catch (e) {
+                  console.error('[rfq-v2] all-no customer SMS failed:', e.message);
+                }
+              }
+            }
+            replyToBusiness = `Got it — passed on this one. We'll keep you in mind for the next match. (RFQ-${pending.rfq_id})`;
+          }
+
+          res.set('Content-Type', 'text/xml');
+          const safe = replyToBusiness.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+          res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${safe}</Message></Response>`);
+          console.log(`[sms-inbound] rfq-v2 ${responseValue} from=${from} rfq=${pending.rfq_id}`);
+          return;
+        }
+      }
+    } catch (rfqErr) {
+      console.error('[sms-inbound] rfq-v2 reply check failed:', rfqErr.message);
+      // fall through to legacy RFQ handling
+    }
+  }
+
   res.set('Content-Type', 'text/xml');
   res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
 
