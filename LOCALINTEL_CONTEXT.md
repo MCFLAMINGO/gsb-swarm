@@ -1504,3 +1504,27 @@ Boilerplate description cleaner. Replaces YP "X is a local business serving the 
 
 ### Session Commits (gsb-swarm)
 - `(see next push)` — feat: reclassify + description cleaner workers
+
+---
+
+## Session — Expanded Reclassification Pass (2026-05-05)
+
+### What Ran
+- Expanded reclassifyWorker with regex-based rules (not just string includes)
+- 180 additional target-ZIP records reclassified (660 total across both passes)
+- Fixed mislabeled law firms tagged as `clinic` → `legal`
+- Normalized `estate_agent` → `real_estate`, `hair_salon` → `beauty_salon`
+- Rebuilt 62 descriptions that had wrong category labels
+- Full `CATEGORY_LABELS` map updated in reclassifyWorker.js (covers all categories)
+
+### Data Quality State (final for this session)
+| Metric | Start of session | Now |
+|---|---|---|
+| Boilerplate descriptions | 2,344 | 0 |
+| LocalBusiness in target ZIPs | 2,189 | 1,340 |
+| LocalBusiness total | 18,115 | ~17,415 |
+| fine_dining counted in oracle | 0 | 4–5 correct |
+
+### Still Unresolved
+- ~1,340 LocalBusiness in target ZIPs with generic names (no inferrable signal)
+- These are honest unknowns — not worth guessing category from name alone
