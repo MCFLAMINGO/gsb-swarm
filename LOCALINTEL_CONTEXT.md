@@ -1295,3 +1295,59 @@ lives in a future task.
 
 **Next:** Merchant portal MVP — show businesses their RFQ activity,
 routing stats, earnings.
+
+## Migration 011 — Merchant portal (2026-05-05)
+
+**Schema (`migrations/011_merchant_portal.sql`):**
+- `businesses.merchant_email` TEXT (unique partial index)
+- `businesses.dashboard_token` TEXT (unique partial index, 32-byte hex)
+- `businesses.token_expires_at` TIMESTAMPTZ
+- `businesses.claimed` BOOLEAN NOT NULL DEFAULT false
+- `businesses.claim_pin` TEXT (reserved for future PIN claim flows)
+
+**Routes in `localIntelAgent.js`:**
+- `POST /api/merchant/request-link` — looks up business by `merchant_email`,
+  inserts a new row when not found (requires `name` + `zip`, returns
+  `{ error: 'new_merchant' }` otherwise), generates a 32-byte hex
+  `dashboard_token` with 24h expiry, sends a Resend magic-link email
+  pointing at `https://www.thelocalintel.com/merchant?token=...`. Email
+  failure is non-fatal — logs and still returns success.
+- `GET /api/merchant/dashboard/:token` — validates token (must be
+  unexpired), returns `{ business, stats, top_queries, wallet_connected }`.
+  Stats pulled from `resolution_history` (total / resolved / 30-day) +
+  `rfq_responses_v2` (sent / matched). 401 with clear "request a new
+  link" message on expired/invalid token.
+- Mounted at `/api/local-intel/merchant/*` AND aliased at
+  `/api/merchant/*` via a small forward in `index.js`.
+
+**Narrative builder:**
+- `buildNarrative(results, nlIntent, meta)` — pure deterministic
+  function near top of `localIntelAgent.js`. Reads results count +
+  intent (taskClass, group, cuisine, category, temporalContext) + meta
+  (semantic_search, gap, businesses_notified) and returns a single
+  human sentence. Never throws — returns `null` on any error.
+- Wired into both branches of `router.post('/')`:
+  - Search/dispatch path adds `meta.narrative` to the success response.
+  - RFQ path adds `meta.narrative` to the dispatched response.
+- No LLM, no I/O. Caller renders it above search cards.
+
+**Frontend (`localintel-landing`):**
+- `claim.html` — added an email-first "Merchant dashboard" card at the
+  top. Submits to `/api/merchant/request-link`. On `{ error: 'new_merchant' }`
+  reveals secondary fields (name, zip, phone, address, category) without
+  redesigning the page. On `{ success: true }` shows "check your email."
+  Existing 5-step Sunbiz claim wizard preserved below.
+- `merchant.html` — single dashboard destination post-claim. Reads
+  `?token=` from URL, calls `/api/merchant/dashboard/:token`. Renders
+  business header (name + claimed badge), four KPI cards (Routed,
+  This Month, RFQ Bids, RFQ Matches), top-queries panel, wallet panel
+  with connect CTA, and an "unclaimed → claim" CTA when applicable.
+  Inline CSS using site color tokens (no external framework).
+- `search.html` — added `result.meta?.narrative` as a fallback source for
+  the existing narrative display, so the new pure-builder output renders
+  above business cards alongside any agent-generated narrative.
+- `vercel.json` — `/merchant` → `/merchant.html` redirect.
+
+**Next:** Merchant onboarding with wallet setup (Tempo/pathUSD, split
+contract) — let merchants connect a payout wallet from inside the
+dashboard so RFQ matches can settle in stable USD.
