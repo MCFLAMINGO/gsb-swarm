@@ -1248,3 +1248,50 @@ Every user query is a task expression with five dimensions. LocalIntel must even
 - Backfill `embedBatch` null → 10s sleep + retry same batch.
 
 **Next:** Session C — embed intent registry entries for semantic intent classification (replaces keyword matching in `intentMap` for ambiguous NL queries).
+
+---
+### RFQ Flow — Non-Food Verticals Live (May 2026)
+
+LocalIntel now routes service-business queries (plumber, electrician, HVAC,
+roofer, handyman, painter, landscaper, cleaner, mechanic, towing) through a
+Request-For-Quote dispatch path. SMS bid request goes out to up to 5
+matching businesses; first YES wins; customer is notified by SMS.
+
+**Files added/modified:**
+- `migrations/010_rfq.sql` — `rfq_requests_v2` (BIGSERIAL PK, customer_id,
+  query, intent_group, category, zip, description, status, businesses_notified,
+  created_at, expires_at) + `rfq_responses_v2` (BIGSERIAL PK, rfq_id FK,
+  business_id UUID, business_name, business_phone, response, responded_at,
+  created_at). Suffixed `_v2` to avoid collision with the legacy
+  rfqService.js UUID schema; both tables coexist, the legacy
+  rfqBroadcast/rfqCallback flow is untouched.
+- `lib/intentRegistry.js` — 10 entries with `taskClass: 'RFQ'` +
+  `resolvesVia: 'rfq'`: plumber, electrician, hvac, roofer, handyman,
+  painter, landscaper, cleaner, mechanic, towing. Listed BEFORE the
+  legacy fallbacks so service queries no longer fall into the broad
+  `retail` / `services` buckets.
+- `localIntelAgent.js` — `handleRFQ()` finds up to 5 matching businesses
+  by category+ZIP (ANY($1::text[]) + ILIKE on category/description), inserts
+  the rfq, fans out Twilio SMS, logs `resolution_history` with
+  `intent_class='RFQ'` + `resolved_via='rfq'`. Each per-business send is
+  wrapped in try/catch — one bad number never blocks the loop. Helpers
+  `sendRfqSms` and `toE164` live alongside.
+- `dashboard-server.js` — sms-inbound handler grew an RFQ-v2 reply check
+  between taskDispatch and the legacy parseSmsCommand path. Matches by
+  `RFQ-<id>` reference if present, else by most-recent pending row for
+  the business phone. YES marks the RFQ matched + sends customer phone
+  to the business; NO marks 'no'; if every response is non-yes the
+  customer gets an "all passed" follow-up SMS.
+
+**Payment model:** businesses pay micro-fee to be routed to; RFQ = first
+routing event. Wallet column already on businesses; metering/charging
+lives in a future task.
+
+**Failure modes (all silent-safe):**
+- Twilio env unset → SMS skipped per-recipient, RFQ row still written.
+- Phone unparseable → response row written with raw phone, SMS skipped.
+- Customer SMS notify failure → logged only, never blocks API response.
+- Reply parser failure → logged, falls through to legacy parseSmsCommand.
+
+**Next:** Merchant portal MVP — show businesses their RFQ activity,
+routing stats, earnings.
