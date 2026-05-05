@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-05 (session 12 — hybrid benchmarks live on ZIP pages)
+> Last updated: 2026-05-05 (session 12 — fix renderGaps subtitle stale g.gap ref)
 
 ---
 
