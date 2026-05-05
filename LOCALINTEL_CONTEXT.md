@@ -1528,3 +1528,33 @@ Boilerplate description cleaner. Replaces YP "X is a local business serving the 
 ### Still Unresolved
 - ~1,340 LocalBusiness in target ZIPs with generic names (no inferrable signal)
 - These are honest unknowns — not worth guessing category from name alone
+
+---
+
+## Session — Website Enrichment + Description Template Workers (2026-05-05)
+
+### What Was Built & Run
+
+#### `workers/websiteEnricherWorker.js`
+Fetches `<title>` + `<meta description>` + OG description from business websites. 5s timeout per fetch, 8 concurrent. Skips YP/social/gov URLs. Uses meta description if ≥60 chars and not generic chain copy. Also re-classifies `LocalBusiness` records if page content matches keyword rules.
+- **969 records enriched** with real website descriptions
+
+#### `workers/descriptionTemplateWorker.js`
+Builds richer deterministic descriptions for records without fetchable websites. Template: `"[Name] is [label] in [City], FL [ZIP]. Call (XXX) XXX-XXXX. Open [hours]."` — adds phone and hours where available.
+- **7,815 descriptions rebuilt**
+
+### Description Quality State (post-run, target ZIPs)
+| Quality | Count |
+|---|---|
+| ≥80 chars (real/rich) | 2,679 |
+| 40–79 chars (template) | 3,576 |
+| <40 chars (very short) | 1,104 |
+| Boilerplate ("local business serving") | 0 |
+
+### How to Re-run
+- Template only: `node workers/descriptionTemplateWorker.js`
+- Website fetch: `CONCURRENCY=8 node workers/websiteEnricherWorker.js`
+- Full refresh: `FULL_REFRESH=true node workers/websiteEnricherWorker.js`
+
+### Session Commits (gsb-swarm)
+- `(see push)` — feat: website enricher + description template workers
