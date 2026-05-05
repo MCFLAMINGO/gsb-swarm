@@ -1099,3 +1099,25 @@ Every user query is a task expression with five dimensions. LocalIntel must even
 - The system now knows its own success rate per intent group and ZIP — closing the loop on Step 1's tsvector fallback and Step 2's gap detection.
 
 **Next step — Step 4:** Temporal intent (`temporalContext` field on registry entries, time-aware SQL filter against `business_hours`).
+
+---
+
+## Step 4 — Temporal intent (When dimension) (2026-05-05)
+
+**Shipped:**
+- `temporalContext` added to `normalizeIntent()` defaults in `lib/intentRegistry.js` (defaults to `null` — no silent undefined).
+- 7 new temporal trigger entries in `lib/intentRegistry.js` registry — placed BEFORE cuisine/general entries so they match first:
+  - `open_now` — "open now", "open today", "currently open", "open right now"
+  - `happy_hour` — "happy hour", "happy hours" (group `bar`)
+  - `late_night` — "late night", "after hours", "open late", "midnight"
+  - `morning` — "breakfast", "open for breakfast", "morning coffee", "early morning", "brunch", "sunday brunch", "weekend brunch" (group `food`)
+  - `midday` — "lunch", "open for lunch", "lunchtime" (group `food`)
+  - `evening` — "dinner", "open for dinner", "dinner reservation" (group `food`)
+- `isOpenDuringWindow(business, temporalContext)` helper added near the top of `localIntelAgent.js`. Parses both OSM-style strings (the actual prod format, e.g. `Mo-Sa 11:00-20:00; Su 11:00-18:00`) and JSON-object hours (defensive). **Every uncertainty path returns `true`** — missing hours, unparseable hours, unknown context, parser exception. Never silently excludes.
+  - Window definitions (24h): `happy_hour [15,19]`, `late_night [22,26]`, `morning [6,11]`, `midday [11,14]`, `evening [17,22]`. `open_now` = current time inside any of today's intervals.
+  - Overnight close handled by adding 24 to `close` when `close < open` (and the alias `00:00 → 24:00`).
+- Temporal post-filter applied to `rawRows` AFTER both the main ILIKE (Path A) and the tsvector fallback (Path B) — single point of application since `rawRows` is the unified result holder.
+- **Data-hole protection:** if the temporal filter would eliminate every result (`filtered.length === 0`), originals are kept. The system never silently shows "no results" because of missing hours data.
+- `meta.temporal` added to the legacy-path response — exposes the resolved `temporalContext` (or `null`).
+
+**Next step — Step 5:** Customer profile + task history (`task_history` table, personalized ranking).
