@@ -458,6 +458,13 @@ app.use(express.json({ limit: '2mb' }));
 const localIntelRouter = require('./localIntelAgent');
 app.use('/api/local-intel', localIntelRouter);
 
+// Merchant portal alias — same router, exposes /api/merchant/request-link
+// and /api/merchant/dashboard/:token at the documented merchant URL.
+app.use('/api/merchant', (req, res, next) => {
+  req.url = '/merchant' + (req.url === '/' ? '' : req.url);
+  return localIntelRouter(req, res, next);
+});
+
 const { router: chamberRouter } = require('./workers/chamberScraper');
 app.use('/api/chamber', chamberRouter);
 
