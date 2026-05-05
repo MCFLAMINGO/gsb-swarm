@@ -1351,3 +1351,64 @@ routing stats, earnings.
 **Next:** Merchant onboarding with wallet setup (Tempo/pathUSD, split
 contract) — let merchants connect a payout wallet from inside the
 dashboard so RFQ matches can settle in stable USD.
+## Session: Fee Collection + Agent-to-Agent RFQ (2026-05-05)
+
+### What Was Built
+
+Three parts shipped as ONE commit:
+
+#### Part 1 — Fee Events + RFQ Match Fee Hook
+- **`lib/feeService.js`** — new file. Full fee lifecycle service.
+  - `fee_events` table: `id, event_type, business_id, rfq_id, amount_usd, status, wallet, meta, created_at`
+  - `logFee({ event_type, business_id, rfq_id, amount_usd, meta })` — always logs; charges only when ROUTING_ENABLED=true AND rate > 0 AND wallet present
+  - Statuses: `free | routing_off | charged | failed | no_wallet`
+  - `no_wallet` = acquisition signal — business should be onboarded
+  - `getRates()` / `getRecentEvents()` / `getSummary()` for dashboard
+- **Fee hook in `rfqBroadcast.js` `confirmSelection()`** — fires `logFee({ event_type: 'rfq_match' })` after job is confirmed. Rate = `RFQ_MATCH_FEE` env var (default $0.00).
+- **Fee hook in `rfqService.js` `bookRfq()`** — fires `logFee({ event_type: 'rfq_book' })` after booking is created. Same rate.
+
+#### Part 2 — Agent-to-Agent RFQ Protocol
+- **`lib/agentBid.js`** — new file. Full agent-to-agent bid protocol.
+  - Adds `agent_endpoint TEXT` and `agent_key TEXT` columns to `businesses` (auto-migrate on first use).
+  - `rfq_agent_bids` table: stores every bid attempt with latency, http_status, accept/price/eta/message.
+  - `broadcastAgentRfq(job, providers)` — fans out structured RFQ payload to all providers with `agent_endpoint`. 8s timeout per agent, 12s global ceiling. Runs in parallel with SMS/email (non-blocking).
+  - Bid request shape: `{ rfq_id, job_code, category, zip, description, budget_usd, deadline_at, requester_id, timestamp, source: 'localintel' }`
+  - Expected response: `{ accept: boolean, price: number, eta: string, message: string, agent_id: string }`
+  - Best bid = lowest price, tie-break fastest eta. Non-standard/timed-out = falls back to SMS/email.
+  - Provider sort: `agent_endpoint IS NOT NULL` DESC first — agents get priority routing.
+- **Wired into `rfqBroadcast.broadcastJob()`** — runs before SMS/email loop. Agent bids logged regardless of outcome.
+- **`GET /api/local-intel/agent-bids/:rfq_id`** — inspect bids for any job.
+
+#### Part 3 — Fee Control Dashboard (internal)
+- **`/local-intel/fees` page** in `gsb-swarm-dashboard` (Next.js).
+  - Rate controls: RFQ_MATCH_FEE (USD flat), ORDER_FEE_PCT (%), ROUTING_ENABLED toggle.
+  - "Save Rates" POSTs to `/api/local-intel/fee-control` — updates process.env at runtime (no redeploy needed for testing, but Railway env vars are source of truth for persistence).
+  - Stats: Total Events, No Wallet (acquisition targets), Charged, Free/Off.
+  - No-wallet callout: amber alert shows count + acquisition CTA.
+  - Agent-to-Agent protocol reference panel.
+  - Fee event log table with type/status/business/amount/wallet/time.
+- **Sidebar nav** — new "↳ Fee Control" entry using `Coins` icon.
+- **New API endpoints on Railway**:
+  - `GET /api/local-intel/fee-events?hours=24&limit=200` — events + summary
+  - `GET /api/local-intel/fee-rates` — current rates from env vars
+  - `POST /api/local-intel/fee-control` — runtime rate update `{ rfq_match_fee, order_fee_pct, routing_enabled }`
+
+### Env Vars to Set on Railway (gsb-swarm service)
+```
+RFQ_MATCH_FEE=0.00       # flat USD per confirmed RFQ match (0 = free tier)
+ORDER_FEE_PCT=0.00        # % of order value on confirmed payment (0 = free tier)
+ROUTING_ENABLED=false     # 'true' to actually charge — keep false until Tempo debit wired
+```
+
+### Architecture Notes
+- **Fee model**: businesses pay ONLY on confirmed transaction success — never on search routing. (ADR preserved)
+- **ROUTING_ENABLED=false** is the correct default: fee events are logged (useful as acquisition data) but no charge attempted until Tempo pathUSD debit logic is implemented in `attemptCharge()` in feeService.js.
+- **`attemptCharge()`** is a stub — it logs a warning and returns `'failed'`. Wire Tempo/viem debit here when fees go live.
+- **agent_endpoint is opt-in** — no existing provider is affected. Businesses without agent_endpoint still get SMS/email as before.
+- **Agent bid data** feeds future JEPA/learning layer — bid latency, acceptance rates, pricing patterns are logged and queryable.
+
+### Session Commits
+- `gsb-swarm`: feat: fee collection + agent-to-agent RFQ (Parts 1+2+3)
+- `gsb-swarm`: docs: fee collection + agent RFQ context update
+- `gsb-swarm-dashboard`: feat: fee control dashboard — /local-intel/fees, sidebar nav
+

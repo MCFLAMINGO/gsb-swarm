@@ -5371,6 +5371,86 @@ router.get('/acquisition-targets', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+// ── Fee Events API (internal dashboard only) ──────────────────────────
+// GET /api/local-intel/fee-events?hours=24&limit=100
+router.get('/fee-events', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  try {
+    const feeService = require('./lib/feeService');
+    const hours = parseInt(req.query.hours, 10) || 24;
+    const limit = parseInt(req.query.limit, 10) || 100;
+    const [events, summary] = await Promise.all([
+      feeService.getRecentEvents({ hours, limit }),
+      feeService.getSummary({ hours }),
+    ]);
+    return res.json({ ok: true, events, summary });
+  } catch (e) {
+    console.error('[fee-events]', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/local-intel/fee-rates  — current rates from env vars
+router.get('/fee-rates', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  try {
+    const feeService = require('./lib/feeService');
+    return res.json({ ok: true, rates: feeService.getRates() });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/local-intel/fee-control  — update rates at runtime (internal only)
+// Body: { rfq_match_fee: number, order_fee_pct: number, routing_enabled: boolean }
+// NOTE: env vars are the source of truth on Railway. This sets process.env at runtime
+// (survives for the lifetime of this process; Railway redeploy resets to persisted env vars).
+router.post('/fee-control', express.json(), async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  try {
+    const { rfq_match_fee, order_fee_pct, routing_enabled } = req.body || {};
+    const changes = {};
+
+    if (rfq_match_fee !== undefined) {
+      const v = parseFloat(rfq_match_fee);
+      if (!isNaN(v) && v >= 0) {
+        process.env.RFQ_MATCH_FEE = String(v.toFixed(4));
+        changes.RFQ_MATCH_FEE = process.env.RFQ_MATCH_FEE;
+      }
+    }
+    if (order_fee_pct !== undefined) {
+      const v = parseFloat(order_fee_pct);
+      if (!isNaN(v) && v >= 0 && v <= 100) {
+        process.env.ORDER_FEE_PCT = String(v.toFixed(4));
+        changes.ORDER_FEE_PCT = process.env.ORDER_FEE_PCT;
+      }
+    }
+    if (routing_enabled !== undefined) {
+      process.env.ROUTING_ENABLED = routing_enabled ? 'true' : 'false';
+      changes.ROUTING_ENABLED = process.env.ROUTING_ENABLED;
+    }
+
+    const feeService = require('./lib/feeService');
+    const rates = feeService.getRates();
+    console.log('[fee-control] rates updated:', changes);
+    return res.json({ ok: true, rates, changes });
+  } catch (e) {
+    console.error('[fee-control]', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/local-intel/agent-bids/:rfq_id  — agent bid history for a job
+router.get('/agent-bids/:rfq_id', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  try {
+    const agentBid = require('./lib/agentBid');
+    const bids = await agentBid.getAgentBidsForJob(req.params.rfq_id);
+    return res.json({ ok: true, bids });
+  } catch (e) {
+    console.error('[agent-bids]', e.message);
+    return res.status(500).json({ error: e.message });
+
   }
 });
 
