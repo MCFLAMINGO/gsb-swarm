@@ -131,6 +131,124 @@ function recordResolution({ query, intent, zip, businessId, resolved, resolvedVi
   ).catch(err => console.error('[resolution_history] write failed:', err.message));
 }
 
+// Step 4 — temporal post-filter. Returns true if the business should be
+// included for the given temporalContext. CRITICAL: every uncertain or
+// error path returns true (include) — never silently exclude on bad data.
+function isOpenDuringWindow(business, temporalContext) {
+  if (!temporalContext) return true;
+  if (!business || !business.hours) return true;
+
+  try {
+    const now = new Date();
+    const currentHour = now.getHours() + now.getMinutes() / 60;
+    const dayShortNames = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+    const dayLongNames  = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+    const todayShort = dayShortNames[now.getDay()];
+    const todayLong  = dayLongNames[now.getDay()];
+
+    // Window definitions (24h, end may exceed 24 to indicate overnight)
+    const windows = {
+      open_now:   null,
+      happy_hour: [15, 19],
+      late_night: [22, 26],
+      morning:    [6,  11],
+      midday:     [11, 14],
+      evening:    [17, 22],
+    };
+
+    let intervals = []; // [{ open, close }] for today, in 24h hours; close may be > 24
+
+    let raw = business.hours;
+
+    // JSON object format (defensive — not the actual prod format, but safe to handle)
+    if (typeof raw === 'object' && raw !== null) {
+      const todayObj = raw[todayLong] || raw[todayShort.toLowerCase()] || raw['*'];
+      if (todayObj) {
+        const parseHM = (s) => {
+          if (s == null) return null;
+          const [h, m] = String(s).split(':').map(Number);
+          return isNaN(h) ? null : h + (isNaN(m) ? 0 : m / 60);
+        };
+        const o = parseHM(todayObj.open  ?? todayObj.opens  ?? todayObj[0]);
+        const c = parseHM(todayObj.close ?? todayObj.closes ?? todayObj[1]);
+        if (o !== null && c !== null) {
+          intervals.push({ open: o, close: c < o ? c + 24 : c });
+        }
+      }
+    } else if (typeof raw === 'string') {
+      // OSM-style: "Mo-Sa 11:00-20:00; Su 11:00-18:00"
+      // Try JSON first (in case some rows are stringified JSON)
+      let asJson = null;
+      const trimmed = raw.trim();
+      if (trimmed.startsWith('{')) {
+        try { asJson = JSON.parse(trimmed); } catch (_) {}
+      }
+      if (asJson) {
+        return isOpenDuringWindow({ hours: asJson }, temporalContext);
+      }
+
+      // OSM parser
+      const parseHM = (s) => {
+        const [h, m] = String(s).split(':').map(Number);
+        if (isNaN(h)) return null;
+        return h + (isNaN(m) ? 0 : m / 60);
+      };
+      const dayIdx = (abbr) => dayShortNames.indexOf(abbr);
+      const todayIdx = dayIdx(todayShort);
+
+      const segments = raw.split(/[;,]/).map(s => s.trim()).filter(Boolean);
+      for (const seg of segments) {
+        // Match "DayRange Time-Time" or "Day Time-Time"
+        const m = seg.match(/^([A-Za-z]{2})(?:-([A-Za-z]{2}))?\s+(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
+        if (!m) continue;
+        const startDay = dayIdx(m[1]);
+        const endDay   = m[2] ? dayIdx(m[2]) : startDay;
+        if (startDay < 0 || endDay < 0) continue;
+
+        // Day range may wrap (e.g. Fr-Mo) — check both ways
+        let dayMatch = false;
+        if (startDay <= endDay) {
+          dayMatch = todayIdx >= startDay && todayIdx <= endDay;
+        } else {
+          dayMatch = todayIdx >= startDay || todayIdx <= endDay;
+        }
+        if (!dayMatch) continue;
+
+        const openH  = parseHM(m[3]);
+        let   closeH = parseHM(m[4]);
+        if (openH === null || closeH === null) continue;
+        // OSM "00:00" close means midnight (24:00). "02:00" close after open=11 means next-day 2am.
+        if (closeH === 0) closeH = 24;
+        if (closeH < openH) closeH += 24;
+        intervals.push({ open: openH, close: closeH });
+      }
+    } else {
+      return true; // unknown shape — include
+    }
+
+    if (intervals.length === 0) return true; // no parseable today hours — include
+
+    if (temporalContext === 'open_now') {
+      // current time inside any interval (account for overnight where close > 24)
+      const t  = currentHour;
+      const tNext = currentHour + 24;
+      return intervals.some(iv =>
+        (t >= iv.open && t < iv.close) || (tNext >= iv.open && tNext < iv.close)
+      );
+    }
+
+    const win = windows[temporalContext];
+    if (!win) return true; // unknown context — include
+    const [winStart, winEnd] = win;
+    // Business hours overlap with the window
+    return intervals.some(iv => iv.open < winEnd && iv.close > winStart);
+
+  } catch (err) {
+    console.error('[temporal] filter error:', err.message);
+    return true;
+  }
+}
+
 // Coerce hours from row → object so isOpenNow can read it. The DB can hand back
 // either a JSON string (jsonb-as-text) or a parsed object depending on the column.
 function _parseHours(h) {
@@ -666,6 +784,18 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // ── Step 4 — temporal post-filter (When dimension) ──────────────────────
+    // Applies after BOTH the main ILIKE (Path A) and the tsvector fallback (Path B),
+    // since rawRows holds whichever produced results. Missing/unparseable hours
+    // ALWAYS include — never silently exclude on uncertainty. If the filter would
+    // eliminate every result (data hole, not closed businesses), keep originals.
+    if (nlIntent.temporalContext && rawRows && rawRows.length > 0) {
+      const filtered = rawRows.filter(b => isOpenDuringWindow(b, nlIntent.temporalContext));
+      if (filtered.length > 0) {
+        rawRows = filtered;
+      }
+    }
+
     // ── 0-result task dispatch — open the loop to the agent network ──
     // Skip when caller pinned a category/group filter (they got an empty page from a real filter,
     // not a free-text search miss) and when the NL intent looks like ORDER/STATUS (Basalt order
@@ -782,6 +912,7 @@ router.post('/', async (req, res) => {
         intent_class:  nlIntent.taskClass || null,
         intent_group:  nlIntent.group     || null,
         intent_cuisine: nlIntent.cuisine  || null,
+        temporal:      nlIntent.temporalContext ?? null,
         ts_fallback:   usedTsFallback,
         ...(dispatchedGap && {
           gap:        true,
