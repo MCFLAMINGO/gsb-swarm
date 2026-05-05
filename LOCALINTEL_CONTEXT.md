@@ -1443,3 +1443,33 @@ Two public-facing SEO landing pages on `www.thelocalintel.com`:
 
 ### Session Commits (localintel-landing)
 - `77f8fea` — feat: ZIP landing pages for 32081 (Nocatee) + 32082 (Ponte Vedra Beach)
+
+---
+
+## Session — Search + Oracle Fixes (2026-05-05)
+
+### What Was Fixed (commit d61640f)
+
+#### 1. `oracleWorker.js` — `foodBiz` filter uses `category_group` first
+**Bug:** `foodBiz` filter only matched literal strings ('restaurant', 'cafe', etc.) — missed 97 food businesses: mexican (21), asian (19), coffee_chain (12), bbq (8), steakhouse (6), fine_dining (5), etc. Oracle was reporting "Zero fine dining" for 32082 despite 4–5 actual fine_dining records in Postgres.
+**Fix:** Check `category_group === 'food'` first (already set on all food businesses), then fall back to string matching. All categories remain individually specific — `fine_dining` is still `fine_dining`, not collapsed.
+
+#### 2. `intentRouter.js` — `_ORDER_ITEM_HINT` requires `from/at` anchor
+**Bug:** "can I order food right now" → classified as `ORDER_ITEM`, bypassed `CATEGORY_SEARCH`, returned 0 results.
+**Fix:** `_ORDER_ITEM_HINT` regex now requires a `from` / `at` / `@` anchor. Browse queries without a specific target business stay as `CATEGORY_SEARCH` (with `needsOpenNow=true`).
+
+#### 3. `localIntelAgent.js` — `needsOpenNow` safety valve
+**Bug:** `searchByCategory` with `needsOpenNow=true` at 1 AM dropped all results (gas stations with no hours data), returning 0 rows → fell through to wrong-category tsvector fallback.
+**Fix:** If `needsOpenNow` filter drops ALL rows but unfiltered results exist, return unfiltered set (hours unknown) rather than 0.
+
+#### 4. `localIntelAgent.js` — tsvector fallback scoped by category
+**Bug:** When `CATEGORY_SEARCH` fell through to tsvector fallback, raw text tokens matched wrong categories ("gas station" → auto_repair via "gas" token).
+**Fix:** Hoisted `_phase2Intent`. When tsvector fallback runs and Phase 2 was a `CATEGORY_SEARCH`, fallback SQL adds `AND category = ANY($3)` to scope results.
+
+### Data Quality Audit Findings (not yet fixed)
+- **2,327 / 4,669 businesses have generic YP boilerplate descriptions** ("X is a local business serving the XXXXX area") — enrichment needed
+- **988 businesses categorized as `LocalBusiness`** — uncategorized, invisible to category search and gap analysis
+- These are data operations, not code fixes — tracked for next enrichment session
+
+### Session Commits (gsb-swarm)
+- `d61640f` — fix: foodBiz category_group, ORDER_ITEM anchor, needsOpenNow safety valve, tsvector scope guard
