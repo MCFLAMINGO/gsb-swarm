@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-05 (session 12 — dynamic multi-sector ZIP pages deployed)
+> Last updated: 2026-05-05 (session 12 — hybrid benchmark logic computed + documented, not yet in code)
 
 ---
 
@@ -1600,3 +1600,46 @@ Both pages rewritten as dynamic, oracle-driven templates:
 ### Live URLs
 - [thelocalintel.com/zip/32082](https://www.thelocalintel.com/zip/32082)
 - [thelocalintel.com/zip/32081](https://www.thelocalintel.com/zip/32081)
+
+---
+
+## Sector Gap Benchmark Logic (2026-05-05 — session 12)
+
+> Full rationale in `docs/BENCHMARKS.md`. Summary below for quick reference.
+
+### Why hybrid?
+Three baselines compared: current hardcoded code (broken — everything showed "Significant"), DB median across 26 FL ZIPs (food/hospitality polluted by tourist ZIPs like Miami Beach), BLS/Census national. Hybrid uses:
+- **DB median** for health, construction, services, and tourist-filtered food/hospitality
+- **BLS national** for retail, fitness, finance, legal, automotive
+
+### Percentage thresholds (replacing absolute `gap >= 10`)
+```
+gap_pct = (expected - actual) / expected
+>= 30%  → Significant Opportunity
+>= 15%  → Moderate Opportunity
+>=  5%  → Slight Opportunity
+<= -20% → Competitive Market
+else    → Balanced
+```
+
+### Final benchmark values (base per 10k pop, affluence mult for HHI > $100k)
+| Sector | Base | Aff | Source |
+|---|---|---|---|
+| health | 27.6 | 1.15 | DB median |
+| food | 27.7 | 1.10 | DB suburban median (tourist ZIPs excluded) |
+| retail | 20.0 | 1.10 | BLS national |
+| fitness | 9.0 | 1.25 | BLS national |
+| finance | 8.0 | 1.15 | BLS national |
+| hospitality | 3.0 | 1.00 | DB suburban median |
+| legal | 5.4 | 1.20 | BLS national |
+| construction | 17.8 | 1.00 | DB median |
+| automotive | 5.1 | 0.90 | BLS national |
+| services | 91.2 | 1.10 | DB median |
+
+### Validation (smell test passed)
+- 32082: Healthcare=balanced ✅, Legal=competitive ✅, Food=slight ✅, Retail=significant ✅
+- 32081: Construction=competitive ✅ (Nocatee build-out), Food=significant ✅ (underserved suburb), Services=competitive ✅
+
+### Status
+**NOT YET IN CODE** — benchmarks computed and validated, awaiting green light to update ZIP HTML files and deploy.
+
