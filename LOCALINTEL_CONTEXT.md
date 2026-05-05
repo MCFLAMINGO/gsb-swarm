@@ -1062,3 +1062,22 @@ Every user query is a task expression with five dimensions. LocalIntel must even
 - **Step 7:** Gap detection — unresolved `dispatchTask` calls aggregated into acquisition intelligence
 
 **The moat:** Every resolved task = enrichment signal. Every unresolved task = gap signal. Postgres holds both. The graph deepens with every query.
+
+---
+
+## Step 2 — Intent registry + gap visibility (2026-05-05)
+
+**Shipped:**
+- `lib/intentRegistry.js` created — single source of truth for all intent definitions
+- `resolveNlIntent` deleted from `localIntelAgent.js` — replaced by `resolveIntent` from registry (imported as `resolveNlIntentFromRegistry` to avoid collision with existing `resolveIntent` from `lib/intentMap.js`)
+- `NL_INTENT_MAP` deleted from `localIntelAgent.js`
+- Normalizer guarantees safe defaults on every field — no silent undefined failures (`taskClass: 'DISCOVER'`, `group: 'general'`, `tags: []`, `cuisine: null`, `category: null`, `resolvesVia: 'search'`)
+- `resolvesVia` field added to every registry entry (W5 "How" dimension, Step 6 prerequisite)
+  - DISCOVER → `'search'`
+  - ORDER → `'surge'`
+  - STATUS → `'status'`
+  - 0-result handler dispatch → set dynamically (not in registry)
+- `meta.gap`, `meta.gap_query`, `meta.gap_intent` added to response when `dispatchTask` fires (both Phase 2 early-return and legacy fire-and-forget paths) — frontend search UI can now act on the gap signal with zero additional work
+- `GET /api/local-intel/gaps` endpoint live — top 50 unresolved queries grouped by `intent + query + zip`, ordered by occurrences DESC then `last_seen` DESC
+
+**Next step — Step 3:** Resolution history table, temporal intent (`temporalContext` field on registry entries).
