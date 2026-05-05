@@ -130,6 +130,15 @@ app.use('/api/raiders', raidersRouter);
 const localIntelRouter = require('./localIntelAgent');
 app.use('/api/local-intel', localIntelRouter);
 
+// Merchant portal alias — same router, exposes /api/merchant/request-link
+// and /api/merchant/dashboard/:token at the documented merchant URL.
+app.use('/api/merchant', (req, res, next) => {
+  // Re-route /api/merchant/* → /api/local-intel/merchant/* so the existing
+  // router matches without duplicating handlers.
+  req.url = '/merchant' + (req.url === '/' ? '' : req.url);
+  return localIntelRouter(req, res, next);
+});
+
 app.get('/', (req, res) => res.json({
   status: 'ONLINE',
   swarm: 'GSB Intelligence Swarm',

@@ -561,6 +561,58 @@ function getCallerId(req) {
     || 'anon';
 }
 
+// ── Narrative builder ────────────────────────────────────────────────────────
+// Pure, deterministic, no I/O — never throws. Reads results/nlIntent/meta and
+// returns a single human sentence to render above search cards.
+function buildNarrative(results, nlIntent, meta) {
+  try {
+    const count    = results?.length ?? 0;
+    const group    = nlIntent?.group ?? 'local';
+    const cuisine  = nlIntent?.cuisine;
+    const category = nlIntent?.category;
+    const temporal = nlIntent?.temporalContext;
+    const taskClass = nlIntent?.taskClass ?? 'DISCOVER';
+    const zip = meta?.zip ?? 'your area';
+
+    if (taskClass === 'RFQ') {
+      const cat = category ?? group;
+      if ((meta?.businesses_notified ?? 0) > 0) {
+        return `We notified ${meta.businesses_notified} ${cat}(s) in your area about your request. You'll hear back shortly.`;
+      }
+      return `We don't have ${cat}s in our network for this area yet — we're working on it.`;
+    }
+
+    if (count === 0) {
+      if (meta?.gap) return `No results found yet — we've flagged this as a gap in our network and we're on it.`;
+      return `No results found for that search in your area.`;
+    }
+
+    const timePhrase = temporal === 'open_now'   ? ', open right now'
+      : temporal === 'happy_hour' ? ' with happy hour'
+      : temporal === 'late_night' ? ', open late tonight'
+      : temporal === 'morning'    ? ' open for breakfast'
+      : temporal === 'midday'     ? ' open for lunch'
+      : temporal === 'evening'    ? ' open for dinner'
+      : '';
+
+    const howPhrase = meta?.semantic_search ? ' (found by meaning, not just keywords)' : '';
+
+    if (cuisine) {
+      return `Found ${count} ${cuisine} restaurant${count !== 1 ? 's' : ''}${timePhrase} near you${howPhrase}.`;
+    }
+    if (category) {
+      return `Found ${count} ${category}${count !== 1 ? 's' : ''}${timePhrase} near you${howPhrase}.`;
+    }
+    const groupLabel = group === 'food' ? 'restaurant'
+      : group === 'bar' ? 'bar'
+      : group === 'health' ? 'health provider'
+      : 'business';
+    return `Found ${count} ${groupLabel}${count !== 1 ? 's' : ''}${timePhrase} near you${howPhrase}.`;
+  } catch (_) {
+    return null;
+  }
+}
+
 // ── Load dataset ──────────────────────────────────────────────────────────────
 // In production this would be a DB — for now it's the JSON file written by the pull script
 const DATA_PATH = path.join(__dirname, 'data', 'localIntel.json');
@@ -735,6 +787,14 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip) {
       [userQuery, nlIntent.group, zip || null, notified > 0, notified, Date.now() - _start]
     ).catch(err => console.error('[rfq] resolution_history write failed:', err.message));
 
+    const _rfqMeta = {
+      intent_class: 'RFQ',
+      intent_group: nlIntent.group,
+      resolves_via: 'rfq',
+      businesses_notified: notified,
+    };
+    _rfqMeta.narrative = buildNarrative([], nlIntent, { ..._rfqMeta, zip });
+
     return res.json({
       ok: true,
       rfq_id: rfqId,
@@ -743,11 +803,7 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip) {
       category: nlIntent.category,
       zip: zip || null,
       message: customerMsg,
-      meta: {
-        intent_class: 'RFQ',
-        intent_group: nlIntent.group,
-        resolves_via: 'rfq'
-      }
+      meta: _rfqMeta
     });
 
   } catch (err) {
@@ -1270,31 +1326,34 @@ router.post('/', async (req, res) => {
       });
     }
 
+    const _meta = {
+      source:        usedSemantic ? 'postgres+pgvector' : (usedTsFallback ? 'postgres+tsvector' : 'postgres'),
+      intent_class:  nlIntent.taskClass || null,
+      intent_group:  nlIntent.group     || null,
+      intent_cuisine: nlIntent.cuisine  || null,
+      temporal:      nlIntent.temporalContext ?? null,
+      ts_fallback:   usedTsFallback && !usedSemantic,
+      semantic_search: usedSemantic,
+      personalized:  !!customerSession,
+      customer_query_count: customerSession?.query_count ?? null,
+      resolves_via:  resolvesVia,
+      ...(dispatchedGap && {
+        gap:                true,
+        gap_query:          query,
+        gap_intent:         nlIntent.taskClass || 'DISCOVER',
+        acquisition_signal: true,
+      }),
+      coverage:      '113,684 businesses — Florida statewide',
+    };
+    _meta.narrative = buildNarrative(rows, nlIntent, { ..._meta, zip });
+
     res.json({
       ok:       true,
       total:    realTotal,
       returned: rows.length,
       zips:     zip ? [zip] : [],
       results:  rows,
-      meta: {
-        source:        usedSemantic ? 'postgres+pgvector' : (usedTsFallback ? 'postgres+tsvector' : 'postgres'),
-        intent_class:  nlIntent.taskClass || null,
-        intent_group:  nlIntent.group     || null,
-        intent_cuisine: nlIntent.cuisine  || null,
-        temporal:      nlIntent.temporalContext ?? null,
-        ts_fallback:   usedTsFallback && !usedSemantic,
-        semantic_search: usedSemantic,
-        personalized:  !!customerSession,
-        customer_query_count: customerSession?.query_count ?? null,
-        resolves_via:  resolvesVia,
-        ...(dispatchedGap && {
-          gap:                true,
-          gap_query:          query,
-          gap_intent:         nlIntent.taskClass || 'DISCOVER',
-          acquisition_signal: true,
-        }),
-        coverage:      '113,684 businesses — Florida statewide',
-      },
+      meta:     _meta,
     });
   } catch (e) {
     console.error('[local-intel query]', e.message);
@@ -1554,6 +1613,165 @@ router.post('/auth/magic', express.json(), async (req, res) => {
   } catch (err) {
     console.error('[auth/magic]', err.message);
     // Response already sent, just log
+  }
+});
+
+// ── Merchant portal ───────────────────────────────────────────────────────────
+// POST /api/local-intel/merchant/request-link
+// GET  /api/local-intel/merchant/dashboard/:token
+// (mounted under /api/local-intel; landing-side fetch hits /api/merchant/* via app-level alias below)
+
+router.post('/merchant/request-link', express.json(), async (req, res) => {
+  const { email, name, address, phone, zip, category } = req.body || {};
+  if (!email) return res.status(400).json({ error: 'email required' });
+
+  try {
+    const db = require('./lib/db');
+    const normEmail = String(email).toLowerCase().trim();
+
+    let [business] = await db.query(
+      'SELECT * FROM businesses WHERE merchant_email = $1 LIMIT 1',
+      [normEmail]
+    );
+
+    if (!business) {
+      if (!name || !zip) {
+        return res.status(200).json({
+          error: 'new_merchant',
+          message: 'Business not found. Please provide name and zip to claim your listing.'
+        });
+      }
+      const [inserted] = await db.query(
+        `INSERT INTO businesses (name, phone, zip, category, merchant_email, claimed, source)
+         VALUES ($1, $2, $3, $4, $5, true, 'claimed')
+         RETURNING *`,
+        [name, phone ?? null, zip, category ?? 'general', normEmail]
+      );
+      business = inserted;
+    }
+
+    const token = require('crypto').randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await db.query(
+      `UPDATE businesses
+         SET dashboard_token = $1, token_expires_at = $2, claimed = true
+       WHERE business_id = $3`,
+      [token, expires, business.business_id]
+    );
+
+    const dashboardUrl = `https://www.thelocalintel.com/merchant?token=${token}`;
+
+    try {
+      const { Resend } = require('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      await resend.emails.send({
+        from: 'LocalIntel <intel@thelocalintel.com>',
+        to: normEmail,
+        subject: 'Your LocalIntel merchant dashboard',
+        html: `
+          <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;">
+            <p style="font-size:15px;color:#111827;">Hi <strong>${(business.name || '').replace(/</g,'&lt;')}</strong>,</p>
+            <p style="font-size:15px;color:#374151;">Here's your private merchant dashboard link:</p>
+            <p style="margin:28px 0;">
+              <a href="${dashboardUrl}" style="background:#16A34A;color:#fff;padding:13px 26px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;">Open My Dashboard &rarr;</a>
+            </p>
+            <p style="font-size:13px;color:#6B7280;">Or copy this link:<br><a href="${dashboardUrl}" style="color:#16A34A;word-break:break-all;">${dashboardUrl}</a></p>
+            <p style="font-size:13px;color:#6B7280;margin-top:20px;">This link expires in 24 hours.</p>
+            <hr style="border:none;border-top:1px solid #E5E7EB;margin:28px 0;">
+            <p style="font-size:12px;color:#9CA3AF;">LocalIntel · thelocalintel.com</p>
+          </div>`
+      });
+    } catch (emailErr) {
+      console.error('[merchant] email send failed:', emailErr.message);
+      // non-fatal — link is in response payload for dev
+    }
+
+    return res.json({
+      success: true,
+      message: `Dashboard link sent to ${normEmail}`,
+      ...(process.env.NODE_ENV === 'production' ? {} : { dashboard_url: dashboardUrl })
+    });
+  } catch (err) {
+    console.error('[merchant] request-link error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/merchant/dashboard/:token', async (req, res) => {
+  const { token } = req.params;
+  if (!token) return res.status(400).json({ error: 'token required' });
+
+  try {
+    const db = require('./lib/db');
+    const [business] = await db.query(
+      `SELECT * FROM businesses
+        WHERE dashboard_token = $1
+          AND token_expires_at > NOW()
+        LIMIT 1`,
+      [token]
+    );
+
+    if (!business) {
+      return res.status(401).json({
+        error: 'invalid_or_expired',
+        message: 'This link has expired. Request a new one at thelocalintel.com/claim'
+      });
+    }
+
+    const [stats] = await db.query(
+      `SELECT
+         COUNT(*)                                                    AS total_routed,
+         COUNT(*) FILTER (WHERE resolved = true)                     AS resolved_count,
+         COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS this_month
+       FROM resolution_history
+       WHERE business_id = $1`,
+      [business.business_id]
+    );
+
+    const topQueries = await db.query(
+      `SELECT query, COUNT(*) AS cnt
+         FROM resolution_history
+        WHERE business_id = $1
+        GROUP BY query
+        ORDER BY cnt DESC
+        LIMIT 5`,
+      [business.business_id]
+    );
+
+    const rfqStats = await db.query(
+      `SELECT
+         COUNT(*)                                  AS total_rfq,
+         COUNT(*) FILTER (WHERE response = 'yes')  AS matched
+         FROM rfq_responses_v2
+        WHERE business_id = $1`,
+      [business.business_id]
+    );
+    const [rfq] = rfqStats;
+
+    return res.json({
+      business: {
+        id:        business.business_id,
+        name:      business.name,
+        address:   business.address ?? null,
+        zip:       business.zip,
+        category:  business.category,
+        wallet:    business.wallet ?? null,
+        claimed:   business.claimed === true || business.claimed_at != null
+      },
+      stats: {
+        total_routed: Number(stats?.total_routed ?? 0),
+        resolved:     Number(stats?.resolved_count ?? 0),
+        this_month:   Number(stats?.this_month ?? 0),
+        rfq_sent:     Number(rfq?.total_rfq ?? 0),
+        rfq_matched:  Number(rfq?.matched   ?? 0)
+      },
+      top_queries: topQueries,
+      wallet_connected: !!business.wallet
+    });
+  } catch (err) {
+    console.error('[merchant] dashboard error:', err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
 
