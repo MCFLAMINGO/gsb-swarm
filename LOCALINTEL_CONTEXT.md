@@ -1226,3 +1226,25 @@ Every user query is a task expression with five dimensions. LocalIntel must even
 - Session B will: (1) wire `embedderClient` into the search query chain as third fallback after registry/tsvector, (2) build `embeddingBackfillWorker` to populate the `embedding` column for existing businesses, (3) create the ivfflat index once data is in.
 
 **Next:** Session B — embeddingBackfillWorker + pgvector as third search fallback in localIntelAgent.
+
+---
+### pgvector Session B — Search Wired (May 2026)
+
+**Files added/modified (Session B):**
+- `workers/embeddingBackfillWorker.js` — batches of 50, skips already-embedded rows, retries on embedder load (10s sleep), creates ivfflat index after completion. Respects `FULL_REFRESH=true` to re-embed all rows. Self-running entry mirroring `searchVectorBackfillWorker` pattern.
+- `dashboard-server.js` — registered `Embedding Backfill` worker in `LOCAL_INTEL_WORKERS` list. Spawned as fork on dashboard server boot, fire-and-forget, never blocks server startup. Same exponential-backoff restart policy as siblings.
+- `localIntelAgent.js` — semantic search wired as 4th path in fallback chain: **ILIKE → tsvector → pgvector → dispatchTask**. `meta.semantic_search = true` when pgvector path resolves the query. `meta.source = 'postgres+pgvector'` when semantic hit. Resolution recorded with `resolvedVia: 'pgvector'`.
+
+**Embedding source text:** combines `name | description | cuisine | category` per business — richer than name-only embeddings, robust against missing fields.
+
+**Index strategy:** `lists = max(1, floor(sqrt(total_businesses)))` — auto-tuned to corpus size, created post-backfill via `CREATE INDEX IF NOT EXISTS idx_businesses_embedding ... USING ivfflat (embedding vector_cosine_ops)`.
+
+**Embedder sidecar:** `https://eloquent-energy-production.up.railway.app` — `/health` returns `{"status":"ready","model":"nomic-ai/nomic-embed-text-v1"}`.
+
+**Failure modes (all silent-safe):**
+- `EMBEDDING_SERVICE_URL` unset → fallback skipped, control falls through to dispatchTask.
+- `embedText` returns null (timeout, HTTP error) → fallback skipped.
+- pgvector query throws → caught, logged, falls through to dispatchTask.
+- Backfill `embedBatch` null → 10s sleep + retry same batch.
+
+**Next:** Session C — embed intent registry entries for semantic intent classification (replaces keyword matching in `intentMap` for ambiguous NL queries).
