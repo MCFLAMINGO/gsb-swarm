@@ -98,6 +98,7 @@ const { exact } = require('x402/schemes');
 const { createApiKeyMiddleware } = require('./lib/apiKeyMiddleware');
 const db = require('./lib/db');
 const { resolveIntent, detectOpenIntent } = require('./lib/intentMap');
+const { resolveIntent: resolveNlIntentFromRegistry } = require('./lib/intentRegistry');
 const { isOpenNow } = require('./workers/hoursParseWorker');
 const { classifyIntent } = require('./workers/intentRouter');
 const { dispatchTask } = require('./lib/taskDispatch');
@@ -412,65 +413,7 @@ function getGroup(cat) {
 }
 
 // ── POST /api/local-intel — main query endpoint ───────────────────────────────
-// NIM-powered intent → group/tag mapping for human queries
-const NL_INTENT_MAP = [
-  // ── Cuisine (DISCOVER · food) ──────────────────────────────────────────────
-  { patterns: [/\bchinese\b/i],                                      taskClass: 'DISCOVER', group: 'food', cuisine: 'chinese',   tags: null },
-  { patterns: [/\bsushi\b|\bjapanese\b|\bramen\b/i],                 taskClass: 'DISCOVER', group: 'food', cuisine: 'japanese',  tags: null },
-  { patterns: [/\bitalian\b|\bpasta\b|\bpizza\b/i],                  taskClass: 'DISCOVER', group: 'food', cuisine: 'italian',   tags: null },
-  { patterns: [/\bthai\b/i],                                         taskClass: 'DISCOVER', group: 'food', cuisine: 'thai',      tags: null },
-  { patterns: [/\bindian\b/i],                                       taskClass: 'DISCOVER', group: 'food', cuisine: 'indian',    tags: null },
-  { patterns: [/\bmexican\b|\btacos?\b|\bburritos?\b/i],             taskClass: 'DISCOVER', group: 'food', cuisine: 'mexican',   tags: null },
-  { patterns: [/\bbbq\b|\bbarbecue\b|\bsmokehouse\b/i],              taskClass: 'DISCOVER', group: 'food', cuisine: 'bbq',       tags: null },
-  { patterns: [/\bseafood\b|\bfish\b|\boysters?\b|\bcrab\b|\blobster\b/i], taskClass: 'DISCOVER', group: 'food', cuisine: 'seafood', tags: null },
-  { patterns: [/\bburgers?\b|\bhamburger\b/i],                       taskClass: 'DISCOVER', group: 'food', cuisine: 'american',  tags: null },
-  { patterns: [/\bsteakhouse\b|\bsteak\b/i],                         taskClass: 'DISCOVER', group: 'food', cuisine: 'steakhouse', tags: null },
-
-  // ── Bar / drink (DISCOVER · bar) ───────────────────────────────────────────
-  { patterns: [/\bwhiskey\b|\bbourbon\b|\bscotch\b|\bcocktails?\b|\bbar\b|\bnightlife\b|\bhappy hour\b/i], taskClass: 'DISCOVER', group: 'bar', category: 'bar',       tags: null },
-  { patterns: [/\bbeer\b|\bcraft beer\b|\bbrewery\b|\btap room\b/i],                                       taskClass: 'DISCOVER', group: 'bar', category: 'brewery',   tags: null },
-  { patterns: [/\bwine\b|\bwinery\b|\bwine bar\b/i],                                                       taskClass: 'DISCOVER', group: 'bar', category: 'wine_bar',  tags: null },
-
-  // ── Utility / errand (DISCOVER) ────────────────────────────────────────────
-  { patterns: [/\bpharmacy\b|\bdrugstore\b/i],                       taskClass: 'DISCOVER', group: 'health',  category: 'pharmacy',    tags: null },
-  { patterns: [/\bhardware\b|\bhome depot\b|\blumber\b/i],           taskClass: 'DISCOVER', group: 'home',    category: 'hardware',    tags: null },
-  { patterns: [/\bgrocery\b|\bsupermarket\b|\bfood store\b/i],       taskClass: 'DISCOVER', group: 'food',    category: 'grocery',     tags: null },
-  { patterns: [/\bgas\b|\bfuel\b|\bgas station\b/i],                 taskClass: 'DISCOVER', group: 'auto',    category: 'gas_station', tags: null },
-  { patterns: [/\bpets?\b|\bdog\b|\bcat\b|\bvet\b|\bveterinarian\b/i], taskClass: 'DISCOVER', group: 'pet',   category: 'pet',         tags: null },
-  { patterns: [/\blaundry\b|\bdry cleaning\b|\blaundromat\b/i],      taskClass: 'DISCOVER', group: 'home',    category: 'laundry',     tags: null },
-  { patterns: [/\bflorist\b|\bflowers\b/i],                          taskClass: 'DISCOVER', group: 'retail',  category: 'florist',     tags: null },
-  { patterns: [/\batm\b|\bcash\b|\bbank\b/i],                        taskClass: 'DISCOVER', group: 'finance', category: 'bank',        tags: null },
-
-  // ── Legacy broad-group fallbacks (DISCOVER) ────────────────────────────────
-  { patterns: [/healthy|health food|organic|clean eat|nutritious|salad|vegan|vegetarian|juice|smoothie/i], taskClass: 'DISCOVER', group: 'food', tags: ['healthy','organic','vegan','vegetarian','juice','salad'] },
-  { patterns: [/restaurant|eat|dining|food|lunch|dinner|breakfast|cafe|coffee|pizza|sushi|burger|taco|bbq|bar/i], taskClass: 'DISCOVER', group: 'food', tags: null },
-  { patterns: [/doctor|dentist|clinic|medical|health|urgent care|physic|therapy|chiro|optom/i], taskClass: 'DISCOVER', group: 'health', tags: null },
-  { patterns: [/lawyer|attorney|legal|law firm/i],                   taskClass: 'DISCOVER', group: 'legal',   tags: null },
-  { patterns: [/bank|finance|invest|insurance|mortgage|credit/i],    taskClass: 'DISCOVER', group: 'finance', tags: null },
-  { patterns: [/shop|store|retail|boutique|salon|spa|beauty|gym|fitness/i], taskClass: 'DISCOVER', group: 'retail', tags: null },
-
-  // ── ORDER / STATUS hints (kept for future routing — Basalt order flow lives in legacy handler) ──
-  // ORDER intent is detected separately in workers/intentRouter via _ORDER_ITEM_HINT; these are tagged
-  // here only so callers reading NL_INTENT_MAP see the full taxonomy.
-  { patterns: [/\border\s+(?:me|a|an)\b|\bI(?:'d| would) like\b|\bI want\b|\bget me\b|\bcan I (?:get|order)\b/i], taskClass: 'ORDER',  group: null, tags: null },
-  { patterns: [/\b(?:order|delivery)\s+status\b|\bwhere(?:'s| is) my order\b|\btrack\s+(?:my\s+)?order\b/i],     taskClass: 'STATUS', group: null, tags: null },
-];
-
-function resolveNlIntent(query) {
-  if (!query) return { taskClass: null, group: null, tags: null, cuisine: null, category: null };
-  for (const rule of NL_INTENT_MAP) {
-    if (rule.patterns.some(p => p.test(query))) {
-      return {
-        taskClass: rule.taskClass || null,
-        group:     rule.group     || null,
-        tags:      rule.tags      || null,
-        cuisine:   rule.cuisine   || null,
-        category:  rule.category  || null,
-      };
-    }
-  }
-  return { taskClass: null, group: null, tags: null, cuisine: null, category: null };
-}
+// NL intent → group/tag mapping lives in lib/intentRegistry.js (single source of truth).
 
 router.post('/', async (req, res) => {
   const { zip, query, category, group, limit = 50, minConfidence = 0 } = req.body || {};
@@ -535,7 +478,12 @@ router.post('/', async (req, res) => {
                 results: [],
                 total: 0,
                 returned: 0,
-                meta: { source: 'task_dispatch' },
+                meta: {
+                  source:     'task_dispatch',
+                  gap:        true,
+                  gap_query:  query,
+                  gap_intent: intent.type || 'DISCOVER',
+                },
               });
             } catch (taskErr) {
               console.error('[taskDispatch] failed to create task:', taskErr.message);
@@ -552,8 +500,8 @@ router.post('/', async (req, res) => {
 
     // ── Resolve NL intent ────────────────────────────────────────────────────
     const nlIntent = (!group && !category)
-      ? resolveNlIntent(query)
-      : { taskClass: null, group: null, tags: null, cuisine: null, category: null };
+      ? resolveNlIntentFromRegistry(query)
+      : { taskClass: null, group: null, tags: null, cuisine: null, category: null, resolvesVia: 'search' };
     const effectiveGroup    = group || nlIntent.group;
     const effectiveCategory = category || nlIntent.category;
 
@@ -677,6 +625,7 @@ router.post('/', async (req, res) => {
     // Skip when caller pinned a category/group filter (they got an empty page from a real filter,
     // not a free-text search miss) and when the NL intent looks like ORDER/STATUS (Basalt order
     // flow handles those separately).
+    let dispatchedGap = false;
     if ((!rawRows || rawRows.length === 0) && query && !category && !group
         && nlIntent.taskClass !== 'ORDER' && nlIntent.taskClass !== 'STATUS') {
       try {
@@ -692,6 +641,7 @@ router.post('/', async (req, res) => {
         Promise.resolve()
           .then(() => dispatchTask(dispatchIntent, query, zip))
           .catch(e => console.error('[taskDispatch legacy 0-result]', e.message));
+        dispatchedGap = true;
       } catch (dispatchInitErr) {
         console.error('[taskDispatch legacy init]', dispatchInitErr.message);
       }
@@ -763,6 +713,11 @@ router.post('/', async (req, res) => {
         intent_group:  nlIntent.group     || null,
         intent_cuisine: nlIntent.cuisine  || null,
         ts_fallback:   usedTsFallback,
+        ...(dispatchedGap && {
+          gap:        true,
+          gap_query:  query,
+          gap_intent: nlIntent.taskClass || 'DISCOVER',
+        }),
         coverage:      '113,684 businesses — Florida statewide',
       },
     });
@@ -4493,6 +4448,32 @@ router.get('/order-status/:receiptId', async (req, res) => {
     return res.json({ paid, status: data?.status || null, receiptId });
   } catch (err) {
     console.error('[order-status]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/local-intel/gaps — top unresolved queries (internal dashboard) ──
+// Groups pending tasks by intent + query + zip so the team can see what
+// the agent network has not yet been able to resolve. No auth — internal only.
+router.get('/gaps', async (req, res) => {
+  try {
+    const db = require('./lib/db');
+    const rows = await db.query(`
+      SELECT
+        intent,
+        query,
+        zip,
+        COUNT(*)        AS occurrences,
+        MAX(created_at) AS last_seen
+      FROM tasks
+      WHERE status = 'pending'
+      GROUP BY intent, query, zip
+      ORDER BY occurrences DESC, last_seen DESC
+      LIMIT 50
+    `);
+    res.json({ gaps: rows, total: rows.length });
+  } catch (err) {
+    console.error('[local-intel gaps]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
