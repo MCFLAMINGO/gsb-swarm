@@ -107,6 +107,30 @@ const apiKeyMiddleware = createApiKeyMiddleware(db);
 // Phase 2 — multi-ZIP fanout when caller doesn't pin a ZIP
 const TARGET_ZIPS = ['32082','32081','32250','32266','32233','32259','32034'];
 
+// Step 3 — fire-and-forget write to resolution_history. Never blocks the
+// response, never throws — failures log only. Call from any path that has
+// resolved or failed to resolve a user query.
+function recordResolution({ query, intent, zip, businessId, resolved, resolvedVia, resultCount, startTime }) {
+  const ms = startTime ? Date.now() - startTime : null;
+  db.query(
+    `INSERT INTO resolution_history
+       (query, intent_class, intent_group, cuisine, zip, business_id, resolved, resolved_via, result_count, response_ms)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [
+      query,
+      intent?.taskClass ?? null,
+      intent?.group     ?? null,
+      intent?.cuisine   ?? null,
+      zip               ?? null,
+      businessId        ?? null,
+      resolved,
+      resolvedVia       ?? null,
+      resultCount       ?? 0,
+      ms
+    ]
+  ).catch(err => console.error('[resolution_history] write failed:', err.message));
+}
+
 // Coerce hours from row → object so isOpenNow can read it. The DB can hand back
 // either a JSON string (jsonb-as-text) or a parsed object depending on the column.
 function _parseHours(h) {
@@ -416,6 +440,7 @@ function getGroup(cat) {
 // NL intent → group/tag mapping lives in lib/intentRegistry.js (single source of truth).
 
 router.post('/', async (req, res) => {
+  const _reqStart = Date.now();
   const { zip, query, category, group, limit = 50, minConfidence = 0 } = req.body || {};
 
   try {
@@ -448,6 +473,16 @@ router.post('/', async (req, res) => {
               delete out.confidence_score;
               return out;
             });
+            recordResolution({
+              query,
+              intent: { taskClass: intent.type, group: null, cuisine: null },
+              zip,
+              businessId: enriched[0]?.business_id ?? null,
+              resolved: true,
+              resolvedVia: 'search',
+              resultCount: enriched.length,
+              startTime: _reqStart
+            });
             return res.json({
               ok:       true,
               total:    enriched.length,
@@ -469,6 +504,16 @@ router.post('/', async (req, res) => {
           if (intent && intent.type !== 'ORDER_ITEM') {
             try {
               const task = await dispatchTask(intent, query, zip);
+              recordResolution({
+                query,
+                intent: { taskClass: intent.type || 'DISCOVER', group: null, cuisine: null },
+                zip,
+                businessId: null,
+                resolved: false,
+                resolvedVia: 'dispatch',
+                resultCount: 0,
+                startTime: _reqStart
+              });
               return res.json({
                 ok: true,
                 taskCreated: true,
@@ -699,6 +744,31 @@ router.post('/', async (req, res) => {
         const countRows    = await db.query(countSql, countParams);
         realTotal          = parseInt(countRows[0]?.total || rows.length, 10);
       } catch (_) { /* non-fatal — fall back to page size */ }
+    }
+
+    // ── Step 3 — record resolution outcome (fire-and-forget) ─────────────────
+    if (rows.length > 0) {
+      recordResolution({
+        query,
+        intent: nlIntent,
+        zip,
+        businessId: rows[0]?.business_id ?? null,
+        resolved: true,
+        resolvedVia: usedTsFallback ? 'tsvector' : 'search',
+        resultCount: rows.length,
+        startTime: _reqStart
+      });
+    } else if (dispatchedGap) {
+      recordResolution({
+        query,
+        intent: nlIntent,
+        zip,
+        businessId: null,
+        resolved: false,
+        resolvedVia: 'dispatch',
+        resultCount: 0,
+        startTime: _reqStart
+      });
     }
 
     res.json({
@@ -4476,6 +4546,55 @@ router.get('/gaps', async (req, res) => {
     res.json({ gaps: rows, total: rows.length });
   } catch (err) {
     console.error('[local-intel gaps]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/local-intel/resolution-stats — Step 3 — system-wide resolution rate
+router.get('/resolution-stats', async (req, res) => {
+  try {
+    const [totals] = await db.query(`
+      SELECT
+        COUNT(*)                                          AS total_queries,
+        COUNT(*) FILTER (WHERE resolved = true)          AS resolved_count,
+        ROUND(
+          COUNT(*) FILTER (WHERE resolved = true)::numeric
+          / NULLIF(COUNT(*),0) * 100, 1
+        )                                                AS resolution_rate_pct,
+        ROUND(AVG(response_ms) FILTER (WHERE response_ms IS NOT NULL))
+                                                         AS avg_response_ms
+      FROM resolution_history
+    `);
+
+    const byGroup = await db.query(`
+      SELECT
+        intent_group,
+        COUNT(*)                                         AS total,
+        COUNT(*) FILTER (WHERE resolved = true)         AS resolved
+      FROM resolution_history
+      WHERE intent_group IS NOT NULL
+      GROUP BY intent_group
+      ORDER BY total DESC
+    `);
+
+    const topGaps = await db.query(`
+      SELECT query, zip, COUNT(*) AS occurrences, MAX(created_at) AS last_seen
+      FROM resolution_history
+      WHERE resolved = false
+      GROUP BY query, zip
+      ORDER BY occurrences DESC, last_seen DESC
+      LIMIT 20
+    `);
+
+    res.json({
+      total_queries:       Number(totals.total_queries),
+      resolved:            Number(totals.resolved_count),
+      resolution_rate:     totals.resolution_rate_pct + '%',
+      avg_response_ms:     Number(totals.avg_response_ms),
+      by_group:            byGroup,
+      top_gaps:            topGaps
+    });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
