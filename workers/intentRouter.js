@@ -423,7 +423,10 @@ const _KEYWORD_KEYS_SORTED = Object.keys(KEYWORD_CATEGORY_MAP)
 
 // Lightweight ORDER_ITEM detector — mirrors the (looser) regex in localIntelAgent
 // so callers can short-circuit before the heavier flow runs there.
-const _ORDER_ITEM_HINT = /(?:\border(?:\s+me)?\s+|\bI(?:'d|\s+would)\s+like\s+|\bI\s+want\s+|\bget\s+me\s+|\bcan\s+I\s+(?:get|order)\s+)/i;
+// REQUIRES a target anchor (from / at / @) so browsing queries like
+// "can I order food right now" or "order some pizza tonight" stay as
+// CATEGORY_SEARCH (with needsOpenNow=true) and never misclassify as ORDER_ITEM.
+const _ORDER_ITEM_HINT = /(?:\border(?:\s+me)?\s+|\bI(?:'d|\s+would)\s+like\s+|\bI\s+want\s+|\bget\s+me\s+|\bcan\s+I\s+(?:get|order)\s+).+?(?:\bfrom\b|\bat\b|\b@\b)/i;
 
 const _NEEDS_OPEN_RE = /\b(right now|open now|open right now|currently open|near me|nearby|tonight|now)\b/i;
 

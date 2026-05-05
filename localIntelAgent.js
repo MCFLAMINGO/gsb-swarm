@@ -337,12 +337,21 @@ async function searchByCategory(intent, zip, limit = 50) {
   `;
   const rows = await db.query(sql, [zips, cats, limit]);
   if (intent.needsOpenNow) {
-    return rows.filter(r => {
+    const filtered = rows.filter(r => {
       const parsed = _parseHours(r.hours);
       const open   = isOpenNow(parsed);
       // Treat unknown (null) as "maybe open" so we don't hide everything
       return open === null || open === true;
     });
+    // Safety valve: if open-now filter drops ALL results (e.g. 1 AM — gas stations
+    // with no hours data all got filtered), fall back to the full unfiltered set
+    // tagged with needsOpenNow=false so the caller still surfaces real businesses
+    // rather than falling through to a wrong-category tsvector fallback.
+    if (filtered.length === 0 && rows.length > 0) {
+      console.log(`[searchByCategory] needsOpenNow dropped all ${rows.length} rows — returning unfiltered (hours unknown)`);
+      return rows;
+    }
+    return filtered;
   }
   return rows;
 }
@@ -887,8 +896,11 @@ router.post('/', async (req, res) => {
     // ── Phase 2 — intent-aware search bar path ──────────────────────────────
     // Only kicks in for free-text queries (no explicit category/group filter).
     // ORDER_ITEM falls through to the legacy handler (Basalt order flow lives there).
+    // _phase2Intent hoisted — lets tsvector fallback scope by category (Fix 3)
+    let _phase2Intent = null;
     if (query && !category && !group) {
       const intent = classifyIntent(query);
+      _phase2Intent = intent;
       if (intent.type === 'CATEGORY_SEARCH' || intent.type === 'TEXT_SEARCH') {
         try {
           const lim = Math.min(Number(limit) || 50, 200);
@@ -1107,6 +1119,8 @@ router.post('/', async (req, res) => {
     let rawRows = await db.query(sql, params);
 
     // ── tsvector fallback — main ILIKE returned 0 rows but the user typed a meaningful query ──
+    // Fix 3: if Phase 2 was a CATEGORY_SEARCH, scope this fallback to those categories
+    // so "gas station near me" never returns auto_repair results via raw text match.
     let usedTsFallback = false;
     if ((!rawRows || rawRows.length === 0) && query && typeof query === 'string') {
       const _STOPWORDS = new Set([
@@ -1120,7 +1134,30 @@ router.post('/', async (req, res) => {
       if (tokens.length) {
         const tsq = tokens.join(' & ');
         const fbZips = zip ? [zip] : TARGET_ZIPS;
-        const fbSql = `
+        // If Phase 2 classified this as CATEGORY_SEARCH, scope fallback to those
+        // categories — prevents "gas" token from matching auto_repair businesses.
+        const _fbCats = (_phase2Intent && _phase2Intent.type === 'CATEGORY_SEARCH' && _phase2Intent.categories && _phase2Intent.categories.length)
+          ? _phase2Intent.categories
+          : null;
+        const fbSql = _fbCats
+          ? `
+          SELECT
+            business_id, name, address, city, zip, phone, website,
+            hours, category, category_group, tags, description, cuisine,
+            confidence_score AS confidence, confidence_score, lat, lon, sunbiz_doc_number,
+            claimed_at IS NOT NULL AS claimed,
+            wallet,
+            pos_config->>'pos_type' AS pos_type,
+            ts_rank(search_vector, to_tsquery('english', $1)) AS rank
+          FROM businesses
+          WHERE status != 'inactive'
+            AND zip = ANY($2::text[])
+            AND category = ANY($3::text[])
+            AND search_vector @@ to_tsquery('english', $1)
+          ORDER BY rank DESC, confidence_score DESC
+          LIMIT 20
+          `
+          : `
           SELECT
             business_id, name, address, city, zip, phone, website,
             hours, category, category_group, tags, description, cuisine,
@@ -1137,7 +1174,9 @@ router.post('/', async (req, res) => {
           LIMIT 20
         `;
         try {
-          rawRows = await db.query(fbSql, [tsq, fbZips]);
+          rawRows = _fbCats
+            ? await db.query(fbSql, [tsq, fbZips, _fbCats])
+            : await db.query(fbSql, [tsq, fbZips]);
           usedTsFallback = (rawRows && rawRows.length > 0);
         } catch (tsErr) {
           // Bad tsquery (e.g. reserved chars) — non-fatal, keep empty results

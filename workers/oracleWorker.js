@@ -337,12 +337,22 @@ async function computeOracle(zip, name) {
 
   // ── Business inventory ────────────────────────────────────────────────────
   const foodBiz = businesses.filter(b => {
+    // Use category_group first (set on all food businesses in Postgres),
+    // then fall back to category string matching for any legacy records.
+    if ((b.category_group || '').toLowerCase() === 'food') return true;
     const cat = (b.category || '').toLowerCase();
     return cat.includes('restaurant') || cat.includes('food') ||
            cat.includes('cafe') || cat.includes('fast_food') ||
            cat.includes('bar') || cat.includes('pub') ||
            cat.includes('bakery') || cat.includes('pizza') ||
-           cat.includes('sushi') || cat.includes('diner');
+           cat.includes('sushi') || cat.includes('diner') ||
+           cat.includes('mexican') || cat.includes('asian') ||
+           cat.includes('steakhouse') || cat.includes('fine_dining') ||
+           cat.includes('italian') || cat.includes('bbq') ||
+           cat.includes('sandwich') || cat.includes('deli') ||
+           cat.includes('cuban') || cat.includes('dessert') ||
+           cat.includes('casual_dining') || cat.includes('seafood') ||
+           cat.includes('coffee');
   });
 
   const totalBiz       = businesses.length;
