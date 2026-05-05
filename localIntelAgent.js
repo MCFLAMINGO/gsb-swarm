@@ -649,6 +649,34 @@ router.post('/', async (req, res) => {
       ? resolveNlIntentFromRegistry(query)
       : { taskClass: null, group: null, tags: null, cuisine: null, category: null, resolvesVia: 'search', temporalContext: null };
 
+    // ── Step 6 — Resolution path routing (How dimension) ────────────────────
+    // Registry's resolvesVia drives where this request goes. ORDER → /place-order,
+    // STATUS → /order-status, search/dispatch → continue below. Returns a clear
+    // structured 400 with a redirect hint instead of running an irrelevant SQL search.
+    const resolvesVia = nlIntentEarly.resolvesVia ?? 'search';
+    if (resolvesVia === 'surge') {
+      return res.status(400).json({
+        ok: false,
+        error: 'Order intents must use the /place-order endpoint',
+        redirect: '/api/local-intel/place-order',
+        intent_class: nlIntentEarly.taskClass,
+        resolves_via: 'surge',
+        meta: { resolves_via: 'surge' },
+      });
+    }
+    if (resolvesVia === 'status') {
+      return res.status(400).json({
+        ok: false,
+        error: 'Status intents must use the /order-status endpoint',
+        redirect: '/api/local-intel/order-status',
+        intent_class: nlIntentEarly.taskClass,
+        resolves_via: 'status',
+        meta: { resolves_via: 'status' },
+      });
+    }
+    // resolvesVia === 'search' or 'dispatch' — continue to SQL search
+    // 'dispatch' is handled by the existing 0-result dispatchTask path below.
+
     // ── Phase 2 — intent-aware search bar path ──────────────────────────────
     // Only kicks in for free-text queries (no explicit category/group filter).
     // ORDER_ITEM falls through to the legacy handler (Basalt order flow lives there).
@@ -721,6 +749,7 @@ router.post('/', async (req, res) => {
                 temporal:      nlIntentEarly.temporalContext ?? null,
                 personalized:  !!customerSession,
                 customer_query_count: customerSession?.query_count ?? null,
+                resolves_via:  resolvesVia,
                 coverage:      '113,684 businesses — Florida statewide',
               },
             });
@@ -764,6 +793,7 @@ router.post('/', async (req, res) => {
                   temporal:   nlIntentEarly.temporalContext ?? null,
                   personalized:  !!customerSession,
                   customer_query_count: customerSession?.query_count ?? null,
+                  resolves_via: resolvesVia,
                 },
               });
             } catch (taskErr) {
@@ -1048,6 +1078,7 @@ router.post('/', async (req, res) => {
         ts_fallback:   usedTsFallback,
         personalized:  !!customerSession,
         customer_query_count: customerSession?.query_count ?? null,
+        resolves_via:  resolvesVia,
         ...(dispatchedGap && {
           gap:        true,
           gap_query:  query,
