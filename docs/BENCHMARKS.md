@@ -41,7 +41,7 @@ Each sector has a `base` (businesses per 10,000 residents) and an `inc` multipli
 | `health` | Healthcare | 27.6 | 1.15 | DB median (26 FL ZIPs) |
 | `food` | Food & Dining | 27.7 | 1.10 | DB suburban median (tourist ZIPs excluded) |
 | `retail` | Retail & Shopping | 20.0 | 1.10 | BLS national (NAICS 44-45) |
-| `fitness` | Fitness & Wellness | 9.0 | 1.25 | BLS national |
+| `fitness` | Fitness | `fitness` | Fitness & Wellness | 9.0 | 1.25 | BLS national | Wellness | 6.0 | 1.15 | BLS national (adjusted down — mature suburban markets are well-served at lower density) |
 | `finance` | Financial Services | 8.0 | 1.15 | BLS national (banks + advisors) |
 | `hospitality` | Hospitality | 3.0 | 1.00 | DB suburban median (tourist ZIPs excluded) |
 | `legal` | Legal Services | 5.4 | 1.20 | BLS national (~180k law offices / 335M pop) |

@@ -56,9 +56,9 @@ const RULES = [
   // ── Professional Services ─────────────────────────────────────────────────
   { patterns: ['law firm','law office','attorney','lawyer',' esq','esquire',' llp',' llc law'], category: 'legal',             group: 'professional_services' },
   { patterns: ['accounting','accountant','bookkeeping','bookkeeper',' cpa',' tax preparation','tax service'], category: 'accounting', group: 'professional_services' },
-  { patterns: ['financial advisor','wealth management','investment advisor','financial planning','mortgage','loan officer'], category: 'finance', group: 'professional_services' },
-  { patterns: ['insurance','allstate','state farm','farmers insurance','geico','usaa agent'],   category: 'insurance',         group: 'professional_services' },
-  { patterns: ['real estate','realty','realtor','homes for sale','realtors','properties llc','property management'], category: 'real_estate', group: 'professional_services' },
+  { patterns: ['financial advisor','wealth management','investment advisor','financial planning','mortgage','loan officer','edward jones','merrill lynch','raymond james','ameriprise','fidelity advisor','charles schwab','td ameritrade','lpl financial','morgan stanley wealth'], category: 'finance', group: 'finance' },
+  { patterns: ['insurance','allstate','state farm','farmers insurance','geico','usaa agent','northwestern mutual','new york life','goosehead','insurance agency','insurance underwriter'], category: 'insurance', group: 'finance' },
+  { patterns: ['real estate','realty','realtor','homes for sale','realtors','property management','real estate brokerage','keller williams','coldwell banker','berkshire hathaway realty','sotheby','century 21','re/max'], category: 'real_estate', group: 'real_estate' },
   { patterns: ['architect','architecture'],                                                      category: 'architecture',      group: 'professional_services' },
   { patterns: ['marketing agency','advertising agency','digital agency','media agency','seo agency'], category: 'marketing',   group: 'professional_services' },
   { patterns: ['staffing','recruiting','headhunter','human resources','hr consulting'],          category: 'staffing',          group: 'professional_services' },
