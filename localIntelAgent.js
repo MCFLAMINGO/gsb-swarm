@@ -1796,15 +1796,42 @@ router.get('/merchant/dashboard/:token', async (req, res) => {
     );
     const [rfq] = rfqStats;
 
+    // Surge menu status — try live fetch, non-blocking
+    let surgeMenu = null;
+    if (business.wallet) {
+      try {
+        const surge = require('./lib/surgeAgent');
+        const menu  = await surge.fetchMenu(business.business_id);
+        const items = menu.items || menu;
+        if (Array.isArray(items)) {
+          const orderable = items.filter(i => i.attributes?.onlineOrderingEnabled !== false);
+          surgeMenu = {
+            connected:      true,
+            total_items:    items.length,
+            orderable_items: orderable.length,
+            categories:     [...new Set(items.map(i => i.category).filter(Boolean))],
+          };
+        }
+      } catch (_) {
+        surgeMenu = { connected: false };
+      }
+    }
+
     return res.json({
       business: {
-        id:        business.business_id,
-        name:      business.name,
-        address:   business.address ?? null,
-        zip:       business.zip,
-        category:  business.category,
-        wallet:    business.wallet ?? null,
-        claimed:   business.claimed === true || business.claimed_at != null
+        id:            business.business_id,
+        name:          business.name,
+        address:       business.address ?? null,
+        zip:           business.zip,
+        category:      business.category,
+        category_group: business.category_group ?? null,
+        wallet:        business.wallet ?? null,
+        claimed:       business.claimed === true || business.claimed_at != null,
+        services_json: business.services_json ?? null,
+        services_text: business.services_text ?? null,
+        menu_url:      business.menu_url ?? null,
+        menu_fetch_error: business.menu_fetch_error ?? null,
+        dispatch_token: business.dispatch_token ?? null,
       },
       stats: {
         total_routed: Number(stats?.total_routed ?? 0),
@@ -1813,8 +1840,9 @@ router.get('/merchant/dashboard/:token', async (req, res) => {
         rfq_sent:     Number(rfq?.total_rfq ?? 0),
         rfq_matched:  Number(rfq?.matched   ?? 0)
       },
-      top_queries: topQueries,
-      wallet_connected: !!business.wallet
+      top_queries:     topQueries,
+      wallet_connected: !!business.wallet,
+      surge_menu:      surgeMenu,
     });
   } catch (err) {
     console.error('[merchant] dashboard error:', err.message);
@@ -2055,7 +2083,7 @@ router.post('/inbox/hours', express.json(), async (req, res) => {
 
 // ── POST /api/local-intel/inbox/services — save services text + menu URL ───────
 router.post('/inbox/services', express.json(), async (req, res) => {
-  const { token, services_text, menu_url } = req.body || {};
+  const { token, services_text, services_json, menu_url } = req.body || {};
   if (!token) return res.status(401).json({ error: 'token required' });
   try {
     const db = require('./lib/db');
@@ -2064,14 +2092,36 @@ router.post('/inbox/services', express.json(), async (req, res) => {
       [token]
     );
     if (!biz) return res.status(401).json({ error: 'invalid token' });
+
+    // Build agent-readable description from services_json if provided
+    let agentDescription = services_text || null;
+    if (services_json && typeof services_json === 'object') {
+      const sj = services_json;
+      const parts = [];
+      if (sj.what_we_do)     parts.push(sj.what_we_do);
+      if (sj.specialties?.length) parts.push('Specialties: ' + sj.specialties.join(', ') + '.');
+      if (sj.price_range)    parts.push('Pricing: ' + sj.price_range + '.');
+      if (sj.service_area)   parts.push('Service area: ' + sj.service_area + '.');
+      if (sj.response_time)  parts.push('Response time: ' + sj.response_time + '.');
+      if (sj.availability)   parts.push('Available: ' + sj.availability + '.');
+      if (parts.length) agentDescription = parts.join(' ');
+    }
+
     await db.query(
       `UPDATE businesses SET
          services_text    = COALESCE($1, services_text),
-         menu_url         = COALESCE($2, menu_url),
+         services_json    = COALESCE($2, services_json),
+         menu_url         = COALESCE($3, menu_url),
          menu_fetched_at  = NULL
-       WHERE business_id = $3`,
-      [services_text || null, menu_url || null, biz.business_id]
+       WHERE business_id = $4`,
+      [
+        agentDescription || null,
+        services_json ? JSON.stringify(services_json) : null,
+        menu_url || null,
+        biz.business_id
+      ]
     );
+
     // If menu_url provided, trigger async fetch
     if (menu_url) {
       setImmediate(async () => {
@@ -2081,7 +2131,6 @@ router.post('/inbox/services', express.json(), async (req, res) => {
           console.log(`[inbox/services] menu fetch complete for ${biz.business_id}`);
         } catch (e) {
           console.warn('[inbox/services] menu fetch error:', e.message);
-          // Store error so UI can surface it
           const db2 = require('./lib/db');
           await db2.query(
             `UPDATE businesses SET menu_fetch_error = $1 WHERE business_id = $2`,
@@ -2090,8 +2139,8 @@ router.post('/inbox/services', express.json(), async (req, res) => {
         }
       });
     }
-    console.log(`[inbox/services] saved for ${biz.business_id}`);
-    res.json({ ok: true, menu_fetch_queued: !!menu_url });
+    console.log(`[inbox/services] saved services_json + text for ${biz.business_id}`);
+    res.json({ ok: true, menu_fetch_queued: !!menu_url, agent_description: agentDescription });
   } catch (err) {
     console.error('[inbox/services POST]', err.message);
     res.status(500).json({ error: err.message });
