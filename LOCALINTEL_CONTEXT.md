@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-05 (session 12 — global oracle refresh: 1012 ZIPs updated, market_maturity seeded, refreshOracleSectors worker wired into oracleWorker)
+> Last updated: 2026-05-05 (session 12 — ZIP template extracted, scaffold-zip.js, single source of truth for all ZIP pages)
 
 ---
 
