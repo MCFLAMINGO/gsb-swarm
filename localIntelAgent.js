@@ -2147,6 +2147,34 @@ router.post('/inbox/services', express.json(), async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/inbox/wallet — save wallet address ───────────────────
+router.post('/inbox/wallet', express.json(), async (req, res) => {
+  const { token, wallet } = req.body || {};
+  if (!token)  return res.status(401).json({ error: 'token required' });
+  if (!wallet) return res.status(400).json({ error: 'wallet address required' });
+  // Basic EVM address validation
+  if (!/^0x[0-9a-fA-F]{40}$/.test(wallet.trim())) {
+    return res.status(400).json({ error: 'Invalid wallet address — must be 0x followed by 40 hex characters' });
+  }
+  try {
+    const db = require('./lib/db');
+    const [biz] = await db.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+    await db.query(
+      `UPDATE businesses SET wallet = $1 WHERE business_id = $2`,
+      [wallet.trim(), biz.business_id]
+    );
+    console.log(`[inbox/wallet] wallet saved for ${biz.business_id}`);
+    res.json({ ok: true, wallet: wallet.trim() });
+  } catch (err) {
+    console.error('[inbox/wallet POST]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/local-intel/inbox/pos — save POS credentials (AES-256 encrypted) ─
 router.post('/inbox/pos', express.json(), async (req, res) => {
   const { token, pos_type, credentials } = req.body || {};
