@@ -3511,6 +3511,31 @@ router.get('/oracle', async (req, res) => {
 // ── GET /api/local-intel/oracle/history?zip=XXXXX ─────────────────────────────
 // Returns full time-series array for a ZIP (up to 180 snapshots)
 // Optional ?limit=N to get last N entries
+// ── Business pins endpoint — lat/lon + name/category for map markers ──────────
+router.get('/pins', async (req, res) => {
+  try {
+    const zip = (req.query.zip || '').replace(/\D/g, '').slice(0, 5);
+    if (!zip) return res.status(400).json({ error: 'zip required' });
+    const rows = await db.query(
+      `SELECT name, lat, lon, category_group, category, claimed
+       FROM businesses
+       WHERE zip = $1 AND lat IS NOT NULL AND lon IS NOT NULL
+       ORDER BY claimed DESC NULLS LAST, name ASC`,
+      [zip]
+    );
+    res.json({ zip, count: rows.length, pins: rows.map(r => ({
+      name: r.name,
+      lat:  parseFloat(r.lat),
+      lon:  parseFloat(r.lon),
+      group: r.category_group || 'services',
+      category: (r.category || '').replace(/_/g, ' '),
+      claimed: !!r.claimed,
+    })) });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/oracle/history', (req, res) => {
   try {
     const zip = (req.query.zip || '').replace(/\D/g, '').slice(0, 5);
