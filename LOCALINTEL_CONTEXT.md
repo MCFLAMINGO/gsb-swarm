@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-05 (session 12 — ZIP template extracted, scaffold-zip.js, single source of truth for all ZIP pages)
+> Last updated: 2026-05-05 (session 13 — Leaflet map overlay deployed — ZIP boundary + gap-tier color signal on all ZIP pages)
 
 ---
 
@@ -1643,3 +1643,41 @@ else    → Balanced
 ### Status
 **LIVE** — market_maturity column in Postgres, oracle returns it, ZIP pages apply maturity-scaled thresholds. 32082=mature (50%+ for Significant), 32081=growth (30%+). localintel-landing commit `a6b6426`, gsb-swarm pgStore updated.
 
+
+---
+
+## Session 13 — Leaflet Map Overlay (2026-05-05)
+
+> Last updated: 2026-05-05 — Leaflet map deployed on all ZIP pages
+
+### What was built
+Leaflet 1.9.4 map overlay added to the ZIP page template and all generated pages. The map:
+- **Lazy-loads** Leaflet JS + CSS from CDN (no API key, no cost)
+- **Fetches ZIP boundary** from Census TIGER GeoJSON (zero-cost, no key): `https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Current/MapServer/2/query?where=ZCTA5='XXXXX'&outFields=ZCTA5&f=geojson&outSR=4326`
+- **Colors the ZIP polygon** by top gap tier from `computeGaps()` result:
+  - `high` (Significant) → red fill `#fca5a5` / stroke `#dc2626`
+  - `medium` (Moderate) → amber `#fed7aa` / stroke `#d97706`
+  - `balanced` → grey `#e5e7eb` / stroke `#9ca3af`
+  - `saturated` (Competitive) → green `#bbf7d0` / stroke `#16a34a`
+- **Legend overlay** bottom-right with all four tiers labeled
+- **Graceful fallback** — if TIGER unavailable, map container shows plain message (no JS crash)
+- `initMap(topTier)` called from `loadStats()` after `renderGaps(gaps)` — fires once per page load
+
+### Template architecture
+- Single source of truth: `zip/_template.html` (15 `{{TOKEN}}` placeholders)
+- Scaffolder: `scripts/scaffold-zip.js --all` regenerates all pages in registry
+- Add new ZIPs: add to `ZIP_CONFIGS` in `scaffold-zip.js` + `MATURITY_SEED` in `workers/refreshOracleSectors.js`
+- Fitness benchmark locked at **4.0/10k** (accounts for informal private trainer supply invisible to DB)
+
+### Benchmark values (locked — fitness corrected this session)
+| Sector | Base/10k | Aff mult |
+|---|---|---|
+| fitness | **4.0** | 1.15 |
+| (all others unchanged — see BENCHMARKS.md) |
+
+### Session Commits (localintel-landing)
+- `1810242` — feat: Leaflet map overlay — ZIP boundary + gap-tier color signal in all pages
+
+### Live URLs
+- [thelocalintel.com/zip/32082](https://www.thelocalintel.com/zip/32082)
+- [thelocalintel.com/zip/32081](https://www.thelocalintel.com/zip/32081)
