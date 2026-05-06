@@ -1681,3 +1681,56 @@ Leaflet 1.9.4 map overlay added to the ZIP page template and all generated pages
 ### Live URLs
 - [thelocalintel.com/zip/32082](https://www.thelocalintel.com/zip/32082)
 - [thelocalintel.com/zip/32081](https://www.thelocalintel.com/zip/32081)
+
+## Session 14 — Fee Model + Merchant Dashboard Copy (2026-05-06)
+
+### Revenue Model (finalized)
+- **$0.25 flat + 1.5% of job value** per confirmed RFQ booking
+- Fires at `/inbox/book` → `rfqService.bookRfq()` → `feeService.logFee()`
+- No fee on: searches, unbooked quotes, agent routing
+- No quote_usd present → $0.25 flat only (quote_usd is optional in respond flow)
+- Example: $200 plumbing job → $0.25 + $3.00 = $3.25 total
+
+### What Changed
+
+#### `lib/feeService.js`
+- **Fee model rewritten** — was: single flat rate from `RFQ_MATCH_FEE` env var (default $0.00)
+- **Now**: two-part fee computed by `computeRfqFee(quote_usd)`:
+  - `flat = RFQ_FLAT_FEE` (default `0.25`)
+  - `value_fee = quote_usd * RFQ_VALUE_PCT` (default `0.015` = 1.5%), zero if no quote
+  - `total = flat + value_fee`
+- **New functions exported**: `computeRfqFee`, `getRfqFlatFee`, `getRfqValuePct`
+- **`getRfqMatchFee()`** kept as deprecated alias → calls `getRfqFlatFee()`
+- **`logFee()`** now accepts `quote_usd` param — computes fee internally if `amount_usd` not passed
+- **`attemptCharge()`** returns `'logged_intent'` (was `'failed'`) — clearer status for deferred charges
+- **New status**: `logged_intent` — fee computed and on record, charge deferred until `ROUTING_ENABLED=true`
+- **`getRates()`** returns `rfq_flat_fee`, `rfq_value_pct`, `rfq_fee_model` (human-readable string)
+- All fee breakdown stored in `meta` JSONB: `flat_fee`, `value_fee`, `quote_usd`
+
+#### `lib/rfqService.js` — `bookRfq()`
+- Fee call updated: no longer passes `amount_usd: rfqFee` (static lookup)
+- Now passes `quote_usd: response.quote_usd` — lets feeService compute the two-part fee
+- `const rfqFee = feeService.getRfqMatchFee()` line removed
+
+#### `localintel-landing/merchant.html` — Wallet Explainer
+- "Do I need to fund it?" copy updated — removed "LocalIntel covers routing fees"
+- Now states the real model: "$0.25 + 1.5% of job value, only on confirmed jobs"
+- Payment flow banner updated to reflect fee deduction before settlement
+
+### Env Vars (Railway — gsb-swarm)
+```
+RFQ_FLAT_FEE=0.25        # flat USD per confirmed booking
+RFQ_VALUE_PCT=0.015      # 1.5% of quote_usd (if present)
+ROUTING_ENABLED=false    # keep false — attemptCharge() logs intent only until Tempo debit wired
+```
+Old vars `RFQ_MATCH_FEE` and `ORDER_FEE_PCT` still read but superseded.
+
+### Tempo Debit (TODO — not yet wired)
+- `attemptCharge()` in feeService.js has full TODO comment with implementation pattern
+- Will use viem + Tempo mainnet + `pathUSD.transferFrom(businessWallet, TREASURY_WALLET, amount)`
+- Requires business wallet pre-approval OR Tempo sponsor-tx via executor wallet
+- Flip `ROUTING_ENABLED=true` only after wired and tested
+
+### Session Commits
+- `gsb-swarm`: feat: two-part fee model — $0.25 flat + 1.5% job value on confirmed RFQ booking
+- `localintel-landing`: feat: merchant dashboard — honest fee model copy in wallet explainer
