@@ -806,6 +806,16 @@ async function runOracle() {
   }
 
   console.log(`[oracleWorker] Done — ${allZips.length} ZIPs computed (index entries: ${Object.keys(index.zips).length}).`);
+
+  // Refresh sector_breakdown in all oracle_json blobs from live business counts
+  // Ensures finance/automotive/fitness reclassifications are reflected immediately
+  try {
+    const { run: refreshSectors } = require('./refreshOracleSectors');
+    await refreshSectors({ silent: true });
+    console.log('[oracleWorker] sector_breakdown refresh complete');
+  } catch (e) {
+    console.error('[oracleWorker] sector_breakdown refresh failed (non-fatal):', e.message);
+  }
 }
 
 // Run immediately, then every 6 hours — skip startup if ran within 6h
