@@ -6788,8 +6788,8 @@ app.use((req, res, next) => {
 (function launchLocalIntelWorkers() {
   const { fork } = require('child_process');
   const LOCAL_INTEL_WORKERS = [
-    { name: 'LocalIntel Claim',     file: 'localIntelWorker.js' },
-    { name: 'LocalIntel MCP',       file: 'localIntelMCP.js' },
+    // { name: 'LocalIntel Claim',     file: 'localIntelWorker.js' }, // DEPRECATED — filesystem-based, superseded by Postgres + localIntelAgent.js
+    // { name: 'LocalIntel MCP',       file: 'localIntelMCP.js' },    // DEPRECATED — filesystem-based MCP, superseded by /api/local-intel/mcp route
     { name: 'Data Ingest',          file: 'dataIngestWorker.js' },
     { name: 'Zip Coordinator',      file: 'workers/zipCoordinatorWorker.js' },
     { name: 'Enrichment Agent',     file: 'workers/enrichmentAgent.js' },
