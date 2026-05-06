@@ -6790,7 +6790,7 @@ app.use((req, res, next) => {
   const LOCAL_INTEL_WORKERS = [
     // { name: 'LocalIntel Claim',     file: 'localIntelWorker.js' }, // DEPRECATED — filesystem-based, superseded by Postgres + localIntelAgent.js
     // { name: 'LocalIntel MCP',       file: 'localIntelMCP.js' },    // DEPRECATED — filesystem-based MCP, superseded by /api/local-intel/mcp route
-    { name: 'Data Ingest',          file: 'dataIngestWorker.js' },
+    // { name: 'Data Ingest',          file: 'dataIngestWorker.js' }, // DEPRECATED — filesystem-based, superseded by POST /api/local-intel/ingest → Postgres
     { name: 'Zip Coordinator',      file: 'workers/zipCoordinatorWorker.js' },
     { name: 'Enrichment Agent',     file: 'workers/enrichmentAgent.js' },
     { name: 'ACP Broadcaster',      file: 'workers/acpBroadcaster.js' },
