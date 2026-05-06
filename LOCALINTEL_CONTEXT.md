@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-05 (session 12 — fix renderGaps subtitle stale g.gap ref)
+> Last updated: 2026-05-05 (session 12 — market_maturity thresholds live)
 
 ---
 
@@ -1641,5 +1641,5 @@ else    → Balanced
 - 32081: Construction=competitive ✅ (Nocatee build-out), Food=significant ✅ (underserved suburb), Services=competitive ✅
 
 ### Status
-**LIVE** — deployed to thelocalintel.com/zip/32082 + /zip/32081 via localintel-landing commit `5eee7c2`
+**LIVE** — market_maturity column in Postgres, oracle returns it, ZIP pages apply maturity-scaled thresholds. 32082=mature (50%+ for Significant), 32081=growth (30%+). localintel-landing commit `a6b6426`, gsb-swarm pgStore updated.
 

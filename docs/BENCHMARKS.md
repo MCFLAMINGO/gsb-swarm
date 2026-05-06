@@ -151,3 +151,24 @@ Recalibrate when:
 3. A ZIP page result fails obvious smell test (e.g. "Legal: Significant Opportunity" in a ZIP full of law firms)
 
 Re-run `/tmp/benchmark_query.js` (in gsb-swarm root) against live Postgres and update this file.
+
+---
+
+## Market Maturity — Threshold Adjustment (2026-05-05)
+
+**Problem:** Population-ratio benchmarks don't account for commercial real estate constraints. A mature built-out coastal ZIP (32082 PVB) has no available commercial space — so even a real population-based gap isn't actionable. Showing "Significant Opportunity" is misleading.
+
+**Solution:** `market_maturity` field in `zip_intelligence` table (values: `growth`, `established`, `mature`). Thresholds scale accordingly:
+
+| Maturity | Significant | Moderate | Slight | Saturated |
+|---|---|---|---|---|
+| `growth` | ≥ 30% | ≥ 15% | ≥ 5% | ≤ -20% |
+| `established` | ≥ 40% | ≥ 20% | ≥ 8% | ≤ -25% |
+| `mature` | ≥ 50% | ≥ 25% | ≥ 10% | ≤ -30% |
+
+**Seeded values:**
+- `32082` (Ponte Vedra Beach) → `mature`
+- `32081` (Nocatee) → `growth`
+- All other ZIPs → defaults to `established`
+
+**Oracle returns `market_maturity` field** — ZIP pages read it and pass into `computeGaps()`.
