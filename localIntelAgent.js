@@ -5558,7 +5558,9 @@ router.post('/fee-control', express.json(), async (req, res) => {
     if (rfq_match_fee !== undefined) {
       const v = parseFloat(rfq_match_fee);
       if (!isNaN(v) && v >= 0) {
-        process.env.RFQ_MATCH_FEE = String(v.toFixed(4));
+        process.env.RFQ_FLAT_FEE  = String(v.toFixed(4)); // new canonical name
+        process.env.RFQ_MATCH_FEE = String(v.toFixed(4)); // legacy compat
+        changes.RFQ_FLAT_FEE  = process.env.RFQ_FLAT_FEE;
         changes.RFQ_MATCH_FEE = process.env.RFQ_MATCH_FEE;
       }
     }
