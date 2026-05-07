@@ -331,7 +331,7 @@ async function searchByCategory(intent, zip, limit = 50) {
     FROM businesses
     WHERE status != 'inactive'
       AND zip = ANY($1::text[])
-      AND category = ANY($2::text[])
+      AND (category = ANY($2::text[]) OR tags && $2::text[])
     ORDER BY has_wallet DESC, confidence_score DESC, name ASC
     LIMIT $3
   `;
