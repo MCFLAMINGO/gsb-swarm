@@ -2963,18 +2963,24 @@ router.get('/coverage-stats', async (req, res) => {
 router.get('/source-log', async (req, res) => {
   try {
     const rows = await db.query(
-      `SELECT worker_name AS source, event_type, payload, created_at AS timestamp
-         FROM worker_events ORDER BY created_at DESC LIMIT 100`
+      `SELECT worker_name AS source, event_type, error_message, meta, created_at AS timestamp
+         FROM worker_events ORDER BY created_at DESC LIMIT 200`
     );
-    // Latest status per source for legacy compatibility
+    // Latest status per source — derive status from event_type + error_message
     const sources = {};
     for (const r of rows) {
       const cur = sources[r.source];
       if (!cur || new Date(r.timestamp) > new Date(cur.checked_at)) {
+        const status = r.error_message
+          ? 'error'
+          : (r.event_type === 'complete' || r.event_type === 'done' || r.event_type === 'success')
+            ? 'ok'
+            : 'unavailable';
         sources[r.source] = {
           checked_at: r.timestamp,
           event_type: r.event_type,
-          payload:    r.payload,
+          status,
+          meta: r.meta,
         };
       }
     }
@@ -2988,7 +2994,7 @@ router.get('/source-log', async (req, res) => {
 router.get('/enrichment-log', async (req, res) => {
   try {
     const rows = await db.query(
-      `SELECT worker_name, event_type, payload, created_at
+      `SELECT worker_name, event_type, meta, output_summary, created_at
          FROM worker_events
         WHERE worker_name = 'enrichmentAgent'
         ORDER BY created_at DESC LIMIT 100`
@@ -2996,10 +3002,13 @@ router.get('/enrichment-log', async (req, res) => {
     const today = new Date(); today.setUTCHours(0,0,0,0);
     const enrichedToday = rows.filter(e => e.created_at && new Date(e.created_at) >= today).length;
     const recent = rows.slice(0, 20).map(r => ({
-      worker_name: r.worker_name,
-      event_type:  r.event_type,
-      payload:     r.payload,
-      enrichedAt:  r.created_at,
+      worker_name:   r.worker_name,
+      event_type:    r.event_type,
+      business_name: r.meta?.business_name || r.output_summary || '',
+      zip:           r.meta?.zip || '',
+      confidence:    r.meta?.confidence || 0,
+      sources_used:  r.meta?.sources || [],
+      enrichedAt:    r.created_at,
     }));
     res.json({ enrichedToday, recent, total: rows.length, generatedAt: new Date().toISOString() });
   } catch(e) {
