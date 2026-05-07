@@ -6664,6 +6664,31 @@ app.post('/api/rfq/email-inbound', express.json(), async (req, res) => {
     const toAddr  = Array.isArray(payload.to) ? payload.to[0] : (payload.to || '');
     const text    = payload.text || payload.html || '';
     console.log(`[email-inbound] From: ${from} | To: ${toAddr}`);
+
+    // ── Personal alias forwarding ──────────────────────────────────────────
+    // Any email to erik@thelocalintel.com (or hello@) gets forwarded to erik@mcflamingo.com
+    const FORWARD_ALIASES = {
+      'erik@thelocalintel.com':  'erik@mcflamingo.com',
+      'hello@thelocalintel.com': 'erik@mcflamingo.com',
+      'info@thelocalintel.com':  'erik@mcflamingo.com',
+    };
+    const fwdTarget = FORWARD_ALIASES[toAddr.toLowerCase()];
+    if (fwdTarget) {
+      const { Resend } = require('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      const emailId = payload.data?.email_id || payload.email_id;
+      if (emailId) {
+        await resend.emails.receiving.forward({
+          emailId,
+          to: fwdTarget,
+          from: 'LocalIntel Mail <jobs@thelocalintel.com>',
+        }).catch(e => console.error('[email-inbound] forward error:', e.message));
+        console.log(`[email-inbound] forwarded ${toAddr} → ${fwdTarget}`);
+      }
+      return;
+    }
+
+    // ── RFQ job code matching ──────────────────────────────────────────────
     const codeMatch = toAddr.match(/jobs\+([A-Z0-9]{5,8})@/i);
     if (!codeMatch) { console.warn('[email-inbound] No job code in To:', toAddr); return; }
     const code = codeMatch[1].toUpperCase();
