@@ -1799,3 +1799,64 @@ Old vars `RFQ_MATCH_FEE` and `ORDER_FEE_PCT` still read but superseded.
 
 ### Session Commits (gsb-swarm-dashboard)
 - Sidebar — "↳ Biz Admin" link added
+
+## Session 15 (continued) — Fee Wiring + Merchant UX
+
+### attemptCharge() — Now Live (gsb-swarm `232611f`)
+
+`lib/feeService.js` — `attemptCharge()` fully wired:
+- Calls `https://www.throw5onit.com/api/sponsor-tx` — same proven pattern as MCP paid-tier payments
+- `fromPK` = `TEMPO_EXECUTOR_PK` (executor co-signs, pays gas)
+- `from` = business wallet (pathUSD pulled from here)
+- `to` = `TEMPO_TREASURY` (default `0x774f484192Cf3F4fB9716Af2e15f44371fD32FEA`)
+- `tokenAddr` = `'auto'` (pathUSD on Tempo mainnet)
+- On `hash` returned → status `'charged'`, tx hash stored in `fee_events.meta.tx_hash`
+- On sponsor-tx error → status `'failed'`, logs reason, never throws
+- No pre-approval/allowance needed — executor co-sign pattern handles authorization
+- **To activate:** set `ROUTING_ENABLED=true` on Railway. Everything else is wired.
+
+Merchant dashboard response (`localIntelAgent.js`) now returns:
+- `wallet_funded` (bool) — from `agent_registry.balance_usd_micro > 0`
+- `balance_usd_micro` (int) — raw balance
+- `pos_type` — from `pos_config->>'pos_type'`
+- `legacy_order_url` — `menu_url` (traditional POS order link, human-only)
+
+### Merchant UX Rewrite (localintel-landing `a39cdec`)
+
+`merchant.html` — two sections redesigned:
+
+**Ordering section ("How customers order from you"):**
+- Two clearly labeled tracks rendered side by side
+- 🤖 Agent ordering (Surge) — AGENTIC badge, Surge status, link to Surge admin if items disabled
+- 🔗 Traditional ordering — HUMAN ONLY badge, shows `legacy_order_url` (any POS), not agent-accessible
+- Both tracks coexist — merchants keep their legacy POS while entering the agent economy
+- Surge no-wallet state → "Create a free Surge account" CTA
+
+**Wallet section ("Wallet & payouts"):**
+Three dynamic states based on `wallet` + `wallet_funded`:
+1. **Funded** — green banner "Active in routing pool", wallet address shown, fees automatic
+2. **Connected, not funded** — amber banner "Add funds to enter routing pool", Surge fund link
+3. **No wallet** — two clear options: Surge (recommended, wallet included) or own EVM wallet
+
+No more MetaMask instructions as primary path. Surge is the recommended onramp.
+No fake "created at claim time" language — wallet state is truth from Postgres.
+
+### Wallet / Routing Architecture (finalized)
+
+- Surge merchant account = wallet included on Tempo mainnet (recommended path)
+- Own EVM wallet = also supported, paste address into merchant portal
+- Fee deduction: executor co-signs via sponsor-tx — no merchant signature needed
+- Routing pool entry: `balance_usd_micro > 0` in `agent_registry`
+- `ROUTING_ENABLED=true` = single env var flip to activate live fee collection
+
+### Alias/Synonym Enrichment (deferred to Session 20+)
+- Llama offline batch worker for query alias expansion — designed, not built
+- Decision: shelve until real query volume generates meaningful GAP ALERTs
+- Schema designed: `pending_aliases` table with canonical anchoring, confidence threshold (0.85 write, 0.95 auto-approve), approval queue
+- Will surface in admin portal as "Pending Aliases" review tab when built
+
+### Session Commits (gsb-swarm)
+- `232611f` — feat: wire attemptCharge() via sponsor-tx + expose wallet_funded/balance/pos_type in merchant dashboard
+
+### Session Commits (localintel-landing)
+- `a39cdec` — feat: merchant UX — two-track ordering (Surge agentic + legacy), three-state wallet, Surge onramp
