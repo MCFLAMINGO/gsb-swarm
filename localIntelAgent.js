@@ -1833,6 +1833,8 @@ router.get('/merchant/dashboard/:token', async (req, res) => {
         menu_url:      business.menu_url ?? null,
         menu_fetch_error: business.menu_fetch_error ?? null,
         dispatch_token: business.dispatch_token ?? null,
+        pos_type:      business.pos_config?.pos_type ?? null,
+        legacy_order_url: business.menu_url ?? null,  // menu_url = legacy POS order link
       },
       stats: {
         total_routed: Number(stats?.total_routed ?? 0),
@@ -1843,6 +1845,8 @@ router.get('/merchant/dashboard/:token', async (req, res) => {
       },
       top_queries:     topQueries,
       wallet_connected: !!business.wallet,
+      wallet_funded:   reg ? (reg.balance_usd_micro || 0) > 0 : false,
+      balance_usd_micro: reg ? (reg.balance_usd_micro || 0) : 0,
       surge_menu:      surgeMenu,
     });
   } catch (err) {
