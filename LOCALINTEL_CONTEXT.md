@@ -1912,3 +1912,54 @@ No fake "created at claim time" language — wallet state is truth from Postgres
 - `enrichment-log` route: updated to SELECT `meta, output_summary`
 - Enrichment entries now pull `business_name`, `zip`, `confidence`, `sources` from `meta` JSONB
 - Live dashboard source health panel will now show real worker statuses
+
+## Session 16 — Source Worker Re-enablement (2026-05-07)
+
+### Problem Discovered
+During investigation of the source health dashboard showing "no data", we uncovered a critical gap: `overpassWorker`, `yellowPagesScraper`, `sunbizWorker`, and `businessMergeWorker` were all built and working before the Postgres migration, but were never re-added to `index.js` after `migrate-json-to-pg.js` moved the flat JSON data into Postgres. They existed in the codebase but were never spawned on Railway.
+
+### Root Cause
+The original architecture had source workers writing to `data/zips/*.json` (ephemeral Railway filesystem), with a reconciliation step collapsing them into a canonical dataset. `migrate-json-to-pg.js` migrated the **data** but not the **worker wiring**. Workers already had Postgres write code (`promoteOsmToBusinesses`, `db.upsertBusiness`, `sunbiz_import_state`) but were never added back to the `index.js` spawn list.
+
+### What Was Fixed (commit `3402244`)
+- **`workers/overpassWorker.js`** — added `logWorkerEvent()`, logs `start` + `complete` to `worker_events` under name `osm_overpass`. Timing via `Date.now()`.
+- **`workers/yellowPagesScraper.js`** — added `logWorkerEvent()` (`yelp_public`), Postgres resume checkpoint (`getScrapedSet` + `markScraped` via `worker_events` `checkpoint` events), daemon loop (`require.main === module` guard). YP now skips already-scraped city+category combos within a 24h window on Railway restart.
+- **`workers/sunbizWorker.js`** — added `logWorkerEvent()` (`fl_sunbiz`), logs `start` on resume, `complete` on finish with timing. Was already resume-safe via `sunbiz_import_state` table.
+- **`workers/businessMergeWorker.js`** — already had `worker_events` logging. No changes needed.
+- **`index.js`** — added all four workers to spawn list:
+  ```
+  { name: 'OSM Overpass',   file: 'workers/overpassWorker.js' }
+  { name: 'Yellow Pages',   file: 'workers/yellowPagesScraper.js' }
+  { name: 'FL SunBiz',      file: 'workers/sunbizWorker.js' }
+  { name: 'Business Merge', file: 'workers/businessMergeWorker.js' }
+  ```
+
+### Worker Cadence (now active)
+| Worker | Name in worker_events | Cadence | Resume-safe |
+|---|---|---|---|
+| overpassWorker | `osm_overpass` | 24h loop | YES — skips ZIPs already in Postgres |
+| yellowPagesScraper | `yelp_public` | 24h loop | YES — checkpoint via worker_events |
+| sunbizWorker | `fl_sunbiz` | Weekly | YES — sunbiz_import_state table |
+| businessMergeWorker | `businessMerge` | 12h loop | YES — min 6h gap via worker_events |
+
+### Source Health Dashboard
+The frontend SOURCES list (`osm_overpass`, `yelp_public`, `fl_sunbiz`) now matches actual `worker_events` worker names. After Railway redeploy, the dashboard will show real run data for all sources.
+
+### Architecture Restored
+```
+overpassWorker    → businesses (via promoteOsmToBusinesses) + zip_enrichment cache
+yellowPagesScraper→ businesses (via db.upsertBusiness)
+sunbizWorker      → businesses (via upsertBatch, resume from sunbiz_import_state)
+                          ↓
+              businessMergeWorker (Union-Find dedup every 12h)
+                          ↓
+                   canonical businesses table
+```
+
+### Next Vision (not yet built)
+Layer 2 geo-economic intelligence overlay:
+- `sjc_arcgis` worker — SJC GIS permits, parcel data, new development signals
+- `irsSoiWorker` — IRS SOI zip-level income data (worker already exists)
+- `censusLayerWorker` — Census demographic overlay (worker already exists)
+- ZIP-level investment signal: new permits + government spending + zoning = market intelligence layer
+
