@@ -836,6 +836,44 @@ async function buildSignalNarrative(bizId, bizName, zip, category) {
     // Category tag (normalised)
     if (category) tags.push(category.toLowerCase().replace(/\s+/g, '_'));
 
+    // Healthcare specialty detection — deterministic, zero cost
+    // Runs whenever category is healthcare; safe to re-run (deduped via Set)
+    if (category && category.toLowerCase() === 'healthcare') {
+      const HEALTHCARE_SPECIALTIES = [
+        ['dentist',          /dent(?!al\s+build)|dental\s+(?!build)|dmd\b|dds\b|orthodont|endodont|periodont|oral\s+surg|teeth\s+whiten|dental\s+implant/i],
+        ['orthodontist',     /orthodont|\bbraces\b|invisalign|aligner/i],
+        ['optometrist',      /\boptom|\bophthal|\beye\s+care|\bvision\s+care|\beyecare|\blasik\b|\bretina\b/i],
+        ['mental_health',    /behav(?:ioral)?\s+health|psychiatr|psycholog|\bcounsel|\btherapist|\btherapy\b|mental\s+health|addiction|substance\s+abuse|\brehab\b|neuropsychol/i],
+        ['pediatrics',       /pediatr|children.s\s+health|kids\s+health|child\s+health/i],
+        ['womens_health',    /ob\/gyn|obgyn|ob-gyn|gynecolog|obstetric|\bfertility\b|reproductive|\bivf\b|midwif|women.s\s+health|breast\s+(?:center|care)/i],
+        ['dermatology',      /dermatol|\bskin\s+(?:care|center|clinic)|\bcosmetic\s+dermatol/i],
+        ['cardiology',       /cardiol|\bheart\s+(?:center|care|clinic)|cardiovascular|\bcardiac\b/i],
+        ['orthopedics',      /orthoped|orthopaed|\bjoint\s+(?:center|replace)|\bspine\s+(?:center|clinic)|sports\s+med/i],
+        ['physical_therapy', /physical\s+therap|\bphysio\b|\bpt\s+clinic\b|\brehabilitation\s+center/i],
+        ['chiropractic',     /chiropract|\bchiro\b/i],
+        ['neurology',        /neurolog|neurosurg|\bheadache\s+clinic|\bmigraine\s+clinic|\bepilep/i],
+        ['urology',          /\burol|\bbladder\s+clinic|kidney\s+stone|\bprostate\s+clinic/i],
+        ['ent',              /ear\s+nose|otolaryngol|\bsinus\s+clinic|\bhearing\s+aid|audiolog|cochlear/i],
+        ['gastroenterology', /gastro|digestive\s+(?:health|center)|\bgi\s+clinic|\bendoscopy\b|colonoscopy|\bhepatol/i],
+        ['oncology',         /\boncol|\bcancer\s+(?:center|care)|radiation\s+oncol/i],
+        ['endocrinology',    /endocrin|\bdiabetes\s+(?:center|clinic)|\bthyroid\s+clinic|\bhormone\s+clinic/i],
+        ['primary_care',     /family\s+med|family\s+practice|family\s+doctor|primary\s+care|internal\s+med|general\s+practice|urgent\s+care|walk-in\s+clinic|medical\s+center|health\s+center/i],
+        ['pharmacy',         /\bpharm\b|\brx\b|drug\s+store|compounding\s+pharm/i],
+        ['podiatry',         /\bpodiat|\bfoot\s+(?:and|&)\s+ankle|\b\.dpm\b/i],
+        ['plastic_surgery',  /plastic\s+surg|cosmetic\s+surg|\baesthetic\s+(?:center|clinic)|\bmed\s*spa\b|\bmedspa\b|\bbotox\b/i],
+        ['nephrology',       /\bdialysis\b|\bnephrol|kidney\s+care|\brenal\s+clinic/i],
+        ['home_health',      /home\s+health|home\s+care|\bhospice\b|palliative/i],
+        ['lab_imaging',      /\blaborator|\bimaging\s+center|\bradiol|\bmri\s+center|\bultrasound\s+center|diagnostic\s+(?:center|lab)/i],
+        ['urgent_care',      /urgent\s+care|emergency\s+room|emergency\s+dept|walk-in\s+clinic/i],
+        ['medical_admin',    /medical\s+(?:billing|claims|coding)|insurance\s+claims/i],
+        ['holistic',         /acupunct|holistic\s+(?:health|care)|naturopath|integrative\s+(?:medicine|health)/i],
+      ];
+      const hay = `${bizName || ''} ${result.description || ''}`;
+      for (const [tag, re] of HEALTHCARE_SPECIALTIES) {
+        if (re.test(hay)) tags.push(tag);
+      }
+    }
+
     // Responsiveness tags
     if (resp) {
       const score = parseFloat(resp.response_score) || 0;
