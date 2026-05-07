@@ -5611,7 +5611,279 @@ router.get('/agent-bids/:rfq_id', async (req, res) => {
   } catch (e) {
     console.error('[agent-bids]', e.message);
     return res.status(500).json({ error: e.message });
+  }
+});
 
+// ─────────────────────────────────────────────────────────────────────────
+// ADMIN API — all routes require Authorization: Bearer <token>
+// ADMIN_TOKEN env var = super admin (full read/write)
+// SALES_TOKEN env var = read + patch description/hours/tags only
+// ─────────────────────────────────────────────────────────────────────────
+
+function adminAuth(req, res) {
+  const auth  = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim();
+  const admin = process.env.ADMIN_TOKEN || '';
+  const sales = process.env.SALES_TOKEN || '';
+  if (!auth || (!admin && !sales)) return null; // no tokens configured — block all
+  if (admin && auth === admin) return 'admin';
+  if (sales && auth === sales) return 'sales';
+  return null;
+}
+
+// GET /api/local-intel/admin/businesses
+// Query params: zip, category, claimed (true/false), wallet (true/false), q (name search), page, limit
+router.get('/admin/businesses', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const role = adminAuth(req, res);
+  if (!role) return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const page   = Math.max(1, parseInt(req.query.page,  10) || 1);
+    const limit  = Math.min(200, parseInt(req.query.limit, 10) || 50);
+    const offset = (page - 1) * limit;
+    const { zip, category, claimed, wallet, q } = req.query;
+
+    const conditions = ['status != \'inactive\''];
+    const params     = [];
+    let   p          = 1;
+
+    if (zip)      { conditions.push(`zip = $${p++}`);                                    params.push(zip); }
+    if (category) { conditions.push(`(category = $${p++} OR tags && ARRAY[$${p-1}])`);  params.push(category); }
+    if (q)        { conditions.push(`name ILIKE $${p++}`);                               params.push(`%${q}%`); }
+    if (claimed === 'true')  conditions.push('claimed_at IS NOT NULL');
+    if (claimed === 'false') conditions.push('claimed_at IS NULL');
+    if (wallet  === 'true')  conditions.push('wallet IS NOT NULL');
+    if (wallet  === 'false') conditions.push('wallet IS NULL');
+
+    const where = conditions.join(' AND ');
+
+    const [{ total }] = await db.query(
+      `SELECT COUNT(*) AS total FROM businesses WHERE ${where}`,
+      params
+    );
+
+    const rows = await db.query(
+      `SELECT business_id, name, address, city, zip, phone, website, category, tags,
+              description, hours, lat, lon,
+              claimed_at IS NOT NULL AS claimed,
+              wallet IS NOT NULL      AS has_wallet,
+              wallet,
+              dispatch_token IS NOT NULL AS has_merchant_token,
+              services_json IS NOT NULL  AS has_skills,
+              menu_fetched_at IS NOT NULL AS has_menu,
+              confidence_score
+         FROM businesses
+        WHERE ${where}
+        ORDER BY (claimed_at IS NOT NULL) DESC, (wallet IS NOT NULL) DESC,
+                 confidence_score DESC, name ASC
+        LIMIT $${p++} OFFSET $${p++}`,
+      [...params, limit, offset]
+    );
+
+    return res.json({
+      ok: true, role, total: parseInt(total, 10),
+      page, limit, pages: Math.ceil(total / limit),
+      businesses: rows,
+    });
+  } catch (e) {
+    console.error('[admin/businesses]', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/local-intel/admin/business/:id — full profile
+router.get('/admin/business/:id', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const role = adminAuth(req, res);
+  if (!role) return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const { id } = req.params;
+    const [biz] = await db.query(
+      `SELECT b.*,
+              claimed_at IS NOT NULL AS claimed,
+              wallet IS NOT NULL      AS has_wallet,
+              dispatch_token IS NOT NULL AS has_merchant_token
+         FROM businesses b
+        WHERE business_id = $1`,
+      [id]
+    );
+    if (!biz) return res.status(404).json({ error: 'not found' });
+
+    // Completeness score
+    const fields = [
+      ['name',         !!biz.name],
+      ['phone',        !!biz.phone],
+      ['address',      !!biz.address],
+      ['hours',        !!biz.hours],
+      ['description',  !!biz.description],
+      ['category',     !!biz.category],
+      ['tags',         Array.isArray(biz.tags) && biz.tags.length > 0],
+      ['wallet',       !!biz.wallet],
+      ['skills',       !!biz.services_json],
+      ['menu',         !!biz.menu_fetched_at],
+      ['location_pin', !!(biz.lat && biz.lon)],
+      ['claimed',      !!biz.claimed_at],
+    ];
+    const score = Math.round((fields.filter(f => f[1]).length / fields.length) * 100);
+    const missing = fields.filter(f => !f[1]).map(f => f[0]);
+
+    // Recent fee events
+    let feeEvents = [];
+    try {
+      feeEvents = await db.query(
+        `SELECT event_type, status, amount_usd, meta, created_at
+           FROM fee_events WHERE business_id = $1
+          ORDER BY created_at DESC LIMIT 10`,
+        [id]
+      );
+    } catch (_) {}
+
+    // Recent RFQs
+    let rfqs = [];
+    try {
+      rfqs = await db.query(
+        `SELECT r.id, r.status, r.intent_summary, r.created_at,
+                resp.quote_usd, resp.status AS response_status
+           FROM rfq_requests_v2 r
+           LEFT JOIN rfq_responses_v2 resp ON resp.rfq_id = r.id AND resp.business_id = $1
+          WHERE r.zip = $2 OR resp.business_id = $1
+          ORDER BY r.created_at DESC LIMIT 10`,
+        [id, biz.zip]
+      );
+    } catch (_) {}
+
+    // What searches does this business appear in?
+    const searchCoverage = [];
+    if (biz.category) searchCoverage.push(biz.category);
+    if (Array.isArray(biz.tags)) biz.tags.forEach(t => { if (!searchCoverage.includes(t)) searchCoverage.push(t); });
+
+    // Merchant dashboard URL
+    const merchantUrl = biz.dispatch_token
+      ? `https://www.thelocalintel.com/merchant.html?token=${biz.dispatch_token}`
+      : null;
+
+    return res.json({
+      ok: true, role,
+      business: biz,
+      completeness: { score, missing, fields: Object.fromEntries(fields) },
+      fee_events:    feeEvents,
+      rfqs,
+      search_coverage: searchCoverage,
+      merchant_url:    merchantUrl,
+      zip_page_url:    biz.zip ? `https://www.thelocalintel.com/zip/${biz.zip}.html` : null,
+    });
+  } catch (e) {
+    console.error('[admin/business/:id]', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// PATCH /api/local-intel/admin/business/:id — update fields
+// Admin: any field. Sales: name, phone, description, hours, tags, category only.
+router.patch('/admin/business/:id', express.json(), async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const role = adminAuth(req, res);
+  if (!role) return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const { id }  = req.params;
+    const allowed = role === 'admin'
+      ? ['name','phone','address','city','zip','website','description','hours','category','tags','lat','lon','wallet','services_json']
+      : ['name','phone','description','hours','tags','category'];
+
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+    if (!Object.keys(updates).length) return res.status(400).json({ error: 'no valid fields' });
+
+    const setClauses = Object.keys(updates).map((k, i) => `${k} = $${i + 2}`);
+    await db.query(
+      `UPDATE businesses SET ${setClauses.join(', ')}, updated_at = NOW() WHERE business_id = $1`,
+      [id, ...Object.values(updates)]
+    );
+    return res.json({ ok: true, updated: Object.keys(updates) });
+  } catch (e) {
+    console.error('[admin/patch]', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/local-intel/admin/business/:id/claim — generate merchant token (admin only)
+router.post('/admin/business/:id/claim', express.json(), async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const role = adminAuth(req, res);
+  if (role !== 'admin') return res.status(401).json({ error: 'admin only' });
+  try {
+    const { id } = req.params;
+    const [biz]  = await db.query(
+      `SELECT business_id, name, dispatch_token, claimed_at FROM businesses WHERE business_id = $1`,
+      [id]
+    );
+    if (!biz) return res.status(404).json({ error: 'not found' });
+
+    // If already claimed, return existing token
+    if (biz.claimed_at && biz.dispatch_token) {
+      return res.json({
+        ok: true, already_claimed: true,
+        dispatch_token: biz.dispatch_token,
+        merchant_url: `https://www.thelocalintel.com/merchant.html?token=${biz.dispatch_token}`,
+      });
+    }
+
+    // Generate new dispatch token and mark claimed
+    const { randomUUID } = require('crypto');
+    const dispatchToken  = randomUUID().replace(/-/g, '');
+    await db.query(
+      `UPDATE businesses
+          SET claimed_at = NOW(), dispatch_token = $2,
+              claim_token = NULL, claim_token_exp = NULL
+        WHERE business_id = $1`,
+      [id, dispatchToken]
+    );
+    console.log(`[admin/claim] ${biz.name} claimed via admin — token generated`);
+    return res.json({
+      ok: true, claimed: true,
+      dispatch_token: dispatchToken,
+      merchant_url: `https://www.thelocalintel.com/merchant.html?token=${dispatchToken}`,
+    });
+  } catch (e) {
+    console.error('[admin/claim]', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/local-intel/admin/stats — platform-wide summary
+router.get('/admin/stats', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const role = adminAuth(req, res);
+  if (!role) return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const [counts] = await db.query(`
+      SELECT
+        COUNT(*)                                          AS total,
+        COUNT(*) FILTER (WHERE claimed_at IS NOT NULL)   AS claimed,
+        COUNT(*) FILTER (WHERE wallet IS NOT NULL)        AS has_wallet,
+        COUNT(*) FILTER (WHERE dispatch_token IS NOT NULL AND claimed_at IS NULL) AS token_not_claimed,
+        COUNT(*) FILTER (WHERE services_json IS NOT NULL) AS has_skills,
+        COUNT(*) FILTER (WHERE menu_fetched_at IS NOT NULL) AS has_menu
+      FROM businesses WHERE status != 'inactive'
+    `);
+    const zipBreakdown = await db.query(`
+      SELECT zip,
+        COUNT(*)                                          AS total,
+        COUNT(*) FILTER (WHERE claimed_at IS NOT NULL)   AS claimed,
+        COUNT(*) FILTER (WHERE wallet IS NOT NULL)        AS has_wallet
+      FROM businesses WHERE status != 'inactive'
+      GROUP BY zip ORDER BY total DESC LIMIT 20
+    `);
+    let feeStats = {};
+    try {
+      const feeService = require('./lib/feeService');
+      feeStats = await feeService.getSummary({ hours: 168 }); // last 7 days
+    } catch (_) {}
+    return res.json({ ok: true, role, counts, zip_breakdown: zipBreakdown, fee_stats: feeStats });
+  } catch (e) {
+    console.error('[admin/stats]', e.message);
+    return res.status(500).json({ error: e.message });
   }
 });
 
