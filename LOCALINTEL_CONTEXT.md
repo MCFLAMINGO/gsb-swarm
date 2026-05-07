@@ -1734,3 +1734,68 @@ Old vars `RFQ_MATCH_FEE` and `ORDER_FEE_PCT` still read but superseded.
 ### Session Commits
 - `gsb-swarm`: feat: two-part fee model — $0.25 flat + 1.5% job value on confirmed RFQ booking
 - `localintel-landing`: feat: merchant dashboard — honest fee model copy in wallet explainer
+
+## Session 15 — Admin Portal + Healthcare Enrichment + LLM Audit (2026-05-07)
+
+### Business Admin Portal (`/admin`)
+- Full CRUD portal at `https://www.thelocalintel.com/admin`
+- Auth: `ADMIN_TOKEN` (super admin) or `SALES_TOKEN` (read + limited edit) — set as Railway env vars
+- Stats bar: total businesses, claimed count, wallets funded, avg completeness
+- Filterable table: search by name/ZIP/category, click row to open full profile panel
+- Profile panel: inline edit for all fields, category dropdown, tags pill picker, Skills + Menu sections
+- Claim token: generates/displays `dispatch_token` for merchant onboarding
+- Backend routes in `localIntelAgent.js`:
+  - `GET /api/local-intel/admin/businesses` — paginated list
+  - `GET /api/local-intel/admin/business/:id` — full profile
+  - `PATCH /api/local-intel/admin/business/:id` — inline edit
+  - `POST /api/local-intel/admin/business/:id/claim` — generate claim token
+  - `GET /api/local-intel/admin/stats` — dashboard stats
+
+### Merchant Dashboard Fix
+- Was querying `dashboard_token` (legacy/unused) — link always showed "expired"
+- Fixed to query `dispatch_token` (permanent, no expiry)
+
+### Multi-Trade Business Fix (Donovan Air, Electric & Plumbing)
+- `category = 'hvac'`, `tags = ['hvac','plumber','electrician','contractor']`
+- `searchByCategory` now checks `tags && $2::text[]` in addition to `category =`
+- Multi-trade businesses surface for all their trades
+
+### Healthcare Specialty Enrichment (committed `a9d5a97`)
+- 25 specialty regex patterns wired into `buildSignalNarrative()` in `workers/enrichmentAgent.js`
+- Fires deterministically on every enrichment pass for all `category = 'healthcare'` businesses
+- Specialties: dentist, orthodontist, optometrist, mental_health, pediatrics, womens_health, dermatology, cardiology, orthopedics, physical_therapy, chiropractic, neurology, urology, ent, gastroenterology, oncology, endocrinology, primary_care, pharmacy, podiatry, plastic_surgery, nephrology, home_health, lab_imaging, urgent_care, medical_admin, holistic
+- `scripts/enrichHealthcareSpecialties.js` — one-off backfill script; already ran: **28/40 businesses tagged**, 12 skipped (no name/description signal — office buildings, admin entities)
+- Stored in `signal_narrative` JSONB under `specialty` key
+
+### LLM Audit
+- **No Llama** anywhere in the codebase
+- **Only LLM in the system**: NVIDIA NIM (`compute.virtuals.io/v1/chat/completions`) — free tier
+  - Lives in `scripts/content_engine.js` via `claudeCall()` (misleading name — hits NIM, not Anthropic)
+  - Used ONLY for content engine: social posts, blog posts, themes, repurpose, humanize, rewrite, detect AI
+  - NOT on any LocalIntel hot path
+- `dashboard-server.js`: `const anthropic = null` — kept for reference safety, unused
+- LocalIntel search/routing (`localIntelAgent.js`): 100% deterministic, zero LLM calls
+
+### ZIP Landing Pages — 14 Total Live
+32082 (Ponte Vedra Beach), 32081 (Nocatee), 32250 (Jacksonville Beach), 32266 (Neptune Beach),
+32233 (Atlantic Beach), 32206 (Fairfield/Springfield), 32080 (St. Augustine Beach), 32084 (St. Augustine),
+32086 (St. Augustine South), 32092 (World Golf Village), 32095 (St. Augustine North),
+32259 (St. Johns/Fruit Cove), 32258 (Bartram Park), 32223 (Mandarin)
+
+### Session Commits (gsb-swarm)
+- `16d4d5a` — fix: merchant dashboard — query dispatch_token not dashboard_token
+- `9f435fc` — feat: admin API — businesses list, full profile, patch, claim token, stats
+- `3c99831` — fix: searchByCategory — include tags overlap so multi-trade businesses surface for all trades
+- `d88a748` — fix: order intent — strip 'to order a' prefix from partial, bare biz name resolves pending intent
+- `73d57ec` — fix: fee dashboard 500 — restore rfq_match_fee alias in getRates(), sync RFQ_FLAT_FEE in fee-control POST
+- `17c135b` — feat: two-part fee model — $0.25 flat + 1.5% job value on confirmed RFQ booking
+- `a9d5a97` — feat: healthcare specialty detection — wired into buildSignalNarrative(), backfill script (28/40 tagged)
+
+### Session Commits (localintel-landing)
+- Merchant.html — fee model copy updated
+- admin.html — full admin portal deployed
+- 12 new ZIP pages generated and deployed (32250, 32266, 32233, 32206, 32080, 32084, 32086, 32092, 32095, 32259, 32258, 32223)
+- vercel.json — /admin redirect added
+
+### Session Commits (gsb-swarm-dashboard)
+- Sidebar — "↳ Biz Admin" link added
