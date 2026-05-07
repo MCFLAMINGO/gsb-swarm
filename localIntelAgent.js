@@ -1818,6 +1818,16 @@ router.get('/merchant/dashboard/:token', async (req, res) => {
       }
     }
 
+    // Fetch wallet balance from agent_registry via dispatch_token
+    let reg = null;
+    if (business.dispatch_token) {
+      const regRows = await db.query(
+        `SELECT balance_usd_micro, deposit_address FROM agent_registry WHERE token = $1`,
+        [business.dispatch_token]
+      ).catch(() => []);
+      reg = regRows[0] || null;
+    }
+
     return res.json({
       business: {
         id:            business.business_id,
@@ -1834,7 +1844,7 @@ router.get('/merchant/dashboard/:token', async (req, res) => {
         menu_fetch_error: business.menu_fetch_error ?? null,
         dispatch_token: business.dispatch_token ?? null,
         pos_type:      business.pos_config?.pos_type ?? null,
-        legacy_order_url: business.menu_url ?? null,  // menu_url = legacy POS order link
+        legacy_order_url: business.menu_url ?? null,
       },
       stats: {
         total_routed: Number(stats?.total_routed ?? 0),
