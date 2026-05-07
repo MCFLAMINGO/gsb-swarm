@@ -1886,3 +1886,29 @@ No fake "created at claim time" language — wallet state is truth from Postgres
 - `RFQ_FLAT_FEE=0.25`, `RFQ_VALUE_PCT=0.015`, `TEMPO_TREASURY=0x774f484192Cf3F4fB9716Af2e15f44371fD32FEA` also set
 - Fee collection now live for RFQ/service bookings — fires on bookRfq()
 - Restaurant/Surge fee: separate track, requires Surge revenue share agreement (0.5% to LocalIntel)
+
+## Session 15 (continued) — Dashboard + Email Fixes
+
+### Fee Dashboard 500 Fix (`2063432`)
+- `fee_events.business_id` is TEXT, `businesses.business_id` is UUID
+- Fixed JOIN: `b.business_id = fe.business_id::uuid`
+
+### Merchant Dashboard Fix (`1196bc2`)  
+- `reg is not defined` — `agent_registry` lookup was missing from merchant dashboard route
+- Added: `SELECT balance_usd_micro, deposit_address FROM agent_registry WHERE token = $1` before response block
+
+### Email Forwarding (`222b1d5`)
+- `erik@thelocalintel.com` → `erik@mcflamingo.com`
+- `hello@thelocalintel.com` → `erik@mcflamingo.com`
+- `info@thelocalintel.com` → `erik@mcflamingo.com`
+- Wired into existing Resend inbound webhook in `dashboard-server.js`
+- Uses `resend.emails.receiving.forward()` — preserves original email content
+- Fires BEFORE RFQ job code matching — aliases handled first, then job codes
+
+### Source-Log + Enrichment-Log Fix (`7a52533`)
+- `worker_events` table has NO `payload` column — actual columns: worker_name, event_type, input_summary, output_summary, duration_ms, error_message, records_in, records_out, success_rate, created_at, meta (JSONB)
+- `source-log` route: updated to SELECT `meta, error_message` instead of `payload`
+- Source status now derived: `error_message present` → 'error', `event_type = complete/done/success` → 'ok', else → 'unavailable'
+- `enrichment-log` route: updated to SELECT `meta, output_summary`
+- Enrichment entries now pull `business_name`, `zip`, `confidence`, `sources` from `meta` JSONB
+- Live dashboard source health panel will now show real worker statuses
