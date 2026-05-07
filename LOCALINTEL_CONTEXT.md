@@ -1860,3 +1860,29 @@ No fake "created at claim time" language — wallet state is truth from Postgres
 
 ### Session Commits (localintel-landing)
 - `a39cdec` — feat: merchant UX — two-track ordering (Surge agentic + legacy), three-state wallet, Surge onramp
+
+## Session 15 (continued) — SEO + Search Console
+
+### SEO Files Deployed (localintel-landing `9d2f8d2`)
+- `sitemap.xml` — all 17 pages (3 core + 14 ZIP pages), submitted to Google Search Console
+- `robots.txt` — allows all crawlers, blocks /admin and /merchant.html, points to sitemap
+- `index.html` — Organization schema (name, description, service area, no owner) + WebSite schema with SearchAction
+- `google687f5614c6779e86.html` — Google Search Console HTML verification file (live at root)
+
+### Domain
+- `thelocalintel.com` registered on **Namecheap**
+- DNS TXT record verification needed for Google Search Console:
+  `google-site-verification=s-7OmQ_HG5LpEKXYAtyu9fIZQbo...`
+  (full value visible in Search Console → Verify ownership → Domain name provider)
+
+### Google Search Console
+- Property: https://www.thelocalintel.com
+- HTML file method failed (timing — file was live, propagation delay)
+- DNS TXT record method is the fallback — add to Namecheap DNS
+- After verification: submit sitemap at https://www.thelocalintel.com/sitemap.xml
+
+### ROUTING_ENABLED=true (Railway — gsb-swarm)
+- Set via Railway GraphQL API this session
+- `RFQ_FLAT_FEE=0.25`, `RFQ_VALUE_PCT=0.015`, `TEMPO_TREASURY=0x774f484192Cf3F4fB9716Af2e15f44371fD32FEA` also set
+- Fee collection now live for RFQ/service bookings — fires on bookRfq()
+- Restaurant/Surge fee: separate track, requires Surge revenue share agreement (0.5% to LocalIntel)
