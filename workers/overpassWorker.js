@@ -55,6 +55,18 @@ const MAX_POI_TAGS  = ['amenity', 'shop', 'office', 'tourism', 'leisure',
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// ── worker_events logger ──────────────────────────────────────────────────────
+async function logWorkerEvent({ eventType, recordsIn, recordsOut, durationMs, error }) {
+  if (!process.env.LOCAL_INTEL_DB_URL) return;
+  try {
+    await db.query(
+      `INSERT INTO worker_events (worker_name, event_type, records_in, records_out, duration_ms, error_message, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+      ['osm_overpass', eventType, recordsIn || 0, recordsOut || 0, durationMs || 0, error || null]
+    );
+  } catch (e) { console.warn('[overpass] worker_events log failed:', e.message); }
+}
+
 // Mirror raw OSM POIs to Postgres zip_enrichment (non-blocking)
 function saveOsmEnrichment(zip, pois) {
   if (!process.env.LOCAL_INTEL_DB_URL || !Array.isArray(pois)) return;
@@ -247,6 +259,7 @@ async function processZip(zip, freshZipSet) {
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
 async function runPass() {
+  const t0 = Date.now();
   const zips = getZipsByPriority();  // sorted by population desc
   // Step 1 of the contract: ASK Postgres what's already done before we start.
   const freshZipSet = FULL_REFRESH ? new Set() : await getFreshZipSetFromBusinesses();
@@ -256,6 +269,8 @@ async function runPass() {
   );
   let done = 0, skipped = 0, errors = 0;
 
+  await logWorkerEvent({ eventType: 'start', recordsIn: zips.length });
+
   for (const entry of zips) {
     const result = await processZip(entry.zip, freshZipSet);
     if (result.skipped) { skipped++; }
@@ -264,7 +279,9 @@ async function runPass() {
     await sleep(RATE_MS);
   }
 
+  const durationMs = Date.now() - t0;
   console.log(`[overpass] Pass complete — pulled:${done} skipped:${skipped} errors:${errors}`);
+  await logWorkerEvent({ eventType: 'complete', recordsIn: zips.length, recordsOut: done, durationMs });
 
   // Trigger deduplication after every ingestion pass
   try {

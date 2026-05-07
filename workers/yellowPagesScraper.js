@@ -31,6 +31,48 @@ function getDb() {
   return _db;
 }
 
+// ── worker_events logger ──────────────────────────────────────────────────────
+async function logWorkerEvent({ eventType, recordsIn, recordsOut, durationMs, error }) {
+  const db = getDb();
+  if (!db) return;
+  try {
+    await db.query(
+      `INSERT INTO worker_events (worker_name, event_type, records_in, records_out, duration_ms, error_message, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+      ['yelp_public', eventType, recordsIn || 0, recordsOut || 0, durationMs || 0, error || null]
+    );
+  } catch (e) { console.warn('[YP] worker_events log failed:', e.message); }
+}
+
+// ── Postgres resume checkpoint ────────────────────────────────────────────────
+// Tracks which city+category combos have already been scraped this pass.
+// Stored in worker_events meta so we don't re-scrape on Railway restart.
+async function getScrapedSet() {
+  const db = getDb();
+  if (!db) return new Set();
+  try {
+    const rows = await db.query(
+      `SELECT meta->>'scraped_key' AS k FROM worker_events
+        WHERE worker_name = 'yelp_public'
+          AND event_type = 'checkpoint'
+          AND created_at > NOW() - INTERVAL '24 hours'`
+    );
+    return new Set(rows.map(r => r.k).filter(Boolean));
+  } catch { return new Set(); }
+}
+
+async function markScraped(key) {
+  const db = getDb();
+  if (!db) return;
+  try {
+    await db.query(
+      `INSERT INTO worker_events (worker_name, event_type, meta, created_at)
+       VALUES ('yelp_public', 'checkpoint', $1::jsonb, NOW())`,
+      [JSON.stringify({ scraped_key: key })]
+    );
+  } catch (_) {}
+}
+
 // Infer OSM-style category from business name when schema.org type is generic 'LocalBusiness'
 function inferCategoryFromName(name) {
   const n = (name || '').toLowerCase();
@@ -264,11 +306,19 @@ async function bulkScrapeYellowPages(options = {}) {
   const categories = options.categories || CATEGORIES;
 
   let added = 0, enriched = 0, skipped = 0, totalPages = 0;
+  const t0 = Date.now();
+
+  // Resume checkpoint — skip city+category combos already done in last 24h
+  const scraped = options.skipCheckpoint ? new Set() : await getScrapedSet();
+  await logWorkerEvent({ eventType: 'start', recordsIn: cities.length * categories.length });
 
   for (const city of cities) {
     const defaultZips = CITY_ZIP_MAP[city] || [];
 
     for (const cat of categories) {
+      const ckKey = `${city}|${cat}`;
+      if (scraped.has(ckKey)) { console.log(`[YP] skip (already done): ${city}/${cat}`); continue; }
+
       // Page 1
       for (let page = 1; page <= 10; page++) {
         const url = page === 1
@@ -304,10 +354,13 @@ async function bulkScrapeYellowPages(options = {}) {
       }
 
       await sleep(DELAY_MS);
+      await markScraped(ckKey);
     }
   }
 
+  const durationMs = Date.now() - t0;
   console.log(`[YP] Done — pages: ${totalPages}, added: ${added}, enriched: ${enriched}, skipped: ${skipped}`);
+  await logWorkerEvent({ eventType: 'complete', recordsIn: totalPages, recordsOut: added + enriched, durationMs });
   return { added, enriched, skipped, totalPages };
 }
 
@@ -345,5 +398,19 @@ router.post('/bulk-scrape', async (req, res) => {
 router.get('/status', (req, res) => {
   res.json({ source: 'yellowpages', cities: Object.keys(CITY_ZIP_MAP), categories: CATEGORIES.length });
 });
+
+// ── Daemon loop (when run as worker, not required as module) ─────────────────
+if (require.main === module) {
+  const LOOP_SLEEP_H = 24;
+  (async function main() {
+    console.log('[YP] Worker started');
+    while (true) {
+      try { await bulkScrapeYellowPages(); }
+      catch (err) { console.error('[YP] Pass crashed:', err.message); }
+      console.log(`[YP] Sleeping ${LOOP_SLEEP_H}h until next pass`);
+      await sleep(LOOP_SLEEP_H * 60 * 60 * 1000);
+    }
+  })();
+}
 
 module.exports = { lookupYellowPages, bulkScrapeYellowPages, router };

@@ -22,6 +22,17 @@ const { execSync } = require('child_process');
 const db      = require('../lib/db');
 const hb      = require('../lib/workerHeartbeat');
 
+// ── worker_events logger ──────────────────────────────────────────────────────
+async function logWorkerEvent({ eventType, recordsIn, recordsOut, durationMs, error }) {
+  try {
+    await db.query(
+      `INSERT INTO worker_events (worker_name, event_type, records_in, records_out, duration_ms, error_message, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+      ['fl_sunbiz', eventType, recordsIn || 0, recordsOut || 0, durationMs || 0, error || null]
+    );
+  } catch (e) { console.warn('[sunbizWorker] worker_events log failed:', e.message); }
+}
+
 const SFTP_HOST   = 'sftp.floridados.gov';
 const SFTP_USER   = 'Public';
 const SFTP_PASS   = 'PubAccess1845!';
@@ -181,6 +192,8 @@ async function importSunbiz() {
   const txtFile = path.join(EXTRACT_DIR, files[0]);
   console.log(`[sunbizWorker] Parsing: ${files[0]}`);
 
+  const _importStart = Date.now();
+  await logWorkerEvent({ eventType: 'start' });
   const resumeLine = parseInt(await getState('lines_imported') || '0');
   console.log(`[sunbizWorker] Resuming from line ${resumeLine}`);
 
@@ -218,6 +231,7 @@ async function importSunbiz() {
 
   await setState('lines_imported', String(imported));
   await setState('import_complete', 'true');
+  await logWorkerEvent({ eventType: 'complete', recordsIn: imported + skipped, recordsOut: imported, durationMs: Date.now() - _importStart });
   await hb.ping('sunbizWorker');
   console.log(`[sunbizWorker] Import complete — ${imported} records, ${skipped} skipped`);
 }

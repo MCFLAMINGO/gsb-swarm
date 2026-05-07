@@ -33,6 +33,11 @@ const workers = [
   ...(process.env.FINANCIAL_ANALYST_ENTITY_ID
     ? [{ name: 'Financial Analyst', file: 'financialAnalyst.js' }]
     : []),
+  // ── LocalIntel source workers (data ingestion + reconciliation) ───────────
+  { name: 'OSM Overpass',         file: 'workers/overpassWorker.js' },
+  { name: 'Yellow Pages',         file: 'workers/yellowPagesScraper.js' },
+  { name: 'FL SunBiz',            file: 'workers/sunbizWorker.js' },
+  { name: 'Business Merge',       file: 'workers/businessMergeWorker.js' },
 ];
 
 console.log(`
