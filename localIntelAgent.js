@@ -1751,10 +1751,11 @@ router.get('/merchant/dashboard/:token', async (req, res) => {
 
   try {
     const db = require('./lib/db');
+    // dispatch_token is permanent — no expiry check needed
     const [business] = await db.query(
       `SELECT * FROM businesses
-        WHERE dashboard_token = $1
-          AND token_expires_at > NOW()
+        WHERE dispatch_token = $1
+          AND status != 'inactive'
         LIMIT 1`,
       [token]
     );
