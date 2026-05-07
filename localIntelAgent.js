@@ -4211,6 +4211,7 @@ function detectOrderItemPartial(raw) {
   const m = trimmed.match(_ORDER_ITEM_PARTIAL_RE);
   if (!m) return { isPartial: false, itemQuery: null };
   let itemQuery = (m[1] || '')
+    .replace(/^(?:to\s+)?(?:order|get|have)\s+(?:a\s+|an\s+|some\s+)?/i, '') // strip 'to order a', 'to get some', etc.
     .replace(/[?.!,]+$/, '')
     .replace(/\s+(?:please|now|today|tonight)$/i, '')
     .trim();
@@ -4357,12 +4358,26 @@ router.get('/search', async (req, res) => {
       }
 
       // Business-only follow-up resolves a pending item.
+      // Handles both "from McFlamingo" and bare "McFlamingo" when a pending intent exists.
       const atBiz = detectAtBiz(raw);
       if (atBiz.isAtBiz) {
         const pending = _getPendingOrderIntent(sessionId);
         if (pending) {
           _pendingOrderIntent.delete(sessionId);
           return _resolveOrderItem(pending.item, atBiz.bizName);
+        }
+      }
+      // Bare name fallback: if pending intent exists and raw looks like just a business name
+      // (no item-detection patterns), treat it as the restaurant selection.
+      if (sessionId) {
+        const pending = _getPendingOrderIntent(sessionId);
+        if (pending && raw && raw.trim().length >= 2 && !atBiz.isAtBiz) {
+          // Only treat as bare biz name if it doesn't match any other pattern
+          const looksLikeBizName = !/\b(?:order|book|find|search|show|list|where|what|how|service|request|quote|rfq)\b/i.test(raw);
+          if (looksLikeBizName) {
+            _pendingOrderIntent.delete(sessionId);
+            return _resolveOrderItem(pending.item, raw.trim());
+          }
         }
       }
 
