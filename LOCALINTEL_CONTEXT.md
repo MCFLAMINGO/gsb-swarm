@@ -2433,3 +2433,25 @@ Small counties keep flat ZIP grid. Big municipalities (Jacksonville, Miami, etc.
 - Claimed business pins (when claim flow built)
 - Groq/llama swap for zip-intel-query (GROQ_API_KEY on Railway)
 - robots.txt sitemap entry + Google Search Console submission
+
+---
+
+## Session 18 Continued — Boundary auto-fetch in ZIP pipeline
+
+### What changed
+- `lib/fetchZctaBoundary.js` — NEW shared util: fetchZctaBoundary(zip) + computeCentroid(geom)
+  - Used by boundaryWorker, oracleWorker, irsSoiWorker
+  - Single source of truth for Census TIGER API call
+- `workers/oracleWorker.js` — after upsertZipIntelligence(), fires boundary fetch if boundary_geojson IS NULL
+  - Fire-and-forget (.then/.catch), never slows oracle run
+- `workers/irsSoiWorker.js` — same hook in upsertIrsRow()
+- `workers/boundaryWorker.js` — refactored to use shared lib (DRY)
+
+### Behaviour going forward
+- Every ZIP processed by oracleWorker or irsSoiWorker automatically gets its polygon
+- Already-fetched ZIPs skip the Census call (cheap SELECT guard)
+- Remaining ~1,439 FL ZIPs without boundaries will be backfilled naturally as those workers cycle through them
+- boundaryWorker still usable for one-off backfill: `ZIPS=32202 node workers/boundaryWorker.js`
+
+### Commit
+- gsb-swarm: 9fc63be — boundary auto-fetch wired into ZIP pipeline
