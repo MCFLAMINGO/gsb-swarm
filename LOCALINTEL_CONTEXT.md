@@ -2223,3 +2223,66 @@ Layer 2 geo-economic intelligence overlay:
 - Internal links: Explore Markets section links all ZIPs from homepage ✅
 - Dynamic data: _zip-page.js fetches Railway at runtime (not crawlable, not needed for index) ✅
 - Missing: robots.txt pointing to sitemap (check/add next session)
+
+## Session 17 (continued) — Neighborhood Architecture (Path B)
+
+### Decision
+Sub-ZIP granularity — neighborhood pages under ZIP pages.
+Hierarchy: Florida → County → City → Neighborhood (SLUG) ← also linked from ZIP pages.
+Jacksonville first, framework built to add any FL city later.
+
+### New Table: neighborhoods
+```sql
+neighborhoods (id SERIAL PK, slug TEXT UNIQUE, name TEXT, city TEXT, county TEXT,
+  state TEXT, region TEXT, zip_codes TEXT[], lat NUMERIC, lon NUMERIC,
+  bbox JSONB, polygon JSONB, description TEXT, business_count INTEGER,
+  created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ)
+```
+- Index on city, county, slug
+- `businesses` gets: `neighborhood_id INTEGER REFERENCES neighborhoods(id)`, `neighborhood_slug TEXT`
+
+### New Worker: neighborhoodWorker.js
+- `ensureSchema()` — creates table + adds columns to businesses
+- `seedNeighborhoods()` — upserts from `workers/jaxNeighborhoods.json`
+- `assignBusinesses()` — bbox-based point-in-polygon for every unassigned biz with lat/lon
+  - Fallback: ZIP membership if no bbox hit
+  - Updates `neighborhoods.business_count` after each run
+  - FULL_REFRESH=true clears all assignments and reruns
+- Self-improving: run on schedule, new businesses auto-assigned
+- **Must be triggered manually first time via Railway or local node run**
+
+### Seed Data: workers/jaxNeighborhoods.json
+- 36 Jacksonville neighborhoods across 8 regions:
+  Downtown, Historic Core, Southside, Arlington, Northside, Westside, Beaches, Southside Blvd
+- Each has: slug, name, city, county, region, zips[], lat, lon, bbox (±0.018° ≈ 1mi radius)
+- Source: authoritative city records + Wikipedia + manual centroid placement
+
+### New API Endpoints (localIntelAgent.js)
+- `GET /api/local-intel/neighborhoods?city=Jacksonville` — all neighborhoods for a city
+- `GET /api/local-intel/neighborhood?slug=riverside-jacksonville` — detail + businesses + sectors + census
+- `GET /api/local-intel/zip-neighborhoods?zip=32205` — neighborhoods overlapping a ZIP
+
+### Landing Pages (localintel-landing)
+- `_neighborhood-page.js` — shared engine (211 lines), mirrors _zip-page.js pattern
+- `neighborhood/SLUG.html` — 36 stubs for Jacksonville neighborhoods
+- `/neighborhood/:slug` rewrite added to vercel.json
+- ZIP pages (`_zip-page.js`) now have "Neighborhoods in this ZIP" section — fetches zip-neighborhoods API
+- `generate-neighborhood-pages.js` — fetches Railway /neighborhoods endpoint, writes stubs
+  - Fallback: `jaxNeighborhoodsSeed.json` if Railway unreachable
+
+### Example URLs Live
+- thelocalintel.com/neighborhood/riverside-jacksonville
+- thelocalintel.com/neighborhood/avondale-jacksonville
+- thelocalintel.com/neighborhood/san-marco-jacksonville
+- thelocalintel.com/neighborhood/baymeadows-jacksonville
+
+### To Add More Cities
+1. Create a seed JSON file in `workers/` (e.g. `miamiNeighborhoods.json`)
+2. Update `neighborhoodWorker.js` to load it in `seedNeighborhoods()`
+3. Re-run worker on Railway
+4. Run `generate-neighborhood-pages.js` — fetches all cities automatically
+5. Deploy localintel-landing
+
+### Commit References
+- gsb-swarm: `b704dbc` — neighborhood architecture
+- localintel-landing: `8a4cc8f` — 36 Jacksonville neighborhood stubs
