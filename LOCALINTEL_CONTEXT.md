@@ -2062,4 +2062,26 @@ Layer 2 geo-economic intelligence overlay:
 - Example queries: "Which ZIPs have high income but low healthcare density?" / "Where are permits accelerating fastest?"
 
 ### Session Commits (gsb-swarm)
-- `[pending]` — feat: census_layer_history table + history snapshot in censusLayerWorker
+- `cade071` — feat: census_layer_history table + history snapshot wired into censusLayerWorker
+
+### Session 17 (continued) — ZIP Intel Endpoint + Dashboard Page
+
+#### Backend Changes (gsb-swarm)
+- `/api/local-intel/census` — fixed response shape: `confidence` is now a string tier (VERIFIED/ESTIMATED/PROXY/SPARSE), `income` uses `irs_agi_median/irs_returns/irs_wage_share` keys, `permit_signals_6mo` reshaped to `{commercial, residential, total}`, `pdb.vacancy_pct_tract` added
+- `POST /api/local-intel/zip-intel-query` — NEW endpoint: body `{zip, question}` → pulls Postgres data deterministically → Perplexity sonar synthesizes grounded answer → returns `{zip, question, answer, data_confidence}`
+  - Requires `PERPLEXITY_API_KEY` env var on Railway
+  - LLM only interprets Postgres data, never invents facts
+  - Context includes: population, AGI, wage share, top 5 sectors, PDB signals, permit counts
+
+#### Dashboard Changes (gsb-swarm-dashboard)
+- `/local-intel/zip-intel` — NEW page
+  - ZIP selector grouped by county (all 41 ZIPs)
+  - KPI bar: income tier badge, tax filers, wage share %, confidence tier
+  - Industry Density panel: top 8 sectors, bar chart by county emp share, DENSE/BALANCED/UNDERSERVED per 1k residents
+  - Growth Signals panel: permits (commercial/residential/total), PDB (college %, poverty %, new units, vacancy), growth_state
+  - LLM Hive Query box: chat thread, suggested questions, Perplexity synthesis
+  - Raw JSON toggle: full census + zipIntel Postgres payload
+- Sidebar nav: `↳ ZIP Intel` entry added with Brain icon
+
+#### Still Needed on Railway
+- `PERPLEXITY_API_KEY` must be set as env var — query endpoint returns 503 until set

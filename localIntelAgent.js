@@ -1462,24 +1462,143 @@ router.get('/census', async (req, res) => {
       }
     } catch (_) {}
 
+    // Permit signals: reshape into {commercial, residential, total}
+    let permitOut = null;
+    if (permitSignals) {
+      const commercial  = permitSignals['commercial']  || permitSignals['Commercial']  || 0;
+      const residential = permitSignals['residential'] || permitSignals['Residential'] || 0;
+      const total = Object.values(permitSignals).reduce((a, b) => a + b, 0);
+      permitOut = { commercial, residential, total };
+    }
+
+    // income: use consistent keys
+    const incomeOut = incomeData ? {
+      irs_agi_median:  incomeData.median_agi,
+      irs_returns:     incomeData.total_returns,
+      irs_wage_share:  incomeData.wage_share_pct,
+    } : { irs_agi_median: null, irs_returns: null, irs_wage_share: null };
+
+    // confidence tier string
+    const confidenceTier = conf?.confidence_tier || conf?.tier || 'SPARSE';
+
     res.json({
       zip,
       available:    true,
       updated_at:   rows[0].updated_at,
-      confidence:   conf,
+      confidence:   confidenceTier,
       county_industry_breakdown: sectors,
-      permit_signals_6mo: permitSignals,
-      income: incomeData,
+      permit_signals_6mo: permitOut,
+      income: incomeOut,
       pdb: layer.pdb ? {
         low_response_score: layer.pdb.low_response_score,
         college_pct:        layer.pdb.college_pct,
         poverty_pct:        layer.pdb.poverty_pct,
         new_units_added:    layer.pdb.new_units_added,
+        vacancy_pct_tract:  layer.pdb.vacancy_pct_tract,
         vintage:            layer.pdb.pdb_vintage,
       } : null,
     });
   } catch (e) {
     console.error('[/census]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── ZIP Intel Query — LLM synthesis over Postgres data ─────────────────────
+// POST /api/local-intel/zip-intel-query
+// Body: { zip, question }
+// Flow: pull structured data from Postgres → build context string → Perplexity sonar synthesis
+router.post('/zip-intel-query', async (req, res) => {
+  const { zip, question } = req.body || {};
+  if (!zip || !question) return res.status(400).json({ error: 'zip and question required' });
+
+  const PPLX_KEY = process.env.PERPLEXITY_API_KEY;
+  if (!PPLX_KEY) return res.status(503).json({ error: 'PERPLEXITY_API_KEY not set on Railway' });
+
+  try {
+    // 1. Pull all structured data from Postgres — deterministic, no LLM
+    const [censusRows, intelRows, permitRows] = await Promise.all([
+      db.query('SELECT layer_json, confidence FROM census_layer WHERE zip = $1', [zip]),
+      db.query(
+        `SELECT population, median_household_income, total_businesses, market_opportunity_score,
+                consumer_profile, growth_state, dominant_sector, business_density,
+                irs_agi_median, irs_returns, irs_wage_share
+         FROM zip_intelligence WHERE zip = $1`, [zip]
+      ),
+      db.query(
+        `SELECT permit_type, COUNT(*) as cnt
+         FROM sjc_permits WHERE zip = $1 AND fetched_at > NOW() - INTERVAL '6 months'
+         GROUP BY permit_type ORDER BY cnt DESC`, [zip]
+      ).catch(() => []),
+    ]);
+
+    const layer  = censusRows[0]?.layer_json || {};
+    const conf   = censusRows[0]?.confidence || {};
+    const intel  = intelRows[0] || {};
+    const cbp    = layer.cbp?.sectors || {};
+    const pdb    = layer.pdb || {};
+
+    // Top 5 sectors by establishments
+    const topSectors = Object.entries(cbp)
+      .map(([code, s]) => `${s.label}: ${s.establishments} estab, ${s.county_emp_share_pct}% of county employment`)
+      .sort()
+      .slice(0, 5)
+      .join('\n');
+
+    const permitSummary = permitRows.length
+      ? permitRows.map(r => `${r.permit_type}: ${r.cnt}`).join(', ')
+      : 'No permit data (non-SJC ZIP)';
+
+    // 2. Build structured context string
+    const context = [
+      `ZIP: ${zip}`,
+      `Population: ${intel.population || 'unknown'}`,
+      `Total businesses indexed: ${intel.total_businesses || 'unknown'}`,
+      `IRS Median AGI: $${intel.irs_agi_median || 'unknown'}`,
+      `IRS Returns (households): ${intel.irs_returns || 'unknown'}`,
+      `Wage share of income: ${intel.irs_wage_share || 'unknown'}%`,
+      `Median household income (ACS): $${intel.median_household_income || 'unknown'}`,
+      `Market opportunity score: ${intel.market_opportunity_score || 'unknown'}/100`,
+      `Consumer profile: ${intel.consumer_profile || 'unknown'}`,
+      `Growth state: ${intel.growth_state || 'unknown'}`,
+      `Dominant sector: ${intel.dominant_sector || 'unknown'}`,
+      `Business density: ${intel.business_density || 'unknown'}`,
+      `Data confidence: ${conf.confidence_tier || conf.tier || 'SPARSE'}`,
+      `\nCounty industry breakdown (top sectors):\n${topSectors}`,
+      `\nPDB (Census Planning Database):\n  College attainment: ${pdb.college_pct || 'unknown'}%\n  Poverty rate: ${pdb.poverty_pct || 'unknown'}%\n  New housing units: ${pdb.new_units_added || 'unknown'}\n  Vacancy rate: ${pdb.vacancy_pct_tract || 'unknown'}%`,
+      `\nConstruction/permit signals (6mo): ${permitSummary}`,
+    ].join('\n');
+
+    // 3. Perplexity sonar synthesis — LLM only interprets, never invents
+    const pplxRes = await fetch('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${PPLX_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'sonar',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a local market intelligence analyst for LocalIntel, an agentic business discovery platform. You answer questions strictly based on the structured Postgres data provided. Never invent facts, never hallucinate statistics. If data is missing say so. Be concise and actionable — max 3-4 sentences. Focus on what the data means for business deployment decisions.`,
+          },
+          {
+            role: 'user',
+            content: `Data for ZIP ${zip}:\n\n${context}\n\nQuestion: ${question}`,
+          },
+        ],
+        max_tokens: 300,
+        temperature: 0.2,
+      }),
+    });
+
+    const pplxJson = await pplxRes.json();
+    const answer = pplxJson.choices?.[0]?.message?.content || 'No answer returned.';
+
+    res.json({ zip, question, answer, data_confidence: conf.confidence_tier || 'SPARSE' });
+  } catch (e) {
+    console.error('[/zip-intel-query]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
