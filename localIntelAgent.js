@@ -6249,3 +6249,222 @@ router.get('/zip-neighborhoods', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// GET /api/local-intel/neighborhood-boundary?slug=downtown-jacksonville-jacksonville
+// Returns merged ZIP polygons + aggregate census stats for a neighborhood/region page
+router.get('/neighborhood-boundary', async (req, res) => {
+  try {
+    const { slug } = req.query;
+    if (!slug) return res.status(400).json({ error: 'slug required' });
+
+    // Get neighborhood metadata + zip list
+    const hoods = await db.query(`SELECT * FROM neighborhoods WHERE slug=$1`, [slug]);
+    if (!hoods.length) return res.status(404).json({ error: 'not found', slug });
+    const hood = hoods[0];
+    const zips = hood.zip_codes || [];
+
+    // Fetch zip_intelligence for all ZIPs in this neighborhood/region
+    const zipData = zips.length
+      ? await db.query(
+          `SELECT zip, population, median_household_income, total_households,
+                  total_businesses, restaurant_count, market_opportunity_score,
+                  dominant_sector, sector_counts, irs_agi_median, irs_returns,
+                  age_25_34_pct, age_35_54_pct, age_55_plus_pct,
+                  owner_occupied_pct, vacancy_rate_pct, business_density,
+                  wfh_pct, family_hh_pct, consumer_profile, saturation_status,
+                  growth_state, boundary_geojson, lat, lon
+           FROM zip_intelligence WHERE zip = ANY($1)`,
+          [zips]
+        )
+      : [];
+
+    // ── Aggregate stats ────────────────────────────────────────────────────
+    let totalPop = 0, totalHH = 0, totalBiz = 0, totalRestaurants = 0;
+    let incomeWeightedSum = 0, oppScoreSum = 0, oppCount = 0;
+    let irsAgiSum = 0, irsReturnsSum = 0;
+    const sectorTotals = {};
+    const consumerProfiles = {}, satStatuses = {}, growthStates = {};
+
+    for (const z of zipData) {
+      const pop  = parseInt(z.population)       || 0;
+      const hh   = parseInt(z.total_households) || 0;
+      const biz  = parseInt(z.total_businesses) || 0;
+      const rest = parseInt(z.restaurant_count) || 0;
+      const inc  = parseFloat(z.median_household_income) || 0;
+      const opp  = parseFloat(z.market_opportunity_score);
+
+      totalPop         += pop;
+      totalHH          += hh;
+      totalBiz         += biz;
+      totalRestaurants += rest;
+      incomeWeightedSum += inc * hh;    // weighted by households
+
+      if (!isNaN(opp)) { oppScoreSum += opp; oppCount++; }
+
+      const irsAgi     = parseFloat(z.irs_agi_median)  || 0;
+      const irsReturns = parseInt(z.irs_returns)        || 0;
+      irsAgiSum     += irsAgi * irsReturns;
+      irsReturnsSum += irsReturns;
+
+      // Sector rollup
+      if (z.sector_counts) {
+        const sc = typeof z.sector_counts === 'string' ? JSON.parse(z.sector_counts) : z.sector_counts;
+        for (const [k, v] of Object.entries(sc)) {
+          sectorTotals[k] = (sectorTotals[k] || 0) + (parseInt(v) || 0);
+        }
+      }
+
+      // Mode tracking
+      if (z.consumer_profile) consumerProfiles[z.consumer_profile] = (consumerProfiles[z.consumer_profile] || 0) + 1;
+      if (z.saturation_status) satStatuses[z.saturation_status]     = (satStatuses[z.saturation_status]    || 0) + 1;
+      if (z.growth_state)      growthStates[z.growth_state]         = (growthStates[z.growth_state]        || 0) + 1;
+    }
+
+    const avgIncome     = totalHH   > 0 ? Math.round(incomeWeightedSum / totalHH)   : null;
+    const avgOppScore   = oppCount  > 0 ? Math.round(oppScoreSum / oppCount * 10) / 10 : null;
+    const avgIrsAgi     = irsReturnsSum > 0 ? Math.round(irsAgiSum / irsReturnsSum) : null;
+
+    // Top sectors sorted by count
+    const topSectors = Object.entries(sectorTotals)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => ({ name, count }));
+
+    const mode = obj => Object.keys(obj).length
+      ? Object.entries(obj).sort((a,b)=>b[1]-a[1])[0][0]
+      : null;
+
+    // ── ZIPs with boundaries (for map) ────────────────────────────────────
+    const zipBoundaries = zipData
+      .filter(z => z.boundary_geojson)
+      .map(z => ({
+        zip:             z.zip,
+        lat:             z.lat,
+        lon:             z.lon,
+        population:      z.population,
+        total_businesses: z.total_businesses,
+        boundary_geojson: z.boundary_geojson,
+      }));
+
+    // ── Intelligence paragraph (deterministic template) ───────────────────
+    const zipCount = zips.length;
+    const boundaryCount = zipBoundaries.length;
+    const topSector = topSectors[0]?.name || 'services';
+    const topSector2 = topSectors[1]?.name;
+    const consumerMode = mode(consumerProfiles) || 'mixed';
+    const satMode = mode(satStatuses) || 'active';
+    const growthMode = mode(growthStates) || 'stable';
+
+    const formatNum = n => n >= 1000 ? (n/1000).toFixed(1)+'K' : String(n);
+    const formatIncome = n => n ? '$' + n.toLocaleString() : null;
+
+    let intel = `${hood.name} spans ${zipCount} ZIP code${zipCount !== 1 ? 's' : ''}`;
+    if (totalPop > 0) intel += ` covering approximately ${formatNum(totalPop)} residents`;
+    if (totalHH > 0) intel += ` across ${formatNum(totalHH)} households`;
+    intel += '.';
+    if (avgIncome) intel += ` The median household income is ${formatIncome(avgIncome)}`;
+    if (avgIrsAgi) intel += `, with IRS-reported AGI averaging ${formatIncome(avgIrsAgi)}`;
+    intel += '.';
+    if (totalBiz > 0) {
+      intel += ` There are ${formatNum(totalBiz)} active businesses in the area`;
+      if (topSector) intel += `, led by ${topSector}`;
+      if (topSector2) intel += ` and ${topSector2}`;
+      intel += `.`;
+    }
+    if (satMode !== 'unknown') intel += ` The market is generally ${satMode}`;
+    if (growthMode !== 'unknown') intel += ` and trending ${growthMode}`;
+    intel += '.';
+    if (avgOppScore !== null) intel += ` Market opportunity scores average ${avgOppScore}/100 across constituent ZIPs.`;
+    intel += ` As LocalIntel adds school district data, zoning layers, and claimed business profiles, this page will surface richer context for each area.`;
+
+    res.json({
+      slug,
+      neighborhood: hood,
+      stats: {
+        zip_count:        zipCount,
+        boundary_count:   boundaryCount,
+        total_population: totalPop,
+        total_households: totalHH,
+        total_businesses: totalBiz,
+        total_restaurants: totalRestaurants,
+        avg_median_income: avgIncome,
+        avg_irs_agi:      avgIrsAgi,
+        avg_opp_score:    avgOppScore,
+        top_sectors:      topSectors,
+        consumer_profile: consumerMode,
+        saturation:       satMode,
+        growth_state:     growthMode,
+      },
+      intel_paragraph: intel,
+      zip_boundaries: zipBoundaries,
+    });
+
+  } catch (e) {
+    console.error('[/neighborhood-boundary]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/local-intel/zip-boundary?zip=32202
+// Returns single ZIP polygon + neighbor ZIP outlines + business dots + neighborhood context
+router.get('/zip-boundary', async (req, res) => {
+  try {
+    const { zip } = req.query;
+    if (!zip) return res.status(400).json({ error: 'zip required' });
+
+    // Primary ZIP boundary + intelligence
+    const zipRows = await db.query(
+      `SELECT zip, city_name, county_name, population, median_household_income,
+              total_households, total_businesses, restaurant_count,
+              market_opportunity_score, dominant_sector, sector_counts,
+              irs_agi_median, consumer_profile, saturation_status, growth_state,
+              business_density, lat, lon, boundary_geojson
+       FROM zip_intelligence WHERE zip=$1`,
+      [zip]
+    );
+    if (!zipRows.length) return res.status(404).json({ error: 'zip not found', zip });
+    const zi = zipRows[0];
+
+    // Neighborhood(s) this ZIP belongs to
+    const hoods = await db.query(
+      `SELECT id, slug, name, region, city, zip_codes FROM neighborhoods WHERE $1 = ANY(zip_codes)`,
+      [zip]
+    );
+
+    // Sibling ZIPs in same neighborhood (for context ring) — boundaries only, no full data
+    let siblingBoundaries = [];
+    if (hoods.length) {
+      const allSiblingZips = [...new Set(hoods.flatMap(h => h.zip_codes || []))].filter(z => z !== zip);
+      if (allSiblingZips.length) {
+        siblingBoundaries = await db.query(
+          `SELECT zip, lat, lon, boundary_geojson
+           FROM zip_intelligence
+           WHERE zip = ANY($1) AND boundary_geojson IS NOT NULL`,
+          [allSiblingZips]
+        );
+      }
+    }
+
+    // Business dots — lat/lon points for this ZIP (limit 500 for map performance)
+    const businesses = await db.query(
+      `SELECT business_id, name, category, category_group, lat, lon, website, phone
+       FROM businesses
+       WHERE zip=$1 AND lat IS NOT NULL AND lon IS NOT NULL AND status='active'
+       ORDER BY confidence_score DESC NULLS LAST
+       LIMIT 500`,
+      [zip]
+    );
+
+    res.json({
+      zip,
+      zip_intelligence: zi,
+      neighborhoods: hoods,
+      sibling_boundaries: siblingBoundaries,
+      businesses,
+    });
+
+  } catch (e) {
+    console.error('[/zip-boundary]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
