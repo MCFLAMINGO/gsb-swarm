@@ -19,84 +19,11 @@
 
 'use strict';
 
-const db   = require('../lib/db');
-const https = require('https');
+const db = require('../lib/db');
+const { fetchZctaBoundary, computeCentroid } = require('../lib/fetchZctaBoundary');
 
 const FULL_REFRESH = process.env.FULL_REFRESH === 'true';
 const ZIP_OVERRIDE = process.env.ZIPS ? process.env.ZIPS.split(',').map(z => z.trim()) : null;
-
-// Census TIGER ZCTA endpoint — returns GeoJSON polygon for a single ZIP
-// Uses the TIGERweb REST service (no key required)
-const TIGER_BASE = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/PUMA_TAD_TAZ_UGA_ZCTA/MapServer/1/query';
-
-function fetchJSON(url) {
-  return new Promise((resolve, reject) => {
-    const req = https.get(url, { timeout: 15000 }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error('JSON parse error: ' + e.message)); }
-      });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')); });
-  });
-}
-
-async function fetchZCTABoundary(zip) {
-  // Layer 1 = 2020 Census ZIP Code Tabulation Areas, field ZCTA5
-  const params = new URLSearchParams({
-    where:             `ZCTA5='${zip}'`,
-    outFields:         'ZCTA5,AREALAND,AREAWATER',
-    f:                 'geojson',
-    outSR:             '4326',
-    geometryPrecision: '6',
-  });
-  const url = `${TIGER_BASE}?${params.toString()}`;
-
-  const data = await fetchJSON(url);
-
-  if (!data.features || !data.features.length) {
-    // Fallback: layer 4 (another 2020 ZCTA layer)
-    const params2 = new URLSearchParams({
-      where:             `ZCTA5='${zip}'`,
-      outFields:         'ZCTA5',
-      f:                 'geojson',
-      outSR:             '4326',
-      geometryPrecision: '6',
-    });
-    const url2 = TIGER_BASE.replace('/MapServer/2/', '/MapServer/4/') + '?' + params2.toString();
-    const data2 = await fetchJSON(url2);
-    if (!data2.features || !data2.features.length) return null;
-    return data2.features[0].geometry;
-  }
-
-  return data.features[0].geometry;
-}
-
-// Compute centroid of a polygon geometry (simple bbox center — good enough for map default)
-function computeCentroid(geometry) {
-  if (!geometry) return null;
-  const coords = geometry.type === 'Polygon'
-    ? geometry.coordinates[0]
-    : geometry.coordinates[0][0]; // MultiPolygon
-  if (!coords || !coords.length) return null;
-
-  let minLat = Infinity, maxLat = -Infinity;
-  let minLon = Infinity, maxLon = -Infinity;
-  for (const [lon, lat] of coords) {
-    if (lat < minLat) minLat = lat;
-    if (lat > maxLat) maxLat = lat;
-    if (lon < minLon) minLon = lon;
-    if (lon > maxLon) maxLon = lon;
-  }
-  return {
-    lat:   (minLat + maxLat) / 2,
-    lon:   (minLon + maxLon) / 2,
-    bbox: { south: minLat, north: maxLat, west: minLon, east: maxLon },
-  };
-}
 
 async function run() {
   console.log('[boundaryWorker] START');
@@ -128,7 +55,7 @@ async function run() {
 
   for (const zip of zips) {
     try {
-      const geometry = await fetchZCTABoundary(zip);
+      const geometry = await fetchZctaBoundary(zip);
       if (!geometry) {
         console.warn(`[boundaryWorker] no polygon for ${zip}`);
         skipped++;

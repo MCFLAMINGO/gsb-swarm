@@ -19,6 +19,7 @@
 const path = require('path');
 const fs   = require('fs');
 const { stamp } = require('../lib/categoryNormalizer');
+const { fetchZctaBoundary, computeCentroid } = require('../lib/fetchZctaBoundary');
 
 // flZipRegistry — Census ACS population + income fallback when no zone/ocean data
 let _flRegistry = null;
@@ -785,6 +786,23 @@ async function runOracle() {
 
       // Persist to Postgres — zip_intelligence is the durable store
       await upsertZipIntelligence(zip, result);
+
+      // Fetch ZCTA boundary if not yet stored — fire-and-forget, never blocks oracle run
+      const db = getDb();
+      if (db) {
+        db.query('SELECT boundary_geojson FROM zip_intelligence WHERE zip=$1', [zip])
+          .then(async rows => {
+            if (rows.length && rows[0].boundary_geojson) return; // already have it
+            const geom = await fetchZctaBoundary(zip);
+            if (!geom) return;
+            const c = computeCentroid(geom);
+            await db.query(
+              `UPDATE zip_intelligence SET boundary_geojson=$1, lat=COALESCE(lat,$2), lon=COALESCE(lon,$3), updated_at=now() WHERE zip=$4`,
+              [JSON.stringify(geom), c?.lat ?? null, c?.lon ?? null, zip]
+            );
+          })
+          .catch(e => console.warn(`[oracleWorker] boundary fetch skipped for ${zip}:`, e.message));
+      }
       index.zips[zip] = {
         name:               result.name,
         saturation_status:  result.restaurant_capacity.saturation_status,

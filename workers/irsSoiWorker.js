@@ -27,6 +27,7 @@ const path  = require('path');
 const https = require('https');
 
 const db = require('../lib/db');
+const { fetchZctaBoundary, computeCentroid } = require('../lib/fetchZctaBoundary');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 // CSV is source data — temp file is fine. State/results live in Postgres.
@@ -102,6 +103,20 @@ async function upsertIrsRow(zip, m) {
        irs_updated_at = NOW()`,
     [zip, m.irs_agi_median, m.irs_returns, m.irs_wage_share_pct]
   );
+
+  // Fetch ZCTA boundary for this ZIP if not yet stored — fire-and-forget
+  db.query('SELECT boundary_geojson FROM zip_intelligence WHERE zip=$1', [zip])
+    .then(async rows => {
+      if (rows.length && rows[0].boundary_geojson) return;
+      const geom = await fetchZctaBoundary(zip);
+      if (!geom) return;
+      const c = computeCentroid(geom);
+      await db.query(
+        `UPDATE zip_intelligence SET boundary_geojson=$1, lat=COALESCE(lat,$2), lon=COALESCE(lon,$3), updated_at=now() WHERE zip=$4`,
+        [JSON.stringify(geom), c?.lat ?? null, c?.lon ?? null, zip]
+      );
+    })
+    .catch(e => console.warn(`[irs-soi] boundary fetch skipped for ${zip}:`, e.message));
 }
 
 function csvFresh() {
