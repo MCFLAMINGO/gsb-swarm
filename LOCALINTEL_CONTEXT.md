@@ -2321,3 +2321,42 @@ Small counties keep flat ZIP grid. Big municipalities (Jacksonville, Miami, etc.
 - Groq/llama swap for zip-intel-query: needs `GROQ_API_KEY` on Railway
 - robots.txt: add `Sitemap: https://www.thelocalintel.com/sitemap.xml`
 - Google Search Console: submit sitemap manually
+
+---
+
+## Session 17 End — neighborhoodWorker live run
+
+### What ran
+- `neighborhoodWorker.js` executed against Railway Postgres (May 8 2026)
+- `ensureSchema()` — `neighborhoods` table created, `neighborhood_id` + `neighborhood_slug` columns added to `businesses`
+- `seedNeighborhoods()` — 36 Jacksonville neighborhoods upserted
+- `assignBusinesses()` — 18,367 Duval businesses assigned via ZIP fallback
+
+### Business counts per region (live)
+| Region | Top neighborhoods |
+|---|---|
+| Southside | Mandarin 1,514 · Nocatee 1,287 · Baymeadows 1,068 |
+| Downtown | Downtown Jax 1,431 · Brooklyn 1,004 · Southbank 581 |
+| Beaches | Jacksonville Beach 1,271 · Neptune Beach 659 · Atlantic Beach 312 |
+| Arlington | Arlington 1,247 · Sandalwood 829 · Regency 269 |
+| Historic Core | Ortega 728 · Riverside 700 · Springfield 309 |
+| Westside | Oakleaf Plantation 698 · Westside 617 · Cedar Hills 154 |
+| Northside | Northside 606 |
+
+### Worker fix: bulk SQL
+- Original row-by-row loop (219k individual UPDATEs) timed out
+- Replaced with bulk `UPDATE ... WHERE lat BETWEEN bbox.south AND bbox.north AND lon BETWEEN bbox.west AND bbox.east` — 36 queries total
+- ZIP fallback: 1 query per neighborhood for unmatched businesses
+- Now scales to any database size
+- commit: `f756f38`
+
+### State
+- `neighborhoods` table: 36 rows ✓
+- `businesses.neighborhood_id` + `businesses.neighborhood_slug`: columns exist ✓
+- 18,367 Duval businesses assigned ✓
+- 221,431 businesses outside Duval — unassigned until more cities added
+
+### Still deferred
+- Groq/llama swap for zip-intel-query (needs `GROQ_API_KEY` on Railway)
+- robots.txt sitemap entry
+- Google Search Console sitemap submission
