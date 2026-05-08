@@ -1,0 +1,691 @@
+[
+  {
+    "name": "Downtown Jacksonville",
+    "region": "Downtown",
+    "zips": [
+      "32202"
+    ],
+    "lat": 30.3322,
+    "lon": -81.6557,
+    "slug": "downtown-jacksonville-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.3502,
+      "south": 30.3142,
+      "east": -81.6377,
+      "west": -81.6737
+    }
+  },
+  {
+    "name": "Brooklyn",
+    "region": "Downtown",
+    "zips": [
+      "32202"
+    ],
+    "lat": 30.3199,
+    "lon": -81.668,
+    "slug": "brooklyn-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.3379,
+      "south": 30.3019,
+      "east": -81.65,
+      "west": -81.686
+    }
+  },
+  {
+    "name": "LaVilla",
+    "region": "Downtown",
+    "zips": [
+      "32202"
+    ],
+    "lat": 30.3254,
+    "lon": -81.6703,
+    "slug": "lavilla-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.3434,
+      "south": 30.3074,
+      "east": -81.6523,
+      "west": -81.6883
+    }
+  },
+  {
+    "name": "Southbank",
+    "region": "Downtown",
+    "zips": [
+      "32207"
+    ],
+    "lat": 30.3195,
+    "lon": -81.6541,
+    "slug": "southbank-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.3375,
+      "south": 30.3015,
+      "east": -81.6361,
+      "west": -81.6721
+    }
+  },
+  {
+    "name": "Springfield",
+    "region": "Historic Core",
+    "zips": [
+      "32206"
+    ],
+    "lat": 30.3441,
+    "lon": -81.652,
+    "slug": "springfield-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.3621,
+      "south": 30.3261,
+      "east": -81.634,
+      "west": -81.67
+    }
+  },
+  {
+    "name": "Riverside",
+    "region": "Historic Core",
+    "zips": [
+      "32205"
+    ],
+    "lat": 30.3149,
+    "lon": -81.6878,
+    "slug": "riverside-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.3329,
+      "south": 30.2969,
+      "east": -81.6698,
+      "west": -81.7058
+    }
+  },
+  {
+    "name": "Avondale",
+    "region": "Historic Core",
+    "zips": [
+      "32205"
+    ],
+    "lat": 30.3082,
+    "lon": -81.7012,
+    "slug": "avondale-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.3262,
+      "south": 30.2902,
+      "east": -81.6832,
+      "west": -81.7192
+    }
+  },
+  {
+    "name": "Ortega",
+    "region": "Historic Core",
+    "zips": [
+      "32210"
+    ],
+    "lat": 30.2823,
+    "lon": -81.719,
+    "slug": "ortega-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.3003,
+      "south": 30.2643,
+      "east": -81.701,
+      "west": -81.737
+    }
+  },
+  {
+    "name": "Murray Hill",
+    "region": "Westside",
+    "zips": [
+      "32205",
+      "32210"
+    ],
+    "lat": 30.3029,
+    "lon": -81.7137,
+    "slug": "murray-hill-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.3209,
+      "south": 30.2849,
+      "east": -81.6957,
+      "west": -81.7317
+    }
+  },
+  {
+    "name": "San Marco",
+    "region": "Historic Core",
+    "zips": [
+      "32207"
+    ],
+    "lat": 30.3018,
+    "lon": -81.6441,
+    "slug": "san-marco-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.3198,
+      "south": 30.2838,
+      "east": -81.6261,
+      "west": -81.6621
+    }
+  },
+  {
+    "name": "San Jose",
+    "region": "Southside",
+    "zips": [
+      "32217"
+    ],
+    "lat": 30.2627,
+    "lon": -81.623,
+    "slug": "san-jose-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.2807,
+      "south": 30.2447,
+      "east": -81.605,
+      "west": -81.641
+    }
+  },
+  {
+    "name": "Baymeadows",
+    "region": "Southside",
+    "zips": [
+      "32256"
+    ],
+    "lat": 30.2299,
+    "lon": -81.5804,
+    "slug": "baymeadows-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.2479,
+      "south": 30.2119,
+      "east": -81.5624,
+      "west": -81.5984
+    }
+  },
+  {
+    "name": "Deerwood",
+    "region": "Southside",
+    "zips": [
+      "32256"
+    ],
+    "lat": 30.2166,
+    "lon": -81.5589,
+    "slug": "deerwood-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.2346,
+      "south": 30.1986,
+      "east": -81.5409,
+      "west": -81.5769
+    }
+  },
+  {
+    "name": "Mandarin",
+    "region": "Southside",
+    "zips": [
+      "32223",
+      "32257"
+    ],
+    "lat": 30.2143,
+    "lon": -81.6346,
+    "slug": "mandarin-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.2323,
+      "south": 30.1963,
+      "east": -81.6166,
+      "west": -81.6526
+    }
+  },
+  {
+    "name": "Bartram Park",
+    "region": "Southside",
+    "zips": [
+      "32258"
+    ],
+    "lat": 30.1508,
+    "lon": -81.5609,
+    "slug": "bartram-park-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.1688,
+      "south": 30.1328,
+      "east": -81.5429,
+      "west": -81.5789
+    }
+  },
+  {
+    "name": "eTown",
+    "region": "Southside",
+    "zips": [
+      "32258"
+    ],
+    "lat": 30.1399,
+    "lon": -81.5299,
+    "slug": "etown-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.1579,
+      "south": 30.1219,
+      "east": -81.5119,
+      "west": -81.5479
+    }
+  },
+  {
+    "name": "Nocatee",
+    "region": "Southside",
+    "zips": [
+      "32081"
+    ],
+    "lat": 30.1086,
+    "lon": -81.4196,
+    "slug": "nocatee-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.1266,
+      "south": 30.0906,
+      "east": -81.4016,
+      "west": -81.4376
+    }
+  },
+  {
+    "name": "Arlington",
+    "region": "Arlington",
+    "zips": [
+      "32225",
+      "32211"
+    ],
+    "lat": 30.339,
+    "lon": -81.566,
+    "slug": "arlington-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.357,
+      "south": 30.321,
+      "east": -81.548,
+      "west": -81.584
+    }
+  },
+  {
+    "name": "Fort Caroline",
+    "region": "Arlington",
+    "zips": [
+      "32225"
+    ],
+    "lat": 30.3857,
+    "lon": -81.5218,
+    "slug": "fort-caroline-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.4037,
+      "south": 30.3677,
+      "east": -81.5038,
+      "west": -81.5398
+    }
+  },
+  {
+    "name": "Sandalwood",
+    "region": "Arlington",
+    "zips": [
+      "32246"
+    ],
+    "lat": 30.288,
+    "lon": -81.5221,
+    "slug": "sandalwood-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.306,
+      "south": 30.27,
+      "east": -81.5041,
+      "west": -81.5401
+    }
+  },
+  {
+    "name": "Regency",
+    "region": "Arlington",
+    "zips": [
+      "32246"
+    ],
+    "lat": 30.2974,
+    "lon": -81.558,
+    "slug": "regency-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.3154,
+      "south": 30.2794,
+      "east": -81.54,
+      "west": -81.576
+    }
+  },
+  {
+    "name": "Northside",
+    "region": "Northside",
+    "zips": [
+      "32218",
+      "32226"
+    ],
+    "lat": 30.444,
+    "lon": -81.635,
+    "slug": "northside-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.462,
+      "south": 30.426,
+      "east": -81.617,
+      "west": -81.653
+    }
+  },
+  {
+    "name": "New Berlin",
+    "region": "Northside",
+    "zips": [
+      "32226"
+    ],
+    "lat": 30.4741,
+    "lon": -81.5334,
+    "slug": "new-berlin-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.4921,
+      "south": 30.4561,
+      "east": -81.5154,
+      "west": -81.5514
+    }
+  },
+  {
+    "name": "Oceanway",
+    "region": "Northside",
+    "zips": [
+      "32218"
+    ],
+    "lat": 30.4421,
+    "lon": -81.5712,
+    "slug": "oceanway-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.4601,
+      "south": 30.4241,
+      "east": -81.5532,
+      "west": -81.5892
+    }
+  },
+  {
+    "name": "Westside",
+    "region": "Westside",
+    "zips": [
+      "32210",
+      "32244"
+    ],
+    "lat": 30.2756,
+    "lon": -81.748,
+    "slug": "westside-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.2936,
+      "south": 30.2576,
+      "east": -81.73,
+      "west": -81.766
+    }
+  },
+  {
+    "name": "Lake Shore",
+    "region": "Westside",
+    "zips": [
+      "32210"
+    ],
+    "lat": 30.268,
+    "lon": -81.737,
+    "slug": "lake-shore-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.286,
+      "south": 30.25,
+      "east": -81.719,
+      "west": -81.755
+    }
+  },
+  {
+    "name": "Cedar Hills",
+    "region": "Westside",
+    "zips": [
+      "32210"
+    ],
+    "lat": 30.295,
+    "lon": -81.734,
+    "slug": "cedar-hills-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.313,
+      "south": 30.277,
+      "east": -81.716,
+      "west": -81.752
+    }
+  },
+  {
+    "name": "Argyle Forest",
+    "region": "Westside",
+    "zips": [
+      "32244"
+    ],
+    "lat": 30.2371,
+    "lon": -81.7584,
+    "slug": "argyle-forest-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.2551,
+      "south": 30.2191,
+      "east": -81.7404,
+      "west": -81.7764
+    }
+  },
+  {
+    "name": "Oakleaf Plantation",
+    "region": "Westside",
+    "zips": [
+      "32065"
+    ],
+    "lat": 30.1772,
+    "lon": -81.8044,
+    "slug": "oakleaf-plantation-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.1952,
+      "south": 30.1592,
+      "east": -81.7864,
+      "west": -81.8224
+    }
+  },
+  {
+    "name": "Jacksonville Beach",
+    "region": "Beaches",
+    "zips": [
+      "32250"
+    ],
+    "lat": 30.2793,
+    "lon": -81.3928,
+    "slug": "jacksonville-beach-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.2973,
+      "south": 30.2613,
+      "east": -81.3748,
+      "west": -81.4108
+    }
+  },
+  {
+    "name": "Neptune Beach",
+    "region": "Beaches",
+    "zips": [
+      "32266"
+    ],
+    "lat": 30.3107,
+    "lon": -81.3968,
+    "slug": "neptune-beach-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.3287,
+      "south": 30.2927,
+      "east": -81.3788,
+      "west": -81.4148
+    }
+  },
+  {
+    "name": "Atlantic Beach",
+    "region": "Beaches",
+    "zips": [
+      "32233"
+    ],
+    "lat": 30.3352,
+    "lon": -81.3999,
+    "slug": "atlantic-beach-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.3532,
+      "south": 30.3172,
+      "east": -81.3819,
+      "west": -81.4179
+    }
+  },
+  {
+    "name": "Mayport",
+    "region": "Beaches",
+    "zips": [
+      "32233"
+    ],
+    "lat": 30.3971,
+    "lon": -81.4238,
+    "slug": "mayport-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.4151,
+      "south": 30.3791,
+      "east": -81.4058,
+      "west": -81.4418
+    }
+  },
+  {
+    "name": "Intracoastal West",
+    "region": "Southside",
+    "zips": [
+      "32224"
+    ],
+    "lat": 30.2697,
+    "lon": -81.4682,
+    "slug": "intracoastal-west-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.2877,
+      "south": 30.2517,
+      "east": -81.4502,
+      "west": -81.4862
+    }
+  },
+  {
+    "name": "Kernan",
+    "region": "Southside",
+    "zips": [
+      "32224"
+    ],
+    "lat": 30.2532,
+    "lon": -81.4768,
+    "slug": "kernan-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.2712,
+      "south": 30.2352,
+      "east": -81.4588,
+      "west": -81.4948
+    }
+  },
+  {
+    "name": "Hodges Blvd",
+    "region": "Southside",
+    "zips": [
+      "32224"
+    ],
+    "lat": 30.2418,
+    "lon": -81.4883,
+    "slug": "hodges-blvd-jacksonville",
+    "city": "Jacksonville",
+    "county": "Duval",
+    "state": "FL",
+    "bbox": {
+      "north": 30.2598,
+      "south": 30.2238,
+      "east": -81.4703,
+      "west": -81.5063
+    }
+  }
+]

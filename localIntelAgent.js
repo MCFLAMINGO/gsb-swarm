@@ -6149,3 +6149,103 @@ router.get('/admin/stats', async (req, res) => {
 });
 
 module.exports = router;
+
+// ── Neighborhood endpoints ────────────────────────────────────────────────────
+
+// GET /api/local-intel/neighborhoods?city=Jacksonville
+// Returns all neighborhoods for a city, sorted by name
+router.get('/neighborhoods', async (req, res) => {
+  try {
+    const city = req.query.city || 'Jacksonville';
+    const rows = await db.query(`
+      SELECT slug, name, city, county, region, zip_codes, lat, lon, business_count, description
+      FROM neighborhoods
+      WHERE city ILIKE $1
+      ORDER BY region, name
+    `, [city]);
+    res.json({ city, count: rows.length, neighborhoods: rows });
+  } catch (e) {
+    console.error('[/neighborhoods]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/local-intel/neighborhood?slug=riverside-jacksonville
+// Returns neighborhood detail + businesses + sector signals
+router.get('/neighborhood', async (req, res) => {
+  try {
+    const { slug } = req.query;
+    if (!slug) return res.status(400).json({ error: 'slug required' });
+
+    // Get neighborhood metadata
+    const hoods = await db.query(
+      `SELECT * FROM neighborhoods WHERE slug=$1`, [slug]
+    );
+    if (!hoods.length) return res.status(404).json({ error: 'neighborhood not found', slug });
+    const hood = hoods[0];
+
+    // Get businesses in this neighborhood
+    const businesses = await db.query(`
+      SELECT business_id, name, category, address, zip, lat, lon,
+             claimed, phone, website, pos_config
+      FROM businesses
+      WHERE neighborhood_id=$1
+      ORDER BY claimed DESC, name
+      LIMIT 200
+    `, [hood.id]);
+
+    // Sector breakdown
+    const sectors = await db.query(`
+      SELECT category, COUNT(*) as count
+      FROM businesses
+      WHERE neighborhood_id=$1 AND category IS NOT NULL
+      GROUP BY category
+      ORDER BY count DESC
+      LIMIT 10
+    `, [hood.id]);
+
+    // Census signals from member ZIPs (aggregate)
+    let censusSignals = null;
+    if (hood.zip_codes && hood.zip_codes.length) {
+      const zipData = await db.query(`
+        SELECT zip, layer_json, confidence
+        FROM census_layer
+        WHERE zip = ANY($1::text[])
+      `, [hood.zip_codes]);
+      if (zipData.length) {
+        censusSignals = { zips: zipData.map(r => r.zip), layers: zipData };
+      }
+    }
+
+    res.json({
+      neighborhood: hood,
+      business_count: businesses.length,
+      businesses,
+      sectors,
+      census_signals: censusSignals,
+      available: true
+    });
+  } catch (e) {
+    console.error('[/neighborhood]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/local-intel/zip-neighborhoods?zip=32205
+// Returns all neighborhoods that overlap a given ZIP
+router.get('/zip-neighborhoods', async (req, res) => {
+  try {
+    const { zip } = req.query;
+    if (!zip) return res.status(400).json({ error: 'zip required' });
+    const rows = await db.query(`
+      SELECT slug, name, city, region, lat, lon, business_count
+      FROM neighborhoods
+      WHERE $1 = ANY(zip_codes)
+      ORDER BY name
+    `, [zip]);
+    res.json({ zip, neighborhoods: rows });
+  } catch (e) {
+    console.error('[/zip-neighborhoods]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
