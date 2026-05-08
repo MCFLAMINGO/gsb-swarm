@@ -2085,3 +2085,10 @@ Layer 2 geo-economic intelligence overlay:
 
 #### Still Needed on Railway
 - `PERPLEXITY_API_KEY` must be set as env var — query endpoint returns 503 until set
+
+### Deferred — ZIP Intel LLM Query Key
+- `/api/local-intel/zip-intel-query` requires an LLM API key on Railway
+- Decision: swap to **Groq** (`llama-3.3-70b-instruct`) — free tier, fast
+- Requires adding `GROQ_API_KEY` to Railway env + updating endpoint in `localIntelAgent.js` (3-line swap from Perplexity to Groq)
+- Until then: query box returns 503 — all other ZIP Intel panels work fine
+- Do this in a future session
