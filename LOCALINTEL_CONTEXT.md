@@ -2360,3 +2360,76 @@ Small counties keep flat ZIP grid. Big municipalities (Jacksonville, Miami, etc.
 - Groq/llama swap for zip-intel-query (needs `GROQ_API_KEY` on Railway)
 - robots.txt sitemap entry
 - Google Search Console sitemap submission
+
+---
+
+## Session 18 — Neighborhood + ZIP Map Intelligence
+
+### New DB column
+- `zip_intelligence.boundary_geojson JSONB` — Census TIGER ZCTA polygon
+- Index: GIN on boundary_geojson WHERE NOT NULL
+
+### New Worker: workers/boundaryWorker.js
+- Fetches ZCTA polygon from Census TIGERweb REST API (free, no key)
+  - Layer 1: `PUMA_TAD_TAZ_UGA_ZCTA/MapServer/1` field `ZCTA5`
+- Stores GeoJSON geometry in `zip_intelligence.boundary_geojson`
+- Updates `lat`/`lon` from polygon centroid if not set
+- Respects `FULL_REFRESH=true`, `ZIPS=xxx,yyy` override
+- 300ms polite delay between Census requests
+- 34/49 Duval ZIPs fetched (15 skipped = PO box/military, no ZCTA)
+- Run: `ZIPS=32202,32205 node workers/boundaryWorker.js` for specific ZIPs
+- Run statewide: `node workers/boundaryWorker.js` (fetches all missing)
+
+### New API Endpoints (localIntelAgent.js — gsb-swarm commit e30637d)
+- `GET /api/local-intel/neighborhood-boundary?slug=` — returns:
+  - `neighborhood` — metadata from neighborhoods table
+  - `stats` — aggregate (sum population, weighted avg income, total_businesses, top_sectors, avg_opp_score)
+  - `intel_paragraph` — deterministic template sentence, no LLM
+  - `zip_boundaries` — array of {zip, lat, lon, population, total_businesses, boundary_geojson}
+- `GET /api/local-intel/zip-boundary?zip=` — returns:
+  - `zip_intelligence` — full census row including boundary_geojson
+  - `neighborhoods` — which neighborhoods this ZIP belongs to
+  - `sibling_boundaries` — other ZIPs in same neighborhood (for context ring)
+  - `businesses` — up to 500 active businesses with lat/lon for map dots
+
+### Navigation Flow (live at thelocalintel.com)
+- Landing page: click region name (e.g. "Downtown") → /neighborhood/downtown-jacksonville-jacksonville
+- /neighborhood/SLUG: Leaflet map of all ZIP polygons in region + stats card + intel paragraph + ZIP cards
+- /zip/XXXXX: Leaflet map with this ZIP's polygon (green outline) + faint sibling context ring + up to 500 business dots
+
+### _neighborhood-page.js (localintel-landing)
+- Self-contained: injects CSS + nav, creates #hood-app mount
+- Reads slug from window.NEIGHBORHOOD_CONFIG.slug (existing stubs) or HOOD_SLUG or pathname
+- Dark CartoDB tiles, ZIP polygons clickable → /zip/XXXXX
+- ZIP labels as div icons
+- Stats grid: population, median income, businesses, opp score, restaurants, IRS AGI
+- Top sectors bar chart (deterministic % of total)
+- Intelligence paragraph + signal chips (saturation/growth/consumer profile)
+- ZIP cards grid below map
+
+### _zip-page.js (localintel-landing)
+- Map now uses: /api/local-intel/zip-boundary instead of /api/local-intel/pins
+- Dark CartoDB tiles (matches theme)
+- Sibling ZIPs drawn first in grey (#4a5568), faint fill
+- Primary ZIP polygon in green (#00e676), fitBounds to polygon
+- Business dots: green (has website) vs grey, tooltip with name + category
+- Neighborhood backlinks shown below map (← Riverside (Historic Core))
+- Graceful fallback to old /pins endpoint if zip-boundary fails
+
+### index.html (localintel-landing)
+- Region names in Duval accordion are now links → /neighborhood/SLUG
+- .region-name-link CSS added (click name = navigate, click summary = accordion toggle)
+
+### Commits
+- gsb-swarm: e30637d — boundaryWorker + /neighborhood-boundary + /zip-boundary
+- localintel-landing: 086739d — neighborhood maps + zip maps
+- Deployed: www.thelocalintel.com ✓
+
+### Deferred
+- Run boundaryWorker statewide (all 1,473 FL ZIPs) — `node workers/boundaryWorker.js`
+  - Will take ~25 min with 300ms delay, safe to run as background job
+- Zoning layers (industrial/retail shading) — future when zoning data sourced
+- School district data seeding
+- Claimed business pins (when claim flow built)
+- Groq/llama swap for zip-intel-query (GROQ_API_KEY on Railway)
+- robots.txt sitemap entry + Google Search Console submission
