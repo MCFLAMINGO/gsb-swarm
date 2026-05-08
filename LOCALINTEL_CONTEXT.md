@@ -2092,3 +2092,35 @@ Layer 2 geo-economic intelligence overlay:
 - Requires adding `GROQ_API_KEY` to Railway env + updating endpoint in `localIntelAgent.js` (3-line swap from Perplexity to Groq)
 - Until then: query box returns 503 — all other ZIP Intel panels work fine
 - Do this in a future session
+
+### Session 17 (continued) — Shared ZIP Landing Page Architecture
+
+#### Problem Solved
+- ZIP pages existed at `/zip/XXXXX` but were not discoverable from the landing page
+- Each ZIP page was static scaffolding with no live data fetch
+- Updating one required touching 41 separate files
+
+#### Architecture Decision: Single Source of Truth
+- `_zip-page.js` — shared ZIP page engine, 480 lines, handles all DOM, styles, data fetching, rendering
+  - Fetches from `/api/local-intel/census?zip=` (Railway)
+  - Fetches from `/api/local-intel/zip?zip=` (Railway)
+  - Renders: Market Overview KPIs, Top Sectors, Growth Signals, Investment Signals, About section
+  - Each section shows live Postgres data or graceful empty state
+- `zip/XXXXX.html` — 20-line stub per ZIP, contains ONLY SEO metadata + `window.ZIP_CONFIG = {zip, name, county, lat, lon}`
+- **To update ALL 41 pages: edit `_zip-page.js` and deploy. No generator re-run needed.**
+- Generator re-run only needed when adding new ZIPs
+
+#### Files Changed (localintel-landing)
+- `_zip-page.js` — NEW: shared engine (created this session)
+- `generate-zip-pages.js` — REWRITTEN: generates 20-line stubs from ZIP list
+- `zip/*.html` — ALL 43 stubs regenerated (some existing ZIPs reformatted to stub pattern)
+- `index.html` — NEW "Explore Markets" section: 41 ZIP cards grouped by 8 counties (St. Johns, Duval, Clay, Nassau, Volusia, Flagler, Putnam, Alachua), links to `/zip/XXXXX`
+
+#### SEO Coverage
+- Every ZIP has: unique `<title>`, `<meta description>`, `og:title`, `og:description`, `<link rel="canonical">`, `application/ld+json` (Dataset schema with spatialCoverage)
+- 41 ZIP pages now indexable and discoverable from homepage
+
+#### Deployment
+- Commit: `684ae39` — feat: shared ZIP page architecture — `_zip-page.js` engine + 41 stubs + Explore Markets section on index
+- Deployed to: https://www.thelocalintel.com
+- All 41 ZIP pages live at: https://www.thelocalintel.com/zip/XXXXX
