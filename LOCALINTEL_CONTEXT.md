@@ -2020,3 +2020,46 @@ Layer 2 geo-economic intelligence overlay:
 - irsSoiWorker, censusLayerWorker, sjcArcGisWorker
 
 **Next: ZIP pages** — surface census API data (industry breakdown + permit signals) on each ZIP page for investor view. Data now available at `/api/local-intel/census?zip=`.
+## Session 17 — Hive Intelligence Layer (2026-05-07)
+
+### Vision Established
+- Workers = bees collecting daily signals (live)
+- Hive Intelligence Layer = the greater signal synthesis for the whole swarm
+- Three phases:
+  1. **NOW** — LLM query layer in dashboard (interpret Postgres data, no hallucination)
+  2. **NEXT** — ZIP opportunity scoring (deterministic math, no LLM)
+  3. **LATER** — JEPA world model synthesizer (needs time-series ZIP snapshots to train on)
+
+### census_layer_history Table (NEW)
+- Created in Postgres this session
+- Schema: `id (SERIAL PK), zip (TEXT), snapshot_date (DATE), layer_json (JSONB), confidence (JSONB), created_at (TIMESTAMPTZ)`
+- Constraint: `UNIQUE(zip, snapshot_date)` — idempotent, re-running same day is safe
+- Indexes: `idx_clh_zip`, `idx_clh_date`
+- Purpose: time-series preservation of census layer for JEPA training data + trend detection
+
+### censusLayerWorker — History Wiring
+- Added `snapshotToHistory(zip)` helper — called after every successful upsert to `census_layer`
+- Three call points: after ZBP upsert, after each CBP ZIP upsert, after each PDB ZIP upsert
+- Silent fail (warn only) — never blocks main worker flow
+- census_layer = live current state (fast reads, one row per ZIP)
+- census_layer_history = append-only time series (one row per ZIP per day)
+
+### Planned: Dashboard ZIP Intel Page (/local-intel/zip-intel)
+- ZIP selector (all 41 ZIPs)
+- Market Snapshot panel: income tier badge (from irs_agi_median), household proxy (irs_returns), wage vs investment mix
+- Industry Density panel: establishments per 1,000 residents vs county average (DENSE/BALANCED/UNDERSERVED)
+- Growth Signals panel: permit count 6mo (sjc_permits), new_units_added (PDB), growth_state (zip_intelligence)
+- Raw JSON toggle at bottom
+- LLM Query box: natural language → deterministic SQL pull → Perplexity API synthesis
+- All data from /api/local-intel/census + /api/local-intel/zip endpoints
+- INTERNAL ONLY — dashboard only, never customer-facing
+
+### Planned: LLM Query Architecture
+- User types natural language question in dashboard
+- System pulls relevant structured data from Postgres deterministically (no LLM for data fetch)
+- Perplexity API synthesizes the result into a grounded answer
+- Zero hallucination: LLM only interprets data already in Postgres, never invents facts
+- Example queries: "Which ZIPs have high income but low healthcare density?" / "Where are permits accelerating fastest?"
+
+### Session Commits (gsb-swarm)
+- `[pending]` — feat: census_layer_history table + history snapshot in censusLayerWorker

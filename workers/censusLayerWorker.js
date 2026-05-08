@@ -124,6 +124,27 @@ const NAICS_SECTORS = {
   '81':  { label: 'Other Services',                  oracle_vertical: null           },
 };
 
+// ── History snapshot helper ───────────────────────────────────────────────────
+// Appends current census_layer state to census_layer_history (one row per ZIP per day)
+// UNIQUE(zip, snapshot_date) means re-running same day is safe — idempotent upsert
+async function snapshotToHistory(zip) {
+  try {
+    const current = await pgStore.getCensusLayer(zip);
+    if (!current) return;
+    const { _confidence, ...layerJson } = current;
+    await db.query(
+      `INSERT INTO census_layer_history (zip, snapshot_date, layer_json, confidence)
+       VALUES ($1, CURRENT_DATE, $2, $3)
+       ON CONFLICT (zip, snapshot_date) DO UPDATE
+         SET layer_json  = EXCLUDED.layer_json,
+             confidence  = EXCLUDED.confidence`,
+      [zip, JSON.stringify(layerJson), JSON.stringify(_confidence || null)]
+    );
+  } catch (err) {
+    console.warn(`[censusLayer] History snapshot failed for ${zip}:`, err.message);
+  }
+}
+
 // ── HTTP helper ────────────────────────────────────────────────────────────────
 function fetchJson(url, timeoutMs = 25000) {
   return new Promise((resolve, reject) => {
@@ -262,6 +283,7 @@ async function ingestZBP(targetZips = ALL_ZIPS) {
       updated_at: new Date().toISOString(),
     };
     await pgStore.upsertCensusLayer(zip, zbpLayerData, existing._confidence || null);
+    await snapshotToHistory(zip);
   }
 
   console.log(`[censusLayer] ZBP: ingested ${Object.keys(byZip).length} ZIPs into census_layer`);
@@ -346,6 +368,7 @@ async function ingestCBP(targetZips = ALL_ZIPS) {
         }
 
         await pgStore.upsertCensusLayer(zip, existing, prevConf);
+        await snapshotToHistory(zip);
       }
 
       // Small delay between counties
@@ -553,6 +576,7 @@ async function ingestPDB(targetZips = ALL_ZIPS) {
       updated_at: new Date().toISOString(),
     };
     await pgStore.upsertCensusLayer(zip, pdbLayerData, confidence);
+    await snapshotToHistory(zip);
 
     confidenceIndex[zip] = {
       score:           dataConfidenceScore,
