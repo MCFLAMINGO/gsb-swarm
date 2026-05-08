@@ -2124,3 +2124,10 @@ Layer 2 geo-economic intelligence overlay:
 - Commit: `684ae39` — feat: shared ZIP page architecture — `_zip-page.js` engine + 41 stubs + Explore Markets section on index
 - Deployed to: https://www.thelocalintel.com
 - All 41 ZIP pages live at: https://www.thelocalintel.com/zip/XXXXX
+
+#### Accordion UX (index.html — Explore Markets)
+- Commit: `6a590b6` — county groups now collapse/expand via native `<details>`/`<summary>`
+- St. Johns County is `open` by default (home market)
+- All other counties (Duval, Clay, Nassau, Volusia, Flagler, Putnam & Alachua) collapsed by default
+- Each header shows county name + market count badge (e.g. "19 markets")
+- Chevron rotates 180° when open — pure CSS, no JS
