@@ -2188,3 +2188,38 @@ Layer 2 geo-economic intelligence overlay:
 - Re-run `generate-zip-pages.js` → new stub generated automatically
 - censusLayerWorker picks up new ZIP from zip_intelligence → starts fetching census data
 - Zero manual intervention needed for new ZIPs going forward
+
+## Session 17 (continued) — SEO + Agentic Economy Messaging
+
+### Landing Page Copy Updates (index.html)
+- Hero badge: "Northeast Florida" → "Florida Statewide"
+- Hero sub: rewritten around routing layer + agentic economy framing
+- Hero stat: "360 ZIP Codes" → "1,473 ZIP Codes"
+- How it works step 03: "Connect and get paid" → "Get your wallet. Get routed." — mentions Surge + on-chain settlement
+- For Business heading: "Your Sunbiz number is your identity" → "Your business, connected to the agentic economy"
+- For Business sub: explicitly calls out AI agents routing local service requests
+- For Business cards (3 new):
+  1. "Routed jobs, not cold leads" — AI agent routing, first verified business wins
+  2. "Your digital wallet via Surge" — Surge/Basalt wallet, on-chain instant settlement, machine-readable menu
+  3. "Join the agentic economy" — agents + voice systems already spending locally, wallet = addressable
+- Commit: `f95b2d9` — localintel-landing
+
+### ZIP Stub Evergreen Copy
+- Every ZIP stub now includes a `<noscript>` block with crawlable text — visible to Google without JS
+- Copy pattern: "[City] ([ZIP]) is a market in [County] County, Florida. LocalIntel routes live service requests, RFQ jobs, and agentic task queries to verified businesses operating in this ZIP code..."
+- Static + evergreen — no live data, never stale
+- `<noscript>` ensures Googlebot reads real text on first crawl
+
+### Sitemap
+- Rebuilt from scratch: 1,478 total URLs
+- 4 core pages + 1,474 ZIP pages at /zip/XXXXX
+- All ZIPs at priority 0.7, core pages at 0.8–1.0
+- Commit: `f95b2d9` — localintel-landing
+
+### SEO Architecture (current state)
+- Index: title, meta description, canonical, og tags, JSON-LD Dataset per ZIP ✅
+- Crawlable text: noscript evergreen copy per ZIP ✅
+- Sitemap: 1,478 URLs ✅
+- Internal links: Explore Markets section links all ZIPs from homepage ✅
+- Dynamic data: _zip-page.js fetches Railway at runtime (not crawlable, not needed for index) ✅
+- Missing: robots.txt pointing to sitemap (check/add next session)
