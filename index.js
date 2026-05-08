@@ -38,6 +38,9 @@ const workers = [
   { name: 'Yellow Pages',         file: 'workers/yellowPagesScraper.js' },
   { name: 'FL SunBiz',            file: 'workers/sunbizWorker.js' },
   { name: 'Business Merge',       file: 'workers/businessMergeWorker.js' },
+  // ── LocalIntel intelligence layers (ZIP-level economic data) ─────────────
+  { name: 'IRS SOI',              file: 'workers/irsSoiWorker.js' },
+  { name: 'Census Layer',         file: 'workers/censusLayerWorker.js' },
 ];
 
 console.log(`
