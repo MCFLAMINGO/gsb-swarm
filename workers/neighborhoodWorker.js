@@ -96,14 +96,13 @@ async function seedNeighborhoods() {
   return upserted;
 }
 
-// ── Assign businesses via bounding box ───────────────────────────────────────
+// ── Assign businesses via bounding box (bulk SQL — no row-by-row loop) ──────
 async function assignBusinesses() {
   if (FULL_REFRESH) {
     await db.query(`UPDATE businesses SET neighborhood_id=NULL, neighborhood_slug=NULL`);
     console.log('[neighborhood] FULL_REFRESH — cleared all assignments');
   }
 
-  // Load all neighborhoods with bboxes
   const hoods = await db.query(`
     SELECT id, slug, name, lat, lon, bbox, zip_codes FROM neighborhoods ORDER BY id
   `);
@@ -112,84 +111,57 @@ async function assignBusinesses() {
     return 0;
   }
 
-  // Get unassigned businesses that have lat/lon
-  const businesses = await db.query(`
-    SELECT business_id, name, lat, lon, zip
-    FROM businesses
-    WHERE lat IS NOT NULL AND lon IS NOT NULL
-      AND neighborhood_id IS NULL
-    LIMIT 50000
-  `);
+  let assigned = 0;
 
-  console.log(`[neighborhood] assigning ${businesses.length} unassigned businesses to ${hoods.length} neighborhoods`);
-
-  let assigned = 0, skipped = 0;
-
-  for (const biz of businesses) {
-    const bizLat = parseFloat(biz.lat);
-    const bizLon = parseFloat(biz.lon);
-    if (isNaN(bizLat) || isNaN(bizLon)) { skipped++; continue; }
-
-    let bestHood = null;
-
-    // First pass: bbox check
-    for (const hood of hoods) {
-      const bbox = hood.bbox;
-      if (!bbox) continue;
-      if (
-        bizLat >= bbox.south && bizLat <= bbox.north &&
-        bizLon >= bbox.west  && bizLon <= bbox.east
-      ) {
-        // If multiple match, pick closest centroid
-        if (!bestHood) {
-          bestHood = hood;
-        } else {
-          const dOld = Math.hypot(bizLat - bestHood.lat, bizLon - bestHood.lon);
-          const dNew = Math.hypot(bizLat - hood.lat,     bizLon - hood.lon);
-          if (dNew < dOld) bestHood = hood;
-        }
-      }
-    }
-
-    // Fallback: ZIP match if no bbox hit
-    if (!bestHood && biz.zip) {
-      for (const hood of hoods) {
-        if (hood.zip_codes && hood.zip_codes.includes(biz.zip)) {
-          if (!bestHood) bestHood = hood;
-        }
-      }
-    }
-
-    if (bestHood) {
-      await db.query(
-        `UPDATE businesses SET neighborhood_id=$1, neighborhood_slug=$2 WHERE business_id=$3`,
-        [bestHood.id, bestHood.slug, biz.business_id]
-      );
-      assigned++;
-    } else {
-      skipped++;
-    }
+  // Pass 1: bulk bbox UPDATE per neighborhood (one query each — scales to any size)
+  for (const hood of hoods) {
+    const bbox = hood.bbox;
+    if (!bbox) continue;
+    const pool = require('../lib/db').getPool();
+    const res = await pool.query(
+      `UPDATE businesses
+       SET neighborhood_id = $1, neighborhood_slug = $2
+       WHERE neighborhood_id IS NULL
+         AND lat IS NOT NULL AND lon IS NOT NULL
+         AND lat BETWEEN $3 AND $4
+         AND lon BETWEEN $5 AND $6`,
+      [hood.id, hood.slug, bbox.south, bbox.north, bbox.west, bbox.east]
+    );
+    const rows = res.rowCount || 0;
+    if (rows > 0) console.log(`[neighborhood] bbox: ${hood.slug} — ${rows}`);
+    assigned += rows;
   }
 
-  // Update business_count on neighborhoods
+  // Pass 2: ZIP fallback for businesses that missed all bboxes
+  for (const hood of hoods) {
+    const zips = hood.zip_codes;
+    if (!zips || !zips.length) continue;
+    const placeholders = zips.map((_, i) => `$${i + 3}`).join(',');
+    const pool = require('../lib/db').getPool();
+    const res = await pool.query(
+      `UPDATE businesses SET neighborhood_id=$1, neighborhood_slug=$2
+       WHERE neighborhood_id IS NULL AND zip IN (${placeholders})`,
+      [hood.id, hood.slug, ...zips]
+    );
+    const rows = res.rowCount || 0;
+    if (rows > 0) console.log(`[neighborhood] zip-fallback: ${hood.slug} — ${rows}`);
+    assigned += rows;
+  }
+
+  // Update business_count on all neighborhoods
   await db.query(`
     UPDATE neighborhoods n SET
       business_count = (SELECT COUNT(*) FROM businesses b WHERE b.neighborhood_id = n.id),
       updated_at = now()
   `);
 
-  console.log(`[neighborhood] assigned: ${assigned}, skipped (no match): ${skipped}`);
+  const total = await db.query('SELECT COUNT(*) as c FROM businesses WHERE neighborhood_id IS NOT NULL');
+  console.log(`[neighborhood] assigned: ${assigned} new | total in DB: ${total[0].c}`);
 
   await db.query(`INSERT INTO worker_events
     (worker_name, event_type, input_summary, output_summary, records_in, records_out, success_rate)
-    VALUES ('neighborhoodWorker','assignment_run',
-      $1, $2, $3, $4, $5)`,
-    [
-      `${businesses.length} unassigned businesses`,
-      `assigned:${assigned} skipped:${skipped}`,
-      businesses.length, assigned,
-      businesses.length ? Math.round(assigned / businesses.length * 100) / 100 : 0
-    ]
+    VALUES ('neighborhoodWorker','assignment_run',$1,$2,$3,$4,$5)`,
+    ['bulk bbox+zip', `assigned:${assigned}`, 0, assigned, 1.0]
   );
 
   return assigned;
