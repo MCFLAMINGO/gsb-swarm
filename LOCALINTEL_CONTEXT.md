@@ -1963,3 +1963,27 @@ Layer 2 geo-economic intelligence overlay:
 - `censusLayerWorker` — Census demographic overlay (worker already exists)
 - ZIP-level investment signal: new permits + government spending + zoning = market intelligence layer
 
+
+### Session 16 (continued) — ZIP Intelligence Layer Workers Wired (commit `19e6d4e`)
+
+**`irsSoiWorker`** and **`censusLayerWorker`** added to `index.js`. Both were fully built and Postgres-ready but never spawned after the flat-file migration.
+
+**irsSoiWorker** (`irs_soi` in zip_intelligence):
+- Downloads IRS SOI 2022 CSV once, caches to /tmp (re-downloads every 72h)
+- Parses all FL ZIPs (STATEFIPS=12) — computes weighted median AGI, total returns, wage share
+- Upserts to `zip_intelligence`: `irs_agi_median`, `irs_returns`, `irs_wage_share`, `irs_updated_at`
+- 24h loop, skips already-enriched ZIPs unless FULL_REFRESH=true
+
+**censusLayerWorker** (`census_layer` table via pgStore):
+- **ZBP layer** (once): ZIP Business Patterns 2018 — establishment + employee count by NAICS sector per ZIP. The answer to "how many restaurants/clinics/retailers are in ZIP X"
+- **CBP layer** (monthly): County Business Patterns 2023 — county-level sector health, derives `sector_gaps[]` (industries present at county but absent from ZIP = opportunity signal)
+- **PDB layer** (quarterly): Planning Database 2024 — data confidence score (0-100), poverty%, vacancy%, new housing units added. Stamps confidence tier (VERIFIED/ESTIMATED/PROXY/SPARSE) onto zip_intelligence
+- No API key required — all public Census endpoints
+
+**NAICS sectors tracked**: Construction (23), Retail (44/45), Finance (52), Real Estate (53), Professional Services (54), Healthcare (62), Food Service (72), and 8 others — each mapped to LocalIntel oracle_vertical
+
+**Workers now active on Railway** (full list):
+- taskSeedWorker, enrichmentFillWorker, categoryReclassWorker, searchVectorBackfillWorker (existing)
+- acsWorker (was already wired)
+- osm_overpass, yelp_public, fl_sunbiz, businessMerge (re-enabled this session)
+- irsSoiWorker, censusLayerWorker (wired this commit)
