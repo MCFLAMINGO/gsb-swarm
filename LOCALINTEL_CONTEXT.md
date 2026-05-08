@@ -1987,3 +1987,36 @@ Layer 2 geo-economic intelligence overlay:
 - acsWorker (was already wired)
 - osm_overpass, yelp_public, fl_sunbiz, businessMerge (re-enabled this session)
 - irsSoiWorker, censusLayerWorker (wired this commit)
+
+### Session 16 (continued) — SJC ArcGIS, ZBP Fix, Census API, Sunbelt Expansion (commit `1b0a1ee`)
+
+**sjcArcGisWorker** (`workers/sjcArcGisWorker.js` — NEW):
+- GIS REST base: `https://www.gis.sjcfl.us/portal_sjcgis/rest/services`
+- Fetches `activePermits` + `CO_Permits` FeatureServer endpoints using spatial bounding box over all covered ZIPs
+- Assigns ZIP by nearest centroid (WGS84 from Web Mercator conversion)
+- Classifies permit type: `commercial`, `residential`, `industrial`, `civic`, `other`
+- Upserts to `sjc_permits` table: `zip, permit_no, address, use_desc, permit_type, co_date, fetched_at`
+- Logs to `worker_events` as `sjc_arcgis`, 24h loop
+- `sjc_permits` table auto-created on first run
+
+**ZBP Fix** (`censusLayerWorker.js`):
+- Old skip logic checked only first ZIP — if CBP ran first, zbp never fired
+- New logic: skip only if ≥80% of ZIPs already have zbp in `census_layer` — otherwise runs ingestion
+- ZBP will now populate on next Railway restart
+
+**Census API Endpoint** (`localIntelAgent.js`):
+- `GET /api/local-intel/census?zip=32082`
+- Returns: `county_industry_breakdown` (NAICS sectors sorted by establishment count), `permit_signals_6mo` (from sjc_permits), `income` (IRS median AGI, returns, wage share), `pdb` (confidence, poverty, college%, new units)
+- Used by ZIP pages to surface investor-grade economic data
+
+**Sunbelt ZIP Expansion** (`censusLayerWorker.js`):
+- From 27 ZIPs → 41 ZIPs
+- Added: Mandarin (32223), Avondale (32205), Argyle (32244), Green Cove (32043), Palm Coast (32137), Flagler Beach (32136), Ormond Beach (32174), Daytona (32117/32118), New Smyrna (32168), Palatka (32177), Gainesville (32601/32608)
+- COUNTY_CONFIG expanded to include Volusia, Flagler, Putnam, Alachua counties
+
+**Workers now in index.js** (full list):
+- taskSeedWorker, enrichmentFillWorker, categoryReclassWorker, searchVectorBackfillWorker
+- acsWorker, osm_overpass, yellowpages, fl_sunbiz, businessMergeWorker
+- irsSoiWorker, censusLayerWorker, sjcArcGisWorker
+
+**Next: ZIP pages** — surface census API data (industry breakdown + permit signals) on each ZIP page for investor view. Data now available at `/api/local-intel/census?zip=`.
