@@ -43,10 +43,16 @@ const COUNTY_CONFIG = [
   { name: 'Duval',     state: '12', county: '031', fips: '12031' },
   { name: 'Clay',      state: '12', county: '019', fips: '12019' },
   { name: 'Nassau',    state: '12', county: '089', fips: '12089' },
+  // Sunbelt expansion
+  { name: 'Volusia',   state: '12', county: '127', fips: '12127' },
+  { name: 'Flagler',   state: '12', county: '035', fips: '12035' },
+  { name: 'Putnam',    state: '12', county: '107', fips: '12107' },
+  { name: 'Alachua',   state: '12', county: '001', fips: '12001' },
 ];
 
 // ── ZIP registry ───────────────────────────────────────────────────────────────
 const ALL_ZIPS = [
+  // ── St. Johns County ──────────────────────────────────────────────────────
   { zip: '32081', name: 'Nocatee',                  county: 'St. Johns', state: '12', countyFips: '109' },
   { zip: '32082', name: 'Ponte Vedra Beach',         county: 'St. Johns', state: '12', countyFips: '109' },
   { zip: '32092', name: 'World Golf Village',        county: 'St. Johns', state: '12', countyFips: '109' },
@@ -55,14 +61,11 @@ const ALL_ZIPS = [
   { zip: '32095', name: 'Palm Valley',               county: 'St. Johns', state: '12', countyFips: '109' },
   { zip: '32080', name: 'St. Augustine Beach',       county: 'St. Johns', state: '12', countyFips: '109' },
   { zip: '32259', name: 'Fruit Cove / Saint Johns',  county: 'St. Johns', state: '12', countyFips: '109' },
+  // ── Duval County (Jacksonville area) ─────────────────────────────────────
   { zip: '32250', name: 'Jacksonville Beach',        county: 'Duval',     state: '12', countyFips: '031' },
   { zip: '32266', name: 'Neptune Beach',             county: 'Duval',     state: '12', countyFips: '031' },
   { zip: '32258', name: 'Bartram Park',              county: 'Duval',     state: '12', countyFips: '031' },
   { zip: '32226', name: 'North Jacksonville',        county: 'Duval',     state: '12', countyFips: '031' },
-  { zip: '32003', name: 'Fleming Island',            county: 'Clay',      state: '12', countyFips: '019' },
-  { zip: '32034', name: 'Fernandina Beach',          county: 'Nassau',    state: '12', countyFips: '089' },
-  { zip: '32065', name: 'Orange Park / Oakleaf',     county: 'Clay',      state: '12', countyFips: '019' },
-  { zip: '32097', name: 'Yulee',                     county: 'Nassau',    state: '12', countyFips: '089' },
   { zip: '32256', name: 'Baymeadows / Tinseltown',   county: 'Duval',     state: '12', countyFips: '031' },
   { zip: '32257', name: 'Mandarin South',            county: 'Duval',     state: '12', countyFips: '031' },
   { zip: '32224', name: 'Jacksonville Intracoastal', county: 'Duval',     state: '12', countyFips: '031' },
@@ -73,7 +76,33 @@ const ALL_ZIPS = [
   { zip: '32216', name: 'Southside Blvd',            county: 'Duval',     state: '12', countyFips: '031' },
   { zip: '32217', name: 'San Jose',                  county: 'Duval',     state: '12', countyFips: '031' },
   { zip: '32207', name: 'Jacksonville Southbank',    county: 'Duval',     state: '12', countyFips: '031' },
+  { zip: '32223', name: 'Mandarin',                  county: 'Duval',     state: '12', countyFips: '031' },
+  { zip: '32206', name: 'Jacksonville Urban Core',   county: 'Duval',     state: '12', countyFips: '031' },
+  { zip: '32205', name: 'Avondale / Riverside',      county: 'Duval',     state: '12', countyFips: '031' },
+  { zip: '32210', name: 'Jacksonville Westside',     county: 'Duval',     state: '12', countyFips: '031' },
+  { zip: '32218', name: 'North Jacksonville',        county: 'Duval',     state: '12', countyFips: '031' },
+  { zip: '32244', name: 'Argyle Forest',             county: 'Duval',     state: '12', countyFips: '031' },
+  // ── Clay County ───────────────────────────────────────────────────────────
+  { zip: '32003', name: 'Fleming Island',            county: 'Clay',      state: '12', countyFips: '019' },
+  { zip: '32065', name: 'Orange Park / Oakleaf',     county: 'Clay',      state: '12', countyFips: '019' },
   { zip: '32073', name: 'Orange Park',               county: 'Clay',      state: '12', countyFips: '019' },
+  { zip: '32043', name: 'Green Cove Springs',        county: 'Clay',      state: '12', countyFips: '019' },
+  // ── Nassau County ─────────────────────────────────────────────────────────
+  { zip: '32034', name: 'Fernandina Beach',          county: 'Nassau',    state: '12', countyFips: '089' },
+  { zip: '32097', name: 'Yulee',                     county: 'Nassau',    state: '12', countyFips: '089' },
+  // ── Sunbelt Expansion — Volusia County (Daytona corridor) ─────────────────
+  { zip: '32168', name: 'New Smyrna Beach',          county: 'Volusia',   state: '12', countyFips: '127' },
+  { zip: '32174', name: 'Ormond Beach',              county: 'Volusia',   state: '12', countyFips: '127' },
+  { zip: '32117', name: 'Daytona Beach North',       county: 'Volusia',   state: '12', countyFips: '127' },
+  { zip: '32118', name: 'Daytona Beach Shores',      county: 'Volusia',   state: '12', countyFips: '127' },
+  // ── Sunbelt Expansion — Flagler County ────────────────────────────────────
+  { zip: '32136', name: 'Flagler Beach',             county: 'Flagler',   state: '12', countyFips: '035' },
+  { zip: '32137', name: 'Palm Coast',                county: 'Flagler',   state: '12', countyFips: '035' },
+  // ── Sunbelt Expansion — Putnam County ─────────────────────────────────────
+  { zip: '32177', name: 'Palatka',                   county: 'Putnam',    state: '12', countyFips: '107' },
+  // ── Sunbelt Expansion — Alachua County (Gainesville) ─────────────────────
+  { zip: '32608', name: 'Gainesville SW',            county: 'Alachua',   state: '12', countyFips: '001' },
+  { zip: '32601', name: 'Gainesville Downtown',      county: 'Alachua',   state: '12', countyFips: '001' },
 ];
 
 // ── NAICS sector reference (2-digit codes we care about) ──────────────────────
@@ -141,14 +170,21 @@ function stripMeta(layer) {
 // Vintage 2018 — pulled once on startup, never re-fetched (data doesn't change)
 
 async function ingestZBP(targetZips = ALL_ZIPS) {
-  // Skip if any ZIP already has a zbp section in Postgres
-  try {
-    const existing = await pgStore.getCensusLayer(targetZips[0]?.zip);
-    if (existing?.zbp?.zbp_vintage) {
-      console.log('[censusLayer] ZBP already ingested (Postgres has zbp section) — skipping');
-      return;
-    }
-  } catch (_) { /* fall through */ }
+  // Skip only if ZBP is present for MOST ZIPs — not just the first one
+  if (!FULL_REFRESH) {
+    try {
+      const db = require('../lib/db');
+      const rows = await db.query(
+        `SELECT COUNT(*) as cnt FROM census_layer WHERE layer_json ? 'zbp'`
+      );
+      const zbpCount = parseInt(rows[0]?.cnt || '0');
+      if (zbpCount >= targetZips.length * 0.8) {
+        console.log(`[censusLayer] ZBP already ingested (${zbpCount}/${targetZips.length} ZIPs have zbp) — skipping`);
+        return;
+      }
+      console.log(`[censusLayer] ZBP: ${zbpCount}/${targetZips.length} ZIPs have zbp — running ingestion`);
+    } catch (_) { /* fall through */ }
+  }
 
   console.log('[censusLayer] ZBP: fetching 2018 ZIP Business Patterns for all ZIPs...');
   const ZIP_LIST = targetZips.map(z => z.zip).join(',');

@@ -1409,6 +1409,81 @@ router.post('/', async (req, res) => {
 });
 
 // ── GET /api/local-intel/zones — spending zone summary ────────────────────────
+// ── Census layer endpoint — industry breakdown per ZIP ─────────────────────
+router.get('/census', async (req, res) => {
+  const { zip } = req.query;
+  if (!zip) return res.status(400).json({ error: 'zip required' });
+  try {
+    const rows = await db.query(
+      'SELECT layer_json, confidence, updated_at FROM census_layer WHERE zip = $1', [zip]
+    );
+    if (!rows.length) return res.json({ zip, available: false });
+
+    const layer = rows[0].layer_json || {};
+    const conf  = rows[0].confidence || {};
+
+    // Build clean investor-facing response
+    const cbpSectors = layer.cbp?.sectors || {};
+    const sectors = Object.entries(cbpSectors).map(([code, s]) => ({
+      naics:          code,
+      label:          s.label,
+      establishments: s.establishments,
+      employees:      s.employees,
+      payroll_k:      s.payroll_k,
+      county_emp_share_pct: s.county_emp_share_pct,
+    })).sort((a, b) => b.establishments - a.establishments);
+
+    // Permit signals from sjc_permits if available
+    let permitSignals = null;
+    try {
+      const pRows = await db.query(
+        `SELECT permit_type, COUNT(*) as cnt
+         FROM sjc_permits WHERE zip = $1 AND fetched_at > NOW() - INTERVAL '6 months'
+         GROUP BY permit_type ORDER BY cnt DESC`, [zip]
+      );
+      if (pRows.length) {
+        permitSignals = {};
+        pRows.forEach(r => { permitSignals[r.permit_type] = parseInt(r.cnt); });
+      }
+    } catch (_) {}
+
+    // IRS income data
+    let incomeData = null;
+    try {
+      const iRows = await db.query(
+        'SELECT irs_agi_median, irs_returns, irs_wage_share FROM zip_intelligence WHERE zip = $1', [zip]
+      );
+      if (iRows.length && iRows[0].irs_agi_median) {
+        incomeData = {
+          median_agi:  iRows[0].irs_agi_median,
+          total_returns: iRows[0].irs_returns,
+          wage_share_pct: iRows[0].irs_wage_share,
+        };
+      }
+    } catch (_) {}
+
+    res.json({
+      zip,
+      available:    true,
+      updated_at:   rows[0].updated_at,
+      confidence:   conf,
+      county_industry_breakdown: sectors,
+      permit_signals_6mo: permitSignals,
+      income: incomeData,
+      pdb: layer.pdb ? {
+        low_response_score: layer.pdb.low_response_score,
+        college_pct:        layer.pdb.college_pct,
+        poverty_pct:        layer.pdb.poverty_pct,
+        new_units_added:    layer.pdb.new_units_added,
+        vintage:            layer.pdb.pdb_vintage,
+      } : null,
+    });
+  } catch (e) {
+    console.error('[/census]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/zones', (req, res) => {
   const zones = loadZones();
   res.json({ ok: true, ...zones });

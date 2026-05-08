@@ -41,6 +41,7 @@ const workers = [
   // ── LocalIntel intelligence layers (ZIP-level economic data) ─────────────
   { name: 'IRS SOI',              file: 'workers/irsSoiWorker.js' },
   { name: 'Census Layer',         file: 'workers/censusLayerWorker.js' },
+  { name: 'SJC ArcGIS',          file: 'workers/sjcArcGisWorker.js' },
 ];
 
 console.log(`
