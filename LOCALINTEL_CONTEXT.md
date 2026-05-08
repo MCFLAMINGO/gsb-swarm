@@ -26,7 +26,8 @@
 ### Vercel (Landing)
 - Project ID: `prj_xYhu03Voqiw1mtpTuQPXiXf6bnmk`
 - orgId: `team_19iu8EDRFBkTdrRtK7s6oYuE`
-- Deploy method: `rsync -a --exclude='.git' /home/user/workspace/localintel-landing/ /tmp/li-deploy/` then `NODE_TLS_REJECT_UNAUTHORIZED=0 npx vercel --token $VERCEL_TOKEN --yes --prod` from `/tmp/li-deploy/`
+- Deploy method: `rsync -a --exclude='.git' /home/user/workspace/localintel-landing/ /tmp/li-deploy/` then `NODE_TLS_REJECT_UNAUTHORIZED=0 npx vercel --token $VERCEL_TOKEN --yes --prod --archive=tgz` from `/tmp/li-deploy/`
+- **MUST use `--archive=tgz`** — repo now has 1,475+ files, Vercel CLI per-file upload fails without it. Bundles as single tarball.
 
 ### Git Push Commands
 - gsb-swarm: `HOME=/home/user GIT_CONFIG_GLOBAL=/home/user/.gitconfig-proxy git push origin main` with `api_credentials=["github"]`
