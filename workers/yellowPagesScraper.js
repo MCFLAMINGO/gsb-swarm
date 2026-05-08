@@ -39,7 +39,7 @@ async function logWorkerEvent({ eventType, recordsIn, recordsOut, durationMs, er
     await db.query(
       `INSERT INTO worker_events (worker_name, event_type, records_in, records_out, duration_ms, error_message, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-      ['yelp_public', eventType, recordsIn || 0, recordsOut || 0, durationMs || 0, error || null]
+      ['yellowpages', eventType, recordsIn || 0, recordsOut || 0, durationMs || 0, error || null]
     );
   } catch (e) { console.warn('[YP] worker_events log failed:', e.message); }
 }
@@ -53,7 +53,7 @@ async function getScrapedSet() {
   try {
     const rows = await db.query(
       `SELECT meta->>'scraped_key' AS k FROM worker_events
-        WHERE worker_name = 'yelp_public'
+        WHERE worker_name = 'yellowpages'
           AND event_type = 'checkpoint'
           AND created_at > NOW() - INTERVAL '24 hours'`
     );
@@ -67,7 +67,7 @@ async function markScraped(key) {
   try {
     await db.query(
       `INSERT INTO worker_events (worker_name, event_type, meta, created_at)
-       VALUES ('yelp_public', 'checkpoint', $1::jsonb, NOW())`,
+       VALUES ('yellowpages', 'checkpoint', $1::jsonb, NOW())`,
       [JSON.stringify({ scraped_key: key })]
     );
   } catch (_) {}
