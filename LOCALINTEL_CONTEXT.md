@@ -2131,3 +2131,8 @@ Layer 2 geo-economic intelligence overlay:
 - All other counties (Duval, Clay, Nassau, Volusia, Flagler, Putnam & Alachua) collapsed by default
 - Each header shows county name + market count badge (e.g. "19 markets")
 - Chevron rotates 180° when open — pure CSS, no JS
+
+#### Explore Markets — Heading Copy
+- Commit: `8bc9be0`
+- Heading: "Building an ocean of data, one ZIP code at a time."
+- Replaced the misleading "41 ZIP codes. One intelligence layer." (which implied statewide FL coverage)
