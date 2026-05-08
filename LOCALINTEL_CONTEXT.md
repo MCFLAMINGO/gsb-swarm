@@ -2286,3 +2286,38 @@ neighborhoods (id SERIAL PK, slug TEXT UNIQUE, name TEXT, city TEXT, county TEXT
 ### Commit References
 - gsb-swarm: `b704dbc` — neighborhood architecture
 - localintel-landing: `8a4cc8f` — 36 Jacksonville neighborhood stubs
+
+---
+
+## Session 17 Continued — Duval Nested Accordion (session end)
+
+### What Changed
+- **index.html** (localintel-landing): Duval County accordion replaced with full 3-level nested structure
+  - County → 7 Regions (sub-accordions) → Neighborhood pills → ZIP cards
+  - All 51 Duval ZIPs mapped to correct regions — no more flat "Jacksonville" grid
+  - New CSS: `.county-regions`, `.region-accordion`, `.region-body`, `.hood-links`, `.hood-link`
+
+### Regions + ZIP Counts (Duval)
+| Region | ZIP Count |
+|---|---|
+| Downtown | 6 |
+| Historic Core | 5 |
+| Southside | 13 |
+| Arlington | 7 |
+| Northside | 7 |
+| Westside | 9 |
+| Beaches | 6 |
+
+### Hierarchy Confirmed
+`Florida → County → Region (sub-accordion) → Neighborhood pills → ZIP cards`
+Small counties keep flat ZIP grid. Big municipalities (Jacksonville, Miami, etc.) get Region layer.
+
+### Commit References
+- localintel-landing: `85d88f8` — Duval County: nested County→Region→Hood→ZIP accordion
+- **Deployed:** www.thelocalintel.com aliased ✓
+
+### Deferred (carry to next session)
+- neighborhoodWorker has NOT been run on Railway — `neighborhoods` table does not exist in Postgres yet
+- Groq/llama swap for zip-intel-query: needs `GROQ_API_KEY` on Railway
+- robots.txt: add `Sitemap: https://www.thelocalintel.com/sitemap.xml`
+- Google Search Console: submit sitemap manually
