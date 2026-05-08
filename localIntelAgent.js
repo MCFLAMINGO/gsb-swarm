@@ -1504,6 +1504,49 @@ router.get('/census', async (req, res) => {
   }
 });
 
+// ── All FL ZIPs — returns full FL ZIP list with county + lat/lon ────────────
+// GET /api/local-intel/zips-all
+// Used by generate-zip-pages.js and Explore Markets section to discover all ZIPs.
+// Source of truth: zip_intelligence joined against FL_ZIP_SEED metadata.
+router.get('/zips-all', async (req, res) => {
+  try {
+    // Pull all FL ZIPs from zip_intelligence (IRS SOI worker already seeded 1,109 rows)
+    // Join with census_layer for county metadata where available
+    const rows = await db.query(`
+      SELECT
+        zi.zip,
+        COALESCE(cl.layer_json->>'county', zi.county_name) AS county,
+        COALESCE(cl.layer_json->>'county_fips', zi.county_fips) AS county_fips,
+        zi.city_name AS city,
+        zi.lat,
+        zi.lon
+      FROM zip_intelligence zi
+      LEFT JOIN census_layer cl ON cl.zip = zi.zip
+      WHERE zi.zip IS NOT NULL
+      ORDER BY county, zi.zip
+    `);
+
+    // If zip_intelligence doesn't have county columns yet, fall back to FL_ZIP_SEED
+    // loaded from the census worker
+    if (rows.length === 0 || rows.every(r => !r.county)) {
+      // Return the seed data embedded in the worker
+      const seed = require('./workers/flZipSeed.json');
+      return res.json({ source: 'seed', zips: seed });
+    }
+
+    res.json({ source: 'postgres', count: rows.length, zips: rows });
+  } catch (e) {
+    console.error('[/zips-all]', e.message);
+    // Always fall back to seed — never block SEO generation
+    try {
+      const seed = require('./workers/flZipSeed.json');
+      res.json({ source: 'seed', count: seed.length, zips: seed });
+    } catch (e2) {
+      res.status(500).json({ error: e.message });
+    }
+  }
+});
+
 // ── ZIP Intel Query — LLM synthesis over Postgres data ─────────────────────
 // POST /api/local-intel/zip-intel-query
 // Body: { zip, question }

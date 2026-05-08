@@ -50,8 +50,32 @@ async function ensureSchema() {
       ADD COLUMN IF NOT EXISTS irs_agi_median NUMERIC,
       ADD COLUMN IF NOT EXISTS irs_returns INTEGER,
       ADD COLUMN IF NOT EXISTS irs_wage_share NUMERIC,
-      ADD COLUMN IF NOT EXISTS irs_updated_at TIMESTAMPTZ
+      ADD COLUMN IF NOT EXISTS irs_updated_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS county_name TEXT,
+      ADD COLUMN IF NOT EXISTS county_fips TEXT,
+      ADD COLUMN IF NOT EXISTS city_name TEXT,
+      ADD COLUMN IF NOT EXISTS lat NUMERIC,
+      ADD COLUMN IF NOT EXISTS lon NUMERIC
   `);
+  // Seed county + city + lat/lon from flZipSeed if not yet populated
+  try {
+    const unseeded = await db.query(`SELECT COUNT(*) AS cnt FROM zip_intelligence WHERE county_name IS NULL`);
+    if (parseInt(unseeded[0].cnt) > 0) {
+      const seed = require('./flZipSeed.json');
+      let seeded = 0;
+      for (const z of seed) {
+        await db.query(
+          `UPDATE zip_intelligence SET county_name=$1, county_fips=$2, city_name=$3, lat=$4, lon=$5
+           WHERE zip=$6 AND county_name IS NULL`,
+          [z.county, z.county_fips, z.city, z.lat, z.lon, z.zip]
+        );
+        seeded++;
+      }
+      console.log(`[irs-soi] seeded county/city/lat/lon for ${seeded} ZIPs`);
+    }
+  } catch (e) {
+    console.warn('[irs-soi] county seed failed (non-fatal):', e.message);
+  }
 }
 
 async function getEnrichedZipSet() {
