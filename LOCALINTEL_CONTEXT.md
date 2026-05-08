@@ -2136,3 +2136,54 @@ Layer 2 geo-economic intelligence overlay:
 - Commit: `8bc9be0`
 - Heading: "Building an ocean of data, one ZIP code at a time."
 - Replaced the misleading "41 ZIP codes. One intelligence layer." (which implied statewide FL coverage)
+
+## Session 17 (continued) — Statewide FL ZIP Expansion
+
+### What Changed
+- **Before:** 43 hardcoded ZIPs across 8 counties (NE Florida only)
+- **After:** 1,473 Florida ZIPs across all 67 counties — full state coverage
+
+### censusLayerWorker.js
+- `COUNTY_CONFIG` expanded from 8 to 67 Florida counties (all FIPS codes)
+- `ALL_ZIPS` renamed to `FL_ZIP_SEED` — now 1,473 entries (was 43)
+- `FL_ZIP_SEED` sourced from: Census ZCTA→county 2020 crosswalk + GeoNames 2023
+- `getTargetZips()` uses `FL_ZIP_SEED` as fallback — self-improves as zip_intelligence fills in
+- Commit: `b79e95f` — gsb-swarm
+
+### irsSoiWorker.js
+- `ensureSchema()` now adds: `county_name`, `county_fips`, `city_name`, `lat`, `lon` columns to `zip_intelligence`
+- On first run: seeds all 1,473 FL ZIPs with county/city/lat/lon from `workers/flZipSeed.json`
+- Self-improving: once seeded, never re-runs unless county_name IS NULL
+
+### New Files (gsb-swarm)
+- `workers/flZipSeed.json` — 1,473 FL ZIPs with city, county, county_fips, lat, lon
+
+### New API Endpoint (gsb-swarm)
+- `GET /api/local-intel/zips-all` — returns all FL ZIPs with county/city/lat/lon
+  - Primary: queries `zip_intelligence` (after irsSoiWorker seeds the columns)
+  - Fallback: serves `workers/flZipSeed.json` directly — never returns empty
+  - Used by: `generate-zip-pages.js` + future Explore Markets dynamic build
+
+### localintel-landing
+- `generate-zip-pages.js` — rewritten to fetch from Railway `/api/local-intel/zips-all`
+  - Falls back to `flZipSeed.json` if Railway unreachable
+  - Also writes `zip-county-index.json` — county→ZIP mapping for Explore Markets
+- `flZipSeed.json` — copy of seed for local fallback during generation
+- `zip-county-index.json` — build artifact: 67 counties with ZIP lists (do not edit)
+- `zip/*.html` — 1,473 stubs generated (was 43)
+- `index.html` Explore Markets — 67 county accordions, 1,473 ZIP cards, St. Johns open by default
+- Subtext updated: "1,473 Florida ZIP codes. 67 counties."
+- Deploy note: MUST use `--archive=tgz` flag — 1,475 files exceeds Vercel CLI file-upload limit
+- Commit: `6d2f94d` — localintel-landing
+
+### SEO Impact
+- 1,473 unique FL ZIP pages indexable at thelocalintel.com/zip/XXXXX
+- Every page has: title, meta description, og tags, canonical, JSON-LD Dataset schema
+- All pages load live data from Railway when available, graceful empty state if not
+
+### Self-Improvement Architecture
+- Adding a new ZIP to `businesses` table → irsSoiWorker seeds it to `zip_intelligence` (next run)
+- irsSoiWorker seeds county/city/lat/lon from flZipSeed → zips-all endpoint picks it up
+- Re-run `generate-zip-pages.js` → new stub generated automatically
+- censusLayerWorker picks up new ZIP from zip_intelligence → starts fetching census data
+- Zero manual intervention needed for new ZIPs going forward
