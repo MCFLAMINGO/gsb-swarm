@@ -2786,4 +2786,4 @@ Full RFQ loop operational end-to-end: customer submits job on quote.html → mag
 ### Commits this session
 - `gsb-swarm`: `deb10fa` — RFQ system (migration 013, rfqService, localIntelAgent, dashboard-server)
 - `gsb-swarm`: (context, this commit)
-- `localintel-landing`: (quote.html + rfq.html + vercel.json)
+- `localintel-landing`: `ce52b67` — RFQ system (quote.html + rfq.html + vercel.json)
