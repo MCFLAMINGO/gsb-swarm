@@ -2841,3 +2841,95 @@ Web form submission sends both SMS (if phone provided) and email (if email provi
 ### Commits this session
 - `gsb-swarm`: `cb7bbf2` — Customer confirmation: SMS+email after RFQ broadcast (rfqBroadcast + voiceIntake + rfqService)
 - `gsb-swarm`: (context, this commit)
+
+## Session 22 — Confirmed Jobs + Agent Profiles Full Build (2026-05-09)
+
+### Problem
+Businesses receiving job dispatches via RFQ had no structured job record, no Toast-equivalent view of confirmed work, and no way to signal completion. The skills editor in inbox.html was a simple tag cloud — businesses couldn't define what they do, how they price it, or what settlement path they prefer.
+
+### Fix
+
+**New Postgres tables** (`migrations/014_confirmed_jobs_agent_profiles.sql`):
+- `confirmed_jobs` — WHO/WHAT/WHERE/WHEN/HOW per job. source: `rfq_win|surge_purchase|manual`. status: `confirmed|in_progress|complete|cancelled`. Full customer contact, address, map_url, paid_amount, payment_method, settlement_hash, schedule_text, recurrence. Indexes on business_id, status, created_at DESC.
+- `business_agent_profiles` — industry_type (restaurant/service/professional/retail/other), services_json (service name + price rows), service_area[], specialties[], settlement_tier (surge_catalog/acp_wallet/stripe/none), wallet, surge_catalog_id, stripe_account_id, agent_json JSONB (deterministic AI-callable profile).
+
+**lib/confirmedJobs.js** (new):
+- `createConfirmedJob(params)` — inserts row, fires `notifyBusiness()` via setImmediate (non-blocking). SMS uses raw fetch to Twilio REST API (no `require('twilio')` package). Email via Resend, BCC erik@mcflamingo.com.
+- `getConfirmedJobs(business_id, { limit, status })` — fetch open/complete jobs.
+- `markComplete(job_id)` — sets status=complete, completed_at=NOW().
+- `findOpenJobForBusiness(business_id)` — most recent confirmed/in_progress job (for SMS DONE handler).
+- SMS format: WHO/WHAT/WHERE/WHEN/HOW block + Google Maps link + "Reply DONE when complete."
+
+**lib/agentProfiles.js** (new):
+- `upsertProfile(business_id, data)` — saves profile, rebuilds `agent_json` deterministically (no LLM).
+- `getProfile(business_id)` — returns profile + agent_json.
+- `buildAgentJson(biz, profile)` — constructs structured JSON that an agent can call to match a business to a job (industry, service_area, services with prices, settlement_tier, wallet, contact).
+
+**lib/rfqService.js** — `bookRfq()` now writes a `confirmed_jobs` row via setImmediate on rfq win (source: `rfq_win`).
+
+**dashboard-server.js**:
+- `POST /api/surge/webhook` — receives Surge purchase event. Resolves business by `WHERE LOWER(wallet) = LOWER($1)`. Writes confirmed_jobs row (source: `surge_purchase`). Returns `{ ok: true, job_id }`.
+- `POST /api/surge/done` — marks most recent open job complete.
+- SMS DONE handler in `handleSmsInbound` — `/^\s*DONE\s*$/i` regex on incoming message. Looks up business by `from` phone number, calls `findOpenJobForBusiness` + `markComplete`.
+
+**localIntelAgent.js**:
+- `GET /api/local-intel/confirmed-jobs?token=` — returns open confirmed jobs for token's business.
+- `POST /api/local-intel/confirmed-jobs-done` — `{ token, job_id }` marks job complete.
+- `GET /api/local-intel/agent-profile?token=` — returns business agent profile.
+- `POST /api/local-intel/agent-profile?token=` — upserts profile from inbox.html skills editor.
+
+**inbox.html (localintel-landing)**:
+- Confirmed jobs panel in Open Jobs tab: green `cj-card` cards above bid cards. Shows WHO/WHAT/WHERE/WHEN/HOW, source badge (rfq_win=blue, surge_purchase=green, manual=gray), Mark Done button, Directions (Google Maps link).
+- Skills editor rebuilt with industry tabs (Restaurant/Service/Professional/Other). Service/Professional tabs show `.svc-row` rows (service name + price). Settlement tier selector: Surge Catalog / ACP Wallet / Stripe / None.
+- `ovSaveSkills()` saves to both legacy skills endpoint and new `/api/local-intel/agent-profile` endpoint.
+
+**index.html (localintel-landing)**:
+- Discovery paragraph added above "How customers order from you" in pricing section.
+- "Simple. No subscriptions. Pay for what you use. Earn from what you know." placed in pricing section.
+
+### Bug: Routes in dashboard-server.js shadowed by app.use('/api/local-intel', localIntelRouter)
+- **Problem:** Confirmed jobs and agent-profile routes were added to dashboard-server.js. But `app.use('/api/local-intel', localIntelRouter)` is mounted BEFORE those route definitions. Express matched the prefix first and sent everything to localIntelAgent.js, which didn't have the routes yet.
+- **Fix:** Moved all `/api/local-intel/*` routes to localIntelAgent.js. dashboard-server.js only handles `/api/surge/*` (not under `/api/local-intel/`).
+- **Rule learned:** `/api/local-intel/*` routes MUST live in localIntelAgent.js router.
+
+### Bug: require('twilio') at module level caused crash
+- **Problem:** confirmedJobs.js had `const twilio = require('twilio')` at top. twilio npm package not in package.json → Railway crash on startup.
+- **Fix:** Removed twilio dependency entirely. SMS uses raw fetch to Twilio REST API, same pattern as rfqBroadcast.sendSms.
+
+### Bug: catch-all middleware swallowing /api/surge/webhook
+- **Problem:** dashboard-server.js catch-all `app.use()` at line 6778 matched POST /api/surge/webhook before the explicit route handler at line 6954. Any POST with application/json headers was proxied to the MCP server (port 3004) and returned HTML or empty. curl got the dashboard HTML instead of JSON.
+- **Fix:** Added guard at top of catch-all: `if (req.path.startsWith('/api/')) return next();` — ensures all /api/* routes fall through to their explicit handlers.
+
+### Mock businesses seeded (test data, Postgres)
+| Business | dispatch_token | business_id | industry |
+|---|---|---|---|
+| Green Lawn Pro | test-dispatch-lawn-001 | aaaaaaaa-0001-0001-0001-000000000001 | service/landscaping |
+| Premier Law Group | test-dispatch-law-002 | aaaaaaaa-0002-0002-0002-000000000002 | professional/legal |
+| Coastal Plumbing Co | test-dispatch-plumb-003 | aaaaaaaa-0003-0003-0003-000000000003 | service/plumbing |
+- 4 confirmed_jobs seeded, 3 business_agent_profiles seeded.
+- Coastal Plumbing wallet: 0xPLUMB000000000000000000000000000000003
+
+### Test results
+- Tests 1-5 (direct API for all 3 businesses, mark-done, agent-profile save/load): PASS
+- Tests 6-7 (Surge webhook): FAIL with empty/HTML response — root cause: catch-all middleware. Fixed in commit 3ab1dad.
+
+### Commits this session
+- `gsb-swarm`: `cb7bbf2` — Customer confirmation SMS+email after RFQ broadcast
+- `gsb-swarm`: `a1ae08d` — Context: session 21
+- `gsb-swarm`: `887f877` — feat: confirmed_jobs + agent_profiles full build (Phase 1-4)
+- `gsb-swarm`: `f10613e` — fix: routes must be in localIntelAgent router (not dashboard-server.js)
+- `gsb-swarm`: `c3ddb18` — fix: lazy-require twilio
+- `gsb-swarm`: `ce309d5` — fix: SMS raw fetch not twilio npm
+- `gsb-swarm`: `3ab1dad` — fix: catch-all must not swallow /api/* routes (surge webhook unreachable)
+- `gsb-swarm`: (context, this commit)
+- `localintel-landing`: `dc0bcab` — Copy: merchant discovery paragraph in inbox.html + index.html
+- `localintel-landing`: `7c0c11b` — feat: confirmed jobs panel + industry tabs + settlement tier
+
+### Deferred to next session
+- Surge webhook end-to-end test after catch-all fix deployed
+- Overview tab Surge "instant booking" panel prompt for businesses
+- Voice intake → Surge catalog item matching
+- Phone agent bid response via Surge catalog (instant accept)
+- Proof of service document upload → flat JSON
+- LocalIntel Concierge Agent on Virtuals (SOUL.md first)
+- bookRfq() confirmed_jobs service_name: pull from rfq_requests.description instead of generic "Job for X"
