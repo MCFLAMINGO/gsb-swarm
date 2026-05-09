@@ -6645,6 +6645,34 @@ async function handleSmsInbound(req, res) {
       return;
     }
 
+    // DONE — merchant marks their most recent confirmed job complete
+    if (/^\s*DONE\s*$/i.test(body)) {
+      try {
+        const db2 = require('./lib/db');
+        // Look up business by phone number
+        const [biz] = await db2.query(
+          `SELECT business_id, name FROM businesses WHERE phone = $1 AND status != 'inactive' LIMIT 1`,
+          [from]
+        );
+        if (!biz) {
+          await rfqBroadcast.sendSms(from, 'LocalIntel: Could not find a business linked to this number.');
+          return;
+        }
+        const confirmedJobs = require('./lib/confirmedJobs');
+        const job = await confirmedJobs.findOpenJobForBusiness(biz.business_id);
+        if (!job) {
+          await rfqBroadcast.sendSms(from, 'LocalIntel: No open jobs found to mark complete.');
+          return;
+        }
+        await confirmedJobs.markComplete(job.id);
+        await rfqBroadcast.sendSms(from,
+          `LocalIntel: ✅ Job complete — ${job.service_name}. Great work, ${biz.name}!`);
+        return;
+      } catch (doneErr) {
+        console.error('[sms-inbound] DONE handler error:', doneErr.message);
+      }
+    }
+
     console.log(`[sms-inbound] Unknown command from ${from}: ${body}`);
   } catch (e) {
     console.error('[sms-inbound] Error:', e.message);
@@ -6917,6 +6945,170 @@ app.use((req, res, next) => {
 })();
 
 // ── Start ─────────────────────────────────────────────────────────────────────
+
+// ── Surge webhook ─────────────────────────────────────────────────────────────
+// POST /api/surge/webhook — receives a Surge purchase, writes confirmed_jobs row
+app.post('/api/surge/webhook', express.json(), async (req, res) => {
+  try {
+    const secret = process.env.SURGE_WEBHOOK_SECRET;
+    if (secret && req.headers['x-surge-secret'] !== secret) {
+      return res.status(401).json({ error: 'invalid surge webhook secret' });
+    }
+    const {
+      orderId, merchantWallet,
+      itemName, itemDescription,
+      buyerName, buyerPhone, buyerEmail,
+      address, zip,
+      scheduledAt, scheduleText,
+      isRecurring, recurrenceNote,
+      paidAmount, settlementHash, paymentMethod,
+    } = req.body || {};
+    if (!merchantWallet || !itemName) {
+      return res.status(400).json({ error: 'merchantWallet and itemName required' });
+    }
+    const db2 = require('./lib/db');
+    const [biz] = await db2.query(
+      `SELECT business_id, name, zip AS biz_zip FROM businesses
+        WHERE LOWER(wallet) = LOWER($1) AND status != 'inactive' LIMIT 1`,
+      [merchantWallet]
+    );
+    if (!biz) {
+      console.warn(`[surge/webhook] no business for wallet ${merchantWallet}`);
+      return res.status(404).json({ error: 'business not found for wallet' });
+    }
+    const confirmedJobs = require('./lib/confirmedJobs');
+    const { job_id } = await confirmedJobs.createConfirmedJob({
+      business_id:     biz.business_id,
+      source:          'surge_purchase',
+      customer_name:   buyerName   || null,
+      customer_phone:  buyerPhone  || null,
+      customer_email:  buyerEmail  || null,
+      service_name:    itemName,
+      description:     itemDescription || null,
+      address:         address     || null,
+      zip:             zip || biz.biz_zip || null,
+      scheduled_at:    scheduledAt ? new Date(scheduledAt) : null,
+      schedule_text:   scheduleText   || null,
+      is_recurring:    !!isRecurring,
+      recurrence_note: recurrenceNote || null,
+      paid_amount:     paidAmount   ? parseFloat(paidAmount) : null,
+      payment_method:  paymentMethod || 'surge',
+      settlement_hash: settlementHash || null,
+      surge_order_id:  orderId     || null,
+    });
+    console.log(`[surge/webhook] confirmed_job created: ${job_id} biz=${biz.business_id}`);
+    return res.json({ ok: true, job_id });
+  } catch (err) {
+    console.error('[surge/webhook] error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/surge/done — mark most recent open job complete (called from SMS DONE handler)
+app.post('/api/surge/done', express.json(), async (req, res) => {
+  const { business_id } = req.body || {};
+  if (!business_id) return res.status(400).json({ error: 'business_id required' });
+  try {
+    const confirmedJobs = require('./lib/confirmedJobs');
+    const job = await confirmedJobs.findOpenJobForBusiness(business_id);
+    if (!job) return res.json({ ok: false, message: 'no open jobs found' });
+    await confirmedJobs.markComplete(job.id);
+    return res.json({ ok: true, job_id: job.id, service_name: job.service_name });
+  } catch (err) {
+    console.error('[surge/done] error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Agent Profiles ────────────────────────────────────────────────────────────
+// GET  /api/local-intel/agent-profile?token=<dispatch_token>
+// POST /api/local-intel/agent-profile?token=<dispatch_token>
+app.get('/api/local-intel/agent-profile', async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(401).json({ error: 'token required' });
+  try {
+    const db2 = require('./lib/db');
+    const [biz] = await db2.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+    const agentProfiles = require('./lib/agentProfiles');
+    const profile = await agentProfiles.getProfile(biz.business_id);
+    return res.json({ profile: profile || null });
+  } catch (err) {
+    console.error('[agent-profile GET]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/local-intel/agent-profile', express.json(), async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(401).json({ error: 'token required' });
+  try {
+    const db2 = require('./lib/db');
+    const [biz] = await db2.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+    const agentProfiles = require('./lib/agentProfiles');
+    const profile = await agentProfiles.upsertProfile(biz.business_id, req.body);
+    return res.json({ ok: true, profile });
+  } catch (err) {
+    console.error('[agent-profile POST]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/local-intel/confirmed-jobs-done?token — mark a specific job complete from dashboard
+app.post('/api/local-intel/confirmed-jobs-done', express.json(), async (req, res) => {
+  const { token, job_id } = req.body || {};
+  if (!token) return res.status(401).json({ error: 'token required' });
+  if (!job_id) return res.status(400).json({ error: 'job_id required' });
+  try {
+    const db2 = require('./lib/db');
+    const [biz] = await db2.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+    const confirmedJobs = require('./lib/confirmedJobs');
+    // Verify the job belongs to this business
+    const pool = db2.getPool();
+    const { rows: [job] } = await pool.query(
+      `SELECT id FROM confirmed_jobs WHERE id = $1 AND business_id = $2`,
+      [job_id, biz.business_id]
+    );
+    if (!job) return res.status(404).json({ error: 'job not found' });
+    const done = await confirmedJobs.markComplete(job_id);
+    return res.json({ ok: true, job_id, service_name: done.service_name });
+  } catch (err) {
+    console.error('[confirmed-jobs-done] error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/local-intel/confirmed-jobs?token=<dispatch_token>&status=confirmed
+app.get('/api/local-intel/confirmed-jobs', async (req, res) => {
+  const { token, status } = req.query;
+  if (!token) return res.status(401).json({ error: 'token required' });
+  try {
+    const db2 = require('./lib/db');
+    const [biz] = await db2.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+    const confirmedJobs = require('./lib/confirmedJobs');
+    const jobs = await confirmedJobs.getConfirmedJobs(biz.business_id, { status: status || null });
+    return res.json({ jobs });
+  } catch (err) {
+    console.error('[confirmed-jobs GET]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`[gsb-dashboard] Listening on port ${PORT}`);
 
