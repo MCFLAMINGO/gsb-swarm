@@ -2684,3 +2684,43 @@ Then ran VACUUM ANALYZE businesses to reclaim dead tuple space.
 - `idx_businesses_zip_cat`      — 5 MB, 1.3M scans ✓ (hottest index)
 - `businesses_pkey`             — 15 MB, 5.5M scans ✓
 - `idx_businesses_zip`          — 5.8 MB, 439k scans ✓
+
+---
+
+## Session 18 — Full Session Summary
+
+### Neighborhood + ZIP Maps
+- Census TIGER polygon boundaries fetched for 34 Duval ZIPs → `zip_intelligence.boundary_geojson`
+- `lib/fetchZctaBoundary.js` — shared util, used by boundaryWorker + oracleWorker + irsSoiWorker
+- Boundary fetch wired into pipeline: every new ZIP auto-fetches polygon at ingest (fire-and-forget)
+- `/api/local-intel/neighborhood-boundary?slug=` — aggregate stats + merged polygons for region page
+- `/api/local-intel/zip-boundary?zip=` — single ZIP polygon + sibling context + 500 business dots
+- `_neighborhood-page.js` — Leaflet dark map, stats card, intel paragraph, ZIP cards, self-contained CSS
+- `_zip-page.js` — ZIP polygon (green), sibling ZIPs (faint grey), business dots, neighborhood backlink
+- Region names in Duval accordion now link to `/neighborhood/SLUG`
+
+### Data Quality
+- **City field**: 179k FL businesses normalized to Census city via `zip_intelligence.city_name`
+- **Description text**: 1,083 template descriptions rewritten — "in Lake Buena Vista, FL" → correct city
+- **Pipeline**: `upsertBusiness()` in `lib/db.js` now normalizes city + description at write time permanently
+- **Bad Starbucks**: VA phone/address record → `status=inactive`, flagged `wrong_location_record`
+- **Person names**: 488+ records (`Lastname, Firstname` pattern) → `status=inactive`
+- **Susan Gambardella**: `First Last` format slipped through regex — deactivated directly
+- **Non-FL phones**: 3,154 records flagged `bad_phone_area_code`, `needs_review=true` (toll-free excluded)
+- **Intent router**: `detectOrderItemPartial()` now has `NON_FOOD_RE` guard — real estate/service queries no longer trigger "Which restaurant?" two-turn flow
+
+### Postgres Disk Cleanup
+- Alert: volume at 95% (3.49 GB)
+- Root cause: `idx_businesses_embedding` — 1,694 MB vector index, 0 scans ever
+- Dropped 6 dead indexes, ran VACUUM ANALYZE
+- **3,490 MB → 1,771 MB — 1.72 GB freed**
+- `embedding` column data preserved — index can be rebuilt when semantic search query path exists
+
+### Commits this session
+- `localintel-landing`: `086739d` — neighborhood + ZIP maps
+- `gsb-swarm`: `e30637d` — boundaryWorker + neighborhood-boundary + zip-boundary endpoints
+- `gsb-swarm`: `9fc63be` — boundary auto-fetch in ZIP pipeline (fetchZctaBoundary shared lib)
+- `gsb-swarm`: `0c01cab` — ORDER_ITEM_PARTIAL non-food guard
+- `gsb-swarm`: `3b8d603` — city normalization at ingest + person-name suppression
+- `gsb-swarm`: `e13b425` — description city fix at ingest
+- `gsb-swarm`: `bd174f7` — context: Postgres disk cleanup
