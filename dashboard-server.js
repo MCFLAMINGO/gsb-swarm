@@ -6776,6 +6776,9 @@ app.post('/api/rfq/email-inbound', express.json(), async (req, res) => {
 // No proxy needed — dashboard-server.js is the Railway entry point
 
 app.use((req, res, next) => {
+  // ── Guard: never swallow /api/* routes — they must be handled by explicit handlers above
+  if (req.path.startsWith('/api/')) return next();
+
   // ── MCP catch-all: Smithery/scanner sends POST with JSON-RPC to root or unknown paths
   // Detect by Content-Type + Accept header — route to internal MCP server, not HTML
   const acceptsEventStream = (req.headers['accept'] || '').includes('text/event-stream');
