@@ -2486,3 +2486,40 @@ through to the correct intent handler (out_of_scope, service RFQ, or name search
 
 ### Commit
 - gsb-swarm: 0c01cab — non-food guard in ORDER_ITEM_PARTIAL
+
+---
+
+## Session 18 — Data Quality Fixes
+
+### Problems fixed
+1. **City field dirty data** — Yellow Pages/OSM city field contains HQ city, not store city
+   - "Palm Valley Fish Camp" showing as "Lake Buena Vista"
+   - 676 of 732 businesses in 32082 had NULL city
+   - 22,268 statewide had wrong city
+2. **Wrong-location records** — Starbucks with Virginia (757) area code in 32082
+3. **Person names as businesses** — "Ghafoor, Ammara", "Susan Gambardella" surfacing in results
+4. **Intent routing** — "I would like to rent a property" triggering "Which restaurant?" response
+
+### Fixes applied (Postgres — one-time data repair)
+- **Fix 1**: `UPDATE businesses SET city = zip_intelligence.city_name WHERE zip matches` — 179k rows normalized
+- **Fix 2**: `bad_phone_area_code` flag added to 3,154 records with non-FL, non-toll-free area codes
+- **Fix 3**: Starbucks VA record → `status='inactive'`, flagged `wrong_location_record`
+- **Fix 4**: 488 records matching `^Lastname, Firstname$` pattern → flagged `likely_person_not_business`
+
+### Code changes (commit 3b8d603)
+- `lib/db.js` — `upsertBusiness()` now does Step 0: normalize city from `zip_intelligence.city_name`
+  at ingest time. Every new business gets Census-authoritative city. Source city field ignored.
+- `localIntelAgent.js` — `BASE_SELECT` now excludes `likely_person_not_business` records from all
+  consumer-facing search results
+- `localIntelAgent.js` — `detectOrderItemPartial()` has NON_FOOD_RE guard blocking rent/property/
+  service phrases from triggering the "which restaurant?" two-turn flow
+
+### quality_flags values in use
+- `likely_person_not_business` — suppressed from search results entirely
+- `bad_phone_area_code` — shown in results, `needs_review=true`, manual verification needed
+- `wrong_location_record` — status=inactive, not shown in results
+
+### Remaining data issues (deferred)
+- 3,154 records with non-FL area codes still active — need manual review or re-enrichment
+- Some records have no lat/lon — need geocoding pass
+- "Susan Gambardella" is a person name but also possibly a venue — needs human review
