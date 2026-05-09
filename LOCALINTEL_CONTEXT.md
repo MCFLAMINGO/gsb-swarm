@@ -2617,3 +2617,31 @@ was baked into the `description` column as a template string from Yellow Pages i
 - "Palm Valley Fish Camp is a seafood restaurant in **Ponte Vedra Beach**, FL 32082. Call (904) 285-3200." ✓
 - All 1,083 template descriptions corrected in Postgres
 - Future ingests auto-corrected at write time
+
+---
+
+## Session 18 — Person-Name Records Fix (Problem / Fix / Result)
+
+### Problem
+Susan Gambardella still showing in search results despite `likely_person_not_business` flag.
+Root cause: the flag suppression in `BASE_SELECT` was working, but Susan Gambardella had
+`quality_flags: []` — the regex `^Lastname, Firstname$` only matched `Last, First` format,
+not `First Last` format. So she was never flagged to begin with.
+
+### Fix
+- Set `status='inactive'` directly on Susan Gambardella
+- Set `status='inactive'` on ALL 488 `likely_person_not_business` records
+  (better than query-time suppression — `status != 'inactive'` already filters everywhere)
+- `BASE_SELECT` quality_flag suppression is now redundant but kept as defense-in-depth
+
+### Result
+- Susan Gambardella: `status=inactive` ✓
+- 488 person-name records: all `status=inactive`, 0 still active ✓
+- `status='inactive'` is the single authoritative suppression mechanism — applies to ALL
+  query paths, not just BASE_SELECT
+
+### Note for future ingests
+Person-name detection pattern only catches `Lastname, Firstname` format.
+`First Last` names that are not real businesses (e.g. individual YellowPages listings
+for real estate agents, lawyers, etc.) require a different signal — ideally category
+filtering (e.g. `LocalBusiness` with no real category + person-name heuristics).
