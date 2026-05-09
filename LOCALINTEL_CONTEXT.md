@@ -2787,3 +2787,20 @@ Full RFQ loop operational end-to-end: customer submits job on quote.html → mag
 - `gsb-swarm`: `deb10fa` — RFQ system (migration 013, rfqService, localIntelAgent, dashboard-server)
 - `gsb-swarm`: (context, this commit)
 - `localintel-landing`: `ce52b67` — RFQ system (quote.html + rfq.html + vercel.json)
+
+## Session 20 addendum — Dashboard consolidation (inbox.html ← merchant.html)
+
+**Problem:** Two separate dashboard pages (inbox.html + merchant.html) with two different auth flows. Magic link email sent to inbox.html but merchant.html had all the stats/skills/wallet panels, reachable only through a separate /login flow. Confusing for business owners.
+
+**Fix:**
+- Extended `GET /api/local-intel/inbox` to return all dashboard intelligence fields: stats (total_routed, this_month, rfq_sent, rfq_matched), top_queries, surge_menu, wallet, address, category_group, claimed. One API call feeds the complete page.
+- Added Overview tab to inbox.html with full merchant dashboard content: completion score bar, stats row, agent economy explainer, agent skills editor (tag input, live preview), ordering/Surge panel, queries, wallet (3 states: funded/connected/none). Same dark design tokens as inbox.
+- merchant.html → redirect to inbox.html?token=, preserving token param.
+- All `merchant.html?token=` URLs in localIntelAgent.js → `inbox.html?token=`. /merchant/request-link email now sends to inbox.html.
+
+**Result:** One URL, one token, complete business dashboard. Magic link email lands on the right page. merchant.html still works via redirect for any old bookmarks.
+
+**Commits:**
+- `gsb-swarm`: `decfd43` — inbox API extension + URL unification
+- `gsb-swarm`: (context, this commit)
+- `localintel-landing`: (inbox.html + merchant.html redirect)
