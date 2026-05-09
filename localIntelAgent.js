@@ -4959,7 +4959,8 @@ router.get('/search', async (req, res) => {
     const BASE_SELECT = `SELECT name, zip, address, city, phone, website, category, category_group,
       description, tags, hours, hours_json, price_tier, services_text,
       lat, lon, confidence_score, claimed_at, wallet, status
-      FROM businesses WHERE status != 'inactive'`;
+      FROM businesses WHERE status != 'inactive'
+      AND NOT ('likely_person_not_business' = ANY(COALESCE(quality_flags, ARRAY[]::text[])))`;
 
     // Deflect out-of-scope queries gracefully
     if (nlDeflect) {
