@@ -2455,3 +2455,34 @@ Small counties keep flat ZIP grid. Big municipalities (Jacksonville, Miami, etc.
 
 ### Commit
 - gsb-swarm: 9fc63be — boundary auto-fetch wired into ZIP pipeline
+
+---
+
+## Session 18 — Intent routing bug fix
+
+### Bug
+"I would like to rent a property on the beach in south ponte vedra" was triggering
+the ORDER_ITEM_PARTIAL two-turn flow, responding with "Which restaurant would you
+like rent a property on the beach from?" — clearly wrong.
+
+### Root cause
+`_ORDER_ITEM_PARTIAL_RE` matches `I would like [anything]` — "I would like to rent..."
+hit the pattern because the regex didn't distinguish food items from other intents.
+
+### Fix (localIntelAgent.js — commit 0c01cab)
+Added `NON_FOOD_RE` guard in `detectOrderItemPartial()` — after itemQuery is
+extracted, test it against a blocklist of non-food verbs/nouns:
+`rent, lease, buy, property, condo, house, landscap, plumb, service, reservation,
+hire, find a, search for, know where, tell me, hotel, travel, airbnb, vrbo...`
+
+If the itemQuery matches, returns `{ isPartial: false }` and lets the query fall
+through to the correct intent handler (out_of_scope, service RFQ, or name search).
+
+### Behaviour after fix
+- "I would like to rent a property" → falls through to out_of_scope deflection
+- "I would like to rent a hotel room" → same
+- "I would like a burger" → still correctly triggers ORDER_ITEM_PARTIAL ("Which restaurant?")
+- "I would like some tacos" → still correct
+
+### Commit
+- gsb-swarm: 0c01cab — non-food guard in ORDER_ITEM_PARTIAL
