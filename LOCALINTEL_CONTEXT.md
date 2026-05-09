@@ -2724,3 +2724,11 @@ Then ran VACUUM ANALYZE businesses to reclaim dead tuple space.
 - `gsb-swarm`: `3b8d603` — city normalization at ingest + person-name suppression
 - `gsb-swarm`: `e13b425` — description city fix at ingest
 - `gsb-swarm`: `bd174f7` — context: Postgres disk cleanup
+
+## Session 19 — Business Login Nav Link (2026-05-09)
+
+**Problem:** No path from thelocalintel.com homepage to the merchant dashboard. Returning business owners had no visible entry point — the "Already claimed?" ghost link was buried in the hero and easy to miss. Mobile menu had no login link at all.
+
+**Fix:** Added "Business Login" link to desktop nav (after Search) and mobile menu (before Claim CTA) in `index.html`. Points to `/login` — the existing magic-link email flow that sends merchants their dashboard link.
+
+**Result:** Business owners can now find their way back to their merchant dashboard from any page load. Commit `3b2035f` (localintel-landing).
