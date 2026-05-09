@@ -2523,3 +2523,78 @@ through to the correct intent handler (out_of_scope, service RFQ, or name search
 - 3,154 records with non-FL area codes still active — need manual review or re-enrichment
 - Some records have no lat/lon — need geocoding pass
 - "Susan Gambardella" is a person name but also possibly a venue — needs human review
+
+---
+
+## Session 18 — Data Quality (Problem / Fix / Result)
+
+### Problem 1: City field contained bad data from scrapers
+Yellow Pages and OSM store the business HQ city, not the store location city.
+"Palm Valley Fish Camp" (Ponte Vedra Beach) showed city = "Lake Buena Vista".
+676 of 732 businesses in 32082 had NULL city. 22,268 statewide had wrong city.
+
+**Fix:** One-time `UPDATE businesses SET city = zip_intelligence.city_name WHERE zip matches`.
+Then wired city normalization into `upsertBusiness()` in `lib/db.js` — Step 0 now looks up
+`zip_intelligence.city_name` by ZIP before any INSERT. Source city field is permanently ignored.
+
+**Result:** 179,000 FL business records corrected. Every future ingest gets Census-authoritative city.
+"Palm Valley Fish Camp" now shows "Ponte Vedra Beach". No bad city data going forward.
+
+---
+
+### Problem 2: Wrong-location record (Starbucks with Virginia phone/address in ZIP 32082)
+A `flat_backfill` record had `city = Ponte Vedra Beach` but `phone = +1 757-991-0940` (Virginia)
+and no real address. It surfaced in "where should I eat in Ponte Vedra" results.
+
+**Fix:** `UPDATE businesses SET status='inactive', needs_review=true, quality_flags=['wrong_location_record']`
+where ZIP=32082 AND name ILIKE '%starbucks%' AND phone LIKE '%757%'.
+
+**Result:** Record is inactive and filtered from all search results. The legitimate Starbucks Coffee
+(904 area code, correct TPC Blvd address) remains active.
+
+---
+
+### Problem 3: Person names surfacing as businesses
+"Ghafoor, Ammara" and "Susan Gambardella" (Lastname, Firstname pattern) were showing as
+bar/LocalBusiness results in 32082 restaurant searches.
+
+**Fix:** Pattern-matched `^[A-Z][a-z]+,\s+[A-Z][a-z]+$` across all FL businesses.
+Flagged `likely_person_not_business` + `needs_review=true` on 488 records.
+Added to `BASE_SELECT` in `localIntelAgent.js`:
+`AND NOT ('likely_person_not_business' = ANY(COALESCE(quality_flags, ARRAY[]::text[])))`.
+
+**Result:** 488 person-name records permanently suppressed from all consumer-facing search results.
+They remain in the DB for potential correction/re-categorization.
+
+---
+
+### Problem 4: 3,154 businesses with non-Florida area codes
+Non-FL, non-toll-free phone numbers (212 NY, 815 IL, 205 AL, etc.) on FL ZIP businesses.
+Mix of OSM data quality issues and corporate records with HQ phone numbers.
+
+**Fix:** Flagged `bad_phone_area_code` + `needs_review=true`. Toll-free (800/888/877/866/855/844/833)
+excluded — those are valid for any US business. Records remain `active` but flagged.
+
+**Result:** 3,154 records marked for human review. Visible in results but tracked for future
+re-enrichment or deactivation.
+
+---
+
+### Problem 5: Intent router sending "I would like to rent a property" → "Which restaurant?"
+`_ORDER_ITEM_PARTIAL_RE` matched `I would like [anything]` — real estate and service queries
+were triggering the food-order two-turn flow.
+
+**Fix:** Added `NON_FOOD_RE` guard in `detectOrderItemPartial()`. Blocklist includes:
+rent, lease, buy, property, condo, house, home, landscap, plumb, service, reservation,
+hire, find a, search for, hotel, travel, airbnb, vrbo, and similar non-food verbs/nouns.
+If extracted itemQuery matches, returns `{ isPartial: false }` and falls through correctly.
+
+**Result:** Non-food queries now route to out-of-scope deflection or correct service RFQ handler.
+Food item queries ("I would like a burger") still correctly trigger "Which restaurant?".
+
+---
+
+### Commits
+- gsb-swarm: `0c01cab` — ORDER_ITEM_PARTIAL non-food guard
+- gsb-swarm: `3b8d603` — city normalization at ingest + person-name suppression + area code flags
+- gsb-swarm: `aa1f6a0` — context
