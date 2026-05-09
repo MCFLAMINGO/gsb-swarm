@@ -4479,6 +4479,12 @@ function detectOrderItemPartial(raw) {
   if (!itemQuery || itemQuery.length < 2) return { isPartial: false, itemQuery: null };
   // Reject pure routing words.
   if (/^(?:food|some\s+food)$/i.test(itemQuery)) return { isPartial: false, itemQuery: null };
+
+  // Guard: reject clearly non-food phrases — real estate, services, info requests, etc.
+  // "rent a property", "find a landscaper", "know where", "book a table", etc.
+  const NON_FOOD_RE = /\b(?:rent|lease|buy|purchase|book(?:\s+a\s+(?:room|table|reservation|appointment|flight|hotel|venue))?|property|condo|apartment|house|home|land|real\s*estate|landscap|plumb|electr|construct|repair|install|service(?:s)?|appointment|reservation|hire|find\s+a|search\s+for|know\s+where|tell\s+me|show\s+me|recommend\s+a|suggest\s+a|looking\s+for\s+a\s+(?:home|house|property|place\s+to\s+live)|move|relocat|invest|hotel|vacation|travel|flight|airbnb|vrbo)\b/i;
+  if (NON_FOOD_RE.test(itemQuery)) return { isPartial: false, itemQuery: null };
+
   return { isPartial: true, itemQuery };
 }
 
