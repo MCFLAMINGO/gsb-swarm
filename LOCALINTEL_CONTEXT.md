@@ -2645,3 +2645,42 @@ Person-name detection pattern only catches `Lastname, Firstname` format.
 `First Last` names that are not real businesses (e.g. individual YellowPages listings
 for real estate agents, lawyers, etc.) require a different signal — ideally category
 filtering (e.g. `LocalBusiness` with no real category + person-name heuristics).
+
+---
+
+## Session 18 — Postgres Disk Cleanup (Problem / Fix / Result)
+
+### Problem
+Railway alert: Postgres-SUNX volume at 95% capacity (3.49 GB used).
+
+### Root cause
+`idx_businesses_embedding` — a pgvector index on the `embedding` column — was consuming
+1,694 MB with **0 scans and 0 reads** ever. Embeddings were generated for all 240k businesses
+but no query path in gsb-swarm ever uses `ORDER BY embedding <-> $1`. Dead weight.
+5 additional zero-scan indexes added another ~26 MB.
+
+### Fix
+Dropped 6 dead indexes (CONCURRENTLY — no downtime):
+- `idx_businesses_embedding`  — 1,694 MB (vector index, 0 scans)
+- `idx_businesses_state_cat`  — 7.7 MB (0 scans)
+- `idx_businesses_state`      — 6.6 MB (0 scans)
+- `idx_businesses_state_zip`  — 5.9 MB (0 scans)
+- `idx_businesses_sunbiz_doc` — 5.5 MB (duplicate of businesses_sunbiz_doc_number_key)
+- `businesses_cuisine_idx`    — 16 kB (0 scans)
+Then ran VACUUM ANALYZE businesses to reclaim dead tuple space.
+
+### Result
+**3,490 MB → 1,771 MB. 1.72 GB freed. Volume ~50% full.**
+
+### Embedding column status
+- `embedding` column KEPT — 240k vectors preserved, no re-generation needed
+- Index dropped — can be recreated with `CREATE INDEX idx_businesses_embedding ON businesses USING ivfflat (embedding vector_cosine_ops)`
+- Re-introduce when: (1) query path using `<->` operator exists in code, (2) 1,000+ claimed
+  businesses have rich content worth semantic search, (3) selective index on claimed-only rows
+
+### Active indexes (all with real scan counts)
+- `idx_businesses_name_trgm`    — 48 MB, 25k scans ✓
+- `idx_businesses_name_zip`     — 19 MB, 207k scans ✓
+- `idx_businesses_zip_cat`      — 5 MB, 1.3M scans ✓ (hottest index)
+- `businesses_pkey`             — 15 MB, 5.5M scans ✓
+- `idx_businesses_zip`          — 5.8 MB, 439k scans ✓
