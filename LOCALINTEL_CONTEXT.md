@@ -2804,3 +2804,40 @@ Full RFQ loop operational end-to-end: customer submits job on quote.html → mag
 - `gsb-swarm`: `decfd43` — inbox API extension + URL unification
 - `gsb-swarm`: (context, this commit)
 - `localintel-landing`: (inbox.html + merchant.html redirect)
+
+## Session 21 — Customer Confirmation after RFQ Broadcast (2026-05-09)
+
+### Problem
+After an RFQ was broadcast to local providers, the customer received nothing — no SMS, no email, no idea which businesses were contacted. The only confirmation was the initial "we're finding providers" TwiML voice message. Customer had no way to follow up directly with providers while waiting.
+
+### Fix
+
+**rfqBroadcast.broadcastJob()** (`lib/rfqBroadcast.js`):
+- Changed return from bare `count` (number) to `{ count, providers: [{name, phone, email}] }`
+- Tracks `notifiedProviders[]` array during the broadcast loop — appended on each successful SMS or email send
+- Fixed no-providers early return to also return `{ count: 0, providers: [] }` (was returning bare 0, would break destructuring)
+
+**voiceIntake.postVoiceRfq()** (`lib/voiceIntake.js`):
+- Updated `.then(count =>` to `.then(async ({ count, providers }) =>` to handle new return shape
+- After broadcast resolves, sends follow-up SMS to caller with provider list (max 5, name + phone) and rfq track link: `thelocalintel.com/rfq/{token}`
+- Format: "LocalIntel: We sent your job to X providers nearby:\n1. Name — phone\n...\nTrack bids: [url]\nYou can also call them directly while you wait."
+- No-providers path: sends fallback SMS "We don't have [category] providers in [zip] right now"
+
+**rfqService.createRfq()** (`lib/rfqService.js`):
+- After `await Promise.all(notifyPromises)`, sends customer confirmation if `matched_count > 0` and `customer_phone` or `customer_email` is set
+- SMS: Twilio via `customer_phone`, same format as voice follow-up (provider list + quote_url)
+- Email: Resend via `customer_email`, BCC erik@mcflamingo.com — provider list + quote_url + call-them-directly note; signed "LocalIntel Data Services | Erik Osol"
+- Both fire only when matched_count > 0 — silent if no providers found (warning already in return payload)
+
+### Result
+Customer always knows who was contacted. After any RFQ submission (voice or web form), they receive:
+- The list of businesses notified (name + phone, max 5)
+- A direct link to track bids: thelocalintel.com/rfq/{token}
+- A prompt to call providers directly while waiting
+
+Voice intake says: "We sent your job to X providers nearby" then sends follow-up SMS.
+Web form submission sends both SMS (if phone provided) and email (if email provided).
+
+### Commits this session
+- `gsb-swarm`: `cb7bbf2` — Customer confirmation: SMS+email after RFQ broadcast (rfqBroadcast + voiceIntake + rfqService)
+- `gsb-swarm`: (context, this commit)
