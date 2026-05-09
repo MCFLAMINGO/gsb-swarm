@@ -6616,3 +6616,88 @@ router.get('/zip-boundary', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// ── Confirmed Jobs ─────────────────────────────────────────────────────────────
+// GET /api/local-intel/confirmed-jobs?token=<dispatch_token>&status=<optional>
+router.get('/confirmed-jobs', async (req, res) => {
+  const { token, status } = req.query;
+  if (!token) return res.status(401).json({ error: 'token required' });
+  try {
+    const [biz] = await db.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+    const confirmedJobs = require('./lib/confirmedJobs');
+    const jobs = await confirmedJobs.getConfirmedJobs(biz.business_id, { status: status || null });
+    return res.json({ jobs });
+  } catch (err) {
+    console.error('[confirmed-jobs GET]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/local-intel/confirmed-jobs-done — mark a job complete from dashboard UI
+router.post('/confirmed-jobs-done', express.json(), async (req, res) => {
+  const { token, job_id } = req.body || {};
+  if (!token) return res.status(401).json({ error: 'token required' });
+  if (!job_id) return res.status(400).json({ error: 'job_id required' });
+  try {
+    const [biz] = await db.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+    const pool = db.getPool();
+    const { rows: [job] } = await pool.query(
+      `SELECT id FROM confirmed_jobs WHERE id = $1 AND business_id = $2`,
+      [job_id, biz.business_id]
+    );
+    if (!job) return res.status(404).json({ error: 'job not found' });
+    const confirmedJobs = require('./lib/confirmedJobs');
+    const done = await confirmedJobs.markComplete(job_id);
+    return res.json({ ok: true, job_id, service_name: done.service_name });
+  } catch (err) {
+    console.error('[confirmed-jobs-done]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Agent Profile ──────────────────────────────────────────────────────────────
+// GET  /api/local-intel/agent-profile?token=<dispatch_token>
+// POST /api/local-intel/agent-profile?token=<dispatch_token>
+router.get('/agent-profile', async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(401).json({ error: 'token required' });
+  try {
+    const [biz] = await db.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+    const agentProfiles = require('./lib/agentProfiles');
+    const profile = await agentProfiles.getProfile(biz.business_id);
+    return res.json({ profile: profile || null });
+  } catch (err) {
+    console.error('[agent-profile GET]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/agent-profile', express.json(), async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(401).json({ error: 'token required' });
+  try {
+    const [biz] = await db.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+    const agentProfiles = require('./lib/agentProfiles');
+    const profile = await agentProfiles.upsertProfile(biz.business_id, req.body);
+    return res.json({ ok: true, profile });
+  } catch (err) {
+    console.error('[agent-profile POST]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
