@@ -2732,3 +2732,58 @@ Then ran VACUUM ANALYZE businesses to reclaim dead tuple space.
 **Fix:** Added "Business Login" link to desktop nav (after Search) and mobile menu (before Claim CTA) in `index.html`. Points to `/login` — the existing magic-link email flow that sends merchants their dashboard link.
 
 **Result:** Business owners can now find their way back to their merchant dashboard from any page load. Commit `3b2035f` (localintel-landing).
+
+## Session 20 — RFQ / Quote System (Angie's List Competitor) (2026-05-09)
+
+### Problem
+LocalIntel had no mechanism for customers to solicit competitive bids from local service businesses, and no way for businesses to respond with quotes. There was no affiliate/referral tracking, no customer identity system (magic link), and no loser-notification flow.
+
+### Fix
+
+**Migration 013** (`migrations/013_rfq_quote_system.sql`):
+- `rfq_requests`: added `customer_phone`, `customer_email`, `magic_token` (UUID, unique), `ref_tag` (affiliate), `bid_window_type` (same_day/standard/large_job), `is_same_day` (bool)
+- `rfq_responses`: added `eta_text` (freeform availability string), `business_phone`, `loser_notified` (bool)
+
+**rfqService.js** (`lib/rfqService.js`):
+- `computeBidWindow(budget, is_same_day, override)` — budget ≥ $5,000 → 72h; same_day → 4h; default → 24h
+- `createRfq()` — auto-sets deadline_minutes via computeBidWindow, generates magic_token, returns quote_url (`thelocalintel.com/rfq/{token}`)
+- `submitResponse()` — accepts eta_text + business_phone
+- `getRfqStatus(token)` — accepts UUID rfq_id OR magic_token (UUID regex detection)
+- `bookRfq()` — marks winner accepted, fires loser notifications via setImmediate (fire-and-forget), sets loser_notified=true
+
+**localIntelAgent.js** (3 new endpoints):
+- `POST /rfq/submit` — create RFQ, return magic_token + quote_url
+- `GET /rfq/status/:token` — poll endpoint; accepts rfq_id or magic_token; agent + browser safe
+- `POST /rfq/book` — select winning bid; triggers loser notify
+
+**dashboard-server.js** (SMS inbound):
+- Parses `YES $150 tomorrow 9am` → price=$150, eta_text="tomorrow 9am"
+- Upserts into rfq_responses via submitResponse
+
+**quote.html** (new page):
+- Job submission form: category picker, description, ZIP, budget, same-day toggle
+- Bid window badge auto-updates as user enters budget / toggles same-day
+- Contact fields (phone + email) for magic link delivery
+- ref_tag read from URL `?ref=` — tracked for affiliate revenue attribution
+- Success state shows magic link to rfq/{token} page
+
+**rfq.html** (new page):
+- Reads magic_token from `window.location.pathname.split('/').filter(Boolean).pop()`
+- Polls `GET /api/local-intel/rfq/status/{token}` every 30s
+- States: loading spinner, no bids yet (with countdown), bids received, booked, expired/error
+- Bid cards: business name, verified badge (sunbiz_verified), quote_usd, eta_text, message, "Select this bid" CTA
+- Book flow: POST /rfq/book → show confirmation banner, mark winner, grey-out others, stop polling
+- Job summary card: category, description, ZIP, budget, bid window countdown (urgent styling <2h)
+- Same design language as inbox.html / merchant.html (Inter, #16A34A green, light theme)
+
+**vercel.json**:
+- `/rfq/:token` → rewrite to `rfq.html`
+- `/quote` → redirect to `quote.html`
+
+### Result
+Full RFQ loop operational end-to-end: customer submits job on quote.html → magic_token generated → businesses SMS bid `YES $150 tomorrow 9am` → customer polls rfq/{token} → selects winner → losers auto-notified. Affiliate tracking via ?ref= on quote.html. Fee model: 0.5% on confirmed close only, never on search or routing.
+
+### Commits this session
+- `gsb-swarm`: `deb10fa` — RFQ system (migration 013, rfqService, localIntelAgent, dashboard-server)
+- `gsb-swarm`: (context, this commit)
+- `localintel-landing`: (quote.html + rfq.html + vercel.json)
