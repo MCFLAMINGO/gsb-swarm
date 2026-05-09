@@ -2598,3 +2598,22 @@ Food item queries ("I would like a burger") still correctly trigger "Which resta
 - gsb-swarm: `0c01cab` — ORDER_ITEM_PARTIAL non-food guard
 - gsb-swarm: `3b8d603` — city normalization at ingest + person-name suppression + area code flags
 - gsb-swarm: `aa1f6a0` — context
+
+---
+
+## Session 18 — Description City Fix (Problem / Fix / Result)
+
+### Problem
+City field fix didn't fix the rendered description text.
+"Palm Valley Fish Camp is a seafood restaurant in **Lake Buena Vista**, FL 32082" — the wrong city
+was baked into the `description` column as a template string from Yellow Pages ingest.
+1,083 businesses had this pattern: `"{name} is a(n) {category} in {wrong_city}, FL {zip}."`.
+
+### Fix
+1. **One-time repair**: `UPDATE businesses SET description = regexp_replace(description, 'in [^,]+, FL ([0-9]{5})', 'in ' || city || ', FL ' || zip, 'g')` — rewrote the city portion of all template descriptions using the correct `businesses.city` column (already normalized from zip_intelligence).
+2. **Pipeline fix** (`lib/db.js` — commit `e13b425`): `upsertBusiness()` now runs the same regex replace on `description` before INSERT. Any future ingest that sends a template description with a wrong city will have it corrected before hitting Postgres.
+
+### Result
+- "Palm Valley Fish Camp is a seafood restaurant in **Ponte Vedra Beach**, FL 32082. Call (904) 285-3200." ✓
+- All 1,083 template descriptions corrected in Postgres
+- Future ingests auto-corrected at write time
