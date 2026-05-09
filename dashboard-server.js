@@ -6440,6 +6440,18 @@ async function handleSmsInbound(req, res) {
         }
 
         if (pending) {
+          // ── Parse structured bid from SMS body ─────────────────────────────────
+          // Accepts: YES $150 tomorrow 9am | YES 200 monday morning | YES $1500
+          let parsedPrice = null;
+          let parsedEta   = null;
+          if (isYes) {
+            const priceMatch = body.match(/\$?\s*(\d+(?:\.\d{1,2})?)/);
+            if (priceMatch) parsedPrice = parseFloat(priceMatch[1]);
+            // Everything after the price (or after YES if no price) is the eta
+            const afterYes = body.replace(/^\s*YES\s*/i, '').replace(/\$?\s*\d+(?:\.\d{1,2})?\s*/i, '').trim();
+            if (afterYes) parsedEta = afterYes.slice(0, 100);
+          }
+
           const responseValue = isYes ? 'yes' : 'no';
           await db.query(
             `UPDATE rfq_responses_v2
@@ -6447,6 +6459,25 @@ async function handleSmsInbound(req, res) {
               WHERE id = $2`,
             [responseValue, pending.response_id]
           );
+
+          // Also upsert into rfq_responses (rfqService table) so bid comparison page sees the price
+          if (isYes && pending.business_id) {
+            try {
+              const rfqService = require('./lib/rfqService');
+              await rfqService.submitResponse(
+                pending.rfq_id,
+                pending.business_id,
+                {
+                  quote_usd:    parsedPrice,
+                  eta_text:     parsedEta,
+                  message:      body.replace(/^\s*YES\s*/i, '').trim().slice(0, 500) || null,
+                  business_phone: from,
+                }
+              ).catch(e => console.warn('[sms-bid] submitResponse warn:', e.message));
+            } catch(e) {
+              console.warn('[sms-bid] rfqService not available:', e.message);
+            }
+          }
 
           let replyToBusiness = '';
           if (isYes) {

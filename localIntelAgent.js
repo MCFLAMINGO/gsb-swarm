@@ -2222,6 +2222,80 @@ router.post('/inbox/book', express.json(), async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/rfq/submit — public job submission (quote.html) ──────
+// Body: { description, category, zip, budget_usd, is_same_day, customer_phone,
+//         customer_email, ref_tag, pickup_address }
+// Returns: { rfq_id, magic_token, quote_url, bid_window_type, deadline_at,
+//            matched_count, notified_count }
+router.post('/rfq/submit', express.json(), async (req, res) => {
+  try {
+    const rfqService = require('./lib/rfqService');
+    const {
+      description, category, zip, budget_usd, is_same_day,
+      customer_phone, customer_email, ref_tag, pickup_address,
+    } = req.body || {};
+    if (!description) return res.status(400).json({ error: 'description is required' });
+    if (!zip)         return res.status(400).json({ error: 'zip is required' });
+    const result = await rfqService.createRfq({
+      job_type:       'proposal',
+      category:       category || null,
+      zip,
+      description,
+      pickup_address: pickup_address || null,
+      budget_usd:     budget_usd     || null,
+      is_same_day:    !!is_same_day,
+      customer_phone: customer_phone || null,
+      customer_email: customer_email || null,
+      ref_tag:        ref_tag        || null,
+      autonomy:       'human',
+    });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[rfq/submit]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/local-intel/rfq/status/:token — bid comparison data ──────────────
+// Accepts UUID rfq_id OR magic_token. Used by rfq/[token].html page + agents.
+router.get('/rfq/status/:token', async (req, res) => {
+  try {
+    const rfqService = require('./lib/rfqService');
+    const data = await rfqService.getRfqStatus(req.params.token);
+    if (data.error) return res.status(404).json(data);
+    // Sanitise — never expose customer_phone/email to public poll
+    const rfq = { ...data.rfq };
+    delete rfq.customer_phone;
+    delete rfq.customer_email;
+    delete rfq.caller_key;
+    delete rfq.notify_email;
+    res.json({ ...data, rfq });
+  } catch (err) {
+    console.error('[rfq/status]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/local-intel/rfq/book — customer picks a bid ─────────────────────
+// Body: { magic_token, response_id }
+router.post('/rfq/book', express.json(), async (req, res) => {
+  try {
+    const rfqService = require('./lib/rfqService');
+    const { magic_token, response_id } = req.body || {};
+    if (!magic_token)  return res.status(400).json({ error: 'magic_token required' });
+    if (!response_id)  return res.status(400).json({ error: 'response_id required' });
+    // Resolve rfq_id from magic_token
+    const status = await rfqService.getRfqStatus(magic_token);
+    if (status.error || !status.rfq) return res.status(404).json({ error: 'RFQ not found' });
+    if (status.rfq.status === 'booked') return res.status(409).json({ error: 'already booked' });
+    const result = await rfqService.bookRfq(status.rfq.id, response_id, 'customer selection');
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[rfq/book]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /api/local-intel/surge/menu/:id — fetch live Surge menu (UUID or Sunbiz ID) ──
 router.get('/surge/menu/:id', async (req, res) => {
   try {
