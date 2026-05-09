@@ -1944,7 +1944,7 @@ router.post('/merchant/request-link', express.json(), async (req, res) => {
       [token, expires, business.business_id]
     );
 
-    const dashboardUrl = `https://www.thelocalintel.com/merchant?token=${token}`;
+    const dashboardUrl = `https://www.thelocalintel.com/inbox.html?token=${token}`;
 
     try {
       const { Resend } = require('resend');
@@ -2115,7 +2115,8 @@ router.get('/inbox', async (req, res) => {
     const rfqService = require('./lib/rfqService');
     // Look up by dispatch_token (set during claim flow or migration)
     const [biz] = await db.query(
-      `SELECT business_id, name, zip, category, notification_email,
+      `SELECT business_id, name, address, zip, category, category_group,
+              wallet, notification_email,
               notify_push, claimed_at,
               COALESCE(has_hours, false) AS has_hours,
               COALESCE(sunbiz_id, sunbiz_doc_number) AS sunbiz_id,
@@ -2138,6 +2139,57 @@ router.get('/inbox', async (req, res) => {
 
     const open_rfqs = await rfqService.getOpenRfqs(biz.zip, biz.category);
 
+    // Stats + top queries (same as /merchant/dashboard — enables single-page dashboard)
+    const [stats] = await db.query(
+      `SELECT
+         COUNT(*)                                                        AS total_routed,
+         COUNT(*) FILTER (WHERE resolved = true)                         AS resolved_count,
+         COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS this_month
+       FROM resolution_history
+       WHERE business_id = $1`,
+      [biz.business_id]
+    );
+
+    const topQueries = await db.query(
+      `SELECT query, COUNT(*) AS cnt
+         FROM resolution_history
+        WHERE business_id = $1
+        GROUP BY query
+        ORDER BY cnt DESC
+        LIMIT 5`,
+      [biz.business_id]
+    );
+
+    const [rfqStat] = await db.query(
+      `SELECT
+         COUNT(*)                                  AS total_rfq,
+         COUNT(*) FILTER (WHERE response = 'yes')  AS matched
+         FROM rfq_responses_v2
+        WHERE business_id = $1`,
+      [biz.business_id]
+    ).catch(() => [{ total_rfq: 0, matched: 0 }]);
+
+    // Surge menu (non-blocking)
+    let surgeMenu = null;
+    if (biz.wallet) {
+      try {
+        const surge = require('./lib/surgeAgent');
+        const menu  = await surge.fetchMenu(biz.business_id);
+        const items = menu.items || menu;
+        if (Array.isArray(items)) {
+          const orderable = items.filter(i => i.attributes?.onlineOrderingEnabled !== false);
+          surgeMenu = {
+            connected:       true,
+            total_items:     items.length,
+            orderable_items: orderable.length,
+            categories:      [...new Set(items.map(i => i.category).filter(Boolean))],
+          };
+        }
+      } catch (_) {
+        surgeMenu = { connected: false };
+      }
+    }
+
     res.json({
       business_name:     biz.name,
       zip:               biz.zip,
@@ -2159,6 +2211,21 @@ router.get('/inbox', async (req, res) => {
       menu_fetch_error: biz.menu_fetch_error|| null,
       services_json:    biz.services_json   || null,
       pos_type:         biz.pos_type        || null,
+      // Dashboard overview fields
+      address:          biz.address          || null,
+      wallet:           biz.wallet           || null,
+      category_group:   biz.category_group   || null,
+      claimed:          !!biz.claimed_at,
+      legacy_order_url: biz.menu_url         || null,
+      stats: {
+        total_routed: Number(stats?.total_routed  ?? 0),
+        resolved:     Number(stats?.resolved_count ?? 0),
+        this_month:   Number(stats?.this_month     ?? 0),
+        rfq_sent:     Number(rfqStat?.total_rfq    ?? 0),
+        rfq_matched:  Number(rfqStat?.matched      ?? 0),
+      },
+      top_queries:  topQueries,
+      surge_menu:   surgeMenu,
     });
   } catch (err) {
     console.error('[inbox GET]', err.message);
@@ -6100,7 +6167,7 @@ router.get('/admin/business/:id', async (req, res) => {
 
     // Merchant dashboard URL
     const merchantUrl = biz.dispatch_token
-      ? `https://www.thelocalintel.com/merchant.html?token=${biz.dispatch_token}`
+      ? `https://www.thelocalintel.com/inbox.html?token=${biz.dispatch_token}`
       : null;
 
     return res.json({
@@ -6167,7 +6234,7 @@ router.post('/admin/business/:id/claim', express.json(), async (req, res) => {
       return res.json({
         ok: true, already_claimed: true,
         dispatch_token: biz.dispatch_token,
-        merchant_url: `https://www.thelocalintel.com/merchant.html?token=${biz.dispatch_token}`,
+        merchant_url: `https://www.thelocalintel.com/inbox.html?token=${biz.dispatch_token}`,
       });
     }
 
@@ -6185,7 +6252,7 @@ router.post('/admin/business/:id/claim', express.json(), async (req, res) => {
     return res.json({
       ok: true, claimed: true,
       dispatch_token: dispatchToken,
-      merchant_url: `https://www.thelocalintel.com/merchant.html?token=${dispatchToken}`,
+      merchant_url: `https://www.thelocalintel.com/inbox.html?token=${dispatchToken}`,
     });
   } catch (e) {
     console.error('[admin/claim]', e.message);
