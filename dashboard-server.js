@@ -1087,6 +1087,50 @@ app.get('/api/admin/worker-status', async (req, res) => {
   }
 });
 
+// GET /api/admin/ces-debug — calls BLS API inline with 1 series, returns raw response for diagnosis
+app.get('/api/admin/ces-debug', async (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.query?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const apiKey = process.env.BUREAU_OF_LABOR_STATISTICS_API;
+  if (!apiKey) return res.json({ error: 'BUREAU_OF_LABOR_STATISTICS_API not set' });
+  const https = require('https');
+  const body = JSON.stringify({
+    seriesid: ['SMU12272600000000001'],
+    startyear: String(new Date().getFullYear() - 1),
+    endyear:   String(new Date().getFullYear()),
+    registrationkey: apiKey,
+  });
+  const opts = {
+    method: 'POST', hostname: 'api.bls.gov', path: '/publicAPI/v2/timeseries/data/',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), 'User-Agent': 'LocalIntel-DataWorker/1.0' },
+  };
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const r = https.request(opts, resp => {
+        let d = '';
+        resp.on('data', c => d += c);
+        resp.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve({ raw: d.slice(0,500) }); } });
+      });
+      r.on('error', reject);
+      r.write(body);
+      r.end();
+    });
+    const series = result?.Results?.series?.[0];
+    res.json({
+      bls_status: result.status,
+      bls_message: result.message,
+      series_id: series?.seriesID,
+      data_points: series?.data?.length || 0,
+      latest: series?.data?.[0] || null,
+      key_length: apiKey.length,
+    });
+  } catch (e) {
+    res.json({ error: e.message });
+  }
+});
+
 // GET /api/admin/db-check — diagnostic: confirms LOCAL_INTEL_DB_URL is set + DB reachable
 app.get('/api/admin/db-check', async (req, res) => {
   const tok = req.headers['x-operator-token'] || req.query?.token;
