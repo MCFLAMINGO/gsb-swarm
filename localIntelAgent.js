@@ -6701,3 +6701,32 @@ router.post('/agent-profile', express.json(), async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
+// ── GET /api/local-intel/businesses-claimed ───────────────────────────────────
+// Returns all claimed, active businesses with agent profile data.
+// Used by generate-biz-pages.js to build static /biz/{slug}.html pages.
+// Public endpoint — no token required (data is already public NAP info).
+router.get('/businesses-claimed', async (req, res) => {
+  try {
+    const db   = require('./lib/db');
+    const rows = await db.query(`
+      SELECT
+        b.business_id, b.name, b.address, b.zip, b.phone,
+        b.category, b.category_group, b.website,
+        b.claimed_at, b.confidence_score,
+        p.profile_summary, p.services_json, p.surge_wallet,
+        p.settlement_tier, p.industry_type,
+        p.specialties, p.service_area
+      FROM businesses b
+      LEFT JOIN business_agent_profiles p ON p.business_id = b.business_id
+      WHERE b.claimed_at IS NOT NULL
+        AND b.status != 'inactive'
+        AND NOT (b.confidence_score = 0 AND b.business_id::text LIKE 'aaaaaaaa%')
+      ORDER BY b.confidence_score DESC, b.claimed_at ASC
+    `);
+    return res.json({ businesses: rows });
+  } catch (err) {
+    console.error('[businesses-claimed]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
