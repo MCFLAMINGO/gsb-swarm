@@ -3013,3 +3013,38 @@ Businesses receiving job dispatches via RFQ had no structured job record, no Toa
 - `gsb-swarm`: `7b5bda1` — feat: businesses-claimed route (before module.exports fix in 645cc8e)
 - `gsb-swarm`: `645cc8e` — fix: route before module.exports
 - `localintel-landing`: `002ea87` — feat: /biz/{slug} pages + JSON-LD OrderAction
+
+## Session 22 — Addendum: Dynamic stats + Florida regional explore section (2026-05-10)
+
+**Problem:** Hero section had hardcoded "122,000+ businesses / 1,473 ZIPs" (both wrong — actual: 240,493 businesses, 1,610 ZIPs). Explore section was a flat list of county accordions — no geographic orientation, didn't communicate statewide coverage.
+
+**Fix:**
+
+**platform-stats endpoint (gsb-swarm localIntelAgent.js):**
+- `GET /api/local-intel/platform-stats` — returns `{ businesses, zips, claimed }` live from Postgres.
+- 5-minute in-memory cache — fast, single COUNT query.
+- Filters test businesses from claimed count.
+
+**index.html — dynamic numbers:**
+- All hardcoded counts replaced with `<span id="...">` placeholders showing good defaults.
+- JS fetches `/api/local-intel/platform-stats` on load, updates: `stat-businesses`, `stat-zips`, `hero-biz-badge`, `stat-businesses-long`, `stat-zips-explore`, `hero-zip-inline`.
+- Badge reads "240,000+ Businesses and counting" (hero badge).
+- Stat card reads "Businesses & counting".
+
+**index.html — Florida regional explore section:**
+- Replaced ~2,400 lines of county accordions with 6 clean region cards in a CSS grid.
+- Regions: Northeast Florida 🌊 · Central Florida 🏙️ · West Coast 🌅 · Panhandle 🏖️ · South Florida 🌴 · The Keys 🐠
+- Each card: region name, county list subtitle, key ZIP pills, live business count badge, "Explore markets →" CTA.
+- Northeast Florida opens by default (home market).
+- Live business counts per region loaded from `/api/local-intel/stats` byZip — ZIP prefix matching.
+- `toggleRegion()` — click header to expand/collapse any region card.
+
+**Real numbers (as of 2026-05-10):**
+- Total businesses: 240,493
+- Active: 240,003
+- ZIPs covered: 1,610
+- Claimed (real, non-test): 1 (McFlamingo)
+
+**Commits:**
+- `gsb-swarm`: `dc28c45` — feat: platform-stats endpoint
+- `localintel-landing`: `0e0eac0` — feat: Florida regional explore + dynamic counts
