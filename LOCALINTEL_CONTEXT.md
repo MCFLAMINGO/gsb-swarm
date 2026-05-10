@@ -3256,3 +3256,18 @@ Worker produces current BDC data (semiannual FCC releases, June+December). Dashb
 **Fix:** `lib/pgStore.js` — changed `updated_at` → `last_updated_at` in both INSERT column list and ON CONFLICT SET clause. Also widened the catch to suppress any `does not exist` error (not just ones containing "zip_signals") to prevent future silent swallowing of real column errors.
 
 **Result:** commit `6f25ad3` pushed. All 4 workers (ACS, Census, IRS Migration, FCC) re-triggered and writing to zip_signals correctly. World model can now run on real data.
+
+---
+## Session Entry — 2026-05-10 (FRED + BEA Workers)
+
+**Problem:** No FRED or BEA data in LocalIntel despite both APIs being available. Needed county-level unemployment rate and per capita income to answer "how strong is the local economy?" client questions.
+
+**Fix:**
+- Migration 018: added `fred_*` (unemployment_rate, labor_force, employed, unemployment_yoy, vintage) and `bea_*` (per_capita_income, income_growth_1yr, income_growth_5yr, income_vs_fl_avg, vintage) columns to zip_signals
+- `workers/fredWorker.js`: fetches BLS LAUS series LAUCN{FIPS5}000000000{3,6,4} for all 67 FL counties via FRED API — ~201 calls at 500ms pace, denormalizes to ZIPs via flZipCountyMap
+- `workers/beaWorker.js`: fetches BEA CAINC1 per capita income for all FL counties in 2 batch calls (GeoFips=12000 wildcard), computes YoY + 5yr CAGR + vs-FL-average ratio
+- `lib/flZipCountyMap.js`: shared ZIP→county FIPS lookup — parses censusLayerWorker's 1,474-entry ZIP registry at startup, returns ZIPs for any county FIPS5
+- Added `POST /api/admin/trigger-fred` and `POST /api/admin/trigger-bea` endpoints to dashboard-server.js
+- Dashboard: FRED and BEA status cards with trigger buttons + chip indicators in worker strip
+
+**Result:** commit `09826f4`. Both workers triggered. FRED runs ~2 min (67 counties × 3 series). BEA runs ~5 sec (2 batch calls). Signal data will land in zip_signals and world model will incorporate unemployment + income tier into growth scores.
