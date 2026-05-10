@@ -6343,6 +6343,65 @@ router.get('/admin/stats', async (req, res) => {
 });
 
 
+
+// ── POST /api/local-intel/admin/fcc-deep-dive ────────────────────────────────
+// TIER 2 — BDC location-level deep dive (annual / paid consultation).
+// Downloads full FCC BDC availability CSVs for FL by technology type, aggregates
+// to ZIP-level provider/coverage breakdown. NOT a routine worker — run on-demand
+// for paying consultation customers or once per year for baseline refresh.
+//
+// What Tier 2 provides (vs weekly Tier 1 county pulse):
+//   - Per-ZIP (not county) coverage: uses census block → ZIP crosswalk
+//   - Per-provider breakdown: which ISPs serve each ZIP and at what speeds
+//   - Fiber-by-provider counts: Comcast vs AT&T fiber vs Brightspeed etc.
+//   - BEAD challenge eligibility per location
+//   - Fixed wireless tower coverage gap analysis
+//   - Estimated ~500MB download + ~10 min processing for full FL dataset
+//
+// STATUS: stub — implementation queued for first paid consultation request.
+// Trigger from dashboard FCC Deep Dive card (admin token required).
+router.post('/admin/fcc-deep-dive', express.json(), async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const role = adminAuth(req, res);
+  if (role !== 'admin') return res.status(401).json({ error: 'admin only' });
+
+  const { zip, county_fips, dry_run } = req.body || {};
+  console.log(`[fcc-deep-dive] Request from admin — zip=${zip||'all'} county=${county_fips||'all'} dry_run=${dry_run}`);
+
+  // Log the request for pipeline awareness
+  try {
+    await db.query(
+      `INSERT INTO zip_causal_events (zip, event_type, event_date, source, notes, created_at)
+       VALUES ($1, 'fcc_deep_dive_requested', NOW(), 'admin', $2, NOW())
+       ON CONFLICT DO NOTHING`,
+      [zip || 'ALL', JSON.stringify({ county_fips, dry_run, requested_at: new Date().toISOString() })]
+    ).catch(() => {}); // non-fatal if table not ready
+  } catch (_) {}
+
+  return res.json({
+    status:      'not_implemented',
+    tier:        2,
+    description: 'FCC BDC location-level deep dive — downloads full provider/location CSV for FL, aggregates to ZIP',
+    provides:    [
+      'Per-ZIP (not county) coverage percentages',
+      'Per-provider breakdown by technology (fiber / cable / fixed wireless)',
+      'BEAD challenge eligibility per location',
+      'Estimated provider count per ZIP',
+      'Annual refresh baseline for world model calibration',
+    ],
+    estimated_runtime: '~10 minutes for full FL dataset (~500MB download)',
+    cost_context:      'Recommended for paid consultation customers ($750+ tier)',
+    run_cadence:       'Annual baseline or on-demand per consultation',
+    implementation:    'queued — contact admin to schedule',
+    requested: {
+      zip:          zip          || null,
+      county_fips:  county_fips  || null,
+      dry_run:      dry_run      || false,
+      ts:           new Date().toISOString(),
+    },
+  });
+});
+
 // ── GET /api/local-intel/platform-stats ─────────────────────────────────────
 // Lightweight live counts for index.html hero section.
 // Cached in-memory for 5 minutes — fast, no byZip breakdown.

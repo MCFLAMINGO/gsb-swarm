@@ -3187,3 +3187,32 @@ Reads zip_signals + zip_forecast + zip_anomalies + zip_signals_history + zip_cau
 
 **Commits:** (this commit) — migration 017, 5 worker migrations, 2 new data workers, worldModelWorker, reportGenerator, 5 API endpoints
 
+
+---
+
+## Session 25 — FCC BDC Worker Upgrade + Dashboard LocalIntel Panel
+**Date:** 2026-05-10
+**Commit:** (pending)
+
+### Problem
+fccBroadbandWorker.js was using FCC F477 Socrata (2021 vintage, unauthenticated). Data 5 years stale, Socrata API deprecated for new FCC data.
+
+### Fix
+Full rewrite to FCC BDC authenticated API (June 2025+ vintage):
+- **Tier 1 (weekly):** `GET /api/public/map/availability/summary/county/{fips}` for all 67 FL counties
+  - Auth: `FCC_BDC_USERNAME` + `FCC_BDC_API_KEY` Railway env vars
+  - Paced at 8s/call (7.5/min, under 10/min rate limit)
+  - New signals: `fcc_vintage_date`, `fcc_pct_25_3`, `fcc_pct_100_20`, `fcc_pct_gigabit`, `fcc_provider_count`, `fcc_fiber_pct`, `fcc_fixed_wireless_pct`, `fcc_bead_unserved_pct`, `fcc_bead_underserved_pct`
+  - Hard fail-safe: logs loudly on error, NEVER clears existing fcc_* data
+- **Tier 2 (stub):** `POST /api/local-intel/admin/fcc-deep-dive` — location-level BDC CSV download (500MB, 10min), returns `not_implemented` with full description of what it provides. Logged to zip_causal_events for pipeline awareness.
+- **Dashboard:** New "LocalIntel" nav tab with worker pulse strip, Tier 1 status card, Tier 2 deep-dive card (amber badge, confirm dialog, result display), ZIP signal lookup, and open anomalies panel.
+
+### Result
+Worker produces current BDC data (semiannual FCC releases, June+December). Dashboard gives internal visibility into world model health + a clear upgrade path for paid consultation customers needing ZIP-level provider breakdowns.
+
+### Files Changed
+- `workers/fccBroadbandWorker.js` — full rewrite
+- `localIntelAgent.js` — added POST /admin/fcc-deep-dive stub
+- `dashboard-ui/index.html` — LocalIntel nav + section
+- `dashboard-ui/style.css` — li-* component styles
+- `dashboard-ui/app.js` — LocalIntel panel JS

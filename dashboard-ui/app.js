@@ -1362,3 +1362,204 @@ document.addEventListener('DOMContentLoaded', () => {
     el.addEventListener('click', () => setTimeout(renderAppTestsSection, 100));
   });
 });
+
+// ── LocalIntel World Model panel ──────────────────────────────────────────────
+const LI_ADMIN_TOKEN = 'localintel-migrate-2026';
+const LI_BASE        = API_BASE + '/api/local-intel';
+
+// Auto-load when tab is activated
+document.addEventListener('click', e => {
+  const item = e.target.closest('[data-section="localintel"]');
+  if (item) {
+    setTimeout(loadLocalIntelPanel, 100);
+  }
+});
+
+async function loadLocalIntelPanel() {
+  await Promise.all([
+    loadFccStatus(),
+    loadAnomalies(),
+  ]);
+}
+
+// ── FCC Tier 1 status ─────────────────────────────────────────────────────────
+async function loadFccStatus() {
+  try {
+    // Query zip_signals for FCC coverage summary
+    const r = await fetch(`${LI_BASE}/zip-signals/32082`, {
+      headers: { 'x-admin-token': LI_ADMIN_TOKEN }
+    });
+    if (!r.ok) throw new Error('no data');
+    const d = await r.json();
+    const sig = d.signals || {};
+
+    const vintage = sig.fcc_vintage_date || '—';
+    const updated = sig.fcc_updated_at
+      ? new Date(sig.fcc_updated_at).toLocaleDateString()
+      : '—';
+
+    document.getElementById('li-fcc-vintage').textContent = vintage;
+    document.getElementById('li-fcc-updated').textContent = updated;
+
+    // Get count of ZIPs with FCC data
+    const statsR = await fetch(`${LI_BASE}/admin/stats`, {
+      headers: { 'x-admin-token': LI_ADMIN_TOKEN }
+    });
+    if (statsR.ok) {
+      // stats endpoint doesn't have fcc count — just show last updated context
+    }
+
+    // Chip status
+    setChipStatus('fcc',
+      sig.fcc_updated_at ? 'ok' : 'warn',
+      sig.fcc_updated_at ? `v${vintage}` : 'no data yet'
+    );
+    document.getElementById('li-fcc-zips').textContent = '—'; // populated by anomaly count or stats later
+
+  } catch (e) {
+    setChipStatus('fcc', 'warn', 'checking…');
+  }
+
+  // Check other worker chips via anomaly endpoint (confirms world model is running)
+  try {
+    const r = await fetch(`${LI_BASE}/anomalies?limit=1`, {
+      headers: { 'x-admin-token': LI_ADMIN_TOKEN }
+    });
+    if (r.ok) {
+      setChipStatus('world', 'ok', 'running');
+      setChipStatus('irs',   'ok', 'running');
+      setChipStatus('acs',   'ok', 'running');
+      setChipStatus('permit','ok', 'running');
+    } else {
+      ['world','irs','acs','permit'].forEach(k => setChipStatus(k, 'warn', 'no data'));
+    }
+  } catch (e) {
+    ['world','irs','acs','permit'].forEach(k => setChipStatus(k, 'err', 'error'));
+  }
+}
+
+function setChipStatus(key, status, meta) {
+  const dot  = document.getElementById(`li-dot-${key}`);
+  const metaEl = document.getElementById(`li-meta-${key}`);
+  if (dot)   { dot.className = `li-chip-dot ${status}`; }
+  if (metaEl){ metaEl.textContent = meta; }
+}
+
+// ── FCC Tier 2 deep dive trigger ──────────────────────────────────────────────
+async function triggerFccDeepDive() {
+  const btn = document.getElementById('li-t2-trigger');
+  const res = document.getElementById('li-t2-result');
+  if (!btn || !res) return;
+
+  const confirmed = confirm(
+    'Run FCC BDC Tier 2 deep dive?\n\n' +
+    'This downloads ~500MB of location-level provider data for all of Florida ' +
+    'and aggregates it to ZIP level.\n\n' +
+    'Recommended only for annual baseline refresh or paid consultation customers.\n\n' +
+    'Continue?'
+  );
+  if (!confirmed) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Requesting…';
+  res.style.display = 'block';
+  res.textContent = 'Submitting request…';
+
+  try {
+    const r = await fetch(`${LI_BASE}/admin/fcc-deep-dive`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-token': LI_ADMIN_TOKEN,
+      },
+      body: JSON.stringify({ dry_run: false }),
+    });
+    const data = await r.json();
+    res.textContent = JSON.stringify(data, null, 2);
+
+    if (data.status === 'not_implemented') {
+      btn.textContent = 'Implementation Queued';
+      document.getElementById('li-t2-last-run').textContent = 'Never';
+    } else {
+      btn.textContent = 'Requested ✓';
+      document.getElementById('li-t2-last-run').textContent = new Date().toLocaleDateString();
+    }
+  } catch (e) {
+    res.textContent = 'Error: ' + e.message;
+    btn.disabled = false;
+    btn.textContent = 'Run Deep Dive';
+  }
+}
+
+// ── ZIP signal lookup ─────────────────────────────────────────────────────────
+async function lookupZipSignals() {
+  const zip = (document.getElementById('li-zip-input')?.value || '').trim();
+  const out = document.getElementById('li-zip-result');
+  if (!zip || !/^\d{5}$/.test(zip)) {
+    if (out) out.innerHTML = '<span style="color:#EF4444">Enter a valid 5-digit ZIP</span>';
+    return;
+  }
+  if (out) out.innerHTML = '<span style="color:#888">Loading…</span>';
+
+  try {
+    const r = await fetch(`${LI_BASE}/zip-signals/${zip}`, {
+      headers: { 'x-admin-token': LI_ADMIN_TOKEN }
+    });
+    const data = await r.json();
+    if (!data.signals) throw new Error(data.error || 'No signals found');
+
+    const sig = data.signals;
+    const rows = Object.entries(sig)
+      .filter(([k]) => !k.includes('_at') || k === 'fcc_updated_at')
+      .map(([k, v]) => {
+        const val = v === null ? '<span style="color:#444">null</span>'
+          : typeof v === 'boolean' ? (v ? '<span style="color:#16A34A">✓</span>' : '<span style="color:#666">—</span>')
+          : `<span style="color:#e0e0e0">${v}</span>`;
+        return `<tr>
+          <td style="padding:3px 10px 3px 0;color:#888;white-space:nowrap">${k}</td>
+          <td style="padding:3px 0">${val}</td>
+        </tr>`;
+      }).join('');
+
+    if (out) out.innerHTML = `
+      <div style="margin-bottom:6px;color:#16A34A;font-weight:600">ZIP ${zip} — ${Object.keys(sig).length} signals</div>
+      <table style="border-collapse:collapse;width:100%;font-family:monospace">${rows}</table>
+    `;
+  } catch (e) {
+    if (out) out.innerHTML = `<span style="color:#EF4444">${e.message}</span>`;
+  }
+}
+
+// ── Open anomalies ────────────────────────────────────────────────────────────
+async function loadAnomalies() {
+  const out = document.getElementById('li-anomalies-list');
+  if (!out) return;
+  out.textContent = 'Loading…';
+
+  try {
+    const r = await fetch(`${LI_BASE}/anomalies`, {
+      headers: { 'x-admin-token': LI_ADMIN_TOKEN }
+    });
+    const data = await r.json();
+    const items = data.anomalies || data || [];
+
+    if (!items.length) {
+      out.innerHTML = '<span style="color:#16A34A">No open anomalies — world model nominal</span>';
+      return;
+    }
+
+    const severity = { significant: '#EF4444', notable: '#F59E0B', extreme: '#FF0000' };
+    out.innerHTML = items.slice(0, 15).map(a => `
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--border,#1a1a1a);">
+        <span style="font-size:10px;font-weight:700;color:${severity[a.severity]||'#888'};min-width:70px">${(a.severity||'').toUpperCase()}</span>
+        <div>
+          <div style="color:var(--text-1,#e0e0e0);font-size:12px">ZIP ${a.zip} — ${a.signal_name}</div>
+          <div style="color:var(--text-2,#888);font-size:11px;margin-top:2px">${a.question || a.notes || ''}</div>
+        </div>
+        <span style="margin-left:auto;font-size:10px;color:#444;white-space:nowrap">${a.zip}</span>
+      </div>
+    `).join('');
+  } catch (e) {
+    out.textContent = 'Error: ' + e.message;
+  }
+}

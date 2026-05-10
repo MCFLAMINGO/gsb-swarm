@@ -75,6 +75,10 @@
       </svg>
       <span>APP TESTS</span>
     </a>
+    <a href="#localintel" class="nav-item" data-section="localintel">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+      <span>LocalIntel</span>
+    </a>
   </nav>
 
   <div class="sidebar-footer">
@@ -584,6 +588,127 @@
     <!-- Results -->
     <div id="apptests-results" style="margin-top:16px;"></div>
   </section>
+
+  <!-- ── LocalIntel World Model ─────────────────────────────────────────── -->
+  <section class="section" id="section-localintel">
+    <div class="section-header">
+      <h2>LocalIntel — World Model</h2>
+      <span class="muted" style="font-size:12px">Signal workers · ZIP intelligence · FCC broadband</span>
+    </div>
+
+    <!-- Worker pulse strip -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;" id="li-worker-strip">
+      <div class="li-worker-chip" id="li-chip-fcc">
+        <span class="li-chip-dot" id="li-dot-fcc"></span>
+        <span class="li-chip-label">FCC Broadband</span>
+        <span class="li-chip-meta" id="li-meta-fcc">checking…</span>
+      </div>
+      <div class="li-worker-chip" id="li-chip-irs">
+        <span class="li-chip-dot" id="li-dot-irs"></span>
+        <span class="li-chip-label">IRS Migration</span>
+        <span class="li-chip-meta" id="li-meta-irs">checking…</span>
+      </div>
+      <div class="li-worker-chip" id="li-chip-world">
+        <span class="li-chip-dot" id="li-dot-world"></span>
+        <span class="li-chip-label">World Model</span>
+        <span class="li-chip-meta" id="li-meta-world">checking…</span>
+      </div>
+      <div class="li-worker-chip" id="li-chip-acs">
+        <span class="li-chip-dot" id="li-dot-acs"></span>
+        <span class="li-chip-label">ACS Demographics</span>
+        <span class="li-chip-meta" id="li-meta-acs">checking…</span>
+      </div>
+      <div class="li-worker-chip" id="li-chip-permit">
+        <span class="li-chip-dot" id="li-dot-permit"></span>
+        <span class="li-chip-label">Permit Worker</span>
+        <span class="li-chip-meta" id="li-meta-permit">checking…</span>
+      </div>
+    </div>
+
+    <!-- FCC Tier 1 status card -->
+    <div class="li-card" id="li-fcc-card">
+      <div class="li-card-head">
+        <span class="li-card-icon">📡</span>
+        <span class="li-card-title">FCC Broadband — Tier 1 (Weekly County Pulse)</span>
+        <span class="li-card-badge li-badge-live">LIVE</span>
+      </div>
+      <div class="li-card-body">
+        <div class="li-stat-row">
+          <div class="li-stat"><span class="li-stat-val" id="li-fcc-zips">—</span><span class="li-stat-label">ZIPs covered</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-fcc-vintage">—</span><span class="li-stat-label">Data vintage</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-fcc-updated">—</span><span class="li-stat-label">Last updated</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-fcc-counties">67</span><span class="li-stat-label">FL counties</span></div>
+        </div>
+        <p class="li-card-desc">
+          Pulls county-level broadband coverage from FCC BDC authenticated API — pct covered at 25/3, 100/20, gigabit,
+          provider count, fiber %, fixed wireless %, and BEAD unserved/underserved percentages.
+          Apportioned to ZIP via county FIPS. Runs weekly. Preserves existing data on API failure.
+        </p>
+      </div>
+    </div>
+
+    <!-- FCC Tier 2 deep-dive card -->
+    <div class="li-card li-card-dimmed" id="li-fcc-t2-card" style="margin-top:12px;">
+      <div class="li-card-head">
+        <span class="li-card-icon">🔬</span>
+        <span class="li-card-title">FCC Broadband — Tier 2 (Location-Level Deep Dive)</span>
+        <span class="li-card-badge li-badge-stub">ON-DEMAND</span>
+      </div>
+      <div class="li-card-body">
+        <p class="li-card-desc" style="color:var(--text-2,#888);">
+          Downloads full BDC availability CSVs for FL by technology (fiber / cable / fixed wireless / satellite).
+          Aggregates to <strong>ZIP-level</strong> using census block crosswalk — gives per-provider breakdown,
+          fiber-by-ISP counts, BEAD challenge eligibility per location, and fixed wireless coverage gap analysis.
+          ~500MB download · ~10 min processing. Run annually for baseline or on-demand for paid consultation ($750+ tier).
+        </p>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap;">
+          <div class="li-stat"><span class="li-stat-val" id="li-t2-last-run">Never</span><span class="li-stat-label">Last deep dive</span></div>
+          <div class="li-stat"><span class="li-stat-val">Annual</span><span class="li-stat-label">Recommended cadence</span></div>
+          <div class="li-stat"><span class="li-stat-val">$750+</span><span class="li-stat-label">Consultation tier</span></div>
+          <button class="li-btn-deep-dive" id="li-t2-trigger" onclick="triggerFccDeepDive()">
+            Run Deep Dive
+          </button>
+        </div>
+        <div id="li-t2-result" style="display:none;margin-top:10px;font-size:12px;padding:8px 12px;background:var(--bg-2,#111);border-radius:6px;border:1px solid var(--border,#222);color:var(--text-2,#888);white-space:pre-wrap;font-family:monospace;"></div>
+      </div>
+    </div>
+
+    <!-- ZIP signal lookup -->
+    <div class="li-card" style="margin-top:12px;">
+      <div class="li-card-head">
+        <span class="li-card-icon">🔍</span>
+        <span class="li-card-title">ZIP Signal Lookup</span>
+      </div>
+      <div class="li-card-body">
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <input type="text" id="li-zip-input" placeholder="Enter ZIP (e.g. 32082)" maxlength="5"
+            style="flex:1;background:var(--bg-2,#111);border:1px solid var(--border,#333);border-radius:6px;padding:8px 12px;color:var(--text-1,#e0e0e0);font-size:13px;outline:none;"
+            onkeydown="if(event.key==='Enter')lookupZipSignals()">
+          <button onclick="lookupZipSignals()"
+            style="background:#16A34A;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;">
+            LOOKUP
+          </button>
+        </div>
+        <div id="li-zip-result" style="font-size:12px;"></div>
+      </div>
+    </div>
+
+    <!-- Open anomalies -->
+    <div class="li-card" style="margin-top:12px;">
+      <div class="li-card-head">
+        <span class="li-card-icon">⚠</span>
+        <span class="li-card-title">Open Anomalies</span>
+        <button onclick="loadAnomalies()"
+          style="margin-left:auto;background:transparent;border:1px solid var(--border,#333);border-radius:4px;padding:4px 10px;color:var(--text-2,#888);font-size:11px;cursor:pointer;">
+          Refresh
+        </button>
+      </div>
+      <div class="li-card-body">
+        <div id="li-anomalies-list" style="font-size:12px;color:var(--text-2,#888);">Click refresh to load…</div>
+      </div>
+    </div>
+  </section>
+
 
 </main>
 

@@ -1757,3 +1757,82 @@ body {
 .at-summary-bar.fail { background: rgba(231,76,60,.12);  border: 1px solid rgba(231,76,60,.3); }
 .at-summary-count  { font-size: 18px; font-weight: 800; }
 .at-summary-label  { font-size: 12px; color: var(--text-2, #888); }
+
+/* ── LocalIntel World Model panel ─────────────────────────────────────── */
+.li-worker-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-2, #111);
+  border: 1px solid var(--border, #222);
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 11px;
+  color: var(--text-2, #888);
+}
+.li-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #444;
+  flex-shrink: 0;
+}
+.li-chip-dot.ok   { background: #16A34A; box-shadow: 0 0 4px #16A34A88; }
+.li-chip-dot.warn { background: #F59E0B; }
+.li-chip-dot.err  { background: #EF4444; }
+.li-chip-label { color: var(--text-1, #e0e0e0); font-weight: 500; }
+.li-chip-meta  { color: var(--text-2, #666); font-size: 10px; }
+
+.li-card {
+  background: var(--bg-2, #111);
+  border: 1px solid var(--border, #222);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.li-card-dimmed { opacity: 0.85; }
+.li-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border, #222);
+}
+.li-card-icon  { font-size: 16px; }
+.li-card-title { font-size: 13px; font-weight: 600; color: var(--text-1, #e0e0e0); flex: 1; }
+.li-card-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  padding: 2px 7px;
+  border-radius: 3px;
+}
+.li-badge-live { background: #16A34A22; color: #16A34A; border: 1px solid #16A34A44; }
+.li-badge-stub { background: #F59E0B22; color: #F59E0B; border: 1px solid #F59E0B44; }
+
+.li-card-body { padding: 14px 16px; }
+.li-card-desc { font-size: 12px; color: var(--text-2, #888); line-height: 1.6; margin: 0; }
+
+.li-stat-row {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.li-stat { display: flex; flex-direction: column; gap: 2px; }
+.li-stat-val   { font-size: 18px; font-weight: 700; color: var(--text-1, #e0e0e0); }
+.li-stat-label { font-size: 10px; color: var(--text-2, #666); letter-spacing: .05em; text-transform: uppercase; }
+
+.li-btn-deep-dive {
+  background: transparent;
+  border: 1px solid #F59E0B;
+  border-radius: 6px;
+  padding: 7px 14px;
+  color: #F59E0B;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: .06em;
+  transition: background .15s;
+}
+.li-btn-deep-dive:hover { background: #F59E0B22; }
+.li-btn-deep-dive:disabled { opacity: .4; cursor: not-allowed; }
