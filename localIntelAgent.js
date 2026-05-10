@@ -7279,3 +7279,44 @@ router.post('/agent-profile', express.json(), async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
+// ── Property Search ─────────────────────────────────────────────────────────
+// GET /api/local-intel/property-search?zip=32082&limit=20
+// Returns FDOR parcel data for Duval (CO_NO=26) or St. Johns (CO_NO=65) ZIPs.
+// Cache-first: 30-day Postgres TTL. Live source: FloridaGIO ArcGIS FDOR Cadastral 2025.
+const propertyLayer = require('./lib/propertyLayer');
+
+router.get('/property-search', async (req, res) => {
+  const { zip, limit = 20 } = req.query;
+  if (!zip) return res.status(400).json({ error: 'zip is required' });
+
+  try {
+    const result = await propertyLayer.searchByZip(zip, limit);
+    return res.json({
+      zip,
+      source: result.source,
+      count: result.parcels.length,
+      total_fetched: result.total_fetched,
+      parcels: result.parcels,
+    });
+  } catch (err) {
+    console.error('[property-search] error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/local-intel/property/:parcel_id
+// Returns a single parcel record by FDOR PARCEL_ID.
+router.get('/property/:parcel_id', async (req, res) => {
+  const { parcel_id } = req.params;
+  if (!parcel_id) return res.status(400).json({ error: 'parcel_id is required' });
+
+  try {
+    const result = await propertyLayer.getByParcelId(parcel_id);
+    if (!result.parcel) return res.status(404).json({ error: `Parcel ${parcel_id} not found` });
+    return res.json({ source: result.source, parcel: result.parcel });
+  } catch (err) {
+    console.error('[property/:parcel_id] error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
