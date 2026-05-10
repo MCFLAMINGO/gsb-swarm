@@ -1068,13 +1068,13 @@ app.get('/api/admin/worker-status', async (req, res) => {
     const db2 = require('./lib/db');
     if (!db2.isReady()) return res.json({ workers: {} });
     const rows = await db2.query(
-      `SELECT worker_name, last_run, run_count FROM worker_heartbeat ORDER BY last_run DESC NULLS LAST`
+      `SELECT worker_name, last_run FROM worker_heartbeat ORDER BY last_run DESC NULLS LAST`
     ).catch(() => []);
     const workers = {};
     for (const r of rows) {
       workers[r.worker_name] = {
         last_run:  r.last_run,
-        run_count: r.run_count || 0,
+        run_count: 0,
         age_hours: r.last_run
           ? parseFloat(((Date.now() - new Date(r.last_run).getTime()) / 3600000).toFixed(1))
           : null,
@@ -1084,6 +1084,24 @@ app.get('/api/admin/worker-status', async (req, res) => {
   } catch (e) {
     console.error('[worker-status] error:', e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/admin/db-check — diagnostic: confirms LOCAL_INTEL_DB_URL is set + DB reachable
+app.get('/api/admin/db-check', async (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.query?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const hasUrl = Boolean(process.env.LOCAL_INTEL_DB_URL);
+  const hasBls = Boolean(process.env.BUREAU_OF_LABOR_STATISTICS_API);
+  if (!hasUrl) return res.json({ ok: false, LOCAL_INTEL_DB_URL: false, BUREAU_OF_LABOR_STATISTICS_API: hasBls });
+  try {
+    const db2 = require('./lib/db');
+    const rows = await db2.query('SELECT COUNT(*) as n FROM zip_signals WHERE ces_msa_code IS NOT NULL');
+    return res.json({ ok: true, LOCAL_INTEL_DB_URL: true, BUREAU_OF_LABOR_STATISTICS_API: hasBls, ces_zips: rows[0]?.n ?? rows.rows?.[0]?.n });
+  } catch (e) {
+    return res.json({ ok: false, LOCAL_INTEL_DB_URL: true, error: e.message });
   }
 });
 
@@ -1441,7 +1459,7 @@ app.get('/api/acp/webhook/health', async (req, res) => {
   if (process.env.LOCAL_INTEL_DB_URL) {
     try {
       const db2 = require('./lib/db');
-      const rows = await db2.query(`SELECT worker_name, last_run, run_count FROM worker_heartbeat`).catch(() => []);
+      const rows = await db2.query(`SELECT worker_name, last_run FROM worker_heartbeat`).catch(() => []);
       for (const r of rows) heartbeats[r.worker_name] = r;
     } catch (_) {}
   }
