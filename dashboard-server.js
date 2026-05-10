@@ -6395,6 +6395,92 @@ async function handleSmsInbound(req, res) {
     }
   }
 
+  // ── Surge pending choice: caller replies 1 / 2 / 3 or SKIP ───────────────
+  // After a voice call where Surge catalog businesses were found, we save a
+  // surge_pending session keyed on caller_phone. The caller replies 1/2/3 to
+  // confirm, or SKIP to fall into the full RFQ bid flow.
+  if (from && body) {
+    try {
+      const choiceMatch = body.trim().match(/^([123])$/);
+      const isSkip      = /^\s*SKIP\s*$/i.test(body);
+
+      if (choiceMatch || isSkip) {
+        const voiceSession   = require('./lib/voiceSession');
+        const pendingSession = await voiceSession.getSurgePending(from);
+
+        if (pendingSession) {
+          if (isSkip) {
+            // Clear session — fall through to RFQ bid flow below
+            await voiceSession.clearByPhone(from);
+            await rfqBroadcast.sendSms(from,
+              'LocalIntel: Got it — broadcasting your job to all providers for bids. Watch for responses shortly.');
+            // Post RFQ in background
+            const rfqBroadcast2 = require('./lib/rfqBroadcast');
+            const category = pendingSession.category || 'general';
+            const zip      = pendingSession.zip      || '32082';
+            rfqBroadcast2.createJob({
+              callerPhone: from,
+              category,
+              zip,
+              description: `Voice caller SKIP from Surge — needs ${category} in ${zip}`,
+            }).then(({ jobId, code }) =>
+              rfqBroadcast2.broadcastJob({ jobId, code, callerPhone: from, category, zip,
+                description: `Needs ${category} service in ${zip}` })
+            ).catch(e => console.error('[sms-inbound] SKIP rfq error:', e.message));
+            return;
+          }
+
+          // Numbered choice
+          const idx     = parseInt(choiceMatch[1], 10) - 1;
+          const choices = Array.isArray(pendingSession.choices) ? pendingSession.choices : [];
+          const chosen  = choices[idx];
+
+          if (!chosen) {
+            await rfqBroadcast.sendSms(from,
+              `LocalIntel: Please reply 1${choices.length > 1 ? '–' + choices.length : ''} to choose a provider.`);
+            return;
+          }
+
+          // Write confirmed_job
+          const confirmedJobs = require('./lib/confirmedJobs');
+          const job = await confirmedJobs.createConfirmedJob({
+            business_id:    chosen.business_id,
+            source:         'surge_purchase',
+            customer_phone: from,
+            service_name:   pendingSession.category
+              ? pendingSession.category.replace(/_/g, ' ') + ' service'
+              : 'Service request',
+            description:    `Voice caller selected from Surge catalog. ZIP: ${pendingSession.zip}`,
+            zip:            pendingSession.zip,
+            payment_method: 'surge',
+          });
+
+          // Clear pending session
+          await voiceSession.clearByPhone(from);
+
+          // Confirm to caller
+          await rfqBroadcast.sendSms(from,
+            `LocalIntel: Confirmed! ${chosen.name} has been notified and will reach out shortly.\n` +
+            `To pay and book directly: ${chosen.pay_url}`);
+
+          // Notify the business
+          if (chosen.biz_phone) {
+            await rfqBroadcast.sendSms(chosen.biz_phone,
+              `LocalIntel: New job confirmed from ${from}.\n` +
+              `Service: ${pendingSession.category ? pendingSession.category.replace(/_/g,' ') : 'service'} in ${pendingSession.zip || 'nearby'}.\n` +
+              `Reply DONE when complete.`);
+          }
+
+          console.log(`[sms-inbound] Surge choice confirmed: ${chosen.name} job_id=${job && job.id}`);
+          return;
+        }
+      }
+    } catch (surgeChoiceErr) {
+      console.error('[sms-inbound] Surge choice handler error:', surgeChoiceErr.message);
+      // fall through — never block
+    }
+  }
+
   // ── RFQ-v2 reply check (Step 8) ──────────────────────────────────────────
   // YES / NO from a business in response to a handleRFQ broadcast. We match
   // by (1) explicit "RFQ-<id>" reference if present, else (2) the most-recent
