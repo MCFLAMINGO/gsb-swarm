@@ -974,6 +974,47 @@ app.post('/api/admin/trigger-bea', (req, res) => {
   });
 });
 
+// POST /api/admin/trigger-lodes — runs LODES worker (FL WAC + RAC bulk download)
+app.post('/api/admin/trigger-lodes', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'LODES worker triggered — FL WAC + RAC block aggregation to ZIP (LODES8 2022, ~120s runtime)' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/lodesWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[lodes-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[lodes-trigger] ' + d));
+      child.on('close', code => console.log('[admin] LODES worker done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] LODES trigger failed:', e.message); }
+  });
+});
+
+// POST /api/admin/trigger-qwi — runs QWI worker (Census QWI API, county employment)
+app.post('/api/admin/trigger-qwi', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  if (!process.env.Census_Data_API) return res.status(500).json({ error: 'Census_Data_API env var not set' });
+  res.json({ status: 'started', message: 'QWI worker triggered — county employment, earnings, hires, separations for all 67 FL counties' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/qwiWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[qwi-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[qwi-trigger] ' + d));
+      child.on('close', code => console.log('[admin] QWI worker done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] QWI trigger failed:', e.message); }
+  });
+});
+
 // GET /api/local-intel/probe-log — live MCP call log for routerLearningWorker
 app.get('/api/local-intel/probe-log', async (req, res) => {
   if (!process.env.LOCAL_INTEL_DB_URL) return res.json({ error: 'no_db' });

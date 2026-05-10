@@ -635,6 +635,16 @@
         <span class="li-chip-label">BEA Income</span>
         <span class="li-chip-meta" id="li-meta-bea">checking…</span>
       </div>
+      <div class="li-worker-chip" id="li-chip-lodes">
+        <span class="li-chip-dot" id="li-dot-lodes"></span>
+        <span class="li-chip-label">LODES Jobs</span>
+        <span class="li-chip-meta" id="li-meta-lodes">checking…</span>
+      </div>
+      <div class="li-worker-chip" id="li-chip-qwi">
+        <span class="li-chip-dot" id="li-dot-qwi"></span>
+        <span class="li-chip-label">QWI Workforce</span>
+        <span class="li-chip-meta" id="li-meta-qwi">checking…</span>
+      </div>
     </div>
 
     <!-- FCC Tier 1 status card -->
@@ -754,6 +764,57 @@
           TRIGGER BEA WORKER
         </button>
         <span id="li-bea-trigger-result" style="font-size:12px;margin-left:12px;color:#4ade80;"></span>
+      </div>
+    </div>
+
+    <!-- LODES jobs card -->
+    <div class="li-card" style="margin-top:12px;" id="li-lodes-card">
+      <div class="li-card-head">
+        <span class="li-card-icon">🏢</span>
+        <span class="li-card-title">LEHD LODES — Jobs &amp; Workers by ZIP</span>
+        <span class="li-card-badge" id="li-lodes-badge" style="background:#1e1a3f;color:#a78bfa;border:1px solid #7c3aed;">LOADING</span>
+      </div>
+      <div class="li-card-body">
+        <div class="li-stat-row" style="margin-bottom:12px;">
+          <div class="li-stat"><span class="li-stat-val" id="li-lodes-zips">—</span><span class="li-stat-label">ZIPs covered</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-lodes-vintage">—</span><span class="li-stat-label">Vintage</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-lodes-sjc-jobs">—</span><span class="li-stat-label">32082 jobs</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-lodes-sjc-net">—</span><span class="li-stat-label">net flow</span></div>
+        </div>
+        <p style="font-size:12px;color:var(--text-2,#888);margin:0 0 10px;">
+          LODES8 WAC (jobs by workplace) + RAC (workers by residence) at census block level, aggregated to ZIP.
+          Downloads ~11MB of FL bulk CSVs + crosswalk &bull; ~120s runtime.
+        </p>
+        <button onclick="triggerWorker('lodes')" id="li-lodes-trigger-btn"
+          style="background:#6d28d9;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;">
+          TRIGGER LODES WORKER
+        </button>
+        <span id="li-lodes-trigger-result" style="font-size:12px;margin-left:12px;color:#a78bfa;"></span>
+      </div>
+    </div>
+
+    <!-- QWI workforce card -->
+    <div class="li-card" style="margin-top:12px;" id="li-qwi-card">
+      <div class="li-card-head">
+        <span class="li-card-icon">👥</span>
+        <span class="li-card-title">Census QWI — County Workforce Indicators</span>
+        <span class="li-card-badge" id="li-qwi-badge" style="background:#1a2a3f;color:#38bdf8;border:1px solid #0ea5e9;">LOADING</span>
+      </div>
+      <div class="li-card-body">
+        <div class="li-stat-row" style="margin-bottom:12px;">
+          <div class="li-stat"><span class="li-stat-val" id="li-qwi-vintage">—</span><span class="li-stat-label">Quarter</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-qwi-sjc-emp">—</span><span class="li-stat-label">St. Johns employed</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-qwi-sjc-earn">—</span><span class="li-stat-label">Avg monthly earn</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-qwi-sjc-turn">—</span><span class="li-stat-label">Turnover rate/yr</span></div>
+        </div>
+        <p style="font-size:12px;color:var(--text-2,#888);margin:0 0 10px;">
+          QWI employment, earnings, hires, separations for all 67 FL counties — single Census API call &bull; ~5s runtime.
+        </p>
+        <button onclick="triggerWorker('qwi')" id="li-qwi-trigger-btn"
+          style="background:#0369a1;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;">
+          TRIGGER QWI WORKER
+        </button>
+        <span id="li-qwi-trigger-result" style="font-size:12px;margin-left:12px;color:#38bdf8;"></span>
       </div>
     </div>
 

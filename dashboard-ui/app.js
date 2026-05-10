@@ -1479,6 +1479,7 @@ async function loadLocalIntelPanel() {
     loadFccStatus(),
     loadAnomalies(),
     loadFredBeaStatus(),
+    loadLodesQwiStatus(),
   ]);
 }
 
@@ -1836,5 +1837,62 @@ async function loadFredBeaStatus() {
 
   } catch (e) {
     console.warn('[fred/bea status]', e.message);
+  }
+}
+
+// ── LODES + QWI status ────────────────────────────────────────────────────────
+async function loadLodesQwiStatus() {
+  try {
+    const r = await fetch(`${LI_BASE}/zip-signals/32082`, {
+      headers: { 'x-admin-token': LI_ADMIN_TOKEN },
+    });
+    const data = await r.json();
+    const sig = data?.signals || data || {};
+
+    // LODES
+    const lodesBadge = document.getElementById('li-lodes-badge');
+    const lodesDot   = document.getElementById('li-dot-lodes');
+    const lodesMeta  = document.getElementById('li-meta-lodes');
+
+    if (sig.lodes_jobs_here != null) {
+      if (lodesBadge) { lodesBadge.textContent='LIVE'; lodesBadge.style.background='#14532d'; lodesBadge.style.color='#4ade80'; lodesBadge.style.border='1px solid #22c55e'; }
+      if (lodesDot) lodesDot.className = 'li-chip-dot li-dot-live';
+      if (lodesMeta) lodesMeta.textContent = sig.lodes_vintage || 'live';
+      const sjcJobs = document.getElementById('li-lodes-sjc-jobs');
+      const sjcNet  = document.getElementById('li-lodes-sjc-net');
+      const lodesV  = document.getElementById('li-lodes-vintage');
+      if (sjcJobs) sjcJobs.textContent = sig.lodes_jobs_here?.toLocaleString() || '—';
+      if (sjcNet)  sjcNet.textContent  = sig.lodes_net_flow != null ? (sig.lodes_net_flow > 0 ? '+' : '') + sig.lodes_net_flow.toLocaleString() : '—';
+      if (lodesV)  lodesV.textContent  = sig.lodes_vintage || '—';
+    } else {
+      if (lodesBadge) { lodesBadge.textContent='PENDING'; lodesBadge.style.background='#1e1a3f'; lodesBadge.style.color='#a78bfa'; }
+      if (lodesDot) lodesDot.className = 'li-chip-dot';
+      if (lodesMeta) lodesMeta.textContent = 'not yet run';
+    }
+
+    // QWI
+    const qwiBadge = document.getElementById('li-qwi-badge');
+    const qwiDot   = document.getElementById('li-dot-qwi');
+    const qwiMeta  = document.getElementById('li-meta-qwi');
+
+    if (sig.qwi_employment != null) {
+      if (qwiBadge) { qwiBadge.textContent='LIVE'; qwiBadge.style.background='#14532d'; qwiBadge.style.color='#4ade80'; qwiBadge.style.border='1px solid #22c55e'; }
+      if (qwiDot) qwiDot.className = 'li-chip-dot li-dot-live';
+      if (qwiMeta) qwiMeta.textContent = sig.qwi_vintage || 'live';
+      const qwiEmp  = document.getElementById('li-qwi-sjc-emp');
+      const qwiEarn = document.getElementById('li-qwi-sjc-earn');
+      const qwiTurn = document.getElementById('li-qwi-sjc-turn');
+      const qwiV    = document.getElementById('li-qwi-vintage');
+      if (qwiEmp)  qwiEmp.textContent  = sig.qwi_employment?.toLocaleString() || '—';
+      if (qwiEarn) qwiEarn.textContent = sig.qwi_avg_monthly_earn ? '$' + sig.qwi_avg_monthly_earn.toLocaleString() : '—';
+      if (qwiTurn) qwiTurn.textContent = sig.qwi_turnover_rate != null ? sig.qwi_turnover_rate + '%' : '—';
+      if (qwiV)    qwiV.textContent    = sig.qwi_vintage || '—';
+    } else {
+      if (qwiBadge) { qwiBadge.textContent='PENDING'; qwiBadge.style.background='#1a2a3f'; qwiBadge.style.color='#38bdf8'; }
+      if (qwiDot) qwiDot.className = 'li-chip-dot';
+      if (qwiMeta) qwiMeta.textContent = 'not yet run';
+    }
+  } catch (e) {
+    console.warn('[lodes/qwi status]', e.message);
   }
 }
