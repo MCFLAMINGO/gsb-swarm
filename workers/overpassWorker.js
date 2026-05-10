@@ -70,12 +70,37 @@ async function logWorkerEvent({ eventType, recordsIn, recordsOut, durationMs, er
 // Mirror raw OSM POIs to Postgres zip_enrichment (non-blocking)
 function saveOsmEnrichment(zip, pois) {
   if (!process.env.LOCAL_INTEL_DB_URL || !Array.isArray(pois)) return;
-  const { upsertOsmEnrichment } = require('../lib/pgStore');
-  return upsertOsmEnrichment(zip, {
+  const { upsertOsmEnrichment, upsertZipSignals } = require('../lib/pgStore');
+  upsertOsmEnrichment(zip, {
     osm_pois:       pois,
     osm_updated_at: new Date().toISOString(),
     poi_count:      pois.length,
   }).catch(e => console.warn('[overpass] Postgres zip_enrichment write failed:', e.message));
+
+  // World model — aggregate OSM signals into zip_signals
+  const total      = pois.length || 0;
+  const withPhone  = pois.filter(p => p.phone).length;
+  const withWeb    = pois.filter(p => p.website).length;
+  const withHours  = pois.filter(p => p.hours).length;
+  const food       = pois.filter(p => ['amenity','cuisine'].includes(p.category) ||
+    ['restaurant','cafe','fast_food','bar','pub','food_court'].includes(p.subtype)).length;
+  const retail     = pois.filter(p => p.category === 'shop').length;
+  const worship    = pois.filter(p => p.subtype === 'place_of_worship' ||
+    p.category === 'place_of_worship').length;
+  const education  = pois.filter(p => ['school','college','university','kindergarten'].includes(p.subtype)).length;
+  const healthcare = pois.filter(p => ['hospital','clinic','dentist','pharmacy','doctors'].includes(p.subtype)).length;
+  upsertZipSignals(zip, {
+    osm_biz_count:        total || null,
+    osm_with_phone_pct:   total > 0 ? Math.round((withPhone / total) * 1000) / 10 : null,
+    osm_with_website_pct: total > 0 ? Math.round((withWeb   / total) * 1000) / 10 : null,
+    osm_with_hours_pct:   total > 0 ? Math.round((withHours / total) * 1000) / 10 : null,
+    osm_food_count:       food     || null,
+    osm_retail_count:     retail   || null,
+    osm_worship_count:    worship  || null,
+    osm_education_count:  education  || null,
+    osm_healthcare_count: healthcare || null,
+    osm_updated_at:       new Date(),
+  }).catch(() => {});
 }
 
 /**

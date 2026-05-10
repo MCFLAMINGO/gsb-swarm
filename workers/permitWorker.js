@@ -353,11 +353,96 @@ async function runPass() {
   const sjcCount = await fetchSjcPermits();
   total += sjcCount;
 
+  // 3. Materialize bps_* signals into zip_signals (county → ZIP via zip_intelligence.county_name)
+  await materializeBpsSignals();
+
   const dur = Date.now() - t0;
   await logEvent('complete', total, dur);
   console.log(`[permitWorker] Pass complete — ${total} records in ${Math.round(dur/1000)}s`);
   console.log(`[permitWorker]   Census BPS: ${censusCount} county rows`);
   console.log(`[permitWorker]   SJC ArcGIS: ${sjcCount} individual permits`);
+}
+
+// ── Materialize bps_* into zip_signals ───────────────────────────────────────
+// Joins county_permits to zip_intelligence via county_name, apportions county
+// permit totals equally across ZIPs in the same county (county BPS has no ZIP split).
+async function materializeBpsSignals() {
+  const { upsertZipSignals } = require('../lib/pgStore');
+  try {
+    // Get the latest annual period available
+    const latestAnnual = await db.queryOne(
+      `SELECT period_key FROM county_permits
+       WHERE period_type='annual' AND state_fips='12'
+       ORDER BY period_key DESC LIMIT 1`
+    );
+    const latestMonthly = await db.queryOne(
+      `SELECT period_key FROM county_permits
+       WHERE period_type='monthly' AND state_fips='12'
+       ORDER BY period_key DESC LIMIT 1`
+    );
+
+    // Fetch all ZIPs with county_name populated
+    const zipRows = await db.query(
+      `SELECT zip, county_name FROM zip_intelligence WHERE county_name IS NOT NULL`
+    );
+    if (!zipRows.length) return;
+
+    // Build county_name → zip[] map
+    const countyToZips = {};
+    for (const r of zipRows) {
+      if (!countyToZips[r.county_name]) countyToZips[r.county_name] = [];
+      countyToZips[r.county_name].push(r.zip);
+    }
+
+    // Fetch annual permit data
+    const annualRows = latestAnnual
+      ? await db.query(
+          `SELECT county_name, res_1unit, res_multifam, total_units, total_value
+           FROM county_permits
+           WHERE period_type='annual' AND state_fips='12' AND period_key=$1`,
+          [latestAnnual.period_key]
+        )
+      : [];
+
+    // Fetch monthly permit data
+    const monthlyRows = latestMonthly
+      ? await db.query(
+          `SELECT county_name, res_1unit, res_multifam, total_units, period_key
+           FROM county_permits
+           WHERE period_type='monthly' AND state_fips='12' AND period_key=$1`,
+          [latestMonthly.period_key]
+        )
+      : [];
+
+    const monthlyByCounty = {};
+    for (const r of monthlyRows) monthlyByCounty[r.county_name] = r;
+
+    // Upsert bps_* for each ZIP, apportioning county totals by number of ZIPs in county
+    let updated = 0;
+    for (const r of annualRows) {
+      const zips = countyToZips[r.county_name] || [];
+      if (!zips.length) continue;
+      const n = zips.length;
+      const mo = monthlyByCounty[r.county_name];
+      for (const zip of zips) {
+        await upsertZipSignals(zip, {
+          bps_res_1unit_annual:   Math.round((r.res_1unit   || 0) / n),
+          bps_res_multifam_annual:Math.round((r.res_multifam|| 0) / n),
+          bps_total_units_annual: Math.round((r.total_units || 0) / n),
+          bps_total_value_annual: Math.round((r.total_value || 0) / n),
+          bps_res_1unit_mo:       mo ? Math.round((mo.res_1unit   || 0) / n) : null,
+          bps_res_multifam_mo:    mo ? Math.round((mo.res_multifam|| 0) / n) : null,
+          bps_total_units_mo:     mo ? Math.round((mo.total_units || 0) / n) : null,
+          bps_period_mo:          mo ? mo.period_key : null,
+          bps_updated_at:         new Date(),
+        }).catch(() => {});
+        updated++;
+      }
+    }
+    console.log(`[permitWorker] bps_* signals materialized for ${updated} ZIPs`);
+  } catch (e) {
+    console.warn('[permitWorker] materializeBpsSignals error:', e.message);
+  }
 }
 
 // ── Daemon ────────────────────────────────────────────────────────────────────

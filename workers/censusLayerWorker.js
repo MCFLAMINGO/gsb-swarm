@@ -1768,6 +1768,14 @@ async function ingestZBP(targetZips = FL_ZIP_SEED) {
     };
     await pgStore.upsertCensusLayer(zip, zbpLayerData, existing._confidence || null);
     await snapshotToHistory(zip);
+
+    // World model — write zbp_* signals into zip_signals
+    pgStore.upsertZipSignals(zip, {
+      zbp_total_establishments: zbpData.total_establishments || null,
+      zbp_total_employees:      zbpData.total_employees      || null,
+      zbp_sector_json:          Object.keys(zbpData.sectors).length ? zbpData.sectors : null,
+      zbp_updated_at:           new Date(),
+    }).catch(() => {});
   }
 
   console.log(`[censusLayer] ZBP: ingested ${Object.keys(byZip).length} ZIPs into census_layer`);
@@ -1853,6 +1861,18 @@ async function ingestCBP(targetZips = FL_ZIP_SEED) {
 
         await pgStore.upsertCensusLayer(zip, existing, prevConf);
         await snapshotToHistory(zip);
+
+        // World model — write cbp_* signals into zip_signals
+        const cbp = countySectors[name];
+        if (cbp) {
+          pgStore.upsertZipSignals(zip, {
+            cbp_total_establishments: cbp.total_establishments || null,
+            cbp_total_employees:      cbp.total_employees      || null,
+            cbp_total_payroll_k:      cbp.total_payroll_k      || null,
+            cbp_dominant_sector:      existing.zbp?.dominant_sector?.code || null,
+            cbp_updated_at:           new Date(),
+          }).catch(() => {});
+        }
       }
 
       // Small delay between counties

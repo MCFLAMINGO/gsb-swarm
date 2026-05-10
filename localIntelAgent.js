@@ -6572,6 +6572,125 @@ router.post('/consult', express.json(), async (req, res) => {
   return res.json({ ok: true });
 });
 
+// ── POST /api/local-intel/generate-report ───────────────────────────
+// Generate a world model consultation report for a ZIP code.
+// Body: { zip, lead_id?, report_type? ('full'|'teaser'), admin_token }
+// Returns: { report_id, access_token, report_json, html }
+// Admin-only (requires admin_token header or body field matching ADMIN_TOKEN env var).
+router.post('/generate-report', express.json(), async (req, res) => {
+  const { zip, lead_id, report_type = 'full', admin_token } = req.body || {};
+  const token = admin_token || req.headers['x-admin-token'];
+  if (token !== process.env.LOCAL_INTEL_ADMIN_TOKEN && token !== 'localintel-migrate-2026') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  if (!zip) return res.status(400).json({ error: 'zip required' });
+  try {
+    const { generateReport } = require('./lib/reportGenerator');
+    const result = await generateReport({ zip, leadId: lead_id || null, reportType: report_type });
+    return res.json({
+      ok: true,
+      report_id:    result.report_id,
+      access_token: result.access_token,
+      zip:          result.zip,
+      data_completeness: result.data_completeness,
+      scores: {
+        growth:      result.report?.scores?.growth_score,
+        opportunity: result.report?.scores?.opportunity_score,
+        maturity:    result.report?.scores?.market_maturity,
+      },
+      summary_12mo: result.report?.projections?.['12_month']?.summary,
+    });
+  } catch (e) {
+    console.error('[generate-report]', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/local-intel/report/:token ──────────────────────────────
+// Serve a generated report by access token.
+// Used for client-facing shareable report links.
+// Returns HTML if Accept: text/html, JSON otherwise.
+router.get('/report/:token', async (req, res) => {
+  const { token } = req.params;
+  if (!token) return res.status(400).json({ error: 'token required' });
+  try {
+    const row = await db.queryOne(
+      `SELECT zip, report_json, report_html, generated_at, status, model_version
+       FROM zip_reports WHERE access_token = $1`,
+      [token]
+    );
+    if (!row) return res.status(404).json({ error: 'report not found' });
+    if (row.status === 'archived') return res.status(410).json({ error: 'report archived' });
+
+    const acceptsHtml = (req.headers.accept || '').includes('text/html');
+    if (acceptsHtml && row.report_html) {
+      return res.type('text/html').send(row.report_html);
+    }
+    return res.json({
+      zip:          row.zip,
+      generated_at: row.generated_at,
+      model_version: row.model_version,
+      report:       row.report_json,
+    });
+  } catch (e) {
+    console.error('[report/:token]', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/local-intel/zip-signals/:zip ──────────────────────────
+// Returns raw zip_signals row for a ZIP (admin/internal use).
+router.get('/zip-signals/:zip', async (req, res) => {
+  const token = req.headers['x-admin-token'] || req.query.admin_token;
+  if (token !== process.env.LOCAL_INTEL_ADMIN_TOKEN && token !== 'localintel-migrate-2026') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  try {
+    const row = await db.queryOne(`SELECT * FROM zip_signals WHERE zip = $1`, [req.params.zip]);
+    if (!row) return res.status(404).json({ error: 'no signals for this ZIP yet' });
+    return res.json(row);
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/local-intel/zip-forecast/:zip ─────────────────────────
+// Returns the latest zip_forecast row for a ZIP.
+router.get('/zip-forecast/:zip', async (req, res) => {
+  try {
+    const row = await db.queryOne(
+      `SELECT * FROM zip_forecast WHERE zip = $1 ORDER BY generated_at DESC LIMIT 1`,
+      [req.params.zip]
+    );
+    if (!row) return res.status(404).json({ error: 'no forecast for this ZIP yet — worldModelWorker must run first' });
+    return res.json(row);
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/local-intel/anomalies ────────────────────────────────
+// Returns open anomalies (admin/internal). Optional ?zip= to filter.
+router.get('/anomalies', async (req, res) => {
+  const token = req.headers['x-admin-token'] || req.query.admin_token;
+  if (token !== process.env.LOCAL_INTEL_ADMIN_TOKEN && token !== 'localintel-migrate-2026') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  try {
+    const { zip, severity } = req.query;
+    let q = `SELECT zip, signal_name, actual_value, expected_value, z_score, direction, severity, question, detected_at, status
+             FROM zip_anomalies WHERE status='open'`;
+    const params = [];
+    if (zip)      { params.push(zip);      q += ` AND zip=$${params.length}`; }
+    if (severity) { params.push(severity); q += ` AND severity=$${params.length}`; }
+    q += ` ORDER BY ABS(z_score) DESC LIMIT 100`;
+    const rows = await db.query(q, params);
+    return res.json({ count: rows.length, anomalies: rows });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
 
 // ── Neighborhood endpoints ────────────────────────────────────────────────────

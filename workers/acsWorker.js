@@ -188,6 +188,16 @@ async function processZip(zip) {
   fs.writeFileSync(path.join(ACS_DIR, `${zip}.json`), JSON.stringify(result, null, 2));
   // Mirror to Postgres (fire-and-forget)
   pgStore.upsertAcsDemographics(zip, result).catch(() => {});
+
+  // World model — write acs_* signals into zip_signals
+  pgStore.upsertZipSignals(zip, {
+    acs_population:       result.population || null,
+    acs_households:       result.total_households || null,
+    acs_owner_occ_pct:    result.owner_occupied_pct || null,
+    acs_vintage:          '2022 5-year',
+    acs_updated_at:       new Date(),
+  }).catch(() => {});
+
   return result;
 }
 

@@ -6994,6 +6994,10 @@ app.use((req, res, next) => {
     { name: 'Embedding Backfill',          file: 'workers/embeddingBackfillWorker.js' },
     { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' },
     { name: 'Permit Worker',               file: 'workers/permitWorker.js' },
+    // ── World model signal workers ──
+    { name: 'FCC Broadband Worker',        file: 'workers/fccBroadbandWorker.js'  },
+    { name: 'IRS Migration Worker',        file: 'workers/irsMigrationWorker.js'  },
+    { name: 'World Model Worker',          file: 'workers/worldModelWorker.js'    },
   ];
 
   function spawnLocalIntelWorker(w, attempt = 0) {

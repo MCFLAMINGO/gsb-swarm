@@ -3134,3 +3134,56 @@ All sections hidden (display:none) if data is absent — no empty boxes on ZIPs 
 **Note:** Census BPS is residential-only (1-unit, 2-unit, 3-4 unit, 5+ unit). Commercial permit counts come from ArcGIS sources (SJC now, Miami-Dade next). The blurred permit gate will show real residential numbers for all FL ZIPs once worker runs on Railway.
 
 **Commits:** gsb-swarm `4df9c0d`
+
+---
+### Session 24 — World Model Full Build (2026-05-10)
+
+**Problem:** We had 6+ data workers writing to different tables (zip_intelligence, census_layer, zip_enrichment, county_permits, acs_demographics) with no unified signal store. The world model concept existed only architecturally — no implementation. Report generation was manual.
+
+**Fix:** "Do it right — schema first, migrate all workers, then build world model on the clean foundation."
+
+#### Migration 017 — Full World Model Schema (31KB, 552 lines, auto-runs on Railway deploy)
+Seven new tables:
+1. **`zip_signals`** — materialized signal store. One row per ZIP. All worker outputs land here via `upsertZipSignals()`. Bootstrapped from zip_intelligence on migration run.
+2. **`zip_signals_history`** — append-only daily snapshots. Key metric fields only (not all 80+ columns). Training data for future ML. UNIQUE(zip, snapshot_date) = idempotent daily writes.
+3. **`zip_causal_events`** — dated external events with announced/decided/effective/start/completion dates. Enables lag correlation analysis. The key innovation for causal inference.
+4. **`zip_forecast`** — world model output: 12/24/36 month projections per ZIP. driver_signals JSONB, opportunity_gaps JSONB, plain-English summaries.
+5. **`zip_anomalies`** — auto-detected signal divergences. z_score, auto-generated question, candidate_causes JSONB. The "questions we don't know to ask" mechanism.
+6. **`zip_reports`** — consultation artifact table. report_json + report_html. access_token for shareable link. linked to consultation_leads via lead_id.
+7. **`signal_registry`** — self-documenting table: every zip_signals column described with source, unit, frequency, correlates_with, questions_answered. Seeded with 14 signals.
+
+#### pgStore.js — `upsertZipSignals(zip, colsObj)` helper
+Dynamic column upsert: any subset of zip_signals columns passed as object. Builds SQL dynamically. Input-sanitized (snake_case only). Silently swallows table-not-exist errors (migration may not have run yet on first deploy).
+
+#### Worker Migrations (all additive — no structural changes to existing logic)
+Every worker now ALSO writes to zip_signals immediately after its existing write:
+- `acsWorker.js` → `acs_population`, `acs_households`, `acs_owner_occ_pct`, `acs_vintage`, `acs_updated_at`
+- `irsSoiWorker.js` → `irs_agi_median`, `irs_returns`, `irs_wage_share`, `irs_updated_at`
+- `censusLayerWorker.js` → `zbp_total_establishments`, `zbp_total_employees`, `zbp_sector_json` (in ingestZBP) + `cbp_total_establishments`, `cbp_total_employees`, `cbp_total_payroll_k`, `cbp_dominant_sector` (in ingestCBP)
+- `overpassWorker.js` → `osm_biz_count`, `osm_with_phone_pct`, `osm_with_website_pct`, `osm_with_hours_pct`, `osm_food_count`, `osm_retail_count`, `osm_worship_count`, `osm_education_count`, `osm_healthcare_count` — computed from POIs array at write time
+- `permitWorker.js` → NEW `materializeBpsSignals()` function runs after each BPS fetch. Queries county_permits + zip_intelligence to apportion county permit totals to ZIPs. Writes `bps_res_1unit_annual`, `bps_res_multifam_annual`, `bps_total_units_annual`, `bps_total_value_annual`, `bps_res_1unit_mo`, `bps_period_mo`, `bps_updated_at`.
+- `sunbizWorker.js` — NOT directly migrated (no ZIP field in Sunbiz import). `sunbiz_*` signals computed by worldModelWorker via GROUP BY query instead.
+
+#### New Workers
+- **`workers/fccBroadbandWorker.js`** — FCC Form 477 (opendata.fcc.gov Socrata) area table. County-level broadband coverage at 25/100/1000 Mbps speed tiers. Writes: `fcc_has_25_3`, `fcc_has_100_20`, `fcc_has_gigabit`, `fcc_providers_cnt`, `fcc_max_down_mbps`, `fcc_fiber_available`. County→ZIP via zip_intelligence.county_fips. Runs weekly (data updates annually).
+- **`workers/irsMigrationWorker.js`** — IRS SOI County-to-County Migration 2021-2022. `countyinflow2122.csv` + `countyoutflow2122.csv`. Writes: `irs_mig_in_returns`, `irs_mig_out_returns`, `irs_mig_in_agi`, `irs_mig_out_agi`, `irs_mig_net_returns`, `irs_mig_net_agi`, `irs_mig_top_origin`, `irs_mig_top_dest`. County→ZIP via county_fips. Caches CSVs 72h. Runs weekly.
+- **`workers/worldModelWorker.js`** — The brain. Reads all zip_signals rows daily. Clusters ZIPs into peer cohorts (popTier × incTier × housingTier = up to ~45 cohorts). Computes cohort statistics (mean, stddev, median). Scores each ZIP: growth (0-100) + opportunity (0-100). Classifies market maturity (nascent→emerging→growing→stable→mature→saturated). Projects 12/24/36mo trajectory. Writes zip_forecast. Detects anomalies (>2σ from cohort median) → generates plain-English questions + candidate explanations → writes zip_anomalies. Snapshots current state to zip_signals_history daily. Computes sig_* columns back into zip_signals (growth_score, opportunity_score, market_maturity, peer_cohort, data_completeness). 90s startup stagger (waits for signal workers to populate zip_signals).
+
+#### lib/reportGenerator.js — Consultation Report Generator
+Reads zip_signals + zip_forecast + zip_anomalies + zip_signals_history + zip_causal_events + peer ZIPs. Generates structured report_json + pre-rendered report_html. Stores to zip_reports with unique access_token. Plain-English recommendations engine (no LLM). Branded HTML with score bars, projection cards, anomaly cards, data source attribution.
+
+#### New API Endpoints (all in localIntelAgent.js)
+- `POST /api/local-intel/generate-report` — admin-only (token: localintel-migrate-2026). Body: {zip, lead_id?, report_type?}. Returns report_id + access_token + scores + summary.
+- `GET /api/local-intel/report/:token` — public shareable link. HTML if Accept:text/html, JSON otherwise.
+- `GET /api/local-intel/zip-signals/:zip` — admin. Raw zip_signals row.
+- `GET /api/local-intel/zip-forecast/:zip` — public. Latest forecast for ZIP.
+- `GET /api/local-intel/anomalies` — admin. Open anomalies with optional ?zip= and ?severity= filters.
+
+#### Self-Improvement Mechanism
+- Anomalies table IS the feedback loop: the world model asks questions it can't answer itself
+- Anomalies that stay open 30+ days = highest-value consultation hooks
+- Causal events in zip_causal_events → anomalies auto-explained when event date aligns with signal divergence
+- zip_signals_history accumulates daily snapshots → future model can train on actual vs predicted
+
+**Commits:** (this commit) — migration 017, 5 worker migrations, 2 new data workers, worldModelWorker, reportGenerator, 5 API endpoints
+

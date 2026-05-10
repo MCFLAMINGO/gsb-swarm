@@ -104,6 +104,15 @@ async function upsertIrsRow(zip, m) {
     [zip, m.irs_agi_median, m.irs_returns, m.irs_wage_share_pct]
   );
 
+  // World model — write irs_* signals into zip_signals
+  const { upsertZipSignals } = require('../lib/pgStore');
+  upsertZipSignals(zip, {
+    irs_agi_median: m.irs_agi_median || null,
+    irs_returns:    m.irs_returns    || null,
+    irs_wage_share: m.irs_wage_share_pct || null,
+    irs_updated_at: new Date(),
+  }).catch(() => {});
+
   // Fetch ZCTA boundary for this ZIP if not yet stored — fire-and-forget
   db.query('SELECT boundary_geojson FROM zip_intelligence WHERE zip=$1', [zip])
     .then(async rows => {
