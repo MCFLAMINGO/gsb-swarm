@@ -851,6 +851,87 @@ app.post('/api/admin/trigger-census', (req, res) => {
   });
 });
 
+
+// POST /api/admin/trigger-permit — runs permitWorker immediately
+app.post('/api/admin/trigger-permit', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'Permit worker triggered — Census BPS + SJC ArcGIS permits for all FL counties' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/permitWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[permit-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[permit-trigger] ' + d));
+      child.on('close', code => console.log('[admin] permit worker done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] permit trigger failed:', e.message); }
+  });
+});
+
+// POST /api/admin/trigger-irs-migration — runs irsMigrationWorker immediately
+app.post('/api/admin/trigger-irs-migration', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'IRS Migration worker triggered — county-to-county flow 2021-2022' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/irsMigrationWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[irs-mig-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[irs-mig-trigger] ' + d));
+      child.on('close', code => console.log('[admin] irs-migration done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] irs-migration trigger failed:', e.message); }
+  });
+});
+
+// POST /api/admin/trigger-fcc — runs fccBroadbandWorker immediately
+app.post('/api/admin/trigger-fcc', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'FCC BDC worker triggered — county broadband coverage for all 67 FL counties' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/fccBroadbandWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[fcc-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[fcc-trigger] ' + d));
+      child.on('close', code => console.log('[admin] fcc worker done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] fcc trigger failed:', e.message); }
+  });
+});
+
+// POST /api/admin/trigger-world-model — runs worldModelWorker.runPass() immediately
+app.post('/api/admin/trigger-world-model', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'World model worker triggered — peer cohorts, growth scores, forecasts, anomaly detection' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/worldModelWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[world-model-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[world-model-trigger] ' + d));
+      child.on('close', code => console.log('[admin] world model done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] world-model trigger failed:', e.message); }
+  });
+});
+
 // GET /api/local-intel/probe-log — live MCP call log for routerLearningWorker
 app.get('/api/local-intel/probe-log', async (req, res) => {
   if (!process.env.LOCAL_INTEL_DB_URL) return res.json({ error: 'no_db' });
