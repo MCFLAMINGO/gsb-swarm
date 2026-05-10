@@ -6297,6 +6297,41 @@ router.get('/admin/stats', async (req, res) => {
 });
 
 
+// ── GET /api/local-intel/platform-stats ─────────────────────────────────────
+// Lightweight live counts for index.html hero section.
+// Cached in-memory for 5 minutes — fast, no byZip breakdown.
+let _platformStatsCache = null;
+let _platformStatsCachedAt = 0;
+router.get('/platform-stats', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (_platformStatsCache && (now - _platformStatsCachedAt) < 5 * 60 * 1000) {
+      return res.json(_platformStatsCache);
+    }
+    const [row] = await db.query(`
+      SELECT
+        COUNT(*)                                       AS total,
+        COUNT(*) FILTER (WHERE status != 'inactive')   AS active,
+        COUNT(*) FILTER (WHERE claimed_at IS NOT NULL
+          AND NOT (confidence_score = 0 AND business_id::text LIKE 'aaaaaaaa%')) AS claimed,
+        COUNT(DISTINCT zip) FILTER (WHERE status != 'inactive') AS zip_count
+      FROM businesses
+    `);
+    _platformStatsCache = {
+      ok:        true,
+      businesses: parseInt(row.active,  10),
+      zips:       parseInt(row.zip_count, 10),
+      claimed:    parseInt(row.claimed,  10),
+      cached_at:  new Date().toISOString(),
+    };
+    _platformStatsCachedAt = now;
+    return res.json(_platformStatsCache);
+  } catch (err) {
+    console.error('[platform-stats]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /api/local-intel/businesses-claimed ───────────────────────────────────
 // Returns all claimed, active businesses with agent profile data.
 // Used by generate-biz-pages.js to build static /biz/{slug}.html pages.
