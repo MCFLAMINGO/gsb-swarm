@@ -6361,6 +6361,85 @@ router.get('/businesses-claimed', async (req, res) => {
   }
 });
 
+// ── OSM Completeness Check ───────────────────────────────────────────────────
+// GET /api/local-intel/osm-check?token=<dispatch_token>
+//
+// Returns a completeness report for the business's OSM node:
+//   { score, total, present[], missing[], editUrl, osm_type, osm_id,
+//     cached, checked_at }
+//
+// Uses cached result (osm_last_checked) if < 24h old — avoids Nominatim/
+// Overpass hits on every page load. Force fresh: ?refresh=1
+//
+// This is intentionally async/slow on first call (Nominatim + Overpass).
+// The inbox card shows a spinner; subsequent calls return instantly from cache.
+router.get('/osm-check', async (req, res) => {
+  const { token, refresh } = req.query;
+  if (!token) return res.status(401).json({ error: 'token required' });
+
+  try {
+    const [biz] = await db.query(
+      `SELECT business_id, name, lat, lon, phone, website, hours,
+              osm_node_id, osm_node_type, osm_last_checked, osm_missing_fields
+         FROM businesses
+        WHERE dispatch_token = $1 AND status != 'inactive'
+        LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+
+    // Serve cached result if < 24h old and not forced refresh
+    const cacheAge = biz.osm_last_checked
+      ? Date.now() - new Date(biz.osm_last_checked).getTime()
+      : Infinity;
+    const CACHE_TTL = 24 * 60 * 60 * 1000;
+
+    if (refresh !== '1' && cacheAge < CACHE_TTL && biz.osm_last_checked) {
+      // Build a lightweight report from cached columns — no external calls
+      const missingFields = biz.osm_missing_fields || [];
+      const present = ['phone','website','opening_hours','email']
+        .filter(f => !missingFields.includes(f))
+        .map(f => ({ field: f }));
+      const missing = missingFields.map(f => ({
+        field: f,
+        label: { phone:'Phone number', website:'Website URL',
+                 opening_hours:'Opening hours', email:'Email address' }[f] || f,
+        hint: null,
+      }));
+      const editUrl = biz.osm_node_id && biz.osm_node_type
+        ? `https://www.openstreetmap.org/edit?${biz.osm_node_type}=${biz.osm_node_id}`
+        : 'https://www.openstreetmap.org/edit';
+      return res.json({
+        score: present.length, total: 4,
+        present, missing, editUrl,
+        osm_type: biz.osm_node_type || null,
+        osm_id  : biz.osm_node_id || null,
+        cached    : true,
+        checked_at: biz.osm_last_checked,
+      });
+    }
+
+    // Fresh check — hits Nominatim + Overpass
+    const osmChecker = require('./lib/osmChecker');
+    const report = await osmChecker.checkBusiness({
+      business_id : biz.business_id,
+      name        : biz.name,
+      lat         : biz.lat,
+      lon         : biz.lon,
+      phone       : biz.phone,
+      website     : biz.website,
+      hours       : biz.hours,
+      osm_node_id : biz.osm_node_id,
+      osm_node_type: biz.osm_node_type,
+    });
+
+    return res.json({ ...report, cached: false, checked_at: new Date().toISOString() });
+  } catch (err) {
+    console.error('[osm-check]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 
 // ── Neighborhood endpoints ────────────────────────────────────────────────────
@@ -6660,7 +6739,8 @@ router.get('/zip-boundary', async (req, res) => {
 
     // Business dots — lat/lon points for this ZIP (limit 500 for map performance)
     const businesses = await db.query(
-      `SELECT business_id, name, category, category_group, lat, lon, website, phone
+      `SELECT business_id, name, category, category_group, lat, lon, website, phone,
+              (claimed_at IS NOT NULL) AS is_claimed
        FROM businesses
        WHERE zip=$1 AND lat IS NOT NULL AND lon IS NOT NULL AND status='active'
        ORDER BY confidence_score DESC NULLS LAST
