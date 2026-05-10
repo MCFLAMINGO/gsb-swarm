@@ -21,7 +21,7 @@
  *   START → read Postgres (skip if fresh < 30 days) → batch BLS calls
  *         → compute YoY → upsert all ZIPs → heartbeat → END
  *
- * API env var: BLS_QCEW_API (Railway)
+ * API env var: BUREAU_OF_LABOR_STATISTICS_API (Railway)
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -31,7 +31,7 @@ const pgStore = require('../lib/pgStore');
 const { getZipsForCountyFips } = require('../lib/flZipCountyMap');
 
 const BLS_API_URL = 'https://api.bls.gov/publicAPI/v2/timeseries/data/';
-const API_KEY     = process.env.BLS_QCEW_API;
+const API_KEY     = process.env.BUREAU_OF_LABOR_STATISTICS_API;
 const BATCH_SIZE  = 50;   // BLS hard limit per call
 const PACE_MS     = 1500; // 1.5s between batch calls — BLS rate limit is lenient with key
 
@@ -208,7 +208,7 @@ async function isFresh() {
 
 async function run() {
   if (!API_KEY) {
-    console.error('[qcew] ❌ BLS_QCEW_API env var not set — cannot run');
+    console.error('[qcew] ❌ BUREAU_OF_LABOR_STATISTICS_API env var not set — cannot run');
     process.exit(1);
   }
 

@@ -60,7 +60,7 @@ const pgStore = require('../lib/pgStore');
 const { FL_MSAS, MSA_NAMES, getZipsForMsa } = require('../lib/flZipMsaMap');
 
 const BLS_API_URL = 'https://api.bls.gov/publicAPI/v2/timeseries/data/';
-const API_KEY     = process.env.BLS_QCEW_API;   // reuses same BLS API key
+const API_KEY     = process.env.BUREAU_OF_LABOR_STATISTICS_API;   // reuses same BLS API key
 const BATCH_SIZE  = 50;
 const PACE_MS     = 1500;
 
@@ -287,7 +287,7 @@ async function isFresh() {
 
 async function run() {
   if (!API_KEY) {
-    console.error('[ces] ❌ BLS_QCEW_API env var not set — cannot run');
+    console.error('[ces] ❌ BUREAU_OF_LABOR_STATISTICS_API env var not set — cannot run');
     process.exit(1);
   }
 

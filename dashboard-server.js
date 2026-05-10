@@ -1021,7 +1021,7 @@ app.post('/api/admin/trigger-ces', (req, res) => {
   if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
     return res.status(401).json({ error: 'unauthorized' });
   }
-  if (!process.env.BLS_QCEW_API) return res.status(500).json({ error: 'BLS_QCEW_API env var not set' });
+  if (!process.env.BUREAU_OF_LABOR_STATISTICS_API) return res.status(500).json({ error: 'BUREAU_OF_LABOR_STATISTICS_API env var not set' });
   res.json({ status: 'started', message: 'CES worker triggered — BLS monthly sector employment + AI displacement risk + investment scores for 21 FL MSAs (~15s runtime)' });
   setImmediate(async () => {
     try {
@@ -1042,7 +1042,7 @@ app.post('/api/admin/trigger-qcew', (req, res) => {
   if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
     return res.status(401).json({ error: 'unauthorized' });
   }
-  if (!process.env.BLS_QCEW_API) return res.status(500).json({ error: 'BLS_QCEW_API env var not set' });
+  if (!process.env.BUREAU_OF_LABOR_STATISTICS_API) return res.status(500).json({ error: 'BUREAU_OF_LABOR_STATISTICS_API env var not set' });
   res.json({ status: 'started', message: 'QCEW worker triggered — BLS quarterly employment, wages, establishments for all 67 FL counties (~10s runtime)' });
   setImmediate(async () => {
     try {
