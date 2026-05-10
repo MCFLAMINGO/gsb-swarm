@@ -2943,3 +2943,31 @@ Businesses receiving job dispatches via RFQ had no structured job record, no Toa
 **Result:** Confirmed job cards in inbox.html show the real job description (e.g. "Need lawn mowed and edged, about 1/4 acre") instead of generic label.
 
 **Commit:** `f6753db`
+
+## Session 22 — Addendum: Voice → Surge Catalog Match (2026-05-09)
+
+**Problem:** Voice callers triggered a full RFQ bid window even when businesses with fixed-price Surge catalog items existed in the same ZIP/category. Bid windows add latency (4-72h) when the job could be booked instantly.
+
+**Fix:** Added Surge catalog path in voiceIntake.js that fires BEFORE POS order path and RFQ broadcast.
+
+**Flow:**
+1. After extractCategory() + extractZip(), query businesses JOIN business_agent_profiles WHERE settlement_tier='surge_catalog' AND surge_wallet IS NOT NULL, same ZIP+category, LIMIT 3 ordered by claimed/confidence.
+2. If 1+ found: build pay_url per business (surge_catalog_id → `/pay/{id}`, fallback → `/shop/{wallet}`). Save `surge_pending` session keyed on `surge:{callerPhone}` in voice_sessions. SMS caller numbered list with pay links. TwiML tells caller to check their phone and reply 1/2/3.
+3. Caller replies 1, 2, or 3 → handleSmsInbound catches it FIRST (before YES/NO/DONE/RFQ-v2). Looks up surge_pending session by caller phone. Writes confirmed_job (source: surge_purchase). Sends confirmation SMS to caller with pay_url. Sends notification SMS to business phone. Clears pending session.
+4. Caller replies SKIP → clears session, posts RFQ broadcast to all providers as normal.
+5. If no Surge businesses found → falls through to POS order path then RFQ broadcast as before.
+
+**voiceSession.js changes:**
+- Added `choices JSONB` column (auto-migrated with ALTER TABLE IF NOT EXISTS).
+- `save()` allowed list includes `choices` (serialized as JSON like cart).
+- New `getSurgePending(callerPhone)` — looks up stage='surge_pending' by phone, most recent.
+- New `clearByPhone(callerPhone)` — deletes all surge_pending rows for that phone.
+
+**Key design decisions:**
+- Session keyed on `surge:{callerPhone}` not CallSid — call ends before SMS reply arrives.
+- SKIP triggers full RFQ broadcast in background — caller never dead-ends.
+- Error in Surge check is caught and logged — falls through to POS/RFQ, never blocks.
+- SMS reply handler is first block after taskDispatch — before YES/NO RFQ-v2 check.
+- 1/2/3 regex only matches if a surge_pending session exists — single digits won't accidentally trigger for non-surge flows.
+
+**Commit:** `8cbe211`
