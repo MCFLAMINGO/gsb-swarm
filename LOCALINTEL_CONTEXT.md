@@ -3098,3 +3098,20 @@ All sections hidden (display:none) if data is absent — no empty boxes on ZIPs 
 **Result:** Every ZIP page now has a permit section that creates desire and routes to consultation — not a data void.
 
 **Commits:** localintel-landing `60c49aa` · Vercel deployed ✓
+
+---
+### Session 23 addendum — consultation intake (2026-05-10)
+
+**Problem:** Permit gate CTA sent users to the merchant claiming flow (wrong). No consultation lead capture existed. No way to monetize the premium data signals.
+
+**Fix:**
+- Migration 016: `consultation_leads` table — id, name, email, zip, intent, description, ref, created_at, contacted_at, status
+- `POST /api/local-intel/consult` in localIntelAgent.js — stores lead to Postgres + emails erik@mcflamingo.com via Resend. Non-blocking: DB failure doesn't block email, email failure doesn't block DB.
+- `/consult.html` — clean standalone intake page: name, email, zip, intent dropdown (6 options), description textarea. Pre-fills ZIP from ?zip= query param. Shows success state after submit. Links back to ZIP page.
+- Permit gate CTA updated: `/claim.html?ref=permit` → `/consult.html?ref=permit&zip=ZIP`
+- Email to Erik: structured HTML with name/email/zip/intent/description, ZIP page link, "Typical response value: $500–$5,000" note.
+- Pricing shown on page: $750 basic, $2k–$5k expansion packages. Payment via ACH or pathUSD.
+
+**Result:** Every permit gate click now routes to a qualified lead capture. Leads stored in Postgres and emailed immediately. Migration auto-runs on Railway deploy.
+
+**Commits:** gsb-swarm `9a765a7` · localintel-landing `b59a7e2` · Vercel deployed ✓
