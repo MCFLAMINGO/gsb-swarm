@@ -3228,3 +3228,22 @@ Worker produces current BDC data (semiannual FCC releases, June+December). Dashb
 **Problem 2:** `acsWorker.js` was hitting Census API unauthenticated (50 req/min). Census API key received and stored in Railway as `Census_Data_API`.
 **Fix 2:** Wired `Census_Data_API` env var into `fetchACS()` — appends `&key=` to every Census request when present. Also drops inter-request sleep from 300ms → 120ms when authenticated (matches 500 req/min limit). Worker logs which mode it's in at startup. Falls back gracefully if key absent.
 **Result:** Migration 017 complete (7/7 tables). ACS worker now runs 10× faster when key is set — full FL ZIP set completes in ~15 min instead of ~2.5 hours.
+
+---
+## Session Entry — 2026-05-10 (Dashboard Reorg + Node Map)
+
+**Problem:** Dashboard was crypto-punk styled with no clear LocalIntel identity; Copy Trader and War Room tabs silently hitting dead service (gsb-yield-swarm-production.up.railway.app); no way to demonstrate individual LocalIntel data node capabilities to a client.
+
+**Fix:**
+- Railway HTML dashboard renamed to "LocalIntel Ops", LocalIntel section promoted to default tab, nav restructured with section labels (LOCALINTEL / GSB SWARM / SYSTEM)
+- 10-node capability map embedded in Railway LocalIntel section (ACS, IRS SOI, IRS Migration, Census CBP, OSM, Building Permits, FCC BDC, Sunbiz, World Model, MCP Oracle) — each card shows questions it can answer, signal chips, live/pending status, and demo button
+- Vercel Next.js dashboard: new `/local-intel/nodes` page (880 lines) with same 10-node map, completeness strip (X/10 live, X/42 signals), per-node demo buttons that fire live API calls and render JSON inline
+- Sidebar.tsx: added "↳ Node Map" entry with Network icon pointing to /local-intel/nodes
+- Copy Trader + War Room: sticky ⚠ SERVICE OFFLINE banners added (code preserved, service flagged as stopped)
+- World model trigger fired after signal workers ran
+
+**Result:**
+- gsb-swarm commit `38b5bc9` — Railway dashboard reorg
+- gsb-swarm-dashboard Vercel deploy — nodes page + sidebar entry + offline banners
+- World model running, will populate zip_forecast + zip_anomalies from signal data
+- Client demo path: /local-intel/nodes → shows all 10 assets with what questions they answer + live signal count for ZIP 32082
