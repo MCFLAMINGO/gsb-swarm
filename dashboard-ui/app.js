@@ -1363,16 +1363,115 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+// ── LocalIntel Capability Node Definitions ────────────────────────────────────
+const LI_NODES = [
+  {
+    id: 'acs', icon: '👥', label: 'ACS Demographics',
+    source: 'Census Bureau · Annual',
+    color: '#3B82F6',
+    statusKey: 'acs_population',
+    questions: ['What is the median household income?', 'What % own their home?', 'What % work from home?'],
+    signals: ['acs_population','acs_median_hhi','acs_owner_occ_pct','acs_college_pct','acs_poverty_pct'],
+    demoZip: '32082',
+  },
+  {
+    id: 'irs', icon: '💰', label: 'IRS Income (SOI)',
+    source: 'IRS Statistics of Income · Annual',
+    color: '#10B981',
+    statusKey: 'irs_agi_median',
+    questions: ['What is the true median AGI?', 'What share of income is wages vs investment?', 'How many returns filed?'],
+    signals: ['irs_agi_median','irs_returns','irs_wage_share'],
+    demoZip: '32082',
+  },
+  {
+    id: 'irs_mig', icon: '✈️', label: 'IRS Migration Flow',
+    source: 'IRS SOI Migration · Annual',
+    color: '#06B6D4',
+    statusKey: 'irs_mig_net_returns',
+    questions: ['Is this ZIP gaining or losing residents?', 'Where are people moving from?', 'How much income is migrating in?'],
+    signals: ['irs_mig_net_returns','irs_mig_net_agi','irs_mig_top_origin'],
+    demoZip: '32082',
+  },
+  {
+    id: 'zbp', icon: '🏢', label: 'Census Business Patterns',
+    source: 'Census ZBP/CBP · Annual',
+    color: '#8B5CF6',
+    statusKey: 'zbp_total_establishments',
+    questions: ['How many businesses are in this ZIP?', 'What sectors dominate?', 'How many employees?'],
+    signals: ['zbp_total_establishments','cbp_total_establishments','cbp_dominant_sector'],
+    demoZip: '32082',
+  },
+  {
+    id: 'osm', icon: '🗺️', label: 'OpenStreetMap (OSM)',
+    source: 'Overpass API · Weekly',
+    color: '#F97316',
+    statusKey: 'osm_biz_count',
+    questions: ['How many businesses have phone numbers?', 'What % have hours posted?', 'Food/retail/healthcare counts?'],
+    signals: ['osm_biz_count','osm_food_count','osm_with_phone_pct','osm_with_hours_pct'],
+    demoZip: '32082',
+  },
+  {
+    id: 'permits', icon: '🏗️', label: 'Building Permits (BPS)',
+    source: 'Census BPS · Monthly/Annual',
+    color: '#EAB308',
+    statusKey: 'bps_total_units_annual',
+    questions: ['How much construction is happening?', 'Residential or commercial dominant?', 'What is the permit velocity?'],
+    signals: ['bps_total_units_annual','bps_res_multifam_annual','bps_commercial_mo'],
+    demoZip: '32082',
+  },
+  {
+    id: 'fcc', icon: '📡', label: 'FCC Broadband (BDC)',
+    source: 'FCC BDC API · Semiannual',
+    color: '#6366F1',
+    statusKey: 'fcc_updated_at',
+    questions: ['What % have 25/3 Mbps broadband?', 'Is fiber available?', 'How many providers compete?', 'BEAD-eligible?'],
+    signals: ['fcc_pct_25_3','fcc_provider_count','fcc_fiber_available','fcc_bead_unserved_pct'],
+    demoZip: '32082',
+  },
+  {
+    id: 'sunbiz', icon: '📋', label: 'Sunbiz Entity Registry',
+    source: 'Florida DOS · Monthly',
+    color: '#EC4899',
+    statusKey: 'sunbiz_active_entities',
+    questions: ['How many active businesses registered?', 'New formations last 12 months?', 'Is formation accelerating?'],
+    signals: ['sunbiz_active_entities','sunbiz_new_12mo','sunbiz_net_12mo'],
+    demoZip: '32082',
+  },
+  {
+    id: 'world', icon: '🌍', label: 'World Model Score',
+    source: 'LocalIntel · Daily',
+    color: '#EF4444',
+    statusKey: 'sig_growth_score',
+    questions: ['What is the growth score vs peer ZIPs?', 'What is the opportunity score?', 'What market stage is this ZIP?', 'Any statistical anomalies?'],
+    signals: ['sig_growth_score','sig_opportunity_score','sig_market_maturity','sig_peer_cohort'],
+    demoZip: '32082',
+  },
+  {
+    id: 'oracle', icon: '🔮', label: 'MCP Oracle',
+    source: 'LocalIntel API · On-demand',
+    color: '#F59E0B',
+    statusKey: null, // always live — it's the API layer
+    questions: ['What are the top business gaps?', 'What is restaurant saturation?', 'What consumer profile?', 'What would you build here?'],
+    signals: ['nl-query','oracle','brief','market-gaps'],
+    demoZip: '32082',
+  },
+];
+
 // ── LocalIntel World Model panel ──────────────────────────────────────────────
 const LI_ADMIN_TOKEN = 'localintel-migrate-2026';
 const LI_BASE        = API_BASE + '/api/local-intel';
 
-// Auto-load when tab is activated
+// Auto-load when tab is activated (click) or on page init (default tab)
 document.addEventListener('click', e => {
   const item = e.target.closest('[data-section="localintel"]');
   if (item) {
     setTimeout(loadLocalIntelPanel, 100);
   }
+});
+
+// LocalIntel is the default active tab — load it on page init
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(loadLocalIntelPanel, 200);
 });
 
 async function loadLocalIntelPanel() {
@@ -1392,6 +1491,9 @@ async function loadFccStatus() {
     if (!r.ok) throw new Error('no data');
     const d = await r.json();
     const sig = d.signals || {};
+
+    // Render capability node cards with signal presence status
+    renderLiNodes(sig);
 
     const vintage = sig.fcc_vintage_date || '—';
     const updated = sig.fcc_updated_at
@@ -1418,6 +1520,7 @@ async function loadFccStatus() {
 
   } catch (e) {
     setChipStatus('fcc', 'warn', 'checking…');
+    renderLiNodes(null);
   }
 
   // Check other worker chips via anomaly endpoint (confirms world model is running)
@@ -1435,6 +1538,84 @@ async function loadFccStatus() {
     }
   } catch (e) {
     ['world','irs','acs','permit'].forEach(k => setChipStatus(k, 'err', 'error'));
+  }
+}
+
+
+// ── LocalIntel Capability Node Renderer ───────────────────────────────────────
+function renderLiNodes(signals) {
+  const grid = document.getElementById('li-nodes-grid');
+  if (!grid) return;
+  let liveCount = 0;
+
+  grid.innerHTML = LI_NODES.map(node => {
+    const isLive = node.statusKey === null ? true : (signals && signals[node.statusKey] != null);
+    if (isLive) liveCount++;
+
+    const statusDot = isLive
+      ? '<span class="li-node-dot live" title="Live data"></span>'
+      : '<span class="li-node-dot pending" title="Pending — worker running"></span>';
+
+    const questions = node.questions.map(q =>
+      `<div class="li-node-q">Q: ${q}</div>`
+    ).join('');
+
+    const sigChips = node.signals.map(s =>
+      `<span class="li-node-sig">${s}</span>`
+    ).join('');
+
+    return `
+      <div class="li-node-card" style="--node-color:${node.color}">
+        <div class="li-node-head">
+          <span class="li-node-icon">${node.icon}</span>
+          <div class="li-node-info">
+            <span class="li-node-label">${node.label}</span>
+            <span class="li-node-source">${node.source}</span>
+          </div>
+          ${statusDot}
+        </div>
+        <div class="li-node-questions">${questions}</div>
+        <div class="li-node-sigs">${sigChips}</div>
+        <button class="li-node-demo-btn" onclick="demoNode('${node.id}','${node.demoZip}')">Demo ▶</button>
+        <div class="li-node-demo-result" id="li-node-demo-${node.id}" style="display:none"></div>
+      </div>
+    `;
+  }).join('');
+
+  const countEl = document.getElementById('li-nodes-live-count');
+  if (countEl) countEl.textContent = liveCount + ' / ' + LI_NODES.length + ' live';
+}
+
+async function demoNode(nodeId, zip) {
+  const out = document.getElementById('li-node-demo-' + nodeId);
+  if (!out) return;
+  const showing = out.style.display !== 'none' && out.style.display !== '';
+  if (showing) { out.style.display = 'none'; return; }
+  out.style.display = 'block';
+  out.textContent = 'Loading...';
+
+  try {
+    let url, headers = { 'x-admin-token': LI_ADMIN_TOKEN };
+    if (nodeId === 'oracle') {
+      url = `${LI_BASE}/oracle?zip=${zip}`;
+    } else {
+      url = `${LI_BASE}/zip-signals/${zip}`;
+    }
+    const r = await fetch(url, { headers });
+    const data = await r.json();
+
+    // For zip-signals, filter to just this node's signals
+    const node = LI_NODES.find(n => n.id === nodeId);
+    let display = data;
+    if (nodeId !== 'oracle' && data.signals && node) {
+      display = {};
+      node.signals.forEach(s => { if (data.signals[s] != null) display[s] = data.signals[s]; });
+      if (Object.keys(display).length === 0) display = { status: 'pending', message: 'Worker has not populated this ZIP yet — check Railway logs' };
+    }
+
+    out.textContent = JSON.stringify(display, null, 2);
+  } catch(e) {
+    out.textContent = 'Error: ' + e.message;
   }
 }
 
