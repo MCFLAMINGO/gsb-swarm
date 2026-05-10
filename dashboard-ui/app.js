@@ -1478,6 +1478,7 @@ async function loadLocalIntelPanel() {
   await Promise.all([
     loadFccStatus(),
     loadAnomalies(),
+    loadFredBeaStatus(),
   ]);
 }
 
@@ -1742,5 +1743,98 @@ async function loadAnomalies() {
     `).join('');
   } catch (e) {
     out.textContent = 'Error: ' + e.message;
+  }
+}
+
+// ── FRED + BEA worker trigger + status ───────────────────────────────────────
+
+// Generic worker trigger — used by FRED, BEA (and future workers)
+async function triggerWorker(workerKey) {
+  const btn = document.getElementById(`li-${workerKey}-trigger-btn`);
+  const res = document.getElementById(`li-${workerKey}-trigger-result`);
+  if (!btn) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Triggering…';
+  if (res) res.textContent = '';
+
+  try {
+    const r = await fetch(`${API_BASE}/api/admin/trigger-${workerKey}`, {
+      method: 'POST',
+      headers: { 'x-operator-token': LI_ADMIN_TOKEN },
+    });
+    const data = await r.json();
+    if (data.error) {
+      btn.textContent = `ERROR: ${data.error}`;
+      btn.disabled = false;
+      if (res) { res.textContent = data.error; res.style.color = '#EF4444'; }
+    } else {
+      btn.textContent = 'Running ✓';
+      if (res) res.textContent = data.message || 'Worker started';
+      // Reload status after 5s
+      setTimeout(() => loadFredBeaStatus(), 5000);
+    }
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Trigger ' + workerKey.toUpperCase();
+    if (res) { res.textContent = 'Error: ' + e.message; res.style.color = '#EF4444'; }
+  }
+}
+
+// Load FRED + BEA status from zip_signals
+async function loadFredBeaStatus() {
+  try {
+    // Fetch ZIP signal data for 32082 (St. Johns) to show sample values
+    const r = await fetch(`${LI_BASE}/zip-signals/32082`, {
+      headers: { 'x-admin-token': LI_ADMIN_TOKEN },
+    });
+    const data = await r.json();
+    const sig = data?.signals || data || {};
+
+    // FRED stats
+    const fredEl   = document.getElementById('li-fred-badge');
+    const fredZips = document.getElementById('li-fred-zips');
+    const fredVint = document.getElementById('li-fred-vintage');
+    const fredSjc  = document.getElementById('li-fred-sjc');
+    const fredDot  = document.getElementById('li-dot-fred');
+    const fredMeta = document.getElementById('li-meta-fred');
+
+    if (sig.fred_unemployment_rate != null) {
+      if (fredEl) { fredEl.textContent = 'LIVE'; fredEl.style.background='#14532d'; fredEl.style.color='#4ade80'; fredEl.style.border='1px solid #22c55e'; }
+      if (fredZips) fredZips.textContent = '—'; // populated by full count query
+      if (fredVint) fredVint.textContent = sig.fred_vintage || '—';
+      if (fredSjc)  fredSjc.textContent  = sig.fred_unemployment_rate != null ? sig.fred_unemployment_rate + '%' : '—';
+      if (fredDot)  fredDot.className    = 'li-chip-dot li-dot-live';
+      if (fredMeta) fredMeta.textContent = sig.fred_vintage || 'live';
+    } else {
+      if (fredEl) { fredEl.textContent = 'PENDING'; fredEl.style.background='#1e3a5f'; fredEl.style.color='#60a5fa'; }
+      if (fredDot)  fredDot.className   = 'li-chip-dot';
+      if (fredMeta) fredMeta.textContent = 'not yet run';
+    }
+
+    // BEA stats
+    const beaEl   = document.getElementById('li-bea-badge');
+    const beaZips = document.getElementById('li-bea-zips');
+    const beaVint = document.getElementById('li-bea-vintage');
+    const beaSjc  = document.getElementById('li-bea-sjc');
+    const beaVsfl = document.getElementById('li-bea-vs-fl');
+    const beaDot  = document.getElementById('li-dot-bea');
+    const beaMeta = document.getElementById('li-meta-bea');
+
+    if (sig.bea_per_capita_income != null) {
+      if (beaEl)   { beaEl.textContent = 'LIVE'; beaEl.style.background='#14532d'; beaEl.style.color='#4ade80'; beaEl.style.border='1px solid #22c55e'; }
+      if (beaVint) beaVint.textContent = sig.bea_vintage || '—';
+      if (beaSjc)  beaSjc.textContent  = '$' + (sig.bea_per_capita_income || 0).toLocaleString();
+      if (beaVsfl) beaVsfl.textContent = sig.bea_income_vs_fl_avg != null ? sig.bea_income_vs_fl_avg + '×' : '—';
+      if (beaDot)  beaDot.className    = 'li-chip-dot li-dot-live';
+      if (beaMeta) beaMeta.textContent = sig.bea_vintage || 'live';
+    } else {
+      if (beaEl)   { beaEl.textContent = 'PENDING'; beaEl.style.background='#1a3a2a'; beaEl.style.color='#86efac'; }
+      if (beaDot)  beaDot.className    = 'li-chip-dot';
+      if (beaMeta) beaMeta.textContent = 'not yet run';
+    }
+
+  } catch (e) {
+    console.warn('[fred/bea status]', e.message);
   }
 }

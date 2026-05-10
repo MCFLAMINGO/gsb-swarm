@@ -932,6 +932,48 @@ app.post('/api/admin/trigger-world-model', (req, res) => {
   });
 });
 
+// POST /api/admin/trigger-fred — runs FRED LAUS county unemployment worker
+app.post('/api/admin/trigger-fred', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  if (!process.env.FRED_API) return res.status(500).json({ error: 'FRED_API env var not set' });
+  res.json({ status: 'started', message: 'FRED worker triggered — BLS LAUS unemployment rates for all 67 FL counties' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/fredWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[fred-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[fred-trigger] ' + d));
+      child.on('close', code => console.log('[admin] FRED worker done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] FRED trigger failed:', e.message); }
+  });
+});
+
+// POST /api/admin/trigger-bea — runs BEA CAINC1 per capita income worker
+app.post('/api/admin/trigger-bea', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  if (!process.env.BEA_API) return res.status(500).json({ error: 'BEA_API env var not set' });
+  res.json({ status: 'started', message: 'BEA worker triggered — per capita personal income for all 67 FL counties' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/beaWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[bea-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[bea-trigger] ' + d));
+      child.on('close', code => console.log('[admin] BEA worker done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] BEA trigger failed:', e.message); }
+  });
+});
+
 // GET /api/local-intel/probe-log — live MCP call log for routerLearningWorker
 app.get('/api/local-intel/probe-log', async (req, res) => {
   if (!process.env.LOCAL_INTEL_DB_URL) return res.json({ error: 'no_db' });

@@ -625,6 +625,16 @@
         <span class="li-chip-label">Permit Worker</span>
         <span class="li-chip-meta" id="li-meta-permit">checking…</span>
       </div>
+      <div class="li-worker-chip" id="li-chip-fred">
+        <span class="li-chip-dot" id="li-dot-fred"></span>
+        <span class="li-chip-label">FRED / BLS LAUS</span>
+        <span class="li-chip-meta" id="li-meta-fred">checking…</span>
+      </div>
+      <div class="li-worker-chip" id="li-chip-bea">
+        <span class="li-chip-dot" id="li-dot-bea"></span>
+        <span class="li-chip-label">BEA Income</span>
+        <span class="li-chip-meta" id="li-meta-bea">checking…</span>
+      </div>
     </div>
 
     <!-- FCC Tier 1 status card -->
@@ -692,6 +702,58 @@
           </button>
         </div>
         <div id="li-zip-result" style="font-size:12px;"></div>
+      </div>
+    </div>
+
+    <!-- FRED / BLS LAUS unemployment card -->
+    <div class="li-card" style="margin-top:12px;" id="li-fred-card">
+      <div class="li-card-head">
+        <span class="li-card-icon">📊</span>
+        <span class="li-card-title">FRED / BLS LAUS — County Unemployment</span>
+        <span class="li-card-badge" id="li-fred-badge" style="background:#1e3a5f;color:#60a5fa;border:1px solid #3b82f6;">LOADING</span>
+      </div>
+      <div class="li-card-body">
+        <div class="li-stat-row" style="margin-bottom:12px;">
+          <div class="li-stat"><span class="li-stat-val" id="li-fred-zips">—</span><span class="li-stat-label">ZIPs covered</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-fred-vintage">—</span><span class="li-stat-label">Data vintage</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-fred-sjc">—</span><span class="li-stat-label">St. Johns rate</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-fred-fl">—</span><span class="li-stat-label">FL avg rate</span></div>
+        </div>
+        <p style="font-size:12px;color:var(--text-2,#888);margin:0 0 10px;">
+          Monthly county unemployment rate + labor force from BLS LAUS via FRED API.
+          67 FL counties &times; 3 series &asymp; 201 calls &bull; ~2 min runtime.
+        </p>
+        <button onclick="triggerWorker('fred')" id="li-fred-trigger-btn"
+          style="background:#1d4ed8;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;">
+          TRIGGER FRED WORKER
+        </button>
+        <span id="li-fred-trigger-result" style="font-size:12px;margin-left:12px;color:#60a5fa;"></span>
+      </div>
+    </div>
+
+    <!-- BEA per capita income card -->
+    <div class="li-card" style="margin-top:12px;" id="li-bea-card">
+      <div class="li-card-head">
+        <span class="li-card-icon">💰</span>
+        <span class="li-card-title">BEA Regional — Per Capita Personal Income</span>
+        <span class="li-card-badge" id="li-bea-badge" style="background:#1a3a2a;color:#4ade80;border:1px solid #22c55e;">LOADING</span>
+      </div>
+      <div class="li-card-body">
+        <div class="li-stat-row" style="margin-bottom:12px;">
+          <div class="li-stat"><span class="li-stat-val" id="li-bea-zips">—</span><span class="li-stat-label">ZIPs covered</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-bea-vintage">—</span><span class="li-stat-label">Data vintage</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-bea-sjc">—</span><span class="li-stat-label">St. Johns income</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-bea-vs-fl">—</span><span class="li-stat-label">vs FL avg</span></div>
+        </div>
+        <p style="font-size:12px;color:var(--text-2,#888);margin:0 0 10px;">
+          Annual county per capita personal income, YoY growth, and 5-yr CAGR from BEA CAINC1.
+          2 API calls total (all FL counties in one batch) &bull; ~5 sec runtime.
+        </p>
+        <button onclick="triggerWorker('bea')" id="li-bea-trigger-btn"
+          style="background:#15803d;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;">
+          TRIGGER BEA WORKER
+        </button>
+        <span id="li-bea-trigger-result" style="font-size:12px;margin-left:12px;color:#4ade80;"></span>
       </div>
     </div>
 
