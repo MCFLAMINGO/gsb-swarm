@@ -3115,3 +3115,22 @@ All sections hidden (display:none) if data is absent — no empty boxes on ZIPs 
 **Result:** Every permit gate click now routes to a qualified lead capture. Leads stored in Postgres and emailed immediately. Migration auto-runs on Railway deploy.
 
 **Commits:** gsb-swarm `9a765a7` · localintel-landing `b59a7e2` · Vercel deployed ✓
+
+---
+### Session 23 addendum — permit worker (2026-05-10)
+
+**Problem:** Permit data was null everywhere. Root causes: (1) sjcArcGisWorker.js was never wired into the worker list; (2) it only covered 14 SJC ZIPs; (3) geometry x/y fields returned `{}` from the SJC ArcGIS endpoint so all permits were dropped.
+
+**Fix:**
+- NEW `workers/permitWorker.js` — two-source permit ingestion:
+  1. Census BPS (Building Permits Survey): `https://www2.census.gov/econ/bps/County/co{YY}{MM}c.txt` — covers ALL 67 FL counties, updated monthly, no API key. Annual (2024) + last 4 monthly files fetched on each pass.
+  2. SJC ArcGIS `activePermits` FeatureServer — individual permit records for SJC ZIPs. Fixed geometry bug: now uses `Latitude`/`Longitude` string fields + bounding box ZIP assignment instead of broken x/y.
+- NEW `county_permits` table: state_fips, county_fips, county_name, period_type, period_key, res_1unit, res_2unit, res_multifam, total_units, total_value. Schema auto-created by worker on start.
+- `sjc_permits` table also auto-created by permitWorker (removed dependency on sjcArcGisWorker).
+- Census endpoint (`/api/local-intel/census`) now queries `county_permits` via ZIP→county join from `zip_intelligence.county`, falls back to sjc_permits for SJC individual data.
+- Worker added to `LOCAL_INTEL_WORKERS` list in dashboard-server.js — runs on Railway start, loops every 24h.
+- Miami-Dade ArcGIS Hub (`gis-mdc.opendata.arcgis.com`) identified as next source to add — individual permit records for ~50 Dade ZIPs.
+
+**Note:** Census BPS is residential-only (1-unit, 2-unit, 3-4 unit, 5+ unit). Commercial permit counts come from ArcGIS sources (SJC now, Miami-Dade next). The blurred permit gate will show real residential numbers for all FL ZIPs once worker runs on Railway.
+
+**Commits:** gsb-swarm `4df9c0d`
