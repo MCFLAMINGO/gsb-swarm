@@ -3083,3 +3083,18 @@ All sections hidden (display:none) if data is absent — no empty boxes on ZIPs 
 **Result:** Every ZIP page now opens with a narrative paragraph, 3 plain-English Q&A answers, restaurant market saturation data, and growth trajectory — all real, sourced from Postgres, zero hallucination risk.
 
 **Commits:** localintel-landing `4b0bd9b` · Vercel deployed ✓
+
+---
+### Session 23 addendum — permit gate (2026-05-10)
+
+**Problem:** Permit section either showed raw numbers (SJC ZIPs) or "No data" — no premium framing, no monetization signal.
+
+**Fix:** Replaced open permit box with gated premium card:
+- Blurred teaser rows (real numbers behind CSS blur + gradient fade) — visible but not readable
+- "Premium Signal" lock label + "Permit activity data is available with a paid market consultation" message
+- "Get Market Consultation →" CTA links to /claim.html?ref=permit&zip=ZIP
+- If real permit data exists, blurred numbers are populated (tantalizing). If not, rows show dashes.
+
+**Result:** Every ZIP page now has a permit section that creates desire and routes to consultation — not a data void.
+
+**Commits:** localintel-landing `60c49aa` · Vercel deployed ✓
