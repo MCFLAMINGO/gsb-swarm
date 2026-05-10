@@ -1433,19 +1433,60 @@ router.get('/census', async (req, res) => {
       county_emp_share_pct: s.county_emp_share_pct,
     })).sort((a, b) => b.establishments - a.establishments);
 
-    // Permit signals from sjc_permits if available
+    // Permit signals — county_permits (Census BPS, all FL counties) + sjc_permits (SJC individual)
     let permitSignals = null;
     try {
-      const pRows = await db.query(
-        `SELECT permit_type, COUNT(*) as cnt
-         FROM sjc_permits WHERE zip = $1 AND fetched_at > NOW() - INTERVAL '6 months'
-         GROUP BY permit_type ORDER BY cnt DESC`, [zip]
+      // 1. County-level from Census BPS — covers all 67 FL counties
+      // Join ZIP → county via zip_intelligence.county field
+      const countyRow = await db.query(
+        `SELECT county FROM zip_intelligence WHERE zip = $1 LIMIT 1`, [zip]
       );
-      if (pRows.length) {
-        permitSignals = {};
-        pRows.forEach(r => { permitSignals[r.permit_type] = parseInt(r.cnt); });
+      const countyName = countyRow[0]?.county;
+
+      if (countyName) {
+        // Find most recent monthly record for this county
+        const cpRows = await db.query(
+          `SELECT res_1unit, res_2unit, res_multifam, total_units, total_value, period_key
+             FROM county_permits
+            WHERE state_fips = '12'
+              AND LOWER(county_name) LIKE LOWER($1)
+              AND period_type = 'monthly'
+            ORDER BY period_key DESC
+            LIMIT 1`,
+          ['%' + countyName.split(' ')[0] + '%']
+        );
+        if (cpRows.length) {
+          const cp = cpRows[0];
+          permitSignals = {
+            residential : cp.res_1unit + cp.res_2unit,
+            multifamily : cp.res_multifam,
+            total_units : cp.total_units,
+            total_value : cp.total_value,
+            period      : cp.period_key,
+            source      : 'census_bps',
+          };
+        }
       }
-    } catch (_) {}
+
+      // 2. SJC individual permits — augment commercial count if available
+      const sjcRows = await db.query(
+        `SELECT permit_type, COUNT(*) as cnt
+           FROM sjc_permits
+          WHERE zip = $1 AND fetched_at > NOW() - INTERVAL '6 months'
+          GROUP BY permit_type`, [zip]
+      );
+      if (sjcRows.length) {
+        const sjcMap = {};
+        sjcRows.forEach(r => { sjcMap[r.permit_type] = parseInt(r.cnt); });
+        if (!permitSignals) permitSignals = { source: 'sjc_arcgis' };
+        permitSignals.commercial = (sjcMap['commercial'] || 0);
+        if (!permitSignals.residential) permitSignals.residential = sjcMap['residential'] || 0;
+        if (!permitSignals.total_units) permitSignals.total_units =
+          Object.values(sjcMap).reduce((a, b) => a + b, 0);
+      }
+    } catch (permErr) {
+      console.warn('[census] permit lookup failed:', permErr.message);
+    }
 
     // IRS income data
     let incomeData = null;
@@ -1462,13 +1503,18 @@ router.get('/census', async (req, res) => {
       }
     } catch (_) {}
 
-    // Permit signals: reshape into {commercial, residential, total}
+    // Permit signals: reshape into consistent output
     let permitOut = null;
     if (permitSignals) {
-      const commercial  = permitSignals['commercial']  || permitSignals['Commercial']  || 0;
-      const residential = permitSignals['residential'] || permitSignals['Residential'] || 0;
-      const total = Object.values(permitSignals).reduce((a, b) => a + b, 0);
-      permitOut = { commercial, residential, total };
+      permitOut = {
+        commercial  : permitSignals.commercial  || 0,
+        residential : permitSignals.residential || 0,
+        multifamily : permitSignals.multifamily || 0,
+        total       : permitSignals.total_units || (permitSignals.residential + (permitSignals.multifamily||0) + (permitSignals.commercial||0)),
+        total_value : permitSignals.total_value || null,
+        period      : permitSignals.period      || null,
+        source      : permitSignals.source      || 'unknown',
+      };
     }
 
     // income: use consistent keys

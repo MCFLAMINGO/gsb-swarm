@@ -6993,6 +6993,7 @@ app.use((req, res, next) => {
     { name: 'Search Vector Backfill',      file: 'workers/searchVectorBackfillWorker.js' },
     { name: 'Embedding Backfill',          file: 'workers/embeddingBackfillWorker.js' },
     { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' },
+    { name: 'Permit Worker',               file: 'workers/permitWorker.js' },
   ];
 
   function spawnLocalIntelWorker(w, attempt = 0) {
