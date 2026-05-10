@@ -2971,3 +2971,45 @@ Businesses receiving job dispatches via RFQ had no structured job record, no Toa
 - 1/2/3 regex only matches if a surge_pending session exists — single digits won't accidentally trigger for non-surge flows.
 
 **Commit:** `8cbe211`
+
+## Session 22 — Addendum: /biz/{slug} Pages + JSON-LD OrderAction (2026-05-10)
+
+**Problem:** No static per-business URL existed. Siri/Gemini/Google had no way to surface LocalIntel when someone searched for a specific business or asked to order from it. McFlamingo had no indexable page with structured data.
+
+**Fix:** Built a static biz page system — same pattern as generate-zip-pages.js.
+
+**Files (localintel-landing):**
+- `generate-biz-pages.js` — fetches claimed businesses from `/api/local-intel/businesses-claimed`, generates `/biz/{slug}.html` per business with full JSON-LD + NAP meta tags. Excludes test businesses (aaaaaaaa prefix + confidence_score=0). Run after any new business claims listing.
+- `_biz-page.js` — shared client renderer for all /biz/ pages. Renders from injected BIZ_CONFIG instantly, optionally refreshes live data from Railway in background.
+- `biz/mcflamingo.html` — first generated page.
+- `vercel.json` — added `/biz/:slug` → `/biz/:slug.html` rewrite.
+- `sitemap.xml` — auto-updated with all biz slug URLs.
+
+**Files (gsb-swarm):**
+- `localIntelAgent.js` — added `GET /api/local-intel/businesses-claimed` (public, no token). Returns all claimed non-test businesses with agent profile join. Route placed before `module.exports = router`.
+
+**JSON-LD block per page:**
+- `@type`: Restaurant / LocalBusiness / Plumber / LandscapingBusiness etc (mapped from category)
+- Full `PostalAddress` with NAP consistency
+- `areaServed`: array of ZIP PostalAddress objects from service_area[]
+- `potentialAction: OrderAction` → `urlTemplate: /quote?ref={slug}&category={cat}` on all 4 platforms (Desktop/Mobile/iOS/Android)
+- Restaurant extras: `servesCuisine`, `hasMenu`, `acceptsReservations`
+- `sameAs`: business website URL
+
+**Live URL:** https://www.thelocalintel.com/biz/mcflamingo
+
+**How Google/Gemini/Siri discovers this:**
+1. sitemap.xml lists /biz/mcflamingo → Google crawls it
+2. JSON-LD OrderAction tells Google "this page accepts orders at /quote?ref=mcflamingo"
+3. When someone searches "order from McFlamingo" or asks Gemini — LocalIntel surfaces as ordering endpoint
+4. noscript block has full text content so crawlers that don't run JS still see NAP data
+
+**Next steps for deeper Siri integration:**
+- Siri Shortcut file (.shortcut) hosted at /siri-shortcut for "Hey Siri, order from LocalIntel"
+- apple-app-site-association at /.well-known/ for universal links
+- Re-run generate-biz-pages.js after each new business claims
+
+**Commits:**
+- `gsb-swarm`: `7b5bda1` — feat: businesses-claimed route (before module.exports fix in 645cc8e)
+- `gsb-swarm`: `645cc8e` — fix: route before module.exports
+- `localintel-landing`: `002ea87` — feat: /biz/{slug} pages + JSON-LD OrderAction
