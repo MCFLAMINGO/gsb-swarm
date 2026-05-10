@@ -2933,3 +2933,13 @@ Businesses receiving job dispatches via RFQ had no structured job record, no Toa
 - Proof of service document upload → flat JSON
 - LocalIntel Concierge Agent on Virtuals (SOUL.md first)
 - bookRfq() confirmed_jobs service_name: pull from rfq_requests.description instead of generic "Job for X"
+
+## Session 22 — Addendum: bookRfq service_name fix (2026-05-09)
+
+**Problem:** `bookRfq()` set `service_name` to `"Job for [business name]"` — the customer's actual job description was already fetched from `rfq_requests.description` but not used for the label.
+
+**Fix:** `service_name` now uses `rfqRow.description.slice(0, 120)` as primary, falls back to `"Job for [business name]"` only if description is null.
+
+**Result:** Confirmed job cards in inbox.html show the real job description (e.g. "Need lawn mowed and edged, about 1/4 acre") instead of generic label.
+
+**Commit:** `f6753db`
