@@ -1015,6 +1015,57 @@ app.post('/api/admin/trigger-qwi', (req, res) => {
   });
 });
 
+// POST /api/admin/trigger-qcew — runs BLS QCEW worker (quarterly employment/wages, 67 FL counties)
+app.post('/api/admin/trigger-qcew', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  if (!process.env.BLS_QCEW_API) return res.status(500).json({ error: 'BLS_QCEW_API env var not set' });
+  res.json({ status: 'started', message: 'QCEW worker triggered — BLS quarterly employment, wages, establishments for all 67 FL counties (~10s runtime)' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/qcewWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[qcew-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[qcew-trigger] ' + d));
+      child.on('close', code => console.log('[admin] QCEW worker done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] QCEW trigger failed:', e.message); }
+  });
+});
+
+// GET /api/admin/worker-status — returns all worker heartbeats with last_run timestamps
+// Used by dashboard to show "last updated" next to every data node
+app.get('/api/admin/worker-status', async (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.query?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    const db2 = require('./lib/db');
+    if (!db2.isReady()) return res.json({ workers: {} });
+    const rows = await db2.query(
+      `SELECT worker_name, last_run, run_count FROM worker_heartbeat ORDER BY last_run DESC NULLS LAST`
+    ).catch(() => []);
+    const workers = {};
+    for (const r of rows) {
+      workers[r.worker_name] = {
+        last_run:  r.last_run,
+        run_count: r.run_count || 0,
+        age_hours: r.last_run
+          ? parseFloat(((Date.now() - new Date(r.last_run).getTime()) / 3600000).toFixed(1))
+          : null,
+      };
+    }
+    res.json({ workers, fetched_at: new Date() });
+  } catch (e) {
+    console.error('[worker-status] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/local-intel/probe-log — live MCP call log for routerLearningWorker
 app.get('/api/local-intel/probe-log', async (req, res) => {
   if (!process.env.LOCAL_INTEL_DB_URL) return res.json({ error: 'no_db' });

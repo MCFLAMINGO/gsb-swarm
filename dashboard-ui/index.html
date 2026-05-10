@@ -645,6 +645,11 @@
         <span class="li-chip-label">QWI Workforce</span>
         <span class="li-chip-meta" id="li-meta-qwi">checking…</span>
       </div>
+      <div class="li-worker-chip" id="li-chip-qcew">
+        <span class="li-chip-dot" id="li-dot-qcew"></span>
+        <span class="li-chip-label">BLS QCEW</span>
+        <span class="li-chip-meta" id="li-meta-qcew">checking…</span>
+      </div>
     </div>
 
     <!-- FCC Tier 1 status card -->
@@ -815,6 +820,31 @@
           TRIGGER QWI WORKER
         </button>
         <span id="li-qwi-trigger-result" style="font-size:12px;margin-left:12px;color:#38bdf8;"></span>
+      </div>
+    </div>
+
+    <!-- QCEW card -->
+    <div class="li-card" style="margin-top:12px;" id="li-qcew-card">
+      <div class="li-card-head">
+        <span class="li-card-icon">💼</span>
+        <span class="li-card-title">BLS QCEW — Quarterly Employment &amp; Wages</span>
+        <span class="li-card-badge" id="li-qcew-badge" style="background:#1a2a1f;color:#86efac;border:1px solid #22c55e;">LOADING</span>
+      </div>
+      <div class="li-card-body">
+        <div class="li-stat"><span class="li-stat-val" id="li-qcew-vintage">—</span><span class="li-stat-label">Quarter</span></div>
+        <div class="li-stat"><span class="li-stat-val" id="li-qcew-sjc-emp">—</span><span class="li-stat-label">St. Johns employed</span></div>
+        <div class="li-stat"><span class="li-stat-val" id="li-qcew-sjc-wages">—</span><span class="li-stat-label">Avg weekly wages</span></div>
+        <div class="li-stat"><span class="li-stat-val" id="li-qcew-sjc-estab">—</span><span class="li-stat-label">Establishments</span></div>
+        <div class="li-stat"><span class="li-stat-val" id="li-qcew-emp-yoy">—</span><span class="li-stat-label">Emp YoY %</span></div>
+        <div class="li-stat"><span class="li-stat-val" id="li-qcew-wage-yoy">—</span><span class="li-stat-label">Wage YoY %</span></div>
+      </div>
+      <div class="li-card-footer">
+        <p style="font-size:11px;color:#555;margin:0 0 8px;">BLS QCEW Public Data API — series ENU{FIPS5}10010/10410/10540 — all-industry private sector — quarterly, ~6mo lag — county→ZIP fan-out</p>
+        <button onclick="triggerWorker('qcew')" id="li-qcew-trigger-btn"
+          style="background:#166534;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;">
+          TRIGGER QCEW WORKER
+        </button>
+        <span id="li-qcew-trigger-result" style="font-size:12px;margin-left:12px;color:#86efac;"></span>
       </div>
     </div>
 

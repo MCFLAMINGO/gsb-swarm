@@ -1480,6 +1480,8 @@ async function loadLocalIntelPanel() {
     loadAnomalies(),
     loadFredBeaStatus(),
     loadLodesQwiStatus(),
+    loadQcewStatus(),
+    loadWorkerStatus(),
   ]);
 }
 
@@ -1772,8 +1774,13 @@ async function triggerWorker(workerKey) {
     } else {
       btn.textContent = 'Running ✓';
       if (res) res.textContent = data.message || 'Worker started';
-      // Reload status after 5s
-      setTimeout(() => loadFredBeaStatus(), 5000);
+      // Reload all status panels after worker starts (data will populate gradually)
+      setTimeout(() => {
+        loadFredBeaStatus();
+        loadLodesQwiStatus();
+        loadQcewStatus();
+        loadWorkerStatus();
+      }, 5000);
     }
   } catch (e) {
     btn.disabled = false;
@@ -1894,5 +1901,101 @@ async function loadLodesQwiStatus() {
     }
   } catch (e) {
     console.warn('[lodes/qwi status]', e.message);
+  }
+}
+
+// ── QCEW (BLS Quarterly Census of Employment and Wages) status ────────────────
+async function loadQcewStatus() {
+  try {
+    const r = await fetch(`${LI_BASE}/zip-signals/32082`, {
+      headers: { 'x-admin-token': LI_ADMIN_TOKEN },
+    });
+    const data = await r.json();
+    const sig = data?.signals || data || {};
+
+    const qcewBadge = document.getElementById('li-qcew-badge');
+    const qcewDot   = document.getElementById('li-dot-qcew');
+    const qcewMeta  = document.getElementById('li-meta-qcew');
+
+    if (sig.qcew_employment != null) {
+      if (qcewBadge) { qcewBadge.textContent='LIVE'; qcewBadge.style.background='#14532d'; qcewBadge.style.color='#4ade80'; qcewBadge.style.border='1px solid #22c55e'; }
+      if (qcewDot)   qcewDot.className = 'li-chip-dot li-dot-live';
+      if (qcewMeta)  qcewMeta.textContent = sig.qcew_vintage || 'live';
+
+      const empEl   = document.getElementById('li-qcew-sjc-emp');
+      const wagesEl = document.getElementById('li-qcew-sjc-wages');
+      const estabEl = document.getElementById('li-qcew-sjc-estab');
+      const empYoy  = document.getElementById('li-qcew-emp-yoy');
+      const wageYoy = document.getElementById('li-qcew-wage-yoy');
+      const vintEl  = document.getElementById('li-qcew-vintage');
+
+      if (empEl)   empEl.textContent   = sig.qcew_employment?.toLocaleString() || '—';
+      if (wagesEl) wagesEl.textContent = sig.qcew_avg_weekly_wages ? '$' + sig.qcew_avg_weekly_wages.toLocaleString() + '/wk' : '—';
+      if (estabEl) estabEl.textContent = sig.qcew_establishments?.toLocaleString() || '—';
+      if (empYoy)  empYoy.textContent  = sig.qcew_emp_yoy_pct  != null ? (sig.qcew_emp_yoy_pct > 0 ? '+' : '') + sig.qcew_emp_yoy_pct + '%' : '—';
+      if (wageYoy) wageYoy.textContent = sig.qcew_wage_yoy_pct != null ? (sig.qcew_wage_yoy_pct > 0 ? '+' : '') + sig.qcew_wage_yoy_pct + '%' : '—';
+      if (vintEl)  vintEl.textContent  = sig.qcew_vintage || '—';
+    } else {
+      if (qcewBadge) { qcewBadge.textContent='PENDING'; qcewBadge.style.background='#1a2a1f'; qcewBadge.style.color='#86efac'; }
+      if (qcewDot)   qcewDot.className = 'li-chip-dot';
+      if (qcewMeta)  qcewMeta.textContent = 'not yet run';
+    }
+  } catch (e) {
+    console.warn('[qcew status]', e.message);
+  }
+}
+
+// ── Worker heartbeat status — stamps last_run on every chip ──────────────────
+// Pulls /api/admin/worker-status and updates li-meta-* chip labels with
+// human-readable "Xh ago" or "Xd ago" so the dashboard always shows when
+// each data source was last ingested.
+async function loadWorkerStatus() {
+  try {
+    const r = await fetch(`${API_BASE}/api/admin/worker-status`, {
+      headers: { 'x-operator-token': LI_ADMIN_TOKEN },
+    });
+    if (!r.ok) return;
+    const data = await r.json();
+    const workers = data.workers || {};
+
+    // Map: worker_name → chip meta element id
+    const chipMap = {
+      acsWorker:          'li-meta-acs',
+      censusLayerWorker:  'li-meta-acs',   // same chip
+      oracleWorker:       'li-meta-world',
+      worldModelWorker:   'li-meta-world',
+      fredWorker:         'li-meta-fred',
+      beaWorker:          'li-meta-bea',
+      lodesWorker:        'li-meta-lodes',
+      qwiWorker:          'li-meta-qwi',
+      qcewWorker:         'li-meta-qcew',
+      fccBroadbandWorker: 'li-meta-fcc',
+      irsMigrationWorker: 'li-meta-irs',
+      permitWorker:       'li-meta-permit',
+      sjcArcGisWorker:    'li-meta-permit',
+    };
+
+    function ageLabel(ageHours) {
+      if (ageHours == null) return 'never';
+      if (ageHours < 1)  return Math.round(ageHours * 60) + 'm ago';
+      if (ageHours < 48) return Math.round(ageHours) + 'h ago';
+      return Math.round(ageHours / 24) + 'd ago';
+    }
+
+    for (const [workerName, info] of Object.entries(workers)) {
+      const elId = chipMap[workerName];
+      if (!elId) continue;
+      const el = document.getElementById(elId);
+      if (!el) continue;
+      // Only overwrite if the element still shows a placeholder or 'not yet run'
+      // so that signal-based status (e.g. LIVE + vintage) takes precedence.
+      // Worker status is the fallback when signals haven't loaded yet.
+      if (el.textContent === 'checking…' || el.textContent === 'not yet run' || el.textContent === 'never') {
+        el.textContent = ageLabel(info.age_hours);
+      }
+    }
+  } catch (e) {
+    // Non-fatal — chips just stay at default text
+    console.warn('[worker-status]', e.message);
   }
 }

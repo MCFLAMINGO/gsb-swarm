@@ -3271,3 +3271,53 @@ Worker produces current BDC data (semiannual FCC releases, June+December). Dashb
 - Dashboard: FRED and BEA status cards with trigger buttons + chip indicators in worker strip
 
 **Result:** commit `09826f4`. Both workers triggered. FRED runs ~2 min (67 counties × 3 series). BEA runs ~5 sec (2 batch calls). Signal data will land in zip_signals and world model will incorporate unemployment + income tier into growth scores.
+
+---
+## Session Entry — 2026-05-10 (LODES + QWI Workers)
+
+**Problem:** No ZIP-level job count data. Needed to answer "where are the jobs relative to where workers live?" — the net job flow signal that separates job-importer ZIPs from bedroom communities.
+
+**Fix:**
+- Migration 019: added `lodes_*` (jobs_here, retail_jobs, food_jobs, healthcare_jobs, tech_jobs, high_earn_pct, low_earn_pct, workers_live_here, live_retail, live_food, live_healthcare, net_flow, vintage) and `qwi_*` (employment, avg_monthly_earn, hires_qtr, seps_qtr, turnover_rate, vintage) columns to zip_signals
+- `workers/lodesWorker.js`: downloads FL LODES8 WAC+RAC bulk CSVs + block→ZIP crosswalk from LEHD (~11MB gzipped), aggregates 390k Census blocks → 1,013 FL ZIPs. Uses streaming gunzip. Annual vintage (2022 latest stable). Sector breakdown: CNS07=retail, CNS12=food, CNS18=healthcare, CNS10=tech.
+- `workers/qwiWorker.js`: Census QWI API single batch call all 67 FL counties (state=12, county=*), gets Emp/EmpEnd/EarnBeg/HirA/Sep. Computes annualized turnover rate (hires+seps)/(2×avgEmp)×4×100. Quarter lag computed dynamically (3 qtrs behind).
+- Trigger endpoints: `POST /api/admin/trigger-lodes` and `POST /api/admin/trigger-qwi`
+- Dashboard: LODES + QWI chips in worker strip + status cards with vintage display
+
+**Result:** commit `256a550`. Workers triggered. LODES runtime ~120s (bulk download + aggregation). QWI runtime ~3s (single API call). Together these populate Layer 2 (Workforce & Labor Market) of the JEPA model.
+
+---
+## Session Entry — 2026-05-10 (QCEW Worker + Worker Status Dashboard)
+
+**Problem 1:** No BLS QCEW data — the only quarterly wage series we had was QWI (monthly earnings, 9mo lag). QCEW fills the gap: quarterly wages with ~6mo lag, also provides establishment counts and YoY growth.
+
+**Problem 2:** No "last updated" indicator on any dashboard chip. After triggering workers, there was no way to know when each source last ran without querying Postgres directly.
+
+**Fix:**
+- Migration 020: added `qcew_*` columns to zip_signals — `qcew_establishments`, `qcew_employment`, `qcew_avg_weekly_wages`, `qcew_emp_yoy_pct`, `qcew_wage_yoy_pct`, `qcew_vintage`, `qcew_updated_at`
+- `workers/qcewWorker.js`: BLS Public Data API v2 batch calls — 67 counties × 3 series (ENU{FIPS5}10010 emp / 10410 estab / 10540 wages) = 201 series in 5 POST calls (50/call limit). Fetches 3 years of annual data per series, computes YoY in-worker from year-over-year values. 30-day freshness gate via worker_heartbeat. County→ZIP fan-out via flZipCountyMap.
+- `GET /api/admin/worker-status`: new endpoint returns all worker_heartbeat rows with last_run timestamp and age_hours computed. Used by dashboard to stamp chips with real last-run time.
+- `POST /api/admin/trigger-qcew`: trigger endpoint matching existing FRED/BEA/LODES/QWI pattern
+- Dashboard HTML: added QCEW chip (`li-chip-qcew`) to worker strip, QCEW card with 6 stats (vintage, employment, avg weekly wages, establishments, emp YoY%, wage YoY%)
+- Dashboard app.js: `loadQcewStatus()` reads zip-signals/32082 for QCEW fields, renders LIVE/PENDING badge + all 6 stats. `loadWorkerStatus()` calls `/api/admin/worker-status`, maps worker_name→chip meta element, stamps all chips with age label (e.g. "2h ago", "3d ago") as fallback when signal-based text hasn't populated yet. Both wired into `loadLocalIntelPanel()`.
+
+**Result:** All 6 JEPA Layer 2 (Workforce) signals now have workers: FRED (monthly unemployment), QWI (quarterly employment/earnings/hires), LODES (annual job counts by ZIP), QCEW (quarterly wages + establishments). Dashboard chips show real last-run time from Postgres heartbeat table.
+
+### Data Coverage Map (as of this commit)
+
+| Source | Worker | API | Cadence | Lag | Key in Railway |
+|---|---|---|---|---|---|
+| Census ACS 5yr | acsWorker | census.gov/data | Annual | ~12mo | Census_Data_API |
+| IRS SOI ZIP | irsSoiWorker | IRS bulk CSV | Annual | ~18mo | none (bulk) |
+| IRS Migration | irsMigrationWorker | IRS bulk CSV | Annual | ~18mo | none (bulk) |
+| Census CBP/ZBP | censusLayerWorker | census.gov/data | Annual | ~8mo | Census_Data_API |
+| BEA CAINC1 | beaWorker | apps.bea.gov | Annual | ~18mo | BEA_API |
+| LEHD LODES8 | lodesWorker | lehd.ces.census.gov | Annual | ~2yr | none (bulk) |
+| FCC BDC | fccBroadbandWorker | broadbandmap.fcc.gov | Biannual | ~3mo | FCC_BDC_USERNAME + FCC_BDC_API_KEY |
+| BLS LAUS/FRED | fredWorker | fred.stlouisfed.org | Monthly | ~6wk | FRED_API |
+| Census QWI | qwiWorker | census.gov/data/qwi | Quarterly | ~9mo | Census_Data_API |
+| BLS QCEW | qcewWorker | api.bls.gov | Quarterly | ~6mo | BLS_QCEW_API |
+| FL ArcGIS Permits | permitWorker | FL county ArcGIS | Live | live | none |
+| OSM Overpass | overpassWorker | overpass-api.de | Weekly | real-time | none |
+| FL Sunbiz | sunbizWorker | sunbiz.org | Monthly | ~1mo | none |
+
