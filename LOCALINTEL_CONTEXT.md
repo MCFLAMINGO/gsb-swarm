@@ -3048,3 +3048,21 @@ Businesses receiving job dispatches via RFQ had no structured job record, no Toa
 **Commits:**
 - `gsb-swarm`: `dc28c45` — feat: platform-stats endpoint
 - `localintel-landing`: `0e0eac0` — feat: Florida regional explore + dynamic counts
+
+---
+### Session 23 — ZIP page map bugs (2026-05-10)
+
+**Problem:** ZIP page map showed all ~500 business dots as green (Claimed) even though virtually no businesses were actually claimed. Map background was dark (CartoDB dark_all tiles), hard to read against the green boundary polygon.
+
+**Root cause (two bugs):**
+1. `_zip-page.js` line 442: `const claimed = !!b.website` — used website presence as claimed proxy. YP-sourced businesses (~78k) all have websites → all appeared claimed.
+2. `_zip-page.js` line 408: tile layer was `dark_all` — neon green `#00e676` boundary/dots looked garish on dark background.
+3. `zip-boundary` endpoint SELECT did not include `claimed_at` — no way for frontend to know real claim status.
+
+**Fix:**
+- `localIntelAgent.js`: added `(claimed_at IS NOT NULL) AS is_claimed` to zip-boundary businesses SELECT.
+- `_zip-page.js`: changed `!!b.website` → `!!b.is_claimed` for dot coloring. Changed tile URL to `light_all`. Updated boundary + pin colors from neon `#00e676` to brand green `#16A34A`. Updated unclaimed dot from `#6b7280` to `#9CA3AF`.
+
+**Result:** Map is light, boundary is a clean green outline, unclaimed dots (grey) vastly outnumber claimed dots (green) — accurate representation of real claim state.
+
+**Commits:** gsb-swarm `f4d4200` · localintel-landing `29a123f` · Vercel deployed ✓
