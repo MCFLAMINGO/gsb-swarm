@@ -160,8 +160,10 @@ function parseBLSResponse(blsJson) {
     if (!results[fips5]) results[fips5] = {};
 
     // Get most recent 2 annual values (data sorted desc by year)
+    // QCEW ENU series returns monthly data (Jan–Dec), no 'Annual' period.
+    // Use December (M12) as the year-end proxy for each year.
     const validData = (series.data || [])
-      .filter(d => d.value !== '-' && d.value !== '0' && d.periodName === 'Annual')
+      .filter(d => d.value !== '-' && d.value !== '0' && d.period === 'M12')
       .sort((a, b) => parseInt(b.year) - parseInt(a.year));
 
     if (!validData.length) continue;
