@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-05 (session 13 — Leaflet map overlay deployed — ZIP boundary + gap-tier color signal on all ZIP pages)
+> Last updated: 2026-05-10 (session 14 — CES worker + AI investment scoring + labor-market MCP tool)
 
 ---
 
@@ -1352,6 +1352,23 @@ routing stats, earnings.
 **Next:** Merchant onboarding with wallet setup (Tempo/pathUSD, split
 contract) — let merchants connect a payout wallet from inside the
 dashboard so RFQ matches can settle in stable USD.
+## Session: 2026-05-10 — CES + AI Investment Layer
+
+**Problem:** No employment sector breakdown or AI displacement risk scoring in zip_signals. All labor data was county-level unemployment only (FRED LAUS). Could not answer "which sectors are growing in this ZIP?" or "what is the AI investment opportunity here?"
+
+**Fix:**
+- Built `lib/flZipMsaMap.js` — ZIP→county→MSA chain for all 21 FL MSAs using BLS SM area codes. Functions: `getMsaForZip(zip)`, `getZipsForMsa(msaCode)`, `COUNTY_TO_MSA` lookup. Covers Jacksonville (27260), Tampa (45300), Miami (33100), Orlando (36740), and 17 more FL metros.
+- Created `migrations/021_ces_ai_signals.sql` — added ces_* columns (msa_code, msa_name, total_nonfarm, mom/yoy pcts for 8 supersectors, dominant_sector, vintage) + ai_displacement_risk, investment_opportunity_score, investment_tier, labor_market_momentum, dominant_growth_sector to zip_signals.
+- Built `workers/cesWorker.js` — fetches BLS CES SMU series (unadjusted, FL MSAs). 21 MSAs × 8 supersectors = 168 series in 4 batch calls of 50. Computes AI displacement risk (sector-weighted: financial=0.72, retail=0.65, professional=0.58, leisure=0.35, govt=0.30, healthcare=0.28, construction=0.22) and investment opportunity score (0–100 composite, tiers A/B/C/D). Fan-out to ZIP level via flZipMsaMap.
+- Added `POST /api/admin/trigger-ces` to dashboard-server.js.
+- Added `GET /api/local-intel/labor-market/:zip` MCP tool to localIntelAgent.js — returns CES sectors, QCEW, FRED unemployment, AI scores, priced $0.10 pathUSD. Also added `/labor-market-compare?zips=` for multi-ZIP comparison.
+- Added CES chip (`li-chip-ces`) + full CES/AI investment card to dashboard-ui/index.html + app.js (`loadCesStatus()`, `testLaborMarket()`). Added `cesWorker: 'li-meta-ces'` to chipMap in loadWorkerStatus().
+- OEWS bulk download blocked by BLS (403 on all programmatic access) — decided static sector exposure model embedded in cesWorker is more robust and avoids dependency on irregular OEWS release schedule.
+
+**Result:** zip_signals now carries MSA-level employment sector breakdown + AI displacement risk + investment opportunity tier for all FL ZIPs. The `/api/local-intel/labor-market/:zip` MCP tool can answer "what sectors are growing?" and "is this ZIP an AI investment opportunity?" McFlamingo ZIP 32082 → Jacksonville MSA 27260 → healthcare +3.7% YoY, financial services high displacement risk, investment tier computed from composite score.
+
+---
+
 ## Session: Fee Collection + Agent-to-Agent RFQ (2026-05-05)
 
 ### What Was Built

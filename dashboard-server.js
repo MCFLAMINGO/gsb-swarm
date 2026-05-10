@@ -1015,6 +1015,27 @@ app.post('/api/admin/trigger-qwi', (req, res) => {
   });
 });
 
+// POST /api/admin/trigger-ces — runs BLS CES worker (monthly sector employment, 21 FL MSAs)
+app.post('/api/admin/trigger-ces', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  if (!process.env.BLS_QCEW_API) return res.status(500).json({ error: 'BLS_QCEW_API env var not set' });
+  res.json({ status: 'started', message: 'CES worker triggered — BLS monthly sector employment + AI displacement risk + investment scores for 21 FL MSAs (~15s runtime)' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/cesWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[ces-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[ces-trigger] ' + d));
+      child.on('close', code => console.log('[admin] CES worker done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] CES trigger failed:', e.message); }
+  });
+});
+
 // POST /api/admin/trigger-qcew — runs BLS QCEW worker (quarterly employment/wages, 67 FL counties)
 app.post('/api/admin/trigger-qcew', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;

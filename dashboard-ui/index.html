@@ -650,6 +650,11 @@
         <span class="li-chip-label">BLS QCEW</span>
         <span class="li-chip-meta" id="li-meta-qcew">checking…</span>
       </div>
+      <div class="li-worker-chip" id="li-chip-ces">
+        <span class="li-chip-dot" id="li-dot-ces"></span>
+        <span class="li-chip-label">CES Sectors</span>
+        <span class="li-chip-meta" id="li-meta-ces">checking…</span>
+      </div>
     </div>
 
     <!-- FCC Tier 1 status card -->
@@ -846,6 +851,42 @@
         </button>
         <span id="li-qcew-trigger-result" style="font-size:12px;margin-left:12px;color:#86efac;"></span>
       </div>
+    </div>
+
+    <!-- CES + AI Investment card -->
+    <div class="li-card" style="margin-top:12px;" id="li-ces-card">
+      <div class="li-card-head">
+        <span class="li-card-icon">📊</span>
+        <span class="li-card-title">CES Sector Employment + AI Investment Scores</span>
+        <span class="li-card-badge" id="li-ces-badge" style="background:#1a1a3f;color:#a78bfa;border:1px solid #7c3aed;">LOADING</span>
+      </div>
+      <div class="li-card-body">
+        <div class="li-stat"><span class="li-stat-val" id="li-ces-msa">—</span><span class="li-stat-label">MSA (32082)</span></div>
+        <div class="li-stat"><span class="li-stat-val" id="li-ces-total">—</span><span class="li-stat-label">Total nonfarm</span></div>
+        <div class="li-stat"><span class="li-stat-val" id="li-ces-total-yoy">—</span><span class="li-stat-label">Total YoY %</span></div>
+        <div class="li-stat"><span class="li-stat-val" id="li-ces-health">—</span><span class="li-stat-label">Health+Educ YoY%</span></div>
+        <div class="li-stat"><span class="li-stat-val" id="li-ces-const">—</span><span class="li-stat-label">Construction YoY%</span></div>
+        <div class="li-stat"><span class="li-stat-val" id="li-ces-vintage">—</span><span class="li-stat-label">Vintage</span></div>
+      </div>
+      <div class="li-card-body" style="border-top:1px solid #222;margin-top:8px;padding-top:8px;">
+        <div class="li-stat"><span class="li-stat-val" id="li-ces-ai-risk">—</span><span class="li-stat-label">AI Displacement Risk</span></div>
+        <div class="li-stat"><span class="li-stat-val" id="li-ces-inv-score">—</span><span class="li-stat-label">Investment Score</span></div>
+        <div class="li-stat"><span class="li-stat-val" id="li-ces-inv-tier">—</span><span class="li-stat-label">Investment Tier</span></div>
+        <div class="li-stat"><span class="li-stat-val" id="li-ces-dom-sector">—</span><span class="li-stat-label">Growth Leader</span></div>
+      </div>
+      <div class="li-card-footer">
+        <p style="font-size:11px;color:#555;margin:0 0 8px;">BLS CES SMU series — 21 FL MSAs — 8 supersectors — monthly, ~30d lag — MSA→ZIP fan-out. AI scores from sector-weighted automation exposure model (Felten/Webb/McKinsey research composite).</p>
+        <button onclick="triggerWorker('ces')" id="li-ces-trigger-btn"
+          style="background:#4c1d95;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;">
+          TRIGGER CES WORKER
+        </button>
+        <button onclick="testLaborMarket()" id="li-ces-test-btn"
+          style="background:transparent;border:1px solid #7c3aed;border-radius:6px;padding:8px 16px;color:#a78bfa;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;margin-left:8px;">
+          TEST ZIP 32082
+        </button>
+        <span id="li-ces-trigger-result" style="font-size:12px;margin-left:12px;color:#a78bfa;"></span>
+      </div>
+      <div id="li-ces-test-output" style="font-size:11px;color:#aaa;margin-top:8px;padding:8px;background:#111;border-radius:4px;display:none;max-height:200px;overflow:auto;"></div>
     </div>
 
     <!-- Open anomalies -->

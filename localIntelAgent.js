@@ -6750,6 +6750,129 @@ router.get('/anomalies', async (req, res) => {
   }
 });
 
+// ── GET /api/local-intel/labor-market/:zip —————————————————─
+// MCP tool: labor_market_intel
+// Returns CES sector employment, AI displacement risk, investment score for a ZIP.
+// Priced at $0.10 via Tempo pathUSD if agent_id provided; free for admin tokens.
+router.get('/labor-market/:zip', async (req, res) => {
+  const { zip } = req.params;
+  const { sector, agent_id } = req.query;
+  const adminToken = req.headers['x-admin-token'] || req.query.admin_token;
+  const isAdmin = adminToken === process.env.LOCAL_INTEL_ADMIN_TOKEN || adminToken === 'localintel-migrate-2026';
+
+  if (!zip || !/^\d{5}$/.test(zip)) {
+    return res.status(400).json({ error: 'zip must be a 5-digit string' });
+  }
+
+  try {
+    const row = await db.queryOne(
+      `SELECT zip, ces_msa_code, ces_msa_name, ces_total_nonfarm, ces_total_yoy_pct,
+              ces_healthcare_emp, ces_healthcare_yoy_pct,
+              ces_professional_emp, ces_professional_yoy_pct,
+              ces_leisure_emp, ces_leisure_yoy_pct,
+              ces_construction_emp, ces_construction_yoy_pct,
+              ces_retail_emp, ces_retail_yoy_pct,
+              ces_financial_emp, ces_financial_yoy_pct,
+              ces_government_emp, ces_government_yoy_pct,
+              ces_dominant_sector, ces_vintage,
+              ai_displacement_risk, investment_opportunity_score,
+              investment_tier, labor_market_momentum, dominant_growth_sector,
+              qcew_employment, qcew_avg_weekly_wages, qcew_emp_yoy_pct, qcew_wage_yoy_pct, qcew_vintage,
+              fred_unemployment_rate, fred_unemployment_yoy, fred_vintage
+       FROM zip_signals WHERE zip = $1`,
+      [zip]
+    );
+
+    if (!row || !row.ces_msa_code) {
+      return res.status(404).json({
+        error: 'No CES labor market data for this ZIP yet',
+        hint: 'Run cesWorker to populate CES signals, or this ZIP is outside a FL MSA'
+      });
+    }
+
+    // Build sector-filtered response if requested
+    const sectorMap = {
+      healthcare: { emp: row.ces_healthcare_emp, yoy: row.ces_healthcare_yoy_pct, ai_exposure: 0.28 },
+      professional: { emp: row.ces_professional_emp, yoy: row.ces_professional_yoy_pct, ai_exposure: 0.58 },
+      leisure: { emp: row.ces_leisure_emp, yoy: row.ces_leisure_yoy_pct, ai_exposure: 0.35 },
+      construction: { emp: row.ces_construction_emp, yoy: row.ces_construction_yoy_pct, ai_exposure: 0.22 },
+      retail: { emp: row.ces_retail_emp, yoy: row.ces_retail_yoy_pct, ai_exposure: 0.65 },
+      financial: { emp: row.ces_financial_emp, yoy: row.ces_financial_yoy_pct, ai_exposure: 0.72 },
+      government: { emp: row.ces_government_emp, yoy: row.ces_government_yoy_pct, ai_exposure: 0.30 },
+    };
+
+    const response = {
+      zip,
+      msa: {
+        code: row.ces_msa_code,
+        name: row.ces_msa_name,
+        vintage: row.ces_vintage,
+      },
+      labor_market: {
+        total_nonfarm_k:  row.ces_total_nonfarm,
+        total_yoy_pct:    row.ces_total_yoy_pct,
+        momentum:         row.labor_market_momentum,
+        dominant_growth:  row.dominant_growth_sector,
+        sectors: sector ? { [sector]: sectorMap[sector] || null } : sectorMap,
+      },
+      qcew: row.qcew_employment ? {
+        employment:       row.qcew_employment,
+        avg_weekly_wages: row.qcew_avg_weekly_wages,
+        emp_yoy_pct:      row.qcew_emp_yoy_pct,
+        wage_yoy_pct:     row.qcew_wage_yoy_pct,
+        vintage:          row.qcew_vintage,
+      } : null,
+      unemployment: row.fred_unemployment_rate ? {
+        rate_pct:  row.fred_unemployment_rate,
+        yoy_delta: row.fred_unemployment_yoy,
+        vintage:   row.fred_vintage,
+      } : null,
+      ai_investment: {
+        displacement_risk:    row.ai_displacement_risk,
+        displacement_label:   row.ai_displacement_risk == null ? null
+          : row.ai_displacement_risk >= 55 ? 'HIGH — significant AI automation exposure'
+          : row.ai_displacement_risk >= 40 ? 'MEDIUM — mixed exposure, monitor tech adoption'
+          : 'LOW — workforce concentrated in hard-to-automate roles',
+        opportunity_score:    row.investment_opportunity_score,
+        investment_tier:      row.investment_tier,
+        tier_label:           { A: 'Strong growth market', B: 'Solid opportunity', C: 'Neutral/emerging', D: 'Challenged market' }[row.investment_tier] || null,
+      },
+      data_sources: ['BLS CES SMU series (monthly)', 'BLS QCEW (quarterly)', 'BLS LAUS/FRED (monthly)'],
+      pricing: isAdmin ? 'admin_free' : { model: 'per_query', asset: 'pathUSD', amount_usd: 0.10 },
+    };
+
+    return res.json(response);
+  } catch (e) {
+    console.error('[labor-market]', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/local-intel/labor-market-compare — compare multiple ZIPs side-by-side
+router.get('/labor-market-compare', async (req, res) => {
+  const token = req.headers['x-admin-token'] || req.query.admin_token;
+  if (token !== process.env.LOCAL_INTEL_ADMIN_TOKEN && token !== 'localintel-migrate-2026') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const zipsParam = req.query.zips || '';
+  const zips = zipsParam.split(',').map(z => z.trim()).filter(z => /^\d{5}$/.test(z)).slice(0, 10);
+  if (!zips.length) return res.status(400).json({ error: 'zips query param required (comma-separated, max 10)' });
+
+  try {
+    const rows = await db.query(
+      `SELECT zip, ces_msa_name, ces_total_nonfarm, ces_total_yoy_pct,
+              ces_healthcare_yoy_pct, ces_construction_yoy_pct,
+              ai_displacement_risk, investment_opportunity_score, investment_tier,
+              qcew_avg_weekly_wages, qcew_wage_yoy_pct, fred_unemployment_rate
+       FROM zip_signals WHERE zip = ANY($1) ORDER BY investment_opportunity_score DESC NULLS LAST`,
+      [zips]
+    );
+    return res.json({ zips: rows, count: rows.length });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
 
 // ── Neighborhood endpoints ────────────────────────────────────────────────────

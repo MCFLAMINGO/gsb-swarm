@@ -1482,6 +1482,7 @@ async function loadLocalIntelPanel() {
     loadLodesQwiStatus(),
     loadQcewStatus(),
     loadWorkerStatus(),
+    loadCesStatus(),
   ]);
 }
 
@@ -1969,6 +1970,7 @@ async function loadWorkerStatus() {
       lodesWorker:        'li-meta-lodes',
       qwiWorker:          'li-meta-qwi',
       qcewWorker:         'li-meta-qcew',
+      cesWorker:          'li-meta-ces',
       fccBroadbandWorker: 'li-meta-fcc',
       irsMigrationWorker: 'li-meta-irs',
       permitWorker:       'li-meta-permit',
@@ -1997,5 +1999,86 @@ async function loadWorkerStatus() {
   } catch (e) {
     // Non-fatal — chips just stay at default text
     console.warn('[worker-status]', e.message);
+  }
+}
+
+// ── CES sector employment + AI investment scores status ───────────────────────
+async function loadCesStatus() {
+  try {
+    const r = await fetch(`${LI_BASE}/zip-signals/32082`, {
+      headers: { 'x-admin-token': LI_ADMIN_TOKEN },
+    });
+    const data = await r.json();
+    const sig = data?.signals || data || {};
+
+    const cesBadge = document.getElementById('li-ces-badge');
+    const cesDot   = document.getElementById('li-dot-ces');
+    const cesMeta  = document.getElementById('li-meta-ces');
+
+    if (sig.ces_msa_code) {
+      if (cesBadge) { cesBadge.textContent='LIVE'; cesBadge.style.background='#14532d'; cesBadge.style.color='#4ade80'; cesBadge.style.border='1px solid #22c55e'; }
+      if (cesDot)   cesDot.className = 'li-chip-dot li-dot-live';
+      if (cesMeta)  cesMeta.textContent = sig.ces_vintage || 'live';
+
+      const msaEl   = document.getElementById('li-ces-msa');
+      const totEl   = document.getElementById('li-ces-total');
+      const totYoy  = document.getElementById('li-ces-total-yoy');
+      const healthEl = document.getElementById('li-ces-health');
+      const constEl  = document.getElementById('li-ces-const');
+      const vintEl   = document.getElementById('li-ces-vintage');
+      const aiRisk   = document.getElementById('li-ces-ai-risk');
+      const invScore = document.getElementById('li-ces-inv-score');
+      const invTier  = document.getElementById('li-ces-inv-tier');
+      const domSec   = document.getElementById('li-ces-dom-sector');
+
+      if (msaEl)   msaEl.textContent   = sig.ces_msa_name || '—';
+      if (totEl)   totEl.textContent   = sig.ces_total_nonfarm ? sig.ces_total_nonfarm.toLocaleString() + 'k' : '—';
+      if (totYoy)  totYoy.textContent  = sig.ces_total_yoy_pct != null ? (sig.ces_total_yoy_pct > 0 ? '+' : '') + sig.ces_total_yoy_pct + '%' : '—';
+      if (healthEl) healthEl.textContent = sig.ces_healthcare_yoy_pct != null ? (sig.ces_healthcare_yoy_pct > 0 ? '+' : '') + sig.ces_healthcare_yoy_pct + '%' : '—';
+      if (constEl)  constEl.textContent = sig.ces_construction_yoy_pct != null ? (sig.ces_construction_yoy_pct > 0 ? '+' : '') + sig.ces_construction_yoy_pct + '%' : '—';
+      if (vintEl)   vintEl.textContent  = sig.ces_vintage || '—';
+      if (aiRisk)   aiRisk.textContent  = sig.ai_displacement_risk != null ? sig.ai_displacement_risk + '/100' : '—';
+      if (invScore) invScore.textContent = sig.investment_opportunity_score != null ? sig.investment_opportunity_score + '/100' : '—';
+      if (invTier)  invTier.textContent  = sig.investment_tier || '—';
+      if (domSec)   domSec.textContent   = sig.dominant_growth_sector || '—';
+    } else {
+      if (cesBadge) { cesBadge.textContent='PENDING'; cesBadge.style.background='#1a1a3f'; cesBadge.style.color='#a78bfa'; }
+      if (cesDot)   cesDot.className = 'li-chip-dot';
+      if (cesMeta)  cesMeta.textContent = 'not yet run';
+    }
+  } catch (e) {
+    console.warn('[ces status]', e.message);
+  }
+}
+
+// Test the labor_market_intel MCP tool live against ZIP 32082
+async function testLaborMarket() {
+  const outEl = document.getElementById('li-ces-test-output');
+  const btn   = document.getElementById('li-ces-test-btn');
+  if (!outEl || !btn) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Fetching…';
+  outEl.style.display = 'block';
+  outEl.textContent = 'Calling /api/local-intel/labor-market/32082 …';
+
+  try {
+    const r = await fetch(`${LI_BASE}/labor-market/32082`, {
+      headers: { 'x-admin-token': LI_ADMIN_TOKEN },
+    });
+    const data = await r.json();
+    if (data.error) {
+      outEl.textContent = 'Error: ' + data.error + (data.hint ? '\nHint: ' + data.hint : '');
+      outEl.style.color = '#f87171';
+    } else {
+      outEl.textContent = JSON.stringify(data, null, 2);
+      outEl.style.color = '#a3e635';
+    }
+  } catch (e) {
+    outEl.textContent = 'Error: ' + e.message;
+    outEl.style.color = '#f87171';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'TEST ZIP 32082';
   }
 }
