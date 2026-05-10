@@ -387,7 +387,7 @@ CREATE TABLE IF NOT EXISTS zip_anomalies (
   resolved_by       TEXT,               -- 'world_model' | 'analyst' | 'causal_event'
 
   status            TEXT DEFAULT 'open', -- 'open' | 'explained' | 'monitoring' | 'closed'
-  UNIQUE (zip, signal_name, detected_at::DATE)
+  -- uniqueness enforced via: CREATE UNIQUE INDEX idx_za_unique_per_day ON zip_anomalies (zip, signal_name, date_trunc('day', detected_at AT TIME ZONE 'UTC'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_za_zip       ON zip_anomalies (zip);

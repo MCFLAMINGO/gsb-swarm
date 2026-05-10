@@ -14,7 +14,8 @@
  * Writes output to data/acs/{zip}.json
  * Oracle worker reads this on next cycle — fills in the zeros.
  *
- * NO API KEY REQUIRED. Census ACS ZCTA endpoint is public.
+ * API KEY: set Census_Data_API in Railway for authenticated requests
+ * (500 req/min authenticated vs 50 req/min unauthenticated).
  * Runs once on startup, then every 24 hours.
  */
 
@@ -71,11 +72,21 @@ function fetchJson(url) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// Census API key — authenticated = 500 req/min, unauthenticated = 50 req/min
+const CENSUS_API_KEY = process.env.Census_Data_API || process.env.CENSUS_API_KEY || null;
+
+if (CENSUS_API_KEY) {
+  console.log('[acsWorker] Census API key found — authenticated mode (500 req/min)');
+} else {
+  console.log('[acsWorker] No Census API key — unauthenticated (50 req/min). Set Census_Data_API in Railway.');
+}
+
 // ── Fetch ACS table for a list of variables, ZCTA level ─────────────────────
 async function fetchACS(zip, variables) {
   const varStr = variables.join(',');
   // Census API: ZCTA5 level (ZIP Code Tabulation Areas)
-  const url = `https://api.census.gov/data/2022/acs/acs5?get=NAME,${varStr}&for=zip%20code%20tabulation%20area:${zip}`;
+  const keyParam = CENSUS_API_KEY ? `&key=${CENSUS_API_KEY}` : '';
+  const url = `https://api.census.gov/data/2022/acs/acs5?get=NAME,${varStr}&for=zip%20code%20tabulation%20area:${zip}${keyParam}`;
   try {
     const data = await fetchJson(url);
     if (!Array.isArray(data) || data.length < 2) {
@@ -221,7 +232,8 @@ async function run() {
       console.error(`[acsWorker] ${zip} error:`, e.message);
       fail++;
     }
-    await sleep(300); // 300ms between requests — Census API is rate-limited
+    // 120ms authenticated (500/min), 300ms unauthenticated (50/min)
+    await sleep(CENSUS_API_KEY ? 120 : 300);
   }
 
   console.log(`[acsWorker] Done: ${ok} populated, ${fail} empty/failed`);
