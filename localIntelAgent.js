@@ -6440,6 +6440,92 @@ router.get('/osm-check', async (req, res) => {
   }
 });
 
+
+// ── Market Consultation Intake ────────────────────────────────────────────────
+// POST /api/local-intel/consult
+// Public endpoint — no token required. Stores lead in Postgres and emails Erik.
+// Fields: name, email, zip, intent, description, ref
+router.post('/consult', express.json(), async (req, res) => {
+  const { name, email, zip, intent, description, ref } = req.body || {};
+
+  if (!name || !email) {
+    return res.status(400).json({ error: 'name and email are required' });
+  }
+
+  // Basic email sanity check
+  if (!email.includes('@') || email.length > 320) {
+    return res.status(400).json({ error: 'invalid email' });
+  }
+
+  try {
+    // Store lead in Postgres
+    await db.query(
+      `INSERT INTO consultation_leads (name, email, zip, intent, description, ref)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        name.slice(0, 120),
+        email.slice(0, 320).toLowerCase().trim(),
+        zip   || null,
+        intent || null,
+        description ? description.slice(0, 1000) : null,
+        ref   || null,
+      ]
+    );
+  } catch (dbErr) {
+    // Table may not exist yet — do not block the user, still send the email
+    console.error('[consult] DB insert failed:', dbErr.message);
+  }
+
+  // Notify Erik via Resend
+  try {
+    const { Resend } = require('resend');
+    const resend = new Resend(process.env.RESEND_API_KEY);
+
+    const intentLabel = {
+      opening_business : 'Opening a business',
+      investment       : 'Investment decision',
+      real_estate      : 'Real estate deal',
+      expansion        : 'Business expansion',
+      other            : 'Other',
+    }[intent] || intent || 'Not specified';
+
+    await resend.emails.send({
+      from: 'LocalIntel <intel@thelocalintel.com>',
+      to:   'erik@mcflamingo.com',
+      subject: `New consultation inquiry — ${zip || 'no ZIP'} — ${name}`,
+      html: `
+<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;border:1px solid #e5e7eb;border-radius:10px;">
+  <p style="font-size:18px;font-weight:800;color:#111827;margin:0 0 4px">New Market Consultation Lead</p>
+  <p style="color:#6b7280;font-size:13px;margin:0 0 28px">LocalIntel · thelocalintel.com</p>
+
+  <table style="width:100%;border-collapse:collapse;font-size:14px;">
+    <tr><td style="padding:8px 0;color:#6b7280;width:140px">Name</td><td style="padding:8px 0;font-weight:600;color:#111827">${name}</td></tr>
+    <tr><td style="padding:8px 0;color:#6b7280">Email</td><td style="padding:8px 0;font-weight:600;color:#111827"><a href="mailto:${email}" style="color:#16a34a">${email}</a></td></tr>
+    <tr><td style="padding:8px 0;color:#6b7280">ZIP</td><td style="padding:8px 0;font-weight:600;color:#111827">${zip || '—'}</td></tr>
+    <tr><td style="padding:8px 0;color:#6b7280">Intent</td><td style="padding:8px 0;font-weight:600;color:#111827">${intentLabel}</td></tr>
+    <tr><td style="padding:8px 0;color:#6b7280">Source</td><td style="padding:8px 0;color:#111827">${ref || 'direct'}</td></tr>
+  </table>
+
+  ${description ? `
+  <div style="margin-top:20px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb">
+    <p style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin:0 0 8px">What they're trying to figure out</p>
+    <p style="font-size:14px;color:#111827;line-height:1.6;margin:0">${description}</p>
+  </div>` : ''}
+
+  <p style="margin-top:28px">
+    <a href="https://www.thelocalintel.com/zip/${zip || ''}" style="background:#111827;color:#fff;padding:11px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">View ZIP ${zip || ''} page &rarr;</a>
+  </p>
+  <p style="font-size:12px;color:#9ca3af;margin-top:24px">Typical response value: $500–$5,000 · Respond within 24h for best conversion.</p>
+</div>`,
+    });
+  } catch (emailErr) {
+    // Email failure is non-fatal — lead is already in DB
+    console.error('[consult] email failed:', emailErr.message);
+  }
+
+  return res.json({ ok: true });
+});
+
 module.exports = router;
 
 // ── Neighborhood endpoints ────────────────────────────────────────────────────
