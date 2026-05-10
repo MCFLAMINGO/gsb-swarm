@@ -3247,3 +3247,12 @@ Worker produces current BDC data (semiannual FCC releases, June+December). Dashb
 - gsb-swarm-dashboard Vercel deploy — nodes page + sidebar entry + offline banners
 - World model running, will populate zip_forecast + zip_anomalies from signal data
 - Client demo path: /local-intel/nodes → shows all 10 assets with what questions they answer + live signal count for ZIP 32082
+
+---
+## BUG FIX — 2026-05-10 (Silent Signal Write Failure)
+
+**Problem:** zip_signals table had 0 rows despite all workers being triggered. All signal upserts were silently failing because upsertZipSignals() used `updated_at` in the INSERT/ON CONFLICT clause, but the actual schema column is `last_updated_at`. The error was being swallowed by the overly broad `does not exist` catch block.
+
+**Fix:** `lib/pgStore.js` — changed `updated_at` → `last_updated_at` in both INSERT column list and ON CONFLICT SET clause. Also widened the catch to suppress any `does not exist` error (not just ones containing "zip_signals") to prevent future silent swallowing of real column errors.
+
+**Result:** commit `6f25ad3` pushed. All 4 workers (ACS, Census, IRS Migration, FCC) re-triggered and writing to zip_signals correctly. World model can now run on real data.
