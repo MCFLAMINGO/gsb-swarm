@@ -3338,3 +3338,27 @@ Worker produces current BDC data (semiannual FCC releases, June+December). Dashb
 | OSM Overpass | overpassWorker | overpass-api.de | Weekly | real-time | none |
 | FL Sunbiz | sunbizWorker | sunbiz.org | Monthly | ~1mo | none |
 
+
+---
+
+## Session 15 — Property Data Layer (Duval + St. Johns)
+
+**Date:** 2026-05-10
+
+### Problem
+ZIP signal pages lacked real estate / property context. Parcel data for Duval and St. Johns counties was unavailable without paying ATTOM ($$$) or CoreLogic. Public FDOR ArcGIS service existed but required validation of correct service URL, CO_NO values, and field availability before building.
+
+### Fix
+- Validated **Florida Statewide Parcel Centroid Version** (FloridaGIO/FDOR Cadastral 2025) ArcGIS REST service: `https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0`
+- Confirmed CO_NO values from live data: **Duval = 26**, **St. Johns = 65** (not 55 as initially guessed)
+- Confirmed PHY_ZIPCD is a **numeric field** in ArcGIS — must query as integer (PHY_ZIPCD=32082 not '32082')
+- Beds/baths definitively NOT in FDOR NAL (CAMA-only). Duval PAO portal = Cloudflare redirect. SJCPA = 403 CF block. Stored null columns reserved for future CAMA enrichment.
+- **Migration 022** (`migrations/022_property_parcels.sql`): `property_parcels` table with 28 columns including beds/baths (null), 4 indexes (zipcd, co_no, fetched_at, jv). Applied and verified in Postgres.
+- **`lib/propertyLayer.js`**: cache-first architecture — checks `property_parcels` (30-day TTL) first, falls back to live ArcGIS GET, filters to CO_NO ∈ {26, 65}, upserts to Postgres. Node built-in `https` module only — zero npm dependencies. `searchByZip(zip, limit)` and `getByParcelId(parcelId)`.
+- **`localIntelAgent.js`**: two new MCP routes — `GET /api/local-intel/property-search?zip=&limit=` and `GET /api/local-intel/property/:parcel_id`
+
+### Result
+Zero-cost property intelligence for Duval + St. Johns ZIPs. Fields available: `parcel_id`, `owner`, `market_value` (JV), `assessed_value`, `taxable_value`, `land_value`, `land_sqft`, `living_sqft` (TOT_LVG_AR), `year_built`, `dor_uc` (use code), `last_sale` (price/year/month), `prior_sale`. First query hits ArcGIS live; subsequent 30 days served from Postgres cache. Priced at $0.10 pathUSD per MCP query (same as labor-market tool).
+
+### Commit
+`31752cb` — feat: property layer — Duval + St. Johns parcels via FDOR ArcGIS centroid 2025
