@@ -3066,3 +3066,20 @@ Businesses receiving job dispatches via RFQ had no structured job record, no Toa
 **Result:** Map is light, boundary is a clean green outline, unclaimed dots (grey) vastly outnumber claimed dots (green) — accurate representation of real claim state.
 
 **Commits:** gsb-swarm `f4d4200` · localintel-landing `29a123f` · Vercel deployed ✓
+
+---
+### Session 23 addendum — ZIP page enrichment (2026-05-10)
+
+**Problem:** ZIP pages were "thin/placeholder" — Grok's external audit called them out twice. Real data existed in the oracle API response but was never rendered.
+
+**Fix:** Added 4 new sections to `_zip-page.js`, all fed from the existing oracle API call (no new requests):
+1. **Market Brief card** — `oracle_narrative` text + confidence tier badge + opportunity score bar
+2. **Market Q&A** — `top_questions[]` rendered as Q&A cards with signal strength badge
+3. **Restaurant Signal** — capture rate %, saturation status, food business count, tier breakdown bar chart (Fine/Upscale/Mid-Range/Budget)
+4. **Growth Signals strip** — trajectory label, infrastructure momentum score, flood zone %, active construction, owner-occupied %
+
+All sections hidden (display:none) if data is absent — no empty boxes on ZIPs with sparse data.
+
+**Result:** Every ZIP page now opens with a narrative paragraph, 3 plain-English Q&A answers, restaurant market saturation data, and growth trajectory — all real, sourced from Postgres, zero hallucination risk.
+
+**Commits:** localintel-landing `4b0bd9b` · Vercel deployed ✓
