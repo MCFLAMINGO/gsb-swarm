@@ -3216,3 +3216,8 @@ Worker produces current BDC data (semiannual FCC releases, June+December). Dashb
 - `dashboard-ui/index.html` — LocalIntel nav + section
 - `dashboard-ui/style.css` — li-* component styles
 - `dashboard-ui/app.js` — LocalIntel panel JS
+
+### Session 25 — Addendum: fccBroadbandWorker endpoint correction
+**Problem:** First BDC worker used assumed endpoint `/availability/summary/county/{fips}` (path param) and assumed `pct_*` response fields. BDC API spec confirmed the correct form is `/availability/summary?county_fips={fips}` (query param) and response fields are count-based: `total_locations`, `served_locations`, `unserved_locations`, `underserved_locations`, `provider_count`. Percentages must be computed locally.
+**Fix:** Rewrote `fetchCountySummary()` to use correct query-param URL. Added 5-call strategy per county (25/3 baseline, 100/20, 1000/100, fiber tech=50, fixed wireless tech=70). Added explicit error messages for 401/403/429 (Railway datacenter IP + custom user-agent required). Computes `fcc_pct_*` and `fcc_bead_*_pct` from raw counts.
+**Result:** Worker will produce accurate BDC signals without guessing field names. Also adds `fcc_total_locations`, `fcc_served_locations`, `fcc_unserved_locations`, `fcc_underserved_locations` as raw count signals alongside computed percentages.
