@@ -3668,3 +3668,18 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Result: 4,300 MB → 763 MB on volume. businesses table: 2.7 GB → 264 MB.**
 
 **Rule going forward:** when disk alert fires → run `VACUUM FULL <table>` on the largest table, not just `VACUUM ANALYZE`. Regular VACUUM never shrinks the OS-level volume file.
+
+### Root cause of volume filling: sunbizWorker (2026-05-11)
+
+**Problem:** Volume hit 100% at 10 GB. DB was only 764 MB + WAL 1 GB = ~1.8 GB. The remaining ~8 GB was `cordata.zip` (FL Sunbiz quarterly file) being actively downloaded by `sunbizWorker` to `/app/data/sunbiz/` on the Railway volume. Every deploy resumed the download. The zip is 7-8 GB when complete.
+
+**Fix (commits 0b40b69 + 557f1ca):**
+- Disabled `sunbizWorker` in `LOCAL_INTEL_WORKERS` list in `dashboard-server.js` — data already seeded to Postgres, no need to re-download
+- Added `POST /api/admin/cleanup-volume` (admin-token gated) to delete zip + extracted dir
+- Called endpoint, deleted 1.62 GB from volume immediately
+
+**Rule going forward:** Never run sunbizWorker on Railway — it writes a 7-8 GB zip to the volume. Sunbiz data is seeded once to Postgres and stays there. If a new quarterly Sunbiz import is needed, run it locally and upsert to Postgres via the DB connection string.
+
+**Workers disabled on Railway (disk safety):**
+- `embeddingBackfillWorker` — recreates 1.2 GB pgvector index with 0 scans
+- `sunbizWorker` — downloads 7-8 GB cordata.zip to volume
