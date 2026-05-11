@@ -3718,3 +3718,8 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** Railway volume keeps hitting 10GB. sunbizWorker is disabled but volume still fills. Root cause: bedrockWorker writes JSON to /app/data/bedrock/, enrichmentAgent writes enrichmentLog.json + sourceLog.json to /app/data/ — these accumulate across deploys since /app/data IS the persistent volume.
 **Fix:** Redirected bedrockWorker and enrichmentAgent to write to /tmp when RAILWAY_ENVIRONMENT is set (ephemeral, not volume). Added /api/admin/volume-audit endpoint to diagnose disk usage. Expanded cleanup-volume to also delete bedrock/, ocean_floor/, surface/, wave/, enrichmentLog.json, sourceLog.json, zips/ dirs.
 **Result:** Volume should stay under 3GB (Postgres WAL + DB only). Call /api/admin/cleanup-volume to clear accumulated JSON dirs.
+
+## Session Entry — Silent Error Fixes (2026-05-11)
+**Problem:** Railway logs showing 3 repeated silent errors: (1) zones.find is not a function — spendingZones.json exists but is not an array; (2) rfq_gaps column "vertical" does not exist — schema drift between code and DB; (3) rfq-poll column "job_id" does not exist — code references job_id but column is named id.
+**Fix:** (1) loadZone now uses Array.isArray guard. (2) pgStore init migration adds all missing rfq_gaps columns + UNIQUE constraint for upsert. (3) rfq-poll query updated to use correct column name.
+**Result:** These 3 errors should stop repeating in Railway logs.
