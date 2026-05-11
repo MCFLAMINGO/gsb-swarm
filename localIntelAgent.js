@@ -106,6 +106,7 @@ const { classifyIntent } = require('./workers/intentRouter');
 const { dispatchTask } = require('./lib/taskDispatch');
 const { resolveBusinessAlias } = require('./lib/aliasResolver');
 const { injectShowcase } = require('./lib/showcaseBiz');
+const { logDeadEnd } = require('./lib/deadEndLog');
 const apiKeyMiddleware = createApiKeyMiddleware(db);
 
 // Phase 2 — multi-ZIP fanout when caller doesn't pin a ZIP
@@ -818,6 +819,17 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip) {
       ? `We found ${notified} ${nlIntent.category}(s) in your area and sent them your request. You'll hear back shortly. (RFQ-${rfqId})`
       : `We don't have ${nlIntent.category}s in our network for ZIP ${zip || 'that area'} yet — we're working on it.`;
 
+    if (notified === 0) {
+      logDeadEnd({
+        query: userQuery,
+        zip,
+        channel: req.body?.channel || (customerId && String(customerId).startsWith('+') ? 'twilio' : 'web'),
+        failReason: 'rfq_fail',
+        intentPath: `rfq:${nlIntent?.category || nlIntent?.group || 'unknown'}`,
+        callerId: customerId || null,
+      });
+    }
+
     if (customerId && String(customerId).startsWith('+')) {
       sendRfqSms(customerId, customerMsg).catch(err =>
         console.error('[rfq] customer SMS failed:', err.message)
@@ -853,6 +865,14 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip) {
 
   } catch (err) {
     console.error('[rfq] handleRFQ error:', err.message);
+    logDeadEnd({
+      query: userQuery,
+      zip,
+      channel: req.body?.channel || (customerId && String(customerId).startsWith('+') ? 'twilio' : 'web'),
+      failReason: 'rfq_fail',
+      intentPath: `rfq:${nlIntent?.category || nlIntent?.group || 'unknown'}`,
+      callerId: customerId || null,
+    });
     return res.status(500).json({ ok: false, error: 'RFQ dispatch failed', detail: err.message });
   }
 }
@@ -942,6 +962,14 @@ async function handleReservation(req, res, query, customerId, zip) {
 
     if (!businesses.length) {
       const cityHint = bizNameRaw ? ` matching "${bizNameRaw}"` : '';
+      logDeadEnd({
+        query,
+        zip,
+        channel: req.body?.channel || (customerId && String(customerId).startsWith('+') ? 'twilio' : 'web'),
+        failReason: 'reservation_fail',
+        intentPath: `reservation:${bizNameRaw || 'no_name'}`,
+        callerId: customerId || null,
+      });
       return res.json({
         ok: true,
         type: 'reservation_not_found',
@@ -1008,6 +1036,14 @@ async function handleReservation(req, res, query, customerId, zip) {
 
   } catch (err) {
     console.error('[reservation] handleReservation error:', err.message);
+    logDeadEnd({
+      query,
+      zip,
+      channel: req.body?.channel || (customerId && String(customerId).startsWith('+') ? 'twilio' : 'web'),
+      failReason: 'reservation_fail',
+      intentPath: 'reservation:exception',
+      callerId: customerId || null,
+    });
     return res.status(500).json({ ok: false, error: 'Reservation lookup failed', detail: err.message });
   }
 }
@@ -1692,6 +1728,28 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // ── B10 — dead-end logging (fire-and-forget) ────────────────────────────
+    // Capture every 0-result response so we can surface intent gaps later.
+    if (rows.length === 0) {
+      const _channel = req.body?.channel || (customerId && String(customerId).startsWith('+') ? 'twilio' : 'web');
+      const _failReason = nlIntent?.taskClass || effectiveCategory || effectiveGroup
+        ? 'no_results'
+        : 'no_intent';
+      const _intentPath = effectiveCategory
+        ? `searchByCategory:${effectiveCategory}`
+        : (effectiveGroup
+            ? `searchByGroup:${effectiveGroup}`
+            : (nlIntent?.taskClass ? `legacy:${nlIntent.taskClass}` : 'unmatched'));
+      logDeadEnd({
+        query,
+        zip,
+        channel: _channel,
+        failReason: _failReason,
+        intentPath: _intentPath,
+        callerId: customerId || null,
+      });
+    }
+
     const _meta = {
       source:        usedSemantic ? 'postgres+pgvector' : (usedTsFallback ? 'postgres+tsvector' : 'postgres'),
       intent_class:  nlIntent.taskClass || null,
@@ -1723,6 +1781,14 @@ router.post('/', async (req, res) => {
     });
   } catch (e) {
     console.error('[local-intel query]', e.message);
+    logDeadEnd({
+      query,
+      zip,
+      channel: req.body?.channel || (customerId && String(customerId).startsWith('+') ? 'twilio' : 'web'),
+      failReason: 'unknown',
+      intentPath: `exception:${e.message?.slice(0, 80) || 'unknown'}`,
+      callerId: customerId || null,
+    });
     res.status(500).json({ ok: false, error: e.message });
   }
 });
@@ -5578,6 +5644,14 @@ router.get('/search', async (req, res) => {
         );
       }
       if (!bizRows.length) {
+        logDeadEnd({
+          query: raw || bizName || '',
+          zip,
+          channel: req.body?.channel || 'web',
+          failReason: 'no_results',
+          intentPath: 'ordering:no_biz',
+          callerId: req.body?.From || req.body?.from || req.body?.phone || null,
+        });
         return res.json({
           intent: 'order_not_found',
           message: `I couldn't find '${bizName}' in this area.`,
@@ -5622,6 +5696,16 @@ router.get('/search', async (req, res) => {
               : `Couldn't find any of those restaurants in our network yet.`;
             if (notFound.length > 0) {
               message += ` (Not found: ${notFound.join(', ')})`;
+            }
+            if (found.length === 0) {
+              logDeadEnd({
+                query: raw,
+                zip,
+                channel: req.body?.channel || 'web',
+                failReason: 'no_results',
+                intentPath: `ordering:multi_biz:${notFound.join('|')}`,
+                callerId: req.body?.From || req.body?.from || req.body?.phone || null,
+              });
             }
             return res.json({
               ok: true,
@@ -5720,6 +5804,14 @@ router.get('/search', async (req, res) => {
         }
 
         if (!bizRows.length) {
+          logDeadEnd({
+            query: raw,
+            zip,
+            channel: req.body?.channel || 'web',
+            failReason: 'no_results',
+            intentPath: `ordering:no_biz:${orderDetect.name || 'unnamed'}`,
+            callerId: req.body?.From || req.body?.from || req.body?.phone || null,
+          });
           return res.json({
             intent: 'order_not_found',
             message: `I couldn't find a business called '${orderDetect.name || raw}' in this area.`,
@@ -6061,6 +6153,14 @@ router.get('/search', async (req, res) => {
           console.error('[/search] name-guard tsvector probe error:', tsErr.message);
         }
         if (!tsHits.length) {
+          logDeadEnd({
+            query: q,
+            zip,
+            channel: 'web',
+            failReason: 'no_results',
+            intentPath: 'search:name_not_found',
+            callerId: null,
+          });
           return res.json({
             ok: true, total: 0, returned: 0, results: [],
             intent: null,
@@ -7708,6 +7808,45 @@ router.get('/anomalies', async (req, res) => {
     const rows = await db.query(q, params);
     return res.json({ count: rows.length, anomalies: rows });
   } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/local-intel/dead-ends ──────────────────────────────────────────
+// B10: surfaces unmatched/failed user queries from intent_dead_ends.
+// Admin-only — same token pattern as /migrate routes. Query params:
+//   ?limit=100  (max 500)
+//   ?reason=<fail_reason>  (optional)
+//   ?since=<ISO date>  (optional)
+router.get('/dead-ends', async (req, res) => {
+  const token = req.headers['x-admin-token'] || req.query.admin_token;
+  if (token !== process.env.LOCAL_INTEL_ADMIN_TOKEN && token !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const conditions = ['1=1'];
+    const params = [];
+    if (req.query.reason) {
+      params.push(req.query.reason);
+      conditions.push(`fail_reason = $${params.length}`);
+    }
+    if (req.query.since) {
+      params.push(req.query.since);
+      conditions.push(`created_at >= $${params.length}`);
+    }
+    params.push(limit);
+    const rows = await db.query(
+      `SELECT id, query, zip, channel, fail_reason, intent_path, caller_id, created_at
+       FROM intent_dead_ends
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY created_at DESC
+       LIMIT $${params.length}`,
+      params
+    );
+    return res.json({ count: rows.length, dead_ends: rows });
+  } catch (e) {
+    console.error('[dead-ends]', e.message);
     return res.status(500).json({ error: e.message });
   }
 });
