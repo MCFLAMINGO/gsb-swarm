@@ -7280,25 +7280,23 @@ router.post('/agent-profile', express.json(), async (req, res) => {
   }
 });
 
-// ── Property Search ─────────────────────────────────────────────────────────
-// GET /api/local-intel/property-search?zip=32082&limit=20
-// Returns FDOR parcel data for Duval (CO_NO=26) or St. Johns (CO_NO=65) ZIPs.
-// Cache-first: 30-day Postgres TTL. Live source: FloridaGIO ArcGIS FDOR Cadastral 2025.
+// ── Property Layer ──────────────────────────────────────────────────────────
+// POSTGRES IS KING — data pre-seeded from County PA bulk files, no ArcGIS
+//   Duval:     405k parcels (jacksonville.gov TXT, March 2026) w/ beds/baths
+//   St. Johns: 171k parcels (sjcpa.us CAMAData.mdb ParcelView)
+// GET /api/local-intel/property-search?zip=32082&limit=20&min_sqft=1000&min_beds=3
+// GET /api/local-intel/property/:parcel_id
+// GET /api/local-intel/property-address?q=101+cypress+landing
+// GET /api/local-intel/property-stats?county=st_johns
 const propertyLayer = require('./lib/propertyLayer');
 
 router.get('/property-search', async (req, res) => {
-  const { zip, limit = 20 } = req.query;
+  const { zip, limit = 20, min_sqft, max_sqft, min_beds, dor_uc, sort_by } = req.query;
   if (!zip) return res.status(400).json({ error: 'zip is required' });
 
   try {
-    const result = await propertyLayer.searchByZip(zip, limit);
-    return res.json({
-      zip,
-      source: result.source,
-      count: result.parcels.length,
-      total_fetched: result.total_fetched,
-      parcels: result.parcels,
-    });
+    const result = await propertyLayer.searchByZip(zip, { limit, min_sqft, max_sqft, min_beds, dor_uc, sort_by });
+    return res.json(result);
   } catch (err) {
     console.error('[property-search] error:', err.message);
     return res.status(500).json({ error: err.message });
@@ -7306,17 +7304,42 @@ router.get('/property-search', async (req, res) => {
 });
 
 // GET /api/local-intel/property/:parcel_id
-// Returns a single parcel record by FDOR PARCEL_ID.
 router.get('/property/:parcel_id', async (req, res) => {
   const { parcel_id } = req.params;
   if (!parcel_id) return res.status(400).json({ error: 'parcel_id is required' });
 
   try {
     const result = await propertyLayer.getByParcelId(parcel_id);
-    if (!result.parcel) return res.status(404).json({ error: `Parcel ${parcel_id} not found` });
-    return res.json({ source: result.source, parcel: result.parcel });
+    if (result.not_found) return res.status(404).json({ error: `Parcel ${parcel_id} not found` });
+    return res.json(result);
   } catch (err) {
     console.error('[property/:parcel_id] error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/local-intel/property-address?q=101+cypress+landing
+router.get('/property-address', async (req, res) => {
+  const { q, limit = 10 } = req.query;
+  if (!q) return res.status(400).json({ error: 'q (address query) is required' });
+
+  try {
+    const result = await propertyLayer.searchByAddress(q, limit);
+    return res.json(result);
+  } catch (err) {
+    console.error('[property-address] error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/local-intel/property-stats?county=duval|st_johns&zip=32082
+router.get('/property-stats', async (req, res) => {
+  const { county, zip } = req.query;
+  try {
+    const result = await propertyLayer.stats({ county, zip });
+    return res.json(result);
+  } catch (err) {
+    console.error('[property-stats] error:', err.message);
     return res.status(500).json({ error: err.message });
   }
 });

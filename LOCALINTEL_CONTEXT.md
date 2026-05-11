@@ -3362,3 +3362,49 @@ Zero-cost property intelligence for Duval + St. Johns ZIPs. Fields available: `p
 
 ### Commit
 `31752cb` — feat: property layer — Duval + St. Johns parcels via FDOR ArcGIS centroid 2025
+
+---
+
+## Session 16 — Property Layer Seeded (Postgres-Only, No ArcGIS)
+
+**Date:** 2026-05-10
+
+### Problem
+Session 15 left `property_parcels` at 0 rows. ArcGIS service (`services9.arcgis.com` → Azure CDN `13.107.253.70`) was intermittently returning 0 features and timing out — throttling from both Railway and sandbox. Live-query architecture was fundamentally fragile for seeding 576k parcels ZIP by ZIP.
+
+### Fix
+Abandoned ArcGIS entirely for seeding. Switched to **official County PA bulk downloads** — no rate limits, no CDN blocks, no API keys:
+
+**Duval (405,691 parcels):**
+- Source: `jacksonville.gov/departments/property-appraiser/data-offerings` — March 2026 uncertified real estate TXT (pipe-delimited, 91MB zip → 640MB)
+- Parse multi-record-type format: row 00001=parcel main, 00003=owner, 00004=site address, 00005=building (heat_ar/eff/act yr), 00007=beds/baths
+- **Beds/baths ARE available from Duval PA** (row type 00007 — utility structural elements: cd=1 bedroom, cd=2 bath)
+- 317,444 parcels have bed data
+- Download speed: 91MB in <1s from sandbox
+
+**St. Johns (171,154 parcels):**
+- Source: SJCPA CAMAData.mdb ParcelView (already on disk from prior session)
+- Key fields: `strap`, `name` (owner), `addr_1` (site address), `city`, `zip` (padded with suffix — strip to 5 digits), `mkt_val` (JV), `soh_val` (AV_SD), `tax_val` (TV_SD), `tot_lnd_val`, `acreage` (convert to sqft)
+- CAMA enrichment: bldg sqft + year built from `/tmp/sjcpa/cama.pkl`; sales from SalesView
+
+**Seed method:** Python + `psycopg2` `COPY FROM` to temp table → `INSERT ... ON CONFLICT` → 576k rows in ~60 seconds total (not row-by-row which timed out at 10 min)
+
+**lib/propertyLayer.js** rewritten — Postgres-only, no ArcGIS code:
+- `searchByZip(zip, options)` — filter by sqft/beds/dor_uc, sort by jv/sqft/year
+- `getByParcelId(parcelId)` — exact lookup
+- `searchByAddress(q, limit)` — ILIKE fuzzy search
+- `stats(filter)` — aggregates by county or ZIP
+
+**New routes added to localIntelAgent.js:**
+- `GET /api/local-intel/property-address?q=101+cypress+landing`
+- `GET /api/local-intel/property-stats?county=st_johns`
+
+**Seed scripts committed** to `data-seed/seed_duval.py` and `data-seed/seed_stjohns.py`
+
+### Result
+- `property_parcels` table: **576,845 rows** (405,691 Duval + 171,154 St. Johns)
+- Duval: 317,444 with beds/baths, 362,245 with sqft, all with JV
+- St. Johns: 166,856 with address, 171,154 with JV, 126,398 with sqft, 157,757 with sale price
+
+### Commit
+`TBD` — feat: seed 576k property parcels from County PA bulk files + Postgres-only propertyLayer
