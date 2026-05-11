@@ -3723,3 +3723,8 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** Railway logs showing 3 repeated silent errors: (1) zones.find is not a function — spendingZones.json exists but is not an array; (2) rfq_gaps column "vertical" does not exist — schema drift between code and DB; (3) rfq-poll column "job_id" does not exist — code references job_id but column is named id.
 **Fix:** (1) loadZone now uses Array.isArray guard. (2) pgStore init migration adds all missing rfq_gaps columns + UNIQUE constraint for upsert. (3) rfq-poll query updated to use correct column name.
 **Result:** These 3 errors should stop repeating in Railway logs.
+
+## Session Entry — Worker Audit + Disable (2026-05-11)
+**Problem:** 6 active workers consuming CPU/memory/retries with no benefit to search UX: promptEvolutionWorker (no traffic), btrWorker (stjohnstax.us timeouts), irsSoiWorker + irsMigrationWorker (data not queried), fccBroadbandWorker (not used), worldModelWorker (no hot-path consumer).
+**Fix:** Commented out all 6 in LOCAL_INTEL_WORKERS array. 29 other dead-code worker files exist in workers/ but are never launched — left as-is (no impact).
+**Result:** Reduced Railway CPU/memory churn. Active worker count: 22 → 16.
