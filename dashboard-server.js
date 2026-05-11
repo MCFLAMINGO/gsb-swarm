@@ -852,6 +852,31 @@ app.post('/api/admin/trigger-census', (req, res) => {
 });
 
 
+// POST /api/admin/cleanup-volume — one-shot: delete sunbiz zip + extracted dir from Railway volume
+app.post('/api/admin/cleanup-volume', (req, res) => {
+  const token = req.headers['x-admin-token'] || req.body?.token;
+  if (token !== 'localintel-migrate-2026') return res.status(401).json({ error: 'unauthorized' });
+  const fs   = require('fs');
+  const path = require('path');
+  const DATA_DIR   = process.env.DATA_DIR || '/app/data';
+  const SUNBIZ_DIR = path.join(DATA_DIR, 'sunbiz');
+  const results    = [];
+  try {
+    const zip = path.join(SUNBIZ_DIR, 'cordata.zip');
+    if (fs.existsSync(zip)) {
+      const sz = fs.statSync(zip).size;
+      fs.unlinkSync(zip);
+      results.push(`deleted cordata.zip (${(sz/1024/1024/1024).toFixed(2)} GB)`);
+    } else { results.push('cordata.zip not found'); }
+    const ext = path.join(SUNBIZ_DIR, 'extracted');
+    if (fs.existsSync(ext)) {
+      fs.rmSync(ext, { recursive: true, force: true });
+      results.push('deleted extracted/ dir');
+    } else { results.push('extracted/ not found'); }
+  } catch (e) { results.push('error: ' + e.message); }
+  res.json({ ok: true, results });
+});
+
 // POST /api/admin/trigger-permit — runs permitWorker immediately
 app.post('/api/admin/trigger-permit', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
