@@ -1,6 +1,6 @@
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
-> Last updated: 2026-05-10 (session 14 — CES worker + AI investment scoring + labor-market MCP tool)
+> Last updated: 2026-05-11 (session 16 — Railway-native quarterly property reseed cron)
 
 ---
 
@@ -3408,3 +3408,41 @@ Abandoned ArcGIS entirely for seeding. Switched to **official County PA bulk dow
 
 ### Commit
 `TBD` — feat: seed 576k property parcels from County PA bulk files + Postgres-only propertyLayer
+
+---
+
+## Session 16 — Railway-native quarterly property reseed cron (2026-05-11)
+
+### Problem
+The quarterly property reseed (Duval + St. Johns) was Perplexity-hosted instead
+of self-hosted on Railway, so reseed runs depended on Perplexity infrastructure
+and could not be triggered from the same place as the rest of the stack.
+
+### Fix
+- Added `data-seed/reseed_cron.js` — Node.js port of `seed_duval.py` +
+  `seed_stjohns.py` that:
+  - Dynamically scrapes the latest UNCERTIFIED real-estate TXT zip URL from
+    `https://www.jacksonville.gov/departments/property-appraiser/data-offerings`
+    (URL changes monthly, must be discovered at runtime).
+  - Downloads + extracts the Duval pipe-delimited TXT (latin-1) and parses
+    record types 00001/00003/00004/00005/00007 streaming line-by-line.
+  - For St. Johns, pulls `CAMAData.zip` + `CAMADataSup.zip` from
+    `sftp.sjcpa.us`, runs `mdb-export` on ParcelView/BldView/SalesView.
+  - Writes TSVs to `/tmp/`, COPYs into temp tables, then runs
+    `INSERT ... ON CONFLICT (parcel_id) DO UPDATE` against `property_parcels`.
+  - Uses `LOCAL_INTEL_DB_URL` from env (never hardcoded).
+  - Uses `pg-copy-streams` for streaming `COPY FROM STDIN`.
+  - Embeds a minimal zip reader (stored + deflate) so no zip dependency is
+    required — keeps the install lean.
+- Added `railway.toml` defining a `reseed-cron` service with
+  `cronSchedule = "33 7 1 1,4,7,10 *"` (Jan/Apr/Jul/Oct 1 at 07:33 UTC, which
+  is ~03:33 EDT). Same nixpacks build as the web service so env vars and
+  `mdbtools` carry over.
+- Updated `nixpacks.toml` apt list to include `mdbtools` and `unzip`.
+- Added `pg-copy-streams` to `package.json`.
+
+### Result
+Quarterly reseed now runs fully on Railway infrastructure — no Perplexity
+dependency. Cron fires four times a year and refreshes ~576k Duval + St. Johns
+parcel rows in `property_parcels` via the same COPY+upsert pattern used by the
+existing seed scripts.
