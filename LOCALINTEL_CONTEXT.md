@@ -3597,3 +3597,34 @@ Separately, "vodka and cranberry" matched a school in Port Charlotte because:
   goods tags.
 - 94 bad map pins cleared from DB; map renders cleanly inside the NE
   Florida service area.
+
+---
+
+## Session: Geo Leak Root Fix + Resolution Logging (2026-05-11)
+
+**Problem:**
+`GET /api/local-intel/search` — the endpoint the frontend always calls — had zero geo enforcement when no ZIP was passed. Name search used `zip BETWEEN '32004' AND '34997'` (all FL). Category search with expanded CAT_EXPAND had no zip clause at all. Token fallback same. Result: hotels in Orlando, Marshalls from Miami, concert halls from Jacksonville city — all leaking into 32082 searches. The ZIP guard added in a previous session was in the POST handler (~line 1051), which is a completely separate path never called by the frontend.
+
+Additionally, GET /search never wrote to `resolution_history` or `rfq_gaps`, so every failed query was invisible to the self-improvement system.
+
+**Fix (commit ff97c55):**
+- Name search: default zipWhere is now `AND zip = ANY($2)` with `TARGET_ZIPS` — only widens to all FL if TARGET_ZIPS returns nothing
+- Category expanded search (CAT_EXPAND path): `AND zip = ANY($2)` with `TARGET_ZIPS` when no zip supplied
+- Category expanded search (tag-filtered path): same TARGET_ZIPS guard added
+- Category ILIKE path (non-expanded): `AND zip = ANY($2)` with `TARGET_ZIPS`, param count corrected to `$3`
+- Token fallback: switched from `zip BETWEEN '32004' AND '34997'` to `AND zip = ANY($1)` with TARGET_ZIPS
+- tsvector fallback: added to GET /search for the first time (mirrors POST handler Path B) — fires when all ILIKE/category paths return nothing, enforces TARGET_ZIPS geo guard
+- Resolution logging: `recordResolution()` called fire-and-forget on every GET /search query — system now tracks success rate for this path
+- Gap logging: 0-result queries write to `rfq_gaps` (vertical=intentGroup, prompt=raw query, tool='get_search') — feeds routerLearningWorker acquisition intelligence
+
+**Result:**
+- hotel (no zip) → ZIPs: 32034,32233,32250,32266,32082 only ✅
+- concert hall (no zip) → ZIPs: 32081,32250,32082,32259 only ✅
+- restaurants (no zip) → ZIPs: 32082,32233,32250,32034,32081 only ✅
+- properties for rent + zip=32082 → real_estate, all 32082 ✅
+- beach chair + zip=32082 → retail, all 32082 ✅
+- vodka + zip=32082 → liquor_store, 32082 ✅
+- breast implants + zip=32082 → healthcare, all 32082 ✅
+- dry cleaning → cleaning, routed correctly ✅
+- No Miami, Orlando, Sarasota, Daytona results anywhere ✅
+- Every query now writes to resolution_history; 0-result queries write to rfq_gaps ✅
