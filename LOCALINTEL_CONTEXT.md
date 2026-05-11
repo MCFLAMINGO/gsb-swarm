@@ -3446,3 +3446,53 @@ Quarterly reseed now runs fully on Railway infrastructure — no Perplexity
 dependency. Cron fires four times a year and refreshes ~576k Duval + St. Johns
 parcel rows in `property_parcels` via the same COPY+upsert pattern used by the
 existing seed scripts.
+
+---
+
+## Session 16b — ORDER_ITEM_PARTIAL guard + intent vocab + ZIP geo enforcement (2026-05-11)
+
+### Problem
+Several non-food queries leaked through to the ORDER_ITEM_PARTIAL flow, causing
+the assistant to ask "Which restaurant would you like X from?" for things that
+were obviously not food:
+
+- "where can I get a haircut" → ORDER_ITEM_PARTIAL
+- "I need an electric drill" → ORDER_ITEM_PARTIAL
+- "I want a beach chair" → ORDER_ITEM_PARTIAL
+
+Root cause: `NON_FOOD_RE` in `detectOrderItemPartial` (localIntelAgent.js
+~line 4672) only covered real estate, services, and travel — it was missing
+physical-goods and personal-services vocab.
+
+Separately, "vodka and cranberry" matched a school in Port Charlotte because:
+1. No `liquor_store` category in the intent vocab → fell back to text search.
+2. The legacy ILIKE search path had no ZIP guard when no ZIP was passed, so
+   statewide results leaked into local intent. "Properties for rent" similarly
+   fell through to RFQ instead of `real_estate`.
+
+### Fix
+- **localIntelAgent.js**: Expanded `NON_FOOD_RE` in `detectOrderItemPartial`
+  to cover 60+ non-food goods/services categories: hair/beauty/wellness,
+  fitness, healthcare, professional services, auto, home services, outdoor /
+  sporting / hardware goods, furniture, clothing, personal care, electronics.
+- **localIntelAgent.js**: Added `zip = ANY($::text[])` guard with
+  `TARGET_ZIPS` on the legacy ILIKE search path when no ZIP is pinned, so
+  statewide businesses never leak into local results.
+- **lib/intentMap.js**: Added 4 new NL_RULES (before the general food rule):
+  liquor/alcohol, grocery items, retail/outdoor/sporting, rentals/real-estate.
+  Added a liquor keyword block (16 keywords) in KEYWORD_MAP. Replaced the
+  Retail block with a much broader grocery/hardware/outdoor block. Replaced
+  the Real estate block with one that also captures rentals/leases.
+- **workers/intentRouter.js**: Expanded `KEYWORD_CATEGORY_MAP` with outdoor,
+  sporting goods, hardware, furniture entries; added grocery shopping phrases
+  ("buy groceries", "need milk", etc.); added beauty/wellness phrases
+  ("get a haircut", "hair salon", "barber", "facial", "blowout").
+
+### Result
+- Non-food service/goods queries no longer trigger
+  "Which restaurant would you like X from?" — they route to the correct
+  category (`beauty`, `retail`, `hardware`, `healthcare`, etc.).
+- Alcohol/liquor queries route to `liquor_store`.
+- Rental queries route to `real_estate` with `rental`/`for_rent` tags.
+- All ILIKE search results are scoped to TARGET_ZIPS when no ZIP is supplied,
+  so statewide rows never appear in local intent.
