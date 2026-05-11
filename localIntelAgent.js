@@ -105,6 +105,7 @@ const { isOpenNow } = require('./workers/hoursParseWorker');
 const { classifyIntent } = require('./workers/intentRouter');
 const { dispatchTask } = require('./lib/taskDispatch');
 const { resolveBusinessAlias } = require('./lib/aliasResolver');
+const { injectShowcase } = require('./lib/showcaseBiz');
 const apiKeyMiddleware = createApiKeyMiddleware(db);
 
 // Phase 2 — multi-ZIP fanout when caller doesn't pin a ZIP
@@ -348,7 +349,8 @@ async function searchByCategory(intent, zip, limit = 50) {
       claimed_at IS NOT NULL AS claimed,
       wallet,
       pos_config->>'pos_type' AS pos_type,
-      CASE WHEN wallet IS NOT NULL THEN 1 ELSE 0 END AS has_wallet
+      CASE WHEN wallet IS NOT NULL THEN 1 ELSE 0 END AS has_wallet,
+      is_showcase
     FROM businesses
     WHERE ${conditions.join(' AND ')}
     ORDER BY has_wallet DESC, confidence_score DESC, name ASC
@@ -391,7 +393,8 @@ async function searchByText(query, zip, limit = 50) {
       wallet,
       pos_config->>'pos_type' AS pos_type,
       ts_rank(search_vector, to_tsquery('english', $2)) AS rank,
-      CASE WHEN wallet IS NOT NULL THEN 1 ELSE 0 END AS has_wallet
+      CASE WHEN wallet IS NOT NULL THEN 1 ELSE 0 END AS has_wallet,
+      is_showcase
     FROM businesses
     WHERE status != 'inactive'
       AND zip = ANY($1::text[])
@@ -1233,6 +1236,9 @@ router.post('/', async (req, res) => {
               businessId: enriched[0]?.business_id ?? null,
               group: nlIntentEarly.group
             });
+            // Inject showcase businesses (ZIP-agnostic, cuisine-gated)
+            const cuisineForShowcase = nlIntentEarly?.cuisine || intent?.cuisine || null;
+            enriched = await injectShowcase(enriched, cuisineForShowcase);
             const _phase2Meta = {
               source:        'postgres+intent',
               intent_type:   intent.type,
@@ -1413,7 +1419,8 @@ router.post('/', async (req, res) => {
         confidence_score AS confidence, confidence_score, lat, lon, sunbiz_doc_number,
         claimed_at IS NOT NULL AS claimed,
         wallet,
-        pos_config->>'pos_type' AS pos_type
+        pos_config->>'pos_type' AS pos_type,
+        is_showcase
         ${tagBoost}
       FROM businesses
       WHERE ${conditions.join(' AND ')}
@@ -1453,6 +1460,7 @@ router.post('/', async (req, res) => {
             claimed_at IS NOT NULL AS claimed,
             wallet,
             pos_config->>'pos_type' AS pos_type,
+            is_showcase,
             ts_rank(search_vector, to_tsquery('english', $1)) AS rank
           FROM businesses
           WHERE status != 'inactive'
@@ -1470,6 +1478,7 @@ router.post('/', async (req, res) => {
             claimed_at IS NOT NULL AS claimed,
             wallet,
             pos_config->>'pos_type' AS pos_type,
+            is_showcase,
             ts_rank(search_vector, to_tsquery('english', $1)) AS rank
           FROM businesses
           WHERE status != 'inactive'
@@ -1510,6 +1519,7 @@ router.post('/', async (req, res) => {
                 claimed_at IS NOT NULL AS claimed,
                 wallet,
                 pos_config->>'pos_type' AS pos_type,
+                is_showcase,
                 (embedding <=> $1::vector) AS semantic_distance
              FROM businesses
              WHERE zip = ANY($2::text[])
@@ -1643,6 +1653,10 @@ router.post('/', async (req, res) => {
     if (customerSession) {
       rows = personalizeResults(rows, customerSession);
     }
+
+    // ── Inject showcase businesses (ZIP-agnostic, cuisine-gated) ────────────
+    const cuisineForShowcase = nlIntent?.cuisine || nlIntentEarly?.cuisine || null;
+    rows = await injectShowcase(rows, cuisineForShowcase);
 
     // ── Step 5 — fire-and-forget customer session upsert ────────────────────
     upsertCustomerSession({
