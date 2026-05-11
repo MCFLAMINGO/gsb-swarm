@@ -1,3 +1,13 @@
+## 2026-05-11 — taskIntent.js: plain language task routing
+
+**Problem:** "get me dry cleaning picked up" was routing to restaurant (wrong) or returning no results. No mechanism existed to detect task/errand requests and collect follow-up context before routing to RFQ.
+
+**Fix:** Built `lib/taskIntent.js` with `detectTaskIntent(text)` — deterministic regex patterns for pickup/dropoff/errand tasks. Returns `{ isTask, taskType, cat, followUp, followUpKey }`. Follow-up state stored in module-level Map with 10-min TTL keyed by sessionId. Wired into `localIntelAgent.js` POST handler before intent resolution and into `voiceIntake.js`. Fixed SERVICE_MAP: removed `'pick up': 'restaurant'` and `'drop off': 'restaurant'` — these are errand signals, not food. Exported from `lib/intentMap.js` alongside `resolveIntent`.
+
+**Result:** Voice/SMS/search bar all use identical pipeline. "get me dry cleaning picked up" → follow-up "Which dry cleaner do you use?" → RFQ broadcast to dry cleaners. No LLM, fully deterministic.
+
+---
+
 ## 2026-05-11 — Vercel build fails: Next.js auto-detection on static site
 
 **Problem:** After reconnecting `gsb-swarm-dashboard` Vercel project to `MCFLAMINGO/localintel-landing`, Vercel auto-detected Next.js as the framework (from project settings carried over). Since `localintel-landing` has no `package.json` and no `pages/` or `app/` directory, `next build` fails immediately with "Couldn't find any pages or app directory".
