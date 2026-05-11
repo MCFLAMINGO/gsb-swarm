@@ -3703,3 +3703,8 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** Users speaking naturally ("I crashed my car", "my dog is sick", "can you get me a tow", "where can I get coffee") got 0 results or wrong results — intent router only matched direct keyword nouns.
 **Fix:** Added ~100 conversational trigger phrases to KEYWORD_MAP covering: I need/want X, get me X, find me X, can you get me X, where can I get X, where is X, plus emergency situational phrases (pipe burst, power out, tooth hurts, pet emergency, car broke down, locked out, crashed my car, etc). Added 15 NL_RULES regex patterns for pattern-match coverage.
 **Result:** Natural conversational queries now route correctly to the right local business category without any LLM on the hot path.
+
+## Session Entry — Name Search + Intent Fixes (2026-05-11)
+**Problem:** Name searches for specific businesses (jersey mikes) fell through to category expansion returning 20 wrong results. "hoagie/sub/sandwich" triggered RFQ instead of restaurant. "I need a lawyer" capital-I didn't match intent.
+**Fix:** Added early-return in GET /search name path when no intent + no name results + query ≤4 words → returns friendly 0-result message. Added sandwich/deli/hoagie keywords → restaurant. Verified and fixed case-insensitive normalization in intent lookup.
+**Result:** Name miss returns clean 0-result message. Sandwich queries route to restaurants. "I need a lawyer" routes to legal.
