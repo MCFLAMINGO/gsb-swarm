@@ -3728,3 +3728,8 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** 6 active workers consuming CPU/memory/retries with no benefit to search UX: promptEvolutionWorker (no traffic), btrWorker (stjohnstax.us timeouts), irsSoiWorker + irsMigrationWorker (data not queried), fccBroadbandWorker (not used), worldModelWorker (no hot-path consumer).
 **Fix:** Commented out all 6 in LOCAL_INTEL_WORKERS array. 29 other dead-code worker files exist in workers/ but are never launched — left as-is (no impact).
 **Result:** Reduced Railway CPU/memory churn. Active worker count: 22 → 16.
+
+## Session Entry — Volume Cleanup Expansion (2026-05-11)
+**Problem:** Volume audit showed 736MB used with stale dirs: embeddings/ (221MB), irs_soi_2022.csv (207MB), osm/ (52MB), vertical-runs/ (18MB), surface_current/ (17MB), oracle/ (17MB), briefs/ (6MB), and others — all data already in Postgres.
+**Fix:** Expanded cleanup-volume to delete 14 stale dirs/files. Redirected surfaceCurrentWorker, oracleWorker, verticalAgentWorker to write to /tmp on Railway. irsSoiWorker already uses os.tmpdir().
+**Result:** Volume should stay near baseline (~400MB WAL + DB overhead) after cleanup.
