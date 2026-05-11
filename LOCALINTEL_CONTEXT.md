@@ -3698,3 +3698,8 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** 15 query types returned 0 results or wrong results: vet, tow truck, hair salon, clothes, dry cleaning (direct), handyman, car repair, gas station, pharmacy, financial advisor, insurance agent, grocery, hotel, doctor/urgent care.
 **Fix:** Added ~70 new KEYWORD_MAP entries across 14 categories in intentMap.js. Added/expanded 13 CAT_EXPAND entries in localIntelAgent.js. Fixed Winn Dixie DB record (was hotel, corrected to grocery). All NL_RULES updated for regex coverage.
 **Result:** Full coverage across everyday local queries for JAX/PVB area.
+
+## Session Entry — Conversational NL Intent Expansion (2026-05-11)
+**Problem:** Users speaking naturally ("I crashed my car", "my dog is sick", "can you get me a tow", "where can I get coffee") got 0 results or wrong results — intent router only matched direct keyword nouns.
+**Fix:** Added ~100 conversational trigger phrases to KEYWORD_MAP covering: I need/want X, get me X, find me X, can you get me X, where can I get X, where is X, plus emergency situational phrases (pipe burst, power out, tooth hurts, pet emergency, car broke down, locked out, crashed my car, etc). Added 15 NL_RULES regex patterns for pattern-match coverage.
+**Result:** Natural conversational queries now route correctly to the right local business category without any LLM on the hot path.
