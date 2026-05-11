@@ -1,3 +1,18 @@
+## 2026-05-11 — taskIntent v2.3–2.6 + voiceIntake v2 — round summary
+
+**Problem:** After v2.2, several gaps remained in plain-language task routing: BRING ambiguity (pickup vs dropoff), no FL city abbreviation awareness, no healthcare / school / service-dispatch coverage, weak discovery deflect, no multi-task UX in followUp messages, and voiceIntake couldn't cycle through multi-task answers or surface city context.
+
+**Fix (rounds 5–10, commits 85ec35f → 1a12a0a):**
+- v2.3: split BRING_TO_RE (dropoff) from BRING_ME_RE (pickup).
+- v2.4: added FL_CITY_ABBREV lookup (JAX, PVB, STJ, STA, NOC, OPK, FI, TPA, MIA, FLL, ORL, MCO, ALT); `city` field on response; followUp injects city.
+- v2.5: SERVICE_REQUEST_RE for plumber/handyman/electrician/HVAC/locksmith/etc → send_someone; pharmacy CAT expanded with NE FL health systems (Mayo, Baptist, St. Vincent's, Ascension, UF Health, etc.) and labs/bloodwork; new school+hospital CAT pattern (Nease, Palm Valley, Ponte Vedra High, Pedro Menendez, Creekside, Bartram Trail, etc.); auto_repair CAT extended with AC/HVAC; DISCOVERY_HINT_RE updated (removed plumber, added "what pharmacy", "who delivers", "can you recommend", "best dry cleaner/cafe/pharmacy/grocery/store").
+- v2.6: triple-task overview in followUp — when `allTasks.length >= 3`, message becomes `"I see N tasks: a, b, c. Let's start with a — <original followUp>"`.
+- voiceIntake v2: persistent follow-up state now carries `allTasks`, `currentTaskIndex`, `taskData`, and `city`. Multi-task answers cycle through each task with its own followUp question; final answer triggers one `postVoiceRfq` per task with city-tagged descriptions.
+
+**Result:** 86/86 task tests + 5/5 city tests passing. Coverage now spans single + multi (2 and 3+) task sentences, healthcare/school/service dispatch, FL regional abbreviations, and discovery deflect with no false positives across the brief's audit list. All deterministic regex, zero LLM, single-push-per-round committed and pushed.
+
+---
+
 ## 2026-05-11 — voiceIntake v2: multi-task follow-up state machine + city carry-through
 
 **Problem:** When voiceIntake received a multi-task call ("get me dry cleaning AND grab some groceries") it only asked the user about the first task and dropped the rest on the floor. Also, city info from taskIntent (JAX, PVB, etc.) was being detected but never surfaced into the SMS follow-up or the RFQ description.
