@@ -1,3 +1,15 @@
+## 2026-05-11 — Vercel build fails: Next.js auto-detection on static site
+
+**Problem:** After reconnecting `gsb-swarm-dashboard` Vercel project to `MCFLAMINGO/localintel-landing`, Vercel auto-detected Next.js as the framework (from project settings carried over). Since `localintel-landing` has no `package.json` and no `pages/` or `app/` directory, `next build` fails immediately with "Couldn't find any pages or app directory".
+
+**Fix:** Added `"framework": null` to `vercel.json` (commit `c171de2`). This explicitly overrides any project-level framework setting and tells Vercel to treat the repo as a static site.
+
+**Result:** Vercel now serves pre-generated HTML files directly with no build step.
+
+**NEVER:** Do not add a `package.json` with `next build` to this repo. It is a static site generator — HTML is pre-generated and committed.
+
+---
+
 ## 2026-05-11 RECURRING ERROR — sunbizWorker fills Railway volume with cordata.zip
 
 **Problem:** sunbizWorker.js had a weekly `setInterval` that reset `import_complete = false` and re-triggered a 1.6GB cordata.zip download every 7 days, filling the 10GB Railway volume to 100%. This happened multiple times across sessions. Volume was cleared manually via cleanup-volume each time but root cause was never fixed.
