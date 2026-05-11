@@ -1701,6 +1701,97 @@ router.get('/zones', (req, res) => {
   res.json({ ok: true, ...zones });
 });
 
+// ── ZIP SEO Data — static-page build-time aggregates ──────────────────────────
+// GET /api/local-intel/zip-seo-data?zip=XXXXX
+// Public, read-only aggregate. Called by generate-zip-pages.js at landing-site
+// build time (~1,474 ZIPs, sequential) to bake unique per-ZIP stats into static
+// HTML and fix the thin-content problem flagged in Google Search Console.
+router.get('/zip-seo-data', async (req, res) => {
+  const zip = (req.query.zip || '').toString().trim();
+  if (!zip) return res.status(400).json({ error: 'zip required' });
+
+  try {
+    const [topCatRows, totalRows, intelRows, hoodRows] = await Promise.all([
+      db.query(
+        `SELECT category, COUNT(*)::int AS cnt
+           FROM businesses
+          WHERE zip = $1 AND status != 'inactive'
+          GROUP BY category
+          ORDER BY cnt DESC
+          LIMIT 3`,
+        [zip]
+      ).catch(() => []),
+      db.query(
+        `SELECT COUNT(*)::int AS total
+           FROM businesses
+          WHERE zip = $1 AND status != 'inactive'`,
+        [zip]
+      ).catch(() => [{ total: 0 }]),
+      (async () => {
+        try {
+          const rows = await db.query(
+            `SELECT city_name, county_name,
+                    population,
+                    median_household_income AS median_income,
+                    median_home_value,
+                    affluence_pct
+               FROM zip_intelligence
+              WHERE zip = $1
+              LIMIT 1`,
+            [zip]
+          );
+          if (rows.length) return rows;
+        } catch (_) { /* table or column missing — fall through */ }
+        try {
+          return await db.query(
+            `SELECT city_name, county_name,
+                    population,
+                    median_household_income AS median_income,
+                    median_home_value,
+                    affluence_pct
+               FROM zip_signals
+              WHERE zip = $1
+              LIMIT 1`,
+            [zip]
+          );
+        } catch (_) { return []; }
+      })(),
+      db.query(
+        `SELECT DISTINCT name
+           FROM neighborhoods
+          WHERE $1 = ANY(zip_codes)
+          ORDER BY name
+          LIMIT 5`,
+        [zip]
+      ).catch(() => []),
+    ]);
+
+    const total = totalRows[0]?.total || 0;
+    const intel = intelRows[0] || {};
+    const hasIntel = intelRows.length > 0;
+
+    if (total === 0 && !hasIntel) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+
+    res.json({
+      zip,
+      city:              intel.city_name   || null,
+      county:            intel.county_name || null,
+      business_count:    total,
+      top_categories:    topCatRows.map(r => r.category).filter(Boolean),
+      population:        intel.population        ?? null,
+      median_income:     intel.median_income     ?? null,
+      median_home_value: intel.median_home_value ?? null,
+      affluence_pct:     intel.affluence_pct     ?? null,
+      neighborhoods:     hoodRows.map(r => r.name).filter(Boolean),
+    });
+  } catch (e) {
+    console.error('[/zip-seo-data]', zip, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 
 // ─── CLAIM ENDPOINTS ──────────────────────────────────────────────────────────
 
