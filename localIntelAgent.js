@@ -4644,6 +4644,10 @@ function detectOrderItemIntent(raw) {
   if (itemQuery.length < 2 || bizName.length < 2) {
     return { isOrderItem: false, itemQuery: null, bizName: null };
   }
+  // Guard: reject non-food item queries even when a business name is present.
+  // "I need my back fire door fixed at McFlamingo" should NOT trigger order flow.
+  const NON_FOOD_FULL_RE = /\b(?:fixed|repair(?:ed)?|install(?:ed)?|replac(?:ed)?|clean(?:ed)?|paint(?:ed)?|built?|constructed?|renovated?|restor(?:ed)?|inspect(?:ed)?|servic(?:ed)?|maintain(?:ed)?|upgrad(?:ed)?|door|window|roof|wall|floor|ceiling|pipe|drain|wir(?:e|ing)|outlet|breaker|hvac|ac\s+unit|furnace|gutter|shingle|fence|deck|driveway|sidewalk|bathroom|kitchen\s+remodel|haircut|hair\s+cut|manicure|pedicure|massage|facial|wax|blowout|dental|teeth|oil\s+change|tire|alignment|brake|transmission|tow|locksmith|prescription|refill|vaccine|injection|appointment|reservation|table|room|hotel|flight|ticket|seat|parking|storage|unit|locker|beach\s+chair|beach\s+umbrella|kayak|paddleboard|surfboard|drill|power\s+tool|hardware|lumber|furniture|mattress|sofa|couch|clothing|apparel|shirt|pants|shoes|boots|jacket|sunscreen|sunblock|cleats|jersey|uniform|equipment|gear|supplies|supplies)\b/i;
+  if (NON_FOOD_FULL_RE.test(itemQuery)) return { isOrderItem: false, itemQuery: null, bizName: null };
   return { isOrderItem: true, itemQuery, bizName };
 }
 
