@@ -1051,6 +1051,10 @@ router.post('/', async (req, res) => {
     if (zip) {
       conditions.push(`zip = $${p++}`);
       params.push(zip);
+    } else {
+      // No ZIP pinned — enforce TARGET_ZIPS so statewide businesses never leak into local results
+      conditions.push(`zip = ANY($${p++}::text[])`);
+      params.push(TARGET_ZIPS);
     }
     if (effectiveCategory) {
       conditions.push(`category = $${p++}`);
@@ -4669,7 +4673,7 @@ function detectOrderItemPartial(raw) {
 
   // Guard: reject clearly non-food phrases — real estate, services, info requests, etc.
   // "rent a property", "find a landscaper", "know where", "book a table", etc.
-  const NON_FOOD_RE = /\b(?:rent|lease|buy|purchase|book(?:\s+a\s+(?:room|table|reservation|appointment|flight|hotel|venue))?|property|condo|apartment|house|home|land|real\s*estate|landscap|plumb|electr|construct|repair|install|service(?:s)?|appointment|reservation|hire|find\s+a|search\s+for|know\s+where|tell\s+me|show\s+me|recommend\s+a|suggest\s+a|looking\s+for\s+a\s+(?:home|house|property|place\s+to\s+live)|move|relocat|invest|hotel|vacation|travel|flight|airbnb|vrbo)\b/i;
+  const NON_FOOD_RE = /\b(?:rent|lease|buy|purchase|book(?:\s+a\s+(?:room|table|reservation|appointment|flight|hotel|venue))?|property|condo|apartment|house|home|land|real\s*estate|landscap|plumb|electr|construct|repair|install|service(?:s)?|appointment|reservation|hire|find\s+a|search\s+for|know\s+where|tell\s+me|show\s+me|recommend\s+a|suggest\s+a|looking\s+for\s+a\s+(?:home|house|property|place\s+to\s+live)|move|relocat|invest|hotel|vacation|travel|flight|airbnb|vrbo|haircut|hair\s+cut|hair\s+style|blowout|manicure|pedicure|nail|massage|facial|wax|barbershop|salon|spa|gym|workout|yoga|pilates|crossfit|fitness|dentist|dental|doctor|urgent\s+care|prescription|pharmacy|lawyer|attorney|accountant|insurance|mechanic|oil\s+change|car\s+wash|tire|tow|locksmith|pest\s+control|pool\s+service|landscap|irrigation|gutter|roofing|flooring|drywall|painting|fence|deck|remodel|renovation|beach\s+chair|beach\s+umbrella|beach\s+gear|beach\s+supply|outdoor\s+gear|camping\s+gear|sporting\s+goods|kayak|paddleboard|surfboard|fishing\s+gear|bike|bicycle|scooter|drill|power\s+tool|hardware|lumber|screwdriver|wrench|ladder|chainsaw|lawn\s+mower|leaf\s+blower|pressure\s+washer|furniture|mattress|sofa|couch|desk|chair|table|lamp|shelf|closet|mirror|clothing|apparel|shirt|pants|dress|shoes|sneakers|boots|jacket|coat|hat|sunglasses|swimsuit|flip\s+flops|sunscreen|sunblock|lotion|deodorant|shampoo|soap|toothpaste|toilet\s+paper|paper\s+towel|laundry|detergent|batteries|lightbulb|extension\s+cord|phone\s+charger|laptop|computer|printer|tv|television|speaker|headphones|camera|gift\s+card|flowers|florist|balloon|decoration)\b/i;
   if (NON_FOOD_RE.test(itemQuery)) return { isPartial: false, itemQuery: null };
 
   return { isPartial: true, itemQuery };

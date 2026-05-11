@@ -383,6 +383,9 @@ const KEYWORD_CATEGORY_MAP = {
   'toilet paper': ['grocery','convenience'], 'paper towels': ['grocery','convenience'],
   'laundry detergent': ['grocery','supermarket'], cleaning: ['grocery','convenience'],
   toiletries: ['grocery','pharmacy','convenience'],
+  'buy groceries': ['grocery','supermarket'], 'pick up groceries': ['grocery','supermarket'],
+  'need milk': ['grocery','convenience'], 'need eggs': ['grocery','convenience'],
+  'get milk': ['grocery','convenience'], 'get eggs': ['grocery','convenience'],
   // Pharmacy & health
   pharmacy: ['pharmacy'], prescription: ['pharmacy'], meds: ['pharmacy'],
   medicine: ['pharmacy'], vitamins: ['pharmacy','grocery'],
@@ -393,6 +396,18 @@ const KEYWORD_CATEGORY_MAP = {
   paint: ['hardware'], lightbulb: ['hardware','grocery','convenience'],
   batteries: ['hardware','grocery','convenience'], drill: ['hardware'],
   screws: ['hardware'], 'nails': ['hardware'],
+  'beach chair': ['retail','outdoor'], 'beach umbrella': ['retail','outdoor'],
+  'beach gear': ['retail','outdoor'], 'outdoor gear': ['retail','outdoor'],
+  'sporting goods': ['retail','outdoor'], 'camping gear': ['retail','outdoor'],
+  'kayak': ['retail','outdoor'], 'paddleboard': ['retail','outdoor'],
+  'surfboard': ['retail','outdoor'], 'fishing gear': ['retail','outdoor'],
+  'fishing rod': ['retail','outdoor'], 'bike shop': ['retail','outdoor'],
+  'bicycle': ['retail','outdoor'], 'pool float': ['retail','outdoor'],
+  'electric drill': ['hardware'], 'power tool': ['hardware'],
+  'lawn mower': ['hardware','outdoor'], 'leaf blower': ['hardware','outdoor'],
+  'pressure washer': ['hardware'], 'extension cord': ['hardware','grocery'],
+  'lightbulb': ['hardware','grocery'], 'batteries': ['hardware','grocery'],
+  'furniture': ['retail'], 'mattress': ['retail'], 'sofa': ['retail'],
   // Auto
   gas: ['gas_station'], gasoline: ['gas_station'], fuel: ['gas_station'],
   'oil change': ['automotive','car_repair'], tires: ['automotive','car_repair'],
@@ -404,6 +419,10 @@ const KEYWORD_CATEGORY_MAP = {
   // Beauty & wellness
   haircut: ['hairdresser','beauty'], salon: ['beauty','hairdresser'],
   spa: ['wellness','beauty'], massage: ['wellness'],
+  'haircut near me': ['hairdresser','beauty'], 'get a haircut': ['hairdresser','beauty'],
+  'hair salon': ['beauty','hairdresser'], 'barber': ['hairdresser','beauty'],
+  'nail salon': ['beauty'], 'nail spa': ['beauty'], 'day spa': ['wellness','beauty'],
+  'facial': ['beauty','wellness'], 'wax': ['beauty'], 'blowout': ['beauty','hairdresser'],
   // Laundry
   laundry: ['laundry'], 'dry cleaning': ['laundry'], drycleaning: ['laundry'],
   // Bank & ATM
