@@ -1149,6 +1149,29 @@ app.get('/api/admin/db-check', async (req, res) => {
   }
 });
 
+// GET /api/admin/property-debug — tests ArcGIS reachability from Railway
+app.get('/api/admin/property-debug', async (req, res) => {
+  const https = require('https');
+  const start = Date.now();
+  const url = 'https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?where=CO_NO%3D65&outFields=PARCEL_ID%2COWN_NAME%2CJV%2CPHY_ZIPCD&resultRecordCount=1&f=json';
+  try {
+    const data = await new Promise((resolve, reject) => {
+      const req2 = https.get(url, { timeout: 15000 }, (r) => {
+        let raw = '';
+        r.on('data', c => { raw += c; });
+        r.on('end', () => { try { resolve(JSON.parse(raw)); } catch(e) { reject(new Error('parse:' + e.message)); } });
+      });
+      req2.on('error', reject);
+      req2.on('timeout', () => { req2.destroy(); reject(new Error('timeout_15s')); });
+    });
+    const latency = Date.now() - start;
+    const feats = data.features || [];
+    return res.json({ ok: true, latency_ms: latency, features: feats.length, error: data.error || null, sample: feats[0]?.attributes || null });
+  } catch (e) {
+    return res.json({ ok: false, latency_ms: Date.now() - start, error: e.message });
+  }
+});
+
 // GET /api/local-intel/probe-log — live MCP call log for routerLearningWorker
 app.get('/api/local-intel/probe-log', async (req, res) => {
   if (!process.env.LOCAL_INTEL_DB_URL) return res.json({ error: 'no_db' });
