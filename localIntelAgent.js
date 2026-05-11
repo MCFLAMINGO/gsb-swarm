@@ -1023,6 +1023,24 @@ router.post('/', async (req, res) => {
       ? String(_taskSessionId).toString().split(',')[0].trim()
       : null;
 
+    // ── B7: Detect "SLANG = BUSINESS NAME" submission format ────────────────
+    // If user typed "X = Y" or "X equals Y" in the main search bar, return a
+    // helpful hint redirecting them to the slang submission flow rather than
+    // running an irrelevant search.
+    if (query) {
+      const { parseSlangSubmission } = require('./lib/slangParser');
+      const slangParsed = parseSlangSubmission(query);
+      if (slangParsed) {
+        return res.json({
+          ok: true,
+          type: 'slang_submission_hint',
+          message: `Looks like a slang submission! Use: POST /api/local-intel/slang with { query: "${query}" } or tap the "Add Slang" button.`,
+          parsed: slangParsed,
+          meta: { resolves_via: 'slang_submission' }
+        });
+      }
+    }
+
     if (query && _taskSession) {
       // 1. If a follow-up is pending, this message answers it.
       const pending = await getTaskFollowUp(_taskSession);
@@ -3086,6 +3104,193 @@ router.post('/push/unsubscribe', express.json(), async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── B7: Community slang (Tier 3 aliases) ─────────────────────────────────────
+// POST /api/local-intel/slang — submit a community slang term
+// Body: { term, businessName, creditedTo?, zip? } OR { query: "SLANG = BUSINESS", creditedTo?, zip? }
+router.post('/slang', express.json(), async (req, res) => {
+  try {
+    const { parseSlangSubmission } = require('./lib/slangParser');
+    const submittedBy = req.body?.From || req.body?.from || req.body?.phone ||
+      req.headers['x-session-id'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+      req.socket?.remoteAddress || 'anonymous';
+
+    let slangTerm, businessName;
+    if (req.body?.query) {
+      const parsed = parseSlangSubmission(req.body.query);
+      if (!parsed) {
+        return res.status(400).json({ ok: false, error: 'Use format: SLANG = BUSINESS NAME' });
+      }
+      slangTerm = parsed.slangTerm;
+      businessName = parsed.businessQuery;
+    } else {
+      slangTerm = (req.body?.term || '').trim();
+      businessName = (req.body?.businessName || '').trim();
+    }
+
+    if (!slangTerm || !businessName) {
+      return res.status(400).json({ ok: false, error: 'Both slang term and business name are required. Format: SLANG = BUSINESS NAME' });
+    }
+
+    const NEGATIVE_RE = /\b(shit|fuck|crap|ass|bitch|damn|hell|suck|stupid|awful|terrible|worst|hate|racist|sexist|slur)\b/i;
+    const isNegative = NEGATIVE_RE.test(slangTerm);
+
+    const { canonical, business_id: pinnedId } = await resolveBusinessAlias(businessName);
+    const searchZips = req.body?.zip ? [req.body.zip] : TARGET_ZIPS;
+
+    let business = null;
+    if (pinnedId) {
+      const rows = await db.query(
+        `SELECT business_id, name FROM businesses WHERE business_id = $1 AND status != 'inactive' LIMIT 1`,
+        [pinnedId]
+      );
+      business = rows[0] || null;
+    }
+    if (!business) {
+      const rows = await db.query(
+        `SELECT business_id, name FROM businesses
+          WHERE zip = ANY($1::text[]) AND name ILIKE $2 AND status != 'inactive'
+          ORDER BY confidence_score DESC LIMIT 1`,
+        [searchZips, `%${canonical}%`]
+      );
+      business = rows[0] || null;
+    }
+
+    if (!business) {
+      return res.json({
+        ok: false,
+        error: `Couldn't find "${businessName}" in our network. Make sure the business is listed first.`,
+        tip: 'Check the spelling or try the full business name.'
+      });
+    }
+
+    const existing = await db.query(
+      `SELECT id, submitted_by, credited_to, votes FROM business_slang
+        WHERE term_lower = lower(trim($1)) AND business_id = $2 LIMIT 1`,
+      [slangTerm, business.business_id]
+    );
+
+    if (existing.length) {
+      const e = existing[0];
+      const isOriginator = e.submitted_by === submittedBy;
+      return res.json({
+        ok: true,
+        already_exists: true,
+        message: isOriginator
+          ? `You already submitted "${slangTerm}" for ${business.name}. You're immortalized.`
+          : `"${slangTerm}" for ${business.name} was already submitted by ${e.credited_to || 'someone in the community'}. You can upvote it instead.`,
+        votes: e.votes,
+        credited_to: e.credited_to || null,
+      });
+    }
+
+    const creditedTo = (req.body?.creditedTo || '').trim() || null;
+    await db.query(
+      `INSERT INTO business_slang (term, business_id, submitted_by, is_negative, credited_to)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [slangTerm, business.business_id, submittedBy, isNegative, creditedTo]
+    );
+
+    const msg = isNegative
+      ? `Thanks — "${slangTerm}" has been submitted for review. It will be visible once approved.`
+      : `"${slangTerm}" = ${business.name} has been added! ${creditedTo ? `${creditedTo} gets` : 'You get'} credit for being first to immortalize it.`;
+
+    return res.json({
+      ok: true,
+      message: msg,
+      slang_term: slangTerm,
+      business_name: business.name,
+      credited_to: creditedTo,
+      is_negative: isNegative,
+      pending_review: isNegative,
+    });
+  } catch (err) {
+    console.error('[slang] POST /slang error:', err.message);
+    return res.status(500).json({ ok: false, error: 'Slang submission failed', detail: err.message });
+  }
+});
+
+// POST /api/local-intel/slang/vote — upvote a slang term (auto-verifies at 3 votes)
+router.post('/slang/vote', express.json(), async (req, res) => {
+  try {
+    const { slangId, term, businessId } = req.body || {};
+    const voter = req.body?.From || req.body?.phone ||
+      req.headers['x-session-id'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+      req.socket?.remoteAddress || 'anonymous';
+
+    let rows;
+    if (slangId) {
+      rows = await db.query(
+        `SELECT id, term, business_id, votes, verified, credited_to FROM business_slang WHERE id = $1 LIMIT 1`,
+        [slangId]
+      );
+    } else if (term && businessId) {
+      rows = await db.query(
+        `SELECT id, term, business_id, votes, verified, credited_to FROM business_slang
+          WHERE term_lower = lower(trim($1)) AND business_id = $2 LIMIT 1`,
+        [term, businessId]
+      );
+    }
+    if (!rows || !rows.length) {
+      return res.status(404).json({ ok: false, error: 'Slang term not found' });
+    }
+    const entry = rows[0];
+
+    await db.query(`UPDATE business_slang SET votes = votes + 1 WHERE id = $1`, [entry.id]);
+
+    const newVotes = entry.votes + 1;
+    if (newVotes >= 3 && !entry.verified) {
+      await db.query(`UPDATE business_slang SET verified = TRUE WHERE id = $1`, [entry.id]);
+    }
+
+    return res.json({
+      ok: true,
+      votes: newVotes,
+      verified: newVotes >= 3,
+      voter,
+      message: newVotes >= 3
+        ? `"${entry.term}" is now officially in LocalIntel slang!`
+        : `Vote counted. ${3 - newVotes} more vote${3 - newVotes !== 1 ? 's' : ''} to go live.`,
+    });
+  } catch (err) {
+    console.error('[slang] POST /slang/vote error:', err.message);
+    return res.status(500).json({ ok: false, error: 'Vote failed', detail: err.message });
+  }
+});
+
+// GET /api/local-intel/slang?businessId=UUID|zip=XXXXX — fetch slang for a business or ZIP
+router.get('/slang', async (req, res) => {
+  try {
+    const { businessId, zip } = req.query;
+    if (!businessId && !zip) {
+      return res.status(400).json({ ok: false, error: 'businessId or zip required' });
+    }
+    let rows;
+    if (businessId) {
+      rows = await db.query(
+        `SELECT bs.id, bs.term, bs.votes, bs.verified, bs.credited_to, bs.submitted_at, b.name AS business_name
+           FROM business_slang bs
+           JOIN businesses b ON b.business_id = bs.business_id
+          WHERE bs.business_id = $1 AND bs.is_negative = FALSE
+          ORDER BY bs.votes DESC, bs.submitted_at ASC`,
+        [businessId]
+      );
+    } else {
+      rows = await db.query(
+        `SELECT bs.id, bs.term, bs.votes, bs.verified, bs.credited_to, bs.submitted_at, b.name AS business_name
+           FROM business_slang bs
+           JOIN businesses b ON b.business_id = bs.business_id
+          WHERE b.zip = $1 AND bs.is_negative = FALSE AND bs.verified = TRUE
+          ORDER BY bs.votes DESC LIMIT 50`,
+        [zip]
+      );
+    }
+    return res.json({ ok: true, slang: rows });
+  } catch (err) {
+    console.error('[slang] GET /slang error:', err.message);
+    return res.status(500).json({ ok: false, error: 'Slang fetch failed', detail: err.message });
   }
 });
 
