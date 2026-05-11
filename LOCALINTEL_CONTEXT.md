@@ -3496,3 +3496,53 @@ Separately, "vodka and cranberry" matched a school in Port Charlotte because:
 - Rental queries route to `real_estate` with `rental`/`for_rent` tags.
 - All ILIKE search results are scoped to TARGET_ZIPS when no ZIP is supplied,
   so statewide rows never appear in local intent.
+
+## Session 16c — Action deflect + cosmetic/med-spa vocab + beverage delivery (2026-05-11)
+
+### Problem
+- "call the highschool for me" returned a school result from Miami — the
+  query is an *action request* (LocalIntel can't place phone calls), but it
+  fell through to text search and matched a school name far outside the
+  service area.
+- "breast implants" returned no results — there was no cosmetic / plastic
+  surgery vocab in the intent map, so the query never resolved to
+  `healthcare`.
+- "case of water for the team" routed to restaurants — there was no
+  beverage / water delivery vocab; "team" + the food-general rule pulled it
+  into `restaurant`.
+
+### Fix
+- **lib/intentMap.js**: Added an *action-request* NL rule at the top of
+  `NL_RULES` (before the existing out-of-scope deflects). Catches
+  `call/text/email/contact ... for me`, `tell them ...`, `send a message
+  to`, `dial`, `leave a message`, `remind me to/about`, `set a reminder`,
+  `add ... to my (calendar|list|cart)`, `schedule a meeting`, `book a
+  (flight|hotel|table at|reservation|appointment at)` → `deflect: true`.
+- **lib/intentMap.js**: Added a cosmetic / plastic-surgery NL rule before
+  the general doctor/urgent-care rule. Covers breast augmentation,
+  rhinoplasty, botox, fillers, facelift, liposuction, tummy tuck,
+  CoolSculpting, laser treatments, med spa, dermatology, aesthetic
+  clinics. Routes to `cat: 'healthcare'` with tags
+  `['cosmetic','plastic_surgery','med_spa','dermatology']`. Added 20
+  cosmetic-surgery keywords to `KEYWORD_MAP` mapping to `healthcare`.
+- **lib/intentMap.js**: Added a beverage / water delivery NL rule in the
+  grocery section. Covers case of water, water delivery, water cooler,
+  bottled water, bulk water, sports drinks, gatorade, powerade, energy
+  drinks, soda delivery, beverage delivery, "drinks for (the
+  team|group|office|event|party)". Routes to `cat: 'retail'` with tags
+  `['grocery','beverage','delivery']`. Added 9 beverage-delivery keywords
+  to `KEYWORD_MAP`.
+- **workers/intentRouter.js**: Expanded `KEYWORD_CATEGORY_MAP` with 20
+  cosmetic/med-spa entries (botox/filler/rhinoplasty/medspa/dermatology
+  /coolsculpting/laser, etc.) mapping to `['healthcare','beauty']` or just
+  `['healthcare']` for clearly surgical entries. Added 7 beverage entries
+  mapping to `['grocery','convenience']`.
+
+### Result
+- Action requests like "call the highschool for me" cleanly deflect
+  instead of matching garbage business names.
+- "breast implants", "botox near me", "rhinoplasty", "medspa" route to
+  `healthcare` with cosmetic / med-spa tags.
+- "case of water for the team", "water delivery", "gatorade" route to
+  `retail` / `grocery` instead of getting pulled into restaurants.
+
