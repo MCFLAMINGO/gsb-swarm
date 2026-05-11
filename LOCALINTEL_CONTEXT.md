@@ -3661,3 +3661,10 @@ Re-enable embeddingBackfillWorker only when: (1) pgvector `<->` query path exist
 - "theater near me" → cat:entertainment, confidence:high ✅
 - "things to do near me" → cat:entertainment, confidence:high ✅
 - No more "Hallmark Construction" or "Crosswater Hall" showing for venue queries ✅
+
+### Disk — VACUUM FULL (2026-05-11 ~1AM)
+Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS volume — only marks pages free inside Postgres. Erik resized volume to 10 GB in Railway Settings. Then ran `VACUUM FULL businesses` which physically rewrites the table.
+
+**Result: 4,300 MB → 763 MB on volume. businesses table: 2.7 GB → 264 MB.**
+
+**Rule going forward:** when disk alert fires → run `VACUUM FULL <table>` on the largest table, not just `VACUUM ANALYZE`. Regular VACUUM never shrinks the OS-level volume file.
