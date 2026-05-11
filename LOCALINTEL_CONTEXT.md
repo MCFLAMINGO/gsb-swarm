@@ -1,3 +1,23 @@
+## 2026-05-11 — taskIntent v2.5: healthcare + schools + service dispatch + deflect audit
+
+**Problem:** Three gaps and one false-positive class:
+1. Healthcare pickup ("pick up my prescription at Baptist", "get my labs from Mayo", "drop off my mom at the hospital") was routing to `errands` instead of `pharmacy`/medical.
+2. School pickup ("pick up kids from Nease High", "grab my daughter from Palm Valley Academy") routed to `restaurant` because no NE FL school vocabulary existed and "school" wasn't a CAT noun.
+3. Service-dispatch sentences ("I need a plumber", "get me a handyman", "send someone to fix my AC") were either deflected by DISCOVERY_HINT_RE or mis-typed as pickup with cat=errands.
+4. DISCOVERY_HINT_RE missed several real discovery patterns ("what pharmacy is open near me", "who delivers groceries in Nocatee", "best dry cleaner in PVB", "can you recommend a cafe").
+
+**Fix (`lib/taskIntent.js`):**
+- Added `SERVICE_REQUEST_RE` matching "I need / get me / send me a (plumber|handyman|electrician|hvac|ac tech|locksmith|pest control|maid|painter|landscaper|pool guy|roofer|appliance repair|mover…)" — typed as `send_someone`. Placed at top of checks array so it wins over generic GET_ME_RE.
+- Removed plumber/handyman/electrician from `DISCOVERY_HINT_RE` (was deflecting legit task requests).
+- Added discovery patterns: `best (dry cleaner|cafe|pharmacy|grocery|store)`, `what (pharmacy|restaurant|store|cafe|cleaner|grocery)`, `who delivers`, `can you recommend`.
+- Expanded pharmacy CAT regex to include `labs?`, `lab work`, `bloodwork`, NE FL health systems: `mayo`, `baptist`, `st. vincent's`, `ascension`, `uf health`, `memorial hospital`, `orange park medical`.
+- New CAT pattern (placed before restaurant) for schools + hospital pickups → `errands`: NE FL school names (Nease, Palm Valley Academy, Ponte Vedra High, Pedro Menendez, Creekside, Bartram Trail, Fletcher, Sandalwood, Atlantic Coast, Stanton, Paxon, Bolles, Episcopal, Providence) plus generic "school pickup / kids from school / daughter from / son from / hospital / ER".
+- Expanded auto_repair CAT regex to include `ac`, `a/c`, `air condition(er|ing)`, `hvac`, `heater`, `furnace` so "send someone to fix my AC" → `auto_repair`.
+
+**Result:** "pick up my prescription at Baptist" → pickup/pharmacy. "get my labs from Mayo" → pickup/pharmacy. "grab my daughter from Palm Valley Academy" → pickup/errands. "send someone to fix my AC" → send_someone/auto_repair. "I need a plumber" → send_someone/errands. "where can I find a good restaurant in JAX" → deflected. 86/86 task tests + 5/5 city tests passing.
+
+---
+
 ## 2026-05-11 — taskIntent v2.4: FL city abbreviation support
 
 **Problem:** Users say "pick up my dry cleaning in JAX" or "grab my rx from PVB" but follow-up message said "Which dry cleaner?" with no acknowledgement of the location, making the dialog feel dumb. Also no structured city signal was returned so downstream RFQ routing couldn't use it.
