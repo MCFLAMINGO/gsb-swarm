@@ -3683,3 +3683,8 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Workers disabled on Railway (disk safety):**
 - `embeddingBackfillWorker` — recreates 1.2 GB pgvector index with 0 scans
 - `sunbizWorker` — downloads 7-8 GB cordata.zip to volume
+
+## Session Entry — Venue Follow-up Context (2026-05-11)
+**Problem:** "can I buy a ticket" after concert hall result returned 20 wrong businesses (no context chain).
+**Fix:** Added `_pendingVenueContext` Map (10-min TTL) in GET /search — stores single venue result when category is in entertainment list. Follow-up regex (`_VENUE_FOLLOWUP_RE`) checked at top of GET /search handler; if match, returns narrative with phone/website/address instead of running new search. Added ticket/buy a ticket/get tickets → entertainment in intentMap.js KEYWORD_MAP.
+**Result:** Two-turn venue flow works: "concert hall" → result stored → "can I buy a ticket" → narrative answer with Ponte Vedra Concert Hall info.
