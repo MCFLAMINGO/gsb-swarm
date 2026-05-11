@@ -852,6 +852,23 @@ app.post('/api/admin/trigger-census', (req, res) => {
 });
 
 
+// GET /api/admin/volume-audit — show disk usage breakdown
+app.get('/api/admin/volume-audit', async (req, res) => {
+  if (req.headers['x-admin-token'] !== 'localintel-migrate-2026') return res.status(401).json({ error: 'unauthorized' });
+  const { execSync } = require('child_process');
+  try {
+    // Total volume usage
+    const total = execSync('df -h /app/data 2>/dev/null || df -h /app 2>/dev/null').toString().trim();
+    // Top 20 largest files/dirs under /app/data
+    const top = execSync('du -sh /app/data/* /app/data/**/* 2>/dev/null | sort -rh | head -30').toString().trim();
+    // Count files by subdirectory
+    const counts = execSync('find /app/data -maxdepth 2 -type d | while read d; do echo "$(find "$d" -maxdepth 1 -type f | wc -l) files — $d"; done 2>/dev/null | sort -rn | head -20').toString().trim();
+    res.json({ total, top, counts });
+  } catch (e) {
+    res.json({ error: e.message });
+  }
+});
+
 // POST /api/admin/cleanup-volume — one-shot: delete sunbiz zip + extracted dir from Railway volume
 app.post('/api/admin/cleanup-volume', (req, res) => {
   const token = req.headers['x-admin-token'] || req.body?.token;
@@ -873,6 +890,33 @@ app.post('/api/admin/cleanup-volume', (req, res) => {
       fs.rmSync(ext, { recursive: true, force: true });
       results.push('deleted extracted/ dir');
     } else { results.push('extracted/ not found'); }
+
+    // Additional cleanup targets — bedrock/enrichment JSON caches that accumulate on volume
+    const cleanTargets = [
+      path.join(DATA_DIR, 'bedrock'),
+      path.join(DATA_DIR, 'ocean_floor'),
+      path.join(DATA_DIR, 'surface'),
+      path.join(DATA_DIR, 'wave'),
+      path.join(DATA_DIR, 'enrichmentLog.json'),
+      path.join(DATA_DIR, 'sourceLog.json'),
+      path.join(DATA_DIR, 'zips'),
+    ];
+    for (const target of cleanTargets) {
+      try {
+        if (!fs.existsSync(target)) { results.push(`${path.basename(target)} not found`); continue; }
+        const stat = fs.statSync(target);
+        if (stat.isDirectory()) {
+          let size = 0;
+          try { size = parseInt(require('child_process').execSync(`du -sb "${target}" 2>/dev/null | cut -f1`).toString().trim(), 10) || 0; } catch(_) {}
+          fs.rmSync(target, { recursive: true, force: true });
+          results.push(`deleted ${path.basename(target)}/ (${(size/1024/1024).toFixed(2)} MB)`);
+        } else {
+          const sz = stat.size;
+          fs.unlinkSync(target);
+          results.push(`deleted ${path.basename(target)} (${(sz/1024/1024).toFixed(2)} MB)`);
+        }
+      } catch (e) { results.push(`error cleaning ${path.basename(target)}: ${e.message}`); }
+    }
   } catch (e) { results.push('error: ' + e.message); }
   res.json({ ok: true, results });
 });

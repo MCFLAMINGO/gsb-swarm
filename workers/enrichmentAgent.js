@@ -28,7 +28,7 @@ let enrichFromBBB;
 try { ({ enrichFromBBB } = require('./bbbScraper')); } catch(e) { console.warn('[EnrichmentAgent] BBB scraper unavailable:', e.message); }
 
 const PORT        = 3007;
-const DATA_DIR    = path.join(__dirname, '../data');
+const DATA_DIR    = process.env.RAILWAY_ENVIRONMENT ? '/tmp' : path.join(__dirname, '../data');
 const ZIPS_DIR    = path.join(DATA_DIR, 'zips');
 const ENRICH_LOG  = path.join(DATA_DIR, 'enrichmentLog.json');
 const SOURCE_LOG  = path.join(DATA_DIR, 'sourceLog.json');

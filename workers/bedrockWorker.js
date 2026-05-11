@@ -22,7 +22,7 @@ const path    = require('path');
 const fs      = require('fs');
 const pgStore = require('../lib/pgStore');
 
-const DATA_DIR    = path.join(__dirname, '..', 'data');
+const DATA_DIR    = process.env.RAILWAY_ENVIRONMENT ? '/tmp' : path.join(__dirname, '..', 'data');
 const BEDROCK_DIR = path.join(DATA_DIR, 'bedrock');
 const ERRORS_FILE = path.join(BEDROCK_DIR, '_errors.json');
 const INDEX_FILE  = path.join(BEDROCK_DIR, '_index.json');
