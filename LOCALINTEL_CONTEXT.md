@@ -1,3 +1,14 @@
+## 2026-05-11 RECURRING ERROR — sunbizWorker fills Railway volume with cordata.zip
+
+**Problem:** sunbizWorker.js had a weekly `setInterval` that reset `import_complete = false` and re-triggered a 1.6GB cordata.zip download every 7 days, filling the 10GB Railway volume to 100%. This happened multiple times across sessions. Volume was cleared manually via cleanup-volume each time but root cause was never fixed.
+
+**Fix:** Hard-disabled sunbizWorker — now calls `process.exit(0)` immediately on start. Sunbiz data is already fully seeded to Postgres. If a future quarterly re-import is ever needed, use `POST /api/admin/download-sunbiz` + `POST /api/admin/import-sunbiz` as a one-time manual operation, then clean up immediately after.
+
+**Result:** cordata.zip will never auto-download again. Volume stays clean.
+
+---
+
+
 ## 2026-05-11 RECURRING ERROR — Wrong Vercel Project Deployed
 
 **Problem:** Agent repeatedly deployed landing site to `swarm-deploy-throw` (wrong project, no domain) instead of `gsb-swarm-dashboard` (correct project, owns `www.thelocalintel.com`). This happened at least twice across sessions, creating orphan projects and wasting build credits. Root cause: context file had a CLI deploy command with `--name swarm-deploy-throw` that agent followed blindly without verifying which project owns the live domain.
