@@ -891,22 +891,29 @@ router.post('/', async (req, res) => {
       // 2. Otherwise detect a fresh task intent.
       const taskIntent = detectTaskIntent(query);
       if (taskIntent && taskIntent.isTask) {
+        // Store allTasks for multi-task sequential routing
         setTaskFollowUp(_taskSession, {
           taskType:    taskIntent.taskType,
           cat:         taskIntent.cat,
           followUpKey: taskIntent.followUpKey,
           zip:         zip || null,
+          allTasks:    taskIntent.allTasks || [],
         });
+        // Build multi-task hint for UI if more than one task detected
+        const multiHint = (taskIntent.allTasks && taskIntent.allTasks.length > 1)
+          ? ` (I also see ${taskIntent.allTasks.slice(1).map(t => t.cat.replace(/_/g,' ')).join(' and ')} — we\'ll handle those next)`
+          : '';
         return res.json({
           ok: true,
           type: 'followup',
-          message: taskIntent.followUp,
+          message: taskIntent.followUp + multiHint,
           results: [],
           meta: {
             task_type:     taskIntent.taskType,
             category:      taskIntent.cat,
             follow_up_key: taskIntent.followUpKey,
             resolves_via:  'task_followup',
+            all_tasks:     taskIntent.allTasks || [],
           },
         });
       }
