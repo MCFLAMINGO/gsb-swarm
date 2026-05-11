@@ -1,3 +1,16 @@
+## 2026-05-11 — taskIntent v2.3: BRING_TO_RE dropoff split
+
+**Problem:** Single BRING_ME_RE regex matched both "bring me X" (pickup) and "bring the X to Y" (dropoff) but typed both as 'pickup'. Sentences like "bring the contract to the office" and "bring this package to fedex" incorrectly routed as pickup instead of dropoff.
+
+**Fix:** Split the bring-verb logic in `lib/taskIntent.js`:
+- `BRING_ME_RE` (unchanged) → pickup: `/\bbring\s+(?:me|us|my|our)\s+\w/i`
+- `BRING_TO_RE` (new) → dropoff: `/\bbring\s+(?:the|this|that|it|them)\s+\w[\w\s]{0,30}\s+to\s+\w/i`
+- Added `{ re: BRING_TO_RE, type: 'dropoff' }` to checks array, placed BEFORE BRING_ME_RE so the more-specific dropoff pattern wins on left-to-right match.
+
+**Result:** "bring the contract to the office" → dropoff. "bring this package to fedex" → dropoff. "bring me my dry cleaning" still pickup/dry_cleaning. "bring us our food" still pickup/restaurant. Tests pass.
+
+---
+
 ## 2026-05-11 — taskIntent.js v2: verb detection fix + multi-task + FL vocab
 
 **Problem:** v1 had three bugs: (1) PICKUP_VERB_RE required possessive so "pick up pizza", "pick up rx" failed; (2) generic errand fallback hardcoded taskType as 'errand' ignoring detected verb (dropoff/pickup); (3) CAN_YOU_RE was typed 'pickup' for all variants including drop off. No multi-task sentence support. Missing FL-specific brands and slang.
