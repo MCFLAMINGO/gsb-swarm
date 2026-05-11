@@ -1,3 +1,25 @@
+## 2026-05-11 RECURRING ERROR — Wrong Vercel Project Deployed
+
+**Problem:** Agent repeatedly deployed landing site to `swarm-deploy-throw` (wrong project, no domain) instead of `gsb-swarm-dashboard` (correct project, owns `www.thelocalintel.com`). This happened at least twice across sessions, creating orphan projects and wasting build credits. Root cause: context file had a CLI deploy command with `--name swarm-deploy-throw` that agent followed blindly without verifying which project owns the live domain.
+
+**Fix:** 
+- Reconnected `gsb-swarm-dashboard` Vercel project to `MCFLAMINGO/localintel-landing` repo (was wrongly connected to `gsb-swarm-dashboard` repo)
+- Removed CLI deploy instructions from context
+- Canonical mapping locked in context:
+  - `gsb-swarm-dashboard` → `www.thelocalintel.com` → `MCFLAMINGO/localintel-landing` → **Git push auto-deploys, NO CLI**
+  - `swarm-deploy-throw` → DEAD PROJECT, ignore
+
+**Result:** Landing site deploys automatically on every push to `localintel-landing` main. 
+
+**NEVER AGAIN:**
+- Never run `npx vercel` CLI for the landing site
+- Never use `--name swarm-deploy-throw` or any other `--name` flag
+- Never create a new Vercel project
+- Before any Vercel action, verify project name maps to correct domain in this file
+
+---
+
+
 ## 2026-05-11 ZIP SEO — LocalBusiness category filter
 
 **Problem:** zip-seo-data endpoint returned 'LocalBusiness' (schema.org type) in top_categories for 224 ZIPs — leaked through as visible text on ZIP pages.
