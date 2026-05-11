@@ -3693,3 +3693,8 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** Venue follow-up returned static narrative only — no real upcoming events.
 **Fix:** Added TM Discovery API call (fetch, 3s timeout, silent fallback) inside venue follow-up block. If Ticketmaster_Consumer_Key is set and events found, prepends up to 3 upcoming shows with ticket URLs. Added /api/local-intel/admin/tm-probe endpoint (admin-token gated) to test TM venue/event search raw responses.
 **Result:** "can I buy a ticket" now returns real upcoming events from TM when available, falls back to static narrative if TM has no data.
+
+## Session Entry — Intent Keyword Expansion (2026-05-11)
+**Problem:** 15 query types returned 0 results or wrong results: vet, tow truck, hair salon, clothes, dry cleaning (direct), handyman, car repair, gas station, pharmacy, financial advisor, insurance agent, grocery, hotel, doctor/urgent care.
+**Fix:** Added ~70 new KEYWORD_MAP entries across 14 categories in intentMap.js. Added/expanded 13 CAT_EXPAND entries in localIntelAgent.js. Fixed Winn Dixie DB record (was hotel, corrected to grocery). All NL_RULES updated for regex coverage.
+**Result:** Full coverage across everyday local queries for JAX/PVB area.
