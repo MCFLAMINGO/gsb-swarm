@@ -1,3 +1,13 @@
+## 2026-05-11 — B2: Follow-up state persistence — in-process Map → Postgres
+
+**Problem:** Task follow-up state (pending venue questions) was stored in an in-process Node.js `Map` in `lib/taskIntent.js`. Any Railway redeploy/restart wiped it. Web callers using `x-forwarded-for` as sessionId could get different IPs between requests through Railway's proxy. Result: follow-up answers never reached `handleRFQ` — they fell through to regular search with no destination.
+
+**Fix:** New table `task_followup_sessions` (session_id PK, state JSONB, expires_at TIMESTAMPTZ). `getTaskFollowUp` / `setTaskFollowUp` / `clearTaskFollowUp` rewritten as async Postgres calls with 10-min TTL (upsert via `ON CONFLICT … DO UPDATE`). All callers in `localIntelAgent.js` (line ~870) and `lib/voiceIntake.js` (line ~428) updated to `await`. Periodic cleanup every 5 min via `setInterval` deletes expired rows. Errors logged via `console.error` (no silent fail). Migration script at `scripts/migrateB2.js` (idempotent — uses `IF NOT EXISTS`).
+
+**Result:** Follow-up state survives Railway restarts and is consistent across proxy hops. `detectTaskIntent` stays synchronous (pure regex, no DB). Run `node scripts/migrateB2.js` once against Railway to create the table.
+
+---
+
 ## 2026-05-11 — Intent gaps: dessert + jewelry categories (Part B1)
 
 **Problem:** "get ice cream at Flo's", "Dairy Queen", and "Underwood's jewelry" had no routing destination — missing from `lib/intentRegistry.js`, `lib/intentMap.js`, and `lib/taskIntent.js` CAT_PATTERNS entirely. Queries fell through to either the generic restaurant/retail fallback or returned an empty intent.
