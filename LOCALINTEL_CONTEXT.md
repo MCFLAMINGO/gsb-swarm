@@ -3688,3 +3688,8 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** "can I buy a ticket" after concert hall result returned 20 wrong businesses (no context chain).
 **Fix:** Added `_pendingVenueContext` Map (10-min TTL) in GET /search — stores single venue result when category is in entertainment list. Follow-up regex (`_VENUE_FOLLOWUP_RE`) checked at top of GET /search handler; if match, returns narrative with phone/website/address instead of running new search. Added ticket/buy a ticket/get tickets → entertainment in intentMap.js KEYWORD_MAP.
 **Result:** Two-turn venue flow works: "concert hall" → result stored → "can I buy a ticket" → narrative answer with Ponte Vedra Concert Hall info.
+
+## Session Entry — Ticketmaster Integration (2026-05-11)
+**Problem:** Venue follow-up returned static narrative only — no real upcoming events.
+**Fix:** Added TM Discovery API call (fetch, 3s timeout, silent fallback) inside venue follow-up block. If Ticketmaster_Consumer_Key is set and events found, prepends up to 3 upcoming shows with ticket URLs. Added /api/local-intel/admin/tm-probe endpoint (admin-token gated) to test TM venue/event search raw responses.
+**Result:** "can I buy a ticket" now returns real upcoming events from TM when available, falls back to static narrative if TM has no data.
