@@ -1,3 +1,18 @@
+## 2026-05-11 — taskIntent v2.4: FL city abbreviation support
+
+**Problem:** Users say "pick up my dry cleaning in JAX" or "grab my rx from PVB" but follow-up message said "Which dry cleaner?" with no acknowledgement of the location, making the dialog feel dumb. Also no structured city signal was returned so downstream RFQ routing couldn't use it.
+
+**Fix (`lib/taskIntent.js`):**
+- Added `FL_CITY_ABBREV` lookup: JAX→Jacksonville, PVB→Ponte Vedra Beach, STJ/STA→St. Augustine, NOC→Nocatee, OPK→Orange Park, FI→Fleming Island, TPA→Tampa, MIA→Miami, FLL→Fort Lauderdale, ORL→Orlando, MCO→Orlando, ALT→Altamonte Springs.
+- Built `FL_CITY_ABBREV_RE` (word-boundary, case-insensitive) and `_detectFLCity(text)` helper.
+- `detectTaskIntent` now scans for an abbreviation and:
+  - returns `city` field in the response object (full name or null)
+  - injects city into followUp message: `"Which dry cleaner? (in Jacksonville, reply with name or NONE)"`.
+
+**Result:** Task input with FL abbreviations now produces follow-ups that name the city explicitly. `city` field exposed to voiceIntake/localIntelAgent for downstream geo-routing.
+
+---
+
 ## 2026-05-11 — taskIntent v2.3: BRING_TO_RE dropoff split
 
 **Problem:** Single BRING_ME_RE regex matched both "bring me X" (pickup) and "bring the X to Y" (dropoff) but typed both as 'pickup'. Sentences like "bring the contract to the office" and "bring this package to fedex" incorrectly routed as pickup instead of dropoff.
