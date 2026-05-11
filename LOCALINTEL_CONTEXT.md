@@ -1,3 +1,18 @@
+## 2026-05-11 — voiceIntake v2: multi-task follow-up state machine + city carry-through
+
+**Problem:** When voiceIntake received a multi-task call ("get me dry cleaning AND grab some groceries") it only asked the user about the first task and dropped the rest on the floor. Also, city info from taskIntent (JAX, PVB, etc.) was being detected but never surfaced into the SMS follow-up or the RFQ description.
+
+**Fix (`lib/voiceIntake.js` task block, around line 425):**
+- Fresh-task branch now stores `allTasks`, `currentTaskIndex: 0`, `taskData: {}`, and `city` in the follow-up state along with the existing scalar fields.
+- Follow-up answer branch now:
+  - If `allTasks.length > 1`: stores the answer under `taskData[currentTask.cat]`, advances `currentTaskIndex`, and asks the next task's followUp (via twiml + SMS).
+  - When the last task is answered: clears state, fires `postVoiceRfq` for every task in `allTasks` with city-tagged description, and closes the call.
+  - Single-task path unchanged in behavior, but now appends `(in <City>)` to the RFQ description and the goodbye line when city was detected.
+
+**Result:** A caller saying "pick up my dry cleaning and grab groceries in JAX" gets asked about the dry cleaner first, then the grocery store, then a single confirmation; both RFQs are posted with `(in Jacksonville)` carried into the description for downstream routing.
+
+---
+
 ## 2026-05-11 — taskIntent v2.6: triple-task overview followUp
 
 **Problem:** When users said multi-task sentences like "pick up dry cleaning, grab coffee, and get my wife flowers" or "can you get me coffee, pick up my dry cleaning, and drop off this package at UPS", the response was correct (allTasks populated with all three cats), but the followUp message only asked about the FIRST task with no acknowledgement that the user had asked for three things. UX felt like the system missed the other two.
