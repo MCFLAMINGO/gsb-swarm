@@ -1,3 +1,4 @@
+import os
 """
 Fast Duval seed using PostgreSQL COPY instead of row-by-row upsert.
 1. Parse pipe-delimited TXT → /tmp/duval_seed.csv
@@ -150,9 +151,9 @@ print("  COPYing to Postgres...", flush=True)
 import psycopg2
 
 conn = psycopg2.connect(
-    host='turntable.proxy.rlwy.net', port=25739,
-    dbname='railway', user='postgres',
-    password='mHNhBVhHmYVQdPAKVuysgjpajxzneqkE',
+    host=os.environ['PGHOST'], port=int(os.environ.get('PGPORT','25739')),
+    dbname=os.environ.get('PGDATABASE','railway'), user=os.environ.get('PGUSER','postgres'),
+    password=os.environ['PGPASSWORD'],
     sslmode='require'
 )
 conn.autocommit = False

@@ -1,3 +1,4 @@
+import os
 """
 St. Johns seed v2 — correct field names from ParcelView inspection.
 Fields: strap, name, dor_cd, addr_1, city, zip, mkt_val, jst_val, soh_val, tax_val, tot_lnd_val, acreage
@@ -136,9 +137,9 @@ print(f"  {total:,} rows in {time.time()-t0:.1f}s", flush=True)
 # COPY to Postgres
 print("COPYing...", flush=True)
 conn = psycopg2.connect(
-    host='turntable.proxy.rlwy.net', port=25739,
-    dbname='railway', user='postgres',
-    password='mHNhBVhHmYVQdPAKVuysgjpajxzneqkE',
+    host=os.environ['PGHOST'], port=int(os.environ.get('PGPORT','25739')),
+    dbname=os.environ.get('PGDATABASE','railway'), user=os.environ.get('PGUSER','postgres'),
+    password=os.environ['PGPASSWORD'],
     sslmode='require'
 )
 conn.autocommit = False
