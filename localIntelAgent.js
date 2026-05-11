@@ -99,6 +99,7 @@ const { createApiKeyMiddleware } = require('./lib/apiKeyMiddleware');
 const db = require('./lib/db');
 const { resolveIntent, detectOpenIntent } = require('./lib/intentMap');
 const { resolveIntent: resolveNlIntentFromRegistry } = require('./lib/intentRegistry');
+const { detectTaskIntent, getTaskFollowUp, setTaskFollowUp, clearTaskFollowUp } = require('./lib/taskIntent');
 const { isOpenNow } = require('./workers/hoursParseWorker');
 const { classifyIntent } = require('./workers/intentRouter');
 const { dispatchTask } = require('./lib/taskDispatch');
@@ -851,6 +852,65 @@ router.post('/', async (req, res) => {
 
   try {
     const db = require('./lib/db');
+
+    // ── Plain-language TASK intent (pickup / dropoff / errand) ──────────────
+    // Runs BEFORE intent resolution so "get me dry cleaning picked up" is not
+    // misrouted to a category search. Same pipeline serves SMS, voice, and
+    // the web search bar.
+    const _taskSessionId = customerId
+      || (req.headers && (req.headers['x-session-id'] || req.headers['x-forwarded-for']))
+      || req.socket?.remoteAddress
+      || req.ip
+      || null;
+    const _taskSession = _taskSessionId
+      ? String(_taskSessionId).toString().split(',')[0].trim()
+      : null;
+
+    if (query && _taskSession) {
+      // 1. If a follow-up is pending, this message answers it.
+      const pending = getTaskFollowUp(_taskSession);
+      if (pending) {
+        const venueAnswer = String(query).trim();
+        clearTaskFollowUp(_taskSession);
+        const isNone = /^(none|cancel|skip|no(ne)?|n\/a|na)$/i.test(venueAnswer);
+        const enrichedQuery = isNone
+          ? `Task: ${pending.taskType || 'errand'} — ${pending.cat}`
+          : `Task: ${pending.taskType || 'errand'} — ${pending.cat} (${pending.followUpKey || 'venue'}: ${venueAnswer})`;
+        const nlIntentForTask = {
+          taskClass: 'TASK',
+          group:     pending.cat,
+          category:  pending.cat,
+          tags:      null,
+          cuisine:   null,
+          resolvesVia: 'rfq',
+          temporalContext: null,
+        };
+        return await handleRFQ(req, res, nlIntentForTask, enrichedQuery, customerId, zip || pending.zip || null);
+      }
+
+      // 2. Otherwise detect a fresh task intent.
+      const taskIntent = detectTaskIntent(query);
+      if (taskIntent && taskIntent.isTask) {
+        setTaskFollowUp(_taskSession, {
+          taskType:    taskIntent.taskType,
+          cat:         taskIntent.cat,
+          followUpKey: taskIntent.followUpKey,
+          zip:         zip || null,
+        });
+        return res.json({
+          ok: true,
+          type: 'followup',
+          message: taskIntent.followUp,
+          results: [],
+          meta: {
+            task_type:     taskIntent.taskType,
+            category:      taskIntent.cat,
+            follow_up_key: taskIntent.followUpKey,
+            resolves_via:  'task_followup',
+          },
+        });
+      }
+    }
 
     // Resolve NL intent up front so every path (Phase 2 + legacy) can read
     // shared fields like `temporalContext`. Cheap, deterministic, no I/O.
