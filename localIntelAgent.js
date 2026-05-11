@@ -4790,6 +4790,90 @@ function _getVenueContext(sessionId) {
   return entry;
 }
 
+// Guard: recurring/scheduling language → not a single order intent.
+// Used in both detectOrderItemIntent and detectOrderItemPartial so multi-day
+// scheduling queries fall through to discovery instead of the two-turn order flow.
+const RECURRING_ORDER_RE = /\b(\d+\s+day(s)?\s+a\s+week|each\s+day|every\s+day|daily|weekly|different\s+restaurant\s+each|rotating|weekly\s+plan|meal\s+plan|subscription|recurring|repeat\s+order|5\s+days?|monday\s+through|mon.*fri)\b/i;
+
+// Detects whether a string is a comma/and-separated list of business names.
+// Returns array of trimmed names if 2+ detected, else null.
+// e.g. "mcflamingo, medure, aqua bar and grill, starbucks, and dicks"
+//      → ['mcflamingo', 'medure', 'aqua bar and grill', 'starbucks', 'dicks']
+function detectMultiBizList(text) {
+  if (!text || typeof text !== 'string') return null;
+  const t = text.trim();
+  // Must contain at least one comma (single " and " alone isn't enough — too ambiguous
+  // with multi-word names like "aqua bar and grill").
+  if (!/,/.test(t)) return null;
+  // Split on comma first to preserve "X and Y" inside a single name.
+  // Then for the LAST comma-segment only, split on " and " to capture Oxford-comma lists
+  // ("a, b, and c"). This keeps "aqua bar and grill" intact as one name.
+  const commaParts = t.split(/\s*,\s*/).map(s => s.trim()).filter(Boolean);
+  if (commaParts.length < 2) return null;
+  let parts = commaParts.slice(0, -1);
+  const last = commaParts[commaParts.length - 1];
+  const andSplit = last.split(/\s+and\s+/i).map(s => s.trim()).filter(Boolean);
+  parts = parts.concat(andSplit);
+  parts = parts.map(s => s.replace(/^and\s+/i, '').trim()).filter(s => s.length > 1 && s.length < 60);
+  if (parts.length < 2) return null;
+  // Reject if any part looks like a sentence (contains a verb/question word)
+  const SENTENCE_RE = /\b(want|need|get|find|looking|help|can|should|would|please|where|what|how|why|is|are|have|has)\b/i;
+  if (parts.some(p => SENTENCE_RE.test(p))) return null;
+  return parts;
+}
+
+// Look up multiple business names in parallel. Returns array of { queried, found }.
+// Uses ILIKE + word-by-word fallback (same pattern as single-biz lookup elsewhere
+// in this file). Each catch logs to console.error — never silently fails.
+async function lookupMultiBiz(db, names, searchZips) {
+  const zips = (searchZips && searchZips.length)
+    ? searchZips
+    : ['32082','32081','32250','32266','32233','32259','32034'];
+  const results = await Promise.all(names.map(async (raw) => {
+    const name = raw.trim();
+    let rows = [];
+    try {
+      rows = await db.query(
+        `SELECT business_id AS id, name, phone, zip, city, address, website, category, wallet
+           FROM businesses
+          WHERE zip = ANY($1::text[])
+            AND name ILIKE $2
+            AND status != 'inactive'
+          ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+          LIMIT 1`,
+        [zips, `%${name}%`]
+      );
+    } catch (err) {
+      console.error('[lookupMultiBiz] direct ILIKE error for', name, err.message);
+      rows = [];
+    }
+    if (rows.length) return { queried: raw, found: rows[0] };
+
+    // Word-by-word fallback for multi-word names.
+    const words = name.split(/\s+/).filter(w => w.length > 2);
+    if (words.length >= 2) {
+      try {
+        rows = await db.query(
+          `SELECT business_id AS id, name, phone, zip, city, address, website, category, wallet
+             FROM businesses
+            WHERE zip = ANY($1::text[])
+              AND (${words.map((_, i) => `name ILIKE $${i + 2}`).join(' AND ')})
+              AND status != 'inactive'
+            ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+            LIMIT 1`,
+          [zips, ...words.map(w => `%${w}%`)]
+        );
+      } catch (err) {
+        console.error('[lookupMultiBiz] word-fallback error for', name, err.message);
+        rows = [];
+      }
+      if (rows.length) return { queried: raw, found: rows[0] };
+    }
+    return { queried: raw, found: null };
+  }));
+  return results;
+}
+
 function detectOrderItemIntent(raw) {
   if (!raw) return { isOrderItem: false, itemQuery: null, bizName: null };
   const trimmed = raw.trim();
@@ -4799,6 +4883,7 @@ function detectOrderItemIntent(raw) {
   // "food" / "some food" / "from" (ie. routing).
   const routingOnly = /^\s*(?:i(?:'d| would| wanna| want to| 'd like to| would like to)?\s+(?:like\s+to\s+)?)?(?:place\s+an?\s+order|order(?:\s+(?:some\s+)?food)?|get\s+(?:some\s+)?food|grab\s+(?:some\s+)?food|food)\s+(?:from|at)\s+/i;
   if (routingOnly.test(trimmed)) return { isOrderItem: false, itemQuery: null, bizName: null };
+  if (RECURRING_ORDER_RE.test(trimmed)) return { isOrderItem: false, itemQuery: null, bizName: null };
 
   let m = trimmed.match(_ORDER_ITEM_RE);
   if (!m) m = trimmed.match(_WANT_ITEM_RE);
@@ -4838,6 +4923,8 @@ function detectOrderItemPartial(raw) {
   // Skip routing-only phrases.
   const routingOnly = /^\s*(?:i(?:'d| would| wanna| want to| 'd like to| would like to)?\s+(?:like\s+to\s+)?)?(?:place\s+an?\s+order|order(?:\s+(?:some\s+)?food)?|get\s+(?:some\s+)?food|grab\s+(?:some\s+)?food|food)\s*$/i;
   if (routingOnly.test(trimmed)) return { isPartial: false, itemQuery: null };
+  // Guard: recurring/scheduling language should fall through to discovery, not pending order flow.
+  if (RECURRING_ORDER_RE.test(trimmed)) return { isPartial: false, itemQuery: null };
 
   const m = trimmed.match(_ORDER_ITEM_PARTIAL_RE);
   if (!m) return { isPartial: false, itemQuery: null };
@@ -5048,6 +5135,46 @@ router.get('/search', async (req, res) => {
       if (itemDetect.isOrderItem) {
         if (sessionId) _pendingOrderIntent.delete(sessionId);
         return _resolveOrderItem(itemDetect.itemQuery, itemDetect.bizName);
+      }
+
+      // Multi-business comma/and-separated list as follow-up reply to
+      // "Which restaurant?" — look up each in parallel, return summary.
+      // Checked BEFORE single-name _AT_BIZ_RE so a 5-name list isn't mangled
+      // into a single failing biz lookup.
+      if (sessionId) {
+        const pendingForMulti = _getPendingOrderIntent(sessionId);
+        if (pendingForMulti) {
+          const multiBizNames = detectMultiBizList(raw);
+          if (multiBizNames) {
+            _pendingOrderIntent.delete(sessionId);
+            const searchZips = zip ? [zip] : ['32082','32081','32250','32266','32233','32259','32034'];
+            const bizResults = await lookupMultiBiz(db, multiBizNames, searchZips);
+            const found    = bizResults.filter(r => r.found);
+            const notFound = bizResults.filter(r => !r.found).map(r => r.queried);
+            const resultBlocks = found.map(r => r.found);
+            let message = found.length > 0
+              ? `Found ${found.length} of ${multiBizNames.length} restaurants:`
+              : `Couldn't find any of those restaurants in our network yet.`;
+            if (notFound.length > 0) {
+              message += ` (Not found: ${notFound.join(', ')})`;
+            }
+            return res.json({
+              ok: true,
+              type: 'multi_biz_lookup',
+              intent: 'multi_biz_lookup',
+              message,
+              results: resultBlocks,
+              meta: {
+                queried: multiBizNames,
+                found_count: found.length,
+                not_found: notFound,
+                resolves_via: 'multi_biz_lookup',
+                pending_item: pendingForMulti.item,
+              },
+              latency_ms: Date.now() - t0,
+            });
+          }
+        }
       }
 
       // Business-only follow-up resolves a pending item.
