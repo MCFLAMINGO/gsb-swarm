@@ -1,3 +1,18 @@
+## 2026-05-11 — taskIntent v2.6: triple-task overview followUp
+
+**Problem:** When users said multi-task sentences like "pick up dry cleaning, grab coffee, and get my wife flowers" or "can you get me coffee, pick up my dry cleaning, and drop off this package at UPS", the response was correct (allTasks populated with all three cats), but the followUp message only asked about the FIRST task with no acknowledgement that the user had asked for three things. UX felt like the system missed the other two.
+
+**Fix (`lib/taskIntent.js`):**
+- Added `_CAT_LABELS` lookup mapping internal cat keys to human-readable labels (`dry_cleaning → "dry cleaning"`, `cafe → "cafe run"`, `florist → "florist"`, etc.) and `_catLabel(cat)` helper.
+- When `allTasks.length >= 3`, prepend an overview line to the followUp: `"I see N tasks: <a>, <b>, <c>. Let's start with <a> — <original followUp>"`.
+
+**Result:**
+- "pick up dry cleaning, grab coffee, and get my wife flowers" → followUp: "I see 3 tasks: dry cleaning, cafe run, florist. Let's start with dry cleaning — Which dry cleaner do you use? (reply with name or NONE)"
+- 2-task sentences unchanged (still single-cat followUp).
+- 86/86 task tests + 5/5 city tests passing.
+
+---
+
 ## 2026-05-11 — taskIntent v2.5: healthcare + schools + service dispatch + deflect audit
 
 **Problem:** Three gaps and one false-positive class:
