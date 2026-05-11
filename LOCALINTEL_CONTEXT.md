@@ -3546,3 +3546,54 @@ Separately, "vodka and cranberry" matched a school in Port Charlotte because:
 - "case of water for the team", "water delivery", "gatorade" route to
   `retail` / `grocery` instead of getting pulled into restaurants.
 
+
+## Session 16d — NON_FOOD guard on full ORDER_ITEM match + sporting goods vocab (2026-05-11)
+
+### Problem
+- "I need my back fire door fixed at McFlamingo" pulled up McFlamingo
+  menu — `detectOrderItemIntent` (full match) had no NON_FOOD guard, only
+  the partial detector (`detectOrderItemPartial`) did. So a service /
+  repair query that happened to contain "at <biz>" fell straight into the
+  order-item lookup and rendered a menu search.
+- "I need soccer cleats" returned unmatched — there was no sporting
+  goods / athletic equipment vocab in the intent map, so cleats / jerseys
+  / shin guards / sports equipment queries never resolved to `retail`.
+
+### Fix
+- **localIntelAgent.js**: Added `NON_FOOD_FULL_RE` guard inside
+  `detectOrderItemIntent`, immediately before the final
+  `return { isOrderItem: true, ... }`. Pattern covers service verbs
+  (fixed/repaired/installed/replaced/cleaned/painted/built/renovated/
+  inspected/serviced/maintained/upgraded), building parts (door/window/
+  roof/wall/floor/ceiling/pipe/drain/wiring/outlet/breaker), trades
+  (hvac/furnace/gutter/shingle/fence/deck/driveway), services (haircut/
+  manicure/pedicure/massage/facial/oil change/tow/locksmith), bookings
+  (appointment/reservation/table/room/hotel/flight/ticket/parking),
+  outdoor / sporting goods (beach chair/kayak/paddleboard/surfboard),
+  hardware (drill/power tool/lumber), furniture (mattress/sofa/couch),
+  apparel (clothing/shirt/shoes/boots/jacket/cleats/jersey/uniform), and
+  generic goods (equipment/gear/supplies). If matched, returns
+  `isOrderItem: false`.
+- **lib/intentMap.js**: Added a sporting goods / athletic equipment NL
+  rule in `NL_RULES`, immediately after the retail/outdoor rule. Covers
+  cleats (soccer/football/baseball), jerseys, shin guards, shoulder pads,
+  batting gloves, compression gear, running shoes, track spikes, swim
+  goggles, lacrosse / hockey / volleyball / wrestling / boxing gear, gym
+  gloves, weight belts, resistance bands, yoga mats. Routes to
+  `cat: 'retail'` with tags `['sporting_goods','athletic','equipment']`.
+  Added 21 sporting-goods keywords to `KEYWORD_MAP` mapping to `retail`.
+- **Direct DB fix**: Nulled `lat`/`lon` on 94 businesses in TARGET_ZIPS
+  whose coordinates fell outside the NE Florida bounding box (geocoding
+  corruption from upstream sources). Map will fall back to ZIP centroid
+  for those rows until they're re-geocoded.
+
+### Result
+- Service / repair queries like "I need my back fire door fixed at
+  McFlamingo" no longer trigger menu ordering — the NON_FOOD guard kicks
+  in on the full ORDER_ITEM match path and the query falls through to
+  normal trades / services routing.
+- Sporting goods queries ("soccer cleats", "shin guards", "running
+  shoes", "yoga mat", "resistance band") route to `retail` with sporting
+  goods tags.
+- 94 bad map pins cleared from DB; map renders cleanly inside the NE
+  Florida service area.
