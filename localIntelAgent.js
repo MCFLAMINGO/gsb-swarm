@@ -5195,6 +5195,7 @@ router.get('/search', async (req, res) => {
     // ── NL intent → category (lib/intentMap.js — shared with voiceIntake) ──────
     let nlTags = null;
     let nlDeflect = false;
+    let nlIntentResolved = false; // true if resolveIntent produced a cat from raw text
     let openIntent = null; // 'now' | 'late' | 'early' | 'weekend' | null
     if (raw) {
       openIntent = detectOpenIntent(raw);
@@ -5205,7 +5206,10 @@ router.get('/search', async (req, res) => {
         } else if (intent.cat) {
           cat    = intent.cat;
           nlTags = intent.tags || null;
+          nlIntentResolved = true;
         }
+      } else {
+        nlIntentResolved = true; // caller supplied an explicit cat
       }
     }
 
@@ -5275,6 +5279,46 @@ router.get('/search', async (req, res) => {
             [TARGET_ZIPS, `%${tok}%`, limit * 2]
           );
           if (r.length) { rows = r; break; }
+        }
+      }
+
+      // ── Name-search no-fallthrough guard ───────────────────────────────────
+      // If the query looks like a specific business name (no intent resolved,
+      // short query) and ILIKE/token name search came up empty, probe tsvector
+      // too — and if that's also empty, return a clean 0-result message rather
+      // than letting category expansion surface unrelated businesses.
+      if (!rows.length && !nlIntentResolved && q && q.split(/\s+/).length <= 4) {
+        let tsHits = [];
+        try {
+          const tsQuery = q.trim().split(/\s+/)
+            .filter(t => t.length >= 2 && !PG_STOP.has(t.toLowerCase()))
+            .map(t => t.replace(/[^a-zA-Z0-9]/g, '') + ':*')
+            .filter(Boolean)
+            .join(' & ');
+          if (tsQuery) {
+            const tsZipClause = zip ? ' AND zip = $2' : ' AND zip = ANY($2)';
+            const tsZipParam  = zip ? zip : TARGET_ZIPS;
+            tsHits = await db.query(
+              `SELECT 1 FROM businesses
+                WHERE status != 'inactive'
+                  AND NOT ('likely_person_not_business' = ANY(COALESCE(quality_flags, ARRAY[]::text[])))
+                  AND search_vector @@ to_tsquery('english', $1)${tsZipClause}
+                LIMIT 1`,
+              [tsQuery, tsZipParam]
+            );
+          }
+        } catch (tsErr) {
+          console.error('[/search] name-guard tsvector probe error:', tsErr.message);
+        }
+        if (!tsHits.length) {
+          return res.json({
+            ok: true, total: 0, returned: 0, results: [],
+            intent: null,
+            type: 'name_not_found',
+            answer: `I couldn't find '${q}' near you. Try a different name or describe what you need.`,
+            narrative: `I couldn't find '${q}' near you. Try a different name or describe what you need.`,
+            notable_businesses: [], latency_ms: Date.now() - t0,
+          });
         }
       }
     }
