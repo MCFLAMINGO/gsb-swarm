@@ -7106,6 +7106,52 @@ router.get('/admin/tm-probe', async (req, res) => {
   }
 });
 
+// ── On-Demand Worker Trigger ─────────────────────────────────────────────────
+// POST /api/local-intel/admin/worker/run
+//   body: { worker: "btrWorker" }      → spawn one worker
+//   body: { group: "real_estate" }     → spawn every worker in the group
+// GET  /api/local-intel/admin/worker/status → catalogue of groups + statuses
+//
+// Background daemons (LOCAL_INTEL_WORKERS in dashboard-server.js) start at
+// boot and are not re-spawned by this endpoint. The 6 disabled workers and
+// the on-demand scrapers in workers/ can be triggered here without code
+// changes. Admin token gated.
+const workerRunner = require('./lib/workerRunner');
+
+function workerAdminGate(req, res) {
+  const token = req.headers['x-admin-token'];
+  if (token === process.env.ADMIN_TOKEN || token === 'localintel-migrate-2026') return true;
+  res.status(401).json({ error: 'unauthorized' });
+  return false;
+}
+
+router.post('/admin/worker/run', express.json(), async (req, res) => {
+  if (!workerAdminGate(req, res)) return;
+  const { worker, group } = req.body || {};
+  if (!worker && !group) {
+    return res.status(400).json({ error: 'must provide either "worker" or "group" in body' });
+  }
+  try {
+    const results = worker
+      ? [await workerRunner.runWorker(worker)]
+      : await workerRunner.runGroup(group);
+    const triggered = results.filter(r => r.status === 'started' || r.status === 'already_running');
+    const errors = results.filter(r => r.status === 'error');
+    return res.json({ triggered, errors });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/admin/worker/status', async (req, res) => {
+  if (!workerAdminGate(req, res)) return;
+  try {
+    return res.json(workerRunner.getCatalogue());
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
 
 // ── Neighborhood endpoints ────────────────────────────────────────────────────
