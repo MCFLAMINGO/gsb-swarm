@@ -7366,12 +7366,12 @@ app.use((req, res, next) => {
     { name: 'Ocean Floor Worker',   file: 'workers/oceanFloorWorker.js' },
     { name: 'Surface Current',      file: 'workers/surfaceCurrentWorker.js' },
     { name: 'Wave Surface Worker',  file: 'workers/waveSurfaceWorker.js' },
-    { name: 'BTR Worker',           file: 'workers/btrWorker.js' },
+    // { name: 'BTR Worker',           file: 'workers/btrWorker.js' }, // disabled — timing out on all ZIPs (stjohnstax.us unreachable), wasting retries
     { name: 'Vertical Agent',        file: 'workers/verticalAgentWorker.js' },
-    { name: 'Prompt Evolution',       file: 'workers/promptEvolutionWorker.js' },
+    // { name: 'Prompt Evolution',       file: 'workers/promptEvolutionWorker.js' }, // disabled — no production traffic yet, nothing to learn from
     { name: 'Census Layer',            file: 'workers/censusLayerWorker.js'     },
     { name: 'Overpass Worker',         file: 'workers/overpassWorker.js'        },
-    { name: 'IRS SOI Worker',          file: 'workers/irsSoiWorker.js'          },
+    // { name: 'IRS SOI Worker',          file: 'workers/irsSoiWorker.js'          }, // disabled — IRS income data not consumed by any query path yet
     { name: 'ACP Intel Cycle',         file: 'workers/localIntelAcpCycle.js'    },
     // { name: 'MCP Probe Worker',          file: 'workers/mcpProbeWorker.js'        }, // disabled — no real users yet
     { name: 'Router Learning Worker',     file: 'workers/routerLearningWorker.js'  },
@@ -7388,9 +7388,9 @@ app.use((req, res, next) => {
     { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' },
     { name: 'Permit Worker',               file: 'workers/permitWorker.js' },
     // ── World model signal workers ──
-    { name: 'FCC Broadband Worker',        file: 'workers/fccBroadbandWorker.js'  },
-    { name: 'IRS Migration Worker',        file: 'workers/irsMigrationWorker.js'  },
-    { name: 'World Model Worker',          file: 'workers/worldModelWorker.js'    },
+    // { name: 'FCC Broadband Worker',        file: 'workers/fccBroadbandWorker.js'  }, // disabled — FCC broadband data not used in search quality
+    // { name: 'IRS Migration Worker',        file: 'workers/irsMigrationWorker.js'  }, // disabled — IRS migration data not consumed by any query path yet
+    // { name: 'World Model Worker',          file: 'workers/worldModelWorker.js'    }, // disabled — ZIP z-score forecasting expensive, no consumer on hot path yet
   ];
 
   function spawnLocalIntelWorker(w, attempt = 0) {
