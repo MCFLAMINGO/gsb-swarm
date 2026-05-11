@@ -1,3 +1,13 @@
+## 2026-05-11 — Intent gaps: dessert + jewelry categories (Part B1)
+
+**Problem:** "get ice cream at Flo's", "Dairy Queen", and "Underwood's jewelry" had no routing destination — missing from `lib/intentRegistry.js`, `lib/intentMap.js`, and `lib/taskIntent.js` CAT_PATTERNS entirely. Queries fell through to either the generic restaurant/retail fallback or returned an empty intent.
+
+**Fix:** Added `dessert` category (ice cream, gelato, sundae, milkshake, custard, sorbet, soft serve, plus FL brands DQ/Dairy Queen, Flo's, Culver's, Kilwin's, Bruster's, Marble Slab, Cold Stone, Carvel, Baskin) and `jewelry` category (engagement ring, wedding band, diamond, necklace, bracelet, earrings, pendant, fine/custom jewelry, watch repair, plus FL named jeweler Underwood's) to all three routing files. Both inserted **before** their broader fallbacks (dessert before catch-all restaurant; jewelry before generic retail) so they win the first-match scan. Added `_CAT_LABELS` entries for both so multi-task overviews render the right label. Seeded Underwood's Jewelers, Dairy Queen, and Flo's Diner via new `scripts/seedB1Businesses.js` (SELECT-then-INSERT, idempotent; uses `status='unverified'` + `phone=NULL` when address/phone can't be confirmed at runtime, per brief).
+
+**Result:** All 6 `resolveIntent` test cases return the correct category (dessert × 3, jewelry × 3). Both `detectTaskIntent` tests return `isTask: true` with `cat: 'dessert'` and `cat: 'jewelry'` respectively. Zero LLM calls, all regex/keyword. `voiceIntake.js` untouched (B2 scope).
+
+---
+
 ## 2026-05-11 — taskIntent v2.3–2.6 + voiceIntake v2 — round summary
 
 **Problem:** After v2.2, several gaps remained in plain-language task routing: BRING ambiguity (pickup vs dropoff), no FL city abbreviation awareness, no healthcare / school / service-dispatch coverage, weak discovery deflect, no multi-task UX in followUp messages, and voiceIntake couldn't cycle through multi-task answers or surface city context.
