@@ -5227,6 +5227,8 @@ router.get('/search', async (req, res) => {
       bar:                  ['bar','pub','wine_bar','brewery','gastropub'],
       cafe:                 ['cafe','coffee_chain','bakery'],
       gym:                  ['gym_chain','fitness_centre','yoga','crossfit'],
+      entertainment:        ['concert_hall','music_venue','theatre','theater','amphitheatre','amphitheater','performing_arts','event_venue','community_centre','community_center','stadium','arena','nightclub','comedy_club','entertainment'],
+      library:              ['library','public_library'],
     };
 
     // 2. Category search (ZIP-scoped if provided)

@@ -7312,7 +7312,7 @@ app.use((req, res, next) => {
     { name: 'ACS Demographics Worker',    file: 'workers/acsWorker.js'             },
     { name: 'Sunbiz Import Worker',        file: 'workers/sunbizWorker.js'          },
     { name: 'Search Vector Backfill',      file: 'workers/searchVectorBackfillWorker.js' },
-    { name: 'Embedding Backfill',          file: 'workers/embeddingBackfillWorker.js' },
+    // { name: 'Embedding Backfill',          file: 'workers/embeddingBackfillWorker.js' }, // disabled — index recreates at 1.2GB, 0 scans, no query path uses <-> operator yet
     { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' },
     { name: 'Permit Worker',               file: 'workers/permitWorker.js' },
     // ── World model signal workers ──
