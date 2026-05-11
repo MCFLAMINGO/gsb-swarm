@@ -5173,15 +5173,17 @@ router.get('/search', async (req, res) => {
     // Skip name search when NL_INTENT already resolved a category — go straight to cat search
     const skipNameSearch = !!cat && !aboutName;
     if (q && !skipNameSearch) {
-      // Prefer Florida results when no ZIP given
-      const zipWhere = zip ? ` AND zip = '${zip.replace(/'/g,"\'")}' ` : ` AND zip BETWEEN '32004' AND '34997' `;
+      // Geo-guard: if no ZIP supplied, restrict to TARGET_ZIPS (our coverage area)
+      // Only widen to statewide FL if still nothing found
+      const zipWhere    = zip ? ` AND zip = $2 `                  : ` AND zip = ANY($2) `;
+      const zipParam    = zip ? zip                                : TARGET_ZIPS;
       rows = await db.query(
-        BASE_SELECT + zipWhere + ` AND (name ILIKE $1 OR services_text ILIKE $1 OR description ILIKE $1) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
-        [`%${q}%`, limit * 2]
+        BASE_SELECT + zipWhere + ` AND (name ILIKE $1 OR services_text ILIKE $1 OR description ILIKE $1) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`,
+        [`%${q}%`, zipParam, limit * 2]
       );
 
-      // Widen to all FL if ZIP-scoped returned nothing
-      if (!rows.length && zip) {
+      // Widen to all FL only if coverage-area search returned nothing
+      if (!rows.length) {
         rows = await db.query(
           BASE_SELECT + ` AND zip BETWEEN '32004' AND '34997' AND (name ILIKE $1 OR services_text ILIKE $1 OR description ILIKE $1) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
           [`%${q}%`, limit * 2]
@@ -5196,8 +5198,8 @@ router.get('/search', async (req, res) => {
           .sort((a,b) => b.length - a.length); // longest first = most specific
         for (const tok of tokens) {
           const r = await db.query(
-            BASE_SELECT + ` AND zip BETWEEN '32004' AND '34997' AND (name ILIKE $1 OR services_text ILIKE $1 OR description ILIKE $1) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
-            [`%${tok}%`, limit * 2]
+            BASE_SELECT + ` AND zip = ANY($1) AND (name ILIKE $2 OR services_text ILIKE $2 OR description ILIKE $2) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`,
+            [TARGET_ZIPS, `%${tok}%`, limit * 2]
           );
           if (r.length) { rows = r; break; }
         }
@@ -5238,8 +5240,8 @@ router.get('/search', async (req, res) => {
           const tagRows = await db.query(
             BASE_SELECT +
             (zip ? ` AND category = ANY($1) AND zip = $2 AND tags && $3 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $4`
-                 : ` AND category = ANY($1) AND tags && $2 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`),
-            zip ? [expanded, zip, nlTags, limit] : [expanded, nlTags, limit]
+                 : ` AND category = ANY($1) AND zip = ANY($2) AND tags && $3 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $4`),
+            zip ? [expanded, zip, nlTags, limit] : [expanded, TARGET_ZIPS, nlTags, limit]
           );
           if (tagRows.length) rows = tagRows;
         }
@@ -5249,22 +5251,54 @@ router.get('/search', async (req, res) => {
             catWhere  = ` AND category = ANY($1) AND zip = $2 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`;
             catParams = [expanded, zip, limit];
           } else {
-            catWhere  = ` AND category = ANY($1) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`;
-            catParams = [expanded, limit];
+            // Geo-guard: restrict to TARGET_ZIPS coverage area
+            catWhere  = ` AND category = ANY($1) AND zip = ANY($2) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`;
+            catParams = [expanded, TARGET_ZIPS, limit];
           }
           rows = await db.query(BASE_SELECT + catWhere, catParams);
         }
       } else {
         const params = zip
           ? [`%${term}%`, zip, limit]
-          : [`%${term}%`, limit];
-        const zipClause = zip ? ' AND zip = $2' : '';
-        const lim = zip ? '$3' : '$2';
+          : [`%${term}%`, TARGET_ZIPS, limit];
+        const zipClause = zip ? ' AND zip = $2' : ' AND zip = ANY($2)';
+        const lim = '$3';
         rows = await db.query(
           BASE_SELECT + ` AND (category ILIKE $1 OR category_group ILIKE $1 OR name ILIKE $1)${zipClause}
           ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT ${lim}`,
           params
         );
+      }
+
+      // ── tsvector fallback (GET /search path) ─────────────────────────────
+      // Mirrors the POST handler's Path B. Fires when ILIKE / category search
+      // returns nothing. Enforces TARGET_ZIPS geo guard.
+      if (!rows.length && q) {
+        const tsQuery = q.trim().split(/\s+/)
+          .filter(t => t.length >= 2 && !PG_STOP.has(t.toLowerCase()))
+          .map(t => t.replace(/[^a-zA-Z0-9]/g, '') + ':*')
+          .join(' & ');
+        if (tsQuery) {
+          const tsZipClause = zip ? ' AND zip = $2' : ' AND zip = ANY($2)';
+          const tsZipParam  = zip ? zip : TARGET_ZIPS;
+          try {
+            rows = await db.query(
+              `SELECT name, zip, address, city, phone, website, category, category_group,
+                description, tags, hours, hours_json, price_tier, services_text,
+                lat, lon, confidence_score, claimed_at, wallet, status,
+                ts_rank(search_vector, to_tsquery('english', $1)) AS _rank
+               FROM businesses
+               WHERE status != 'inactive'
+                 AND NOT ('likely_person_not_business' = ANY(COALESCE(quality_flags, ARRAY[]::text[])))
+                 AND search_vector @@ to_tsquery('english', $1)${tsZipClause}
+               ORDER BY _rank DESC, (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC
+               LIMIT $3`,
+              [tsQuery, tsZipParam, limit]
+            );
+          } catch (tsErr) {
+            console.error('[/search] tsvector fallback error:', tsErr.message);
+          }
+        }
       }
     }
 
@@ -5525,6 +5559,35 @@ router.get('/search', async (req, res) => {
           notableBusinesses = brief.notable_businesses || [];
         }
       } catch (_) {}
+    }
+
+    // ── Gap + resolution logging (same pattern as POST handler) ────────────────
+    // Every GET /search query is recorded so the system knows its own success rate.
+    // 0-result queries become gap signals for acquisition intelligence.
+    if (raw || cat) {
+      const intentGroup = cat || (nlTags && nlTags[0]) || 'general';
+      const resolved    = results.length > 0;
+      // fire-and-forget — never block the response
+      recordResolution({
+        query:      raw || cat || '',
+        intent:     { taskClass: cat ? 'CATEGORY_SEARCH' : 'TEXT_SEARCH', group: intentGroup, cuisine: null },
+        zip:        zip || null,
+        resolved,
+        resolvedVia: resolved ? 'search' : null,
+        resultCount: results.length,
+        startTime:  t0,
+      });
+      if (!resolved) {
+        // Write to rfq_gaps so routerLearningWorker can surface acquisition targets
+        // Schema: vertical, zip, prompt, tool (rfq_gaps PRIMARY KEY = vertical+zip+prompt)
+        db.query(
+          `INSERT INTO rfq_gaps (vertical, zip, prompt, tool, last_ts)
+           VALUES ($1, $2, $3, 'get_search', NOW())
+           ON CONFLICT (vertical, zip, prompt) DO UPDATE SET last_ts = NOW()`,
+          [intentGroup, zip || 'unknown', raw || cat || '']
+        ).catch(e => console.error('[/search] rfq_gaps insert error:', e.message));
+        console.warn(`[GAP /search] unresolved: "${raw || cat}" zip=${zip || 'none'} group=${intentGroup}`);
+      }
     }
 
     return res.json({
