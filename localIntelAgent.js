@@ -104,6 +104,7 @@ const { detectTaskIntent, getTaskFollowUp, setTaskFollowUp, clearTaskFollowUp } 
 const { isOpenNow } = require('./workers/hoursParseWorker');
 const { classifyIntent } = require('./workers/intentRouter');
 const { dispatchTask } = require('./lib/taskDispatch');
+const { resolveBusinessAlias } = require('./lib/aliasResolver');
 const apiKeyMiddleware = createApiKeyMiddleware(db);
 
 // Phase 2 — multi-ZIP fanout when caller doesn't pin a ZIP
@@ -838,12 +839,27 @@ async function handleReservation(req, res, query, customerId, zip) {
     );
     const bizNameRaw = bizNameMatch ? bizNameMatch[1].trim() : null;
 
+    // Resolve alias (Tier 2 instant, Tier 1 DB) before business lookup.
+    const _resvAlias = bizNameRaw ? await resolveBusinessAlias(bizNameRaw) : { canonical: null, business_id: null };
+    const bizName = _resvAlias.canonical || bizNameRaw;
+    const pinnedResvBusinessId = _resvAlias.business_id || null;
+
     // 2. ZIP expansion — pull in city ZIPs when a city name appears in the query.
     const searchZips = expandZips(query, zip);
 
     // 3. Look up matching businesses.
     let businesses = [];
-    if (bizNameRaw) {
+    if (pinnedResvBusinessId) {
+      businesses = await db.query(
+        `SELECT business_id AS id, name, phone, zip, city, website, category, address
+           FROM businesses
+          WHERE business_id = $1
+            AND status != 'inactive'
+          LIMIT 1`,
+        [pinnedResvBusinessId]
+      ).catch(err => { console.error('[reservation] pinned biz lookup error:', err.message); return []; });
+    }
+    if (!businesses.length && bizName) {
       businesses = await db.query(
         `SELECT business_id AS id, name, phone, zip, city, website, category, address
            FROM businesses
@@ -854,12 +870,12 @@ async function handleReservation(req, res, query, customerId, zip) {
             CASE WHEN zip = ANY($3::text[]) THEN 0 ELSE 1 END,
             length(name)
           LIMIT 3`,
-        [searchZips, `%${bizNameRaw}%`, zip ? [zip] : ['32082','32081']]
+        [searchZips, `%${bizName}%`, zip ? [zip] : ['32082','32081']]
       );
 
       // Fallback — word-by-word AND match for multi-word names.
       if (!businesses.length) {
-        const words = bizNameRaw.split(/\s+/).filter(w => w.length > 2);
+        const words = bizName.split(/\s+/).filter(w => w.length > 2);
         if (words.length) {
           const likeClause = words.map((_, i) => `name ILIKE $${i + 2}`).join(' AND ');
           businesses = await db.query(
@@ -873,7 +889,8 @@ async function handleReservation(req, res, query, customerId, zip) {
           );
         }
       }
-    } else {
+    }
+    if (!businesses.length && !bizNameRaw) {
       // No specific business — surface top restaurants in the area that have a phone.
       businesses = await db.query(
         `SELECT business_id AS id, name, phone, zip, city, website, category, address
@@ -1258,6 +1275,20 @@ router.post('/', async (req, res) => {
     const effectiveGroup    = group || nlIntent.group;
     const effectiveCategory = category || nlIntent.category;
 
+    // ── Tier 2/Tier 1 alias resolution for named-business search ─────────────
+    // Only matters when the user typed a name (no group/category match).
+    let resolvedQuery = query;
+    let pinnedAliasBusinessId = null;
+    if (query && !effectiveGroup && !effectiveCategory) {
+      try {
+        const aliasRes = await resolveBusinessAlias(query);
+        if (aliasRes && aliasRes.canonical) resolvedQuery = aliasRes.canonical;
+        pinnedAliasBusinessId = aliasRes?.business_id || null;
+      } catch (err) {
+        console.error('[local-intel] alias resolve error:', err.message);
+      }
+    }
+
     // ── Build Postgres query — all filtering in SQL ──────────────────────────
     const conditions = ["status != 'inactive'"]; // matches active + null, excludes only explicitly inactive
     const params = [];
@@ -1299,14 +1330,21 @@ router.post('/', async (req, res) => {
     // Name/address text search
     let orderBy = 'confidence_score DESC, name ASC';
     if (query && !effectiveGroup && !effectiveCategory) {
-      conditions.push(`(
-        name ILIKE $${p} OR
-        category ILIKE $${p} OR
-        address ILIKE $${p} OR
-        description ILIKE $${p}
-      )`);
-      params.push(`%${query}%`);
-      p++;
+      if (pinnedAliasBusinessId) {
+        conditions.push(`(business_id = $${p} OR name ILIKE $${p + 1} OR category ILIKE $${p + 1} OR address ILIKE $${p + 1} OR description ILIKE $${p + 1})`);
+        params.push(pinnedAliasBusinessId);
+        params.push(`%${resolvedQuery}%`);
+        p += 2;
+      } else {
+        conditions.push(`(
+          name ILIKE $${p} OR
+          category ILIKE $${p} OR
+          address ILIKE $${p} OR
+          description ILIKE $${p}
+        )`);
+        params.push(`%${resolvedQuery}%`);
+        p++;
+      }
     }
 
     // Tag boost for semantic queries (e.g. "healthy food")
@@ -4978,7 +5016,24 @@ async function lookupMultiBiz(db, names, searchZips) {
     ? searchZips
     : ['32082','32081','32250','32266','32233','32259','32034'];
   const results = await Promise.all(names.map(async (raw) => {
-    const name = raw.trim();
+    const trimmedRaw = raw.trim();
+    const aliasRes = await resolveBusinessAlias(trimmedRaw);
+    const name = aliasRes.canonical || trimmedRaw;
+    // If Tier 1 pinned a business_id, fetch directly.
+    if (aliasRes.business_id) {
+      try {
+        const pinned = await db.query(
+          `SELECT business_id AS id, name, phone, zip, city, address, website, category, wallet
+             FROM businesses
+            WHERE business_id = $1 AND status != 'inactive'
+            LIMIT 1`,
+          [aliasRes.business_id]
+        );
+        if (pinned.length) return { queried: raw, found: pinned[0] };
+      } catch (err) {
+        console.error('[lookupMultiBiz] pinned biz lookup error for', raw, err.message);
+      }
+    }
     let rows = [];
     try {
       rows = await db.query(
@@ -5233,10 +5288,23 @@ router.get('/search', async (req, res) => {
       }
     }
 
-    const _resolveOrderItem = async (itemQuery, bizName) => {
-      const nameLike = `%${bizName}%`;
+    const _resolveOrderItem = async (itemQuery, bizNameInput) => {
+      // Resolve alias (Tier 2 instant, Tier 1 DB) before business lookup.
+      const aliasRes = await resolveBusinessAlias(bizNameInput);
+      const bizName = aliasRes.canonical || bizNameInput;
+      const pinnedBusinessId = aliasRes.business_id || null;
       let bizRows = [];
-      if (zip) {
+      if (pinnedBusinessId) {
+        bizRows = await db.query(
+          `SELECT business_id, name, zip
+             FROM businesses
+            WHERE business_id = $1 AND status != 'inactive'
+            LIMIT 1`,
+          [pinnedBusinessId]
+        ).catch(err => { console.error('[order-item] pinned biz lookup error:', err.message); return []; });
+      }
+      const nameLike = `%${bizName}%`;
+      if (!bizRows.length && zip) {
         bizRows = await db.query(
           `SELECT business_id, name, zip
              FROM businesses
