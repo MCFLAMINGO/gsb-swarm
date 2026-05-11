@@ -3708,3 +3708,8 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** Name searches for specific businesses (jersey mikes) fell through to category expansion returning 20 wrong results. "hoagie/sub/sandwich" triggered RFQ instead of restaurant. "I need a lawyer" capital-I didn't match intent.
 **Fix:** Added early-return in GET /search name path when no intent + no name results + query ≤4 words → returns friendly 0-result message. Added sandwich/deli/hoagie keywords → restaurant. Verified and fixed case-insensitive normalization in intent lookup.
 **Result:** Name miss returns clean 0-result message. Sandwich queries route to restaurants. "I need a lawyer" routes to legal.
+
+## Session Entry — KEYWORD_MAP Precedence Fix (2026-05-11)
+**Problem:** Short keywords (lawyer, tow, gas, doctor) shadowed longer conversational phrases (i need a lawyer, tow truck, gas station, find me a doctor) because KEYWORD_MAP iterated in insertion order with includes() — first match wins.
+**Fix:** Sort KEYWORD_MAP by keyword length descending inside resolveIntent() before iterating. Longest phrase matches first. Also corrected lawyer/attorney → legal (was professional_services).
+**Result:** "I need a lawyer" now routes to legal. All conversational i-need/where-can-i phrases now correctly resolved.
