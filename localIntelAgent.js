@@ -1779,7 +1779,7 @@ router.get('/zip-seo-data', async (req, res) => {
       city:              intel.city_name   || null,
       county:            intel.county_name || null,
       business_count:    total,
-      top_categories:    topCatRows.map(r => r.category).filter(Boolean),
+      top_categories:    topCatRows.map(r => r.category).filter(c => c && c !== 'LocalBusiness').slice(0, 3),
       population:        intel.population        ?? null,
       median_income:     intel.median_income     ?? null,
       median_home_value: intel.median_home_value ?? null,
