@@ -3741,3 +3741,11 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Fix:** Added `lib/workerRunner.js` with `runWorker(name)` + `runGroup(groupName)`. Added admin endpoints `POST /api/local-intel/admin/worker/run` (individual or group trigger) and `GET /api/local-intel/admin/worker/status` (catalogue view). Worker groups: search_quality, enrichment, world_model, real_estate, self_improvement, data_ingestion, infrastructure. Workers are spawned as detached child processes (same pattern as LOCAL_INTEL_WORKERS). In-memory registry prevents double-spawn. `docs/worker_catalogue.md` committed to repo.
 
 **Result:** Any worker or group can now be triggered via authenticated admin POST without code changes. The 6 disabled workers (btrWorker, irsSoiWorker, irsMigrationWorker, fccBroadbandWorker, worldModelWorker, promptEvolutionWorker) can be individually re-enabled on-demand by calling `/api/local-intel/admin/worker/run` with `{ worker: "btrWorker" }`.
+
+## 2026-05-11 ZIP SEO Data Endpoint
+
+**Problem:** generate-zip-pages.js only embedded generic marketing copy in ZIP HTML shells. Google saw 1,474 near-identical thin pages → 1,438 "Discovered - currently not indexed" in Search Console.
+
+**Fix:** Added `GET /api/local-intel/zip-seo-data?zip=XXXXX` to localIntelAgent.js. Returns business_count, top_categories (top 3), population, median_income, median_home_value, affluence_pct, neighborhoods — all from Postgres (businesses + zip_intelligence/zip_signals + neighborhoods tables). No auth, read-only aggregate data. Called by generate-zip-pages.js at landing site build time to bake real per-ZIP stats into static HTML.
+
+**Result:** Each ZIP page now contains unique, substantive static content visible to Google without JavaScript. Fixes the thin-content problem causing 1,438 pages to be discovered but not indexed.
