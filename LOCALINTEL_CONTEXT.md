@@ -3713,3 +3713,8 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** Short keywords (lawyer, tow, gas, doctor) shadowed longer conversational phrases (i need a lawyer, tow truck, gas station, find me a doctor) because KEYWORD_MAP iterated in insertion order with includes() — first match wins.
 **Fix:** Sort KEYWORD_MAP by keyword length descending inside resolveIntent() before iterating. Longest phrase matches first. Also corrected lawyer/attorney → legal (was professional_services).
 **Result:** "I need a lawyer" now routes to legal. All conversational i-need/where-can-i phrases now correctly resolved.
+
+## Session Entry — Volume Bleed Fix (2026-05-11)
+**Problem:** Railway volume keeps hitting 10GB. sunbizWorker is disabled but volume still fills. Root cause: bedrockWorker writes JSON to /app/data/bedrock/, enrichmentAgent writes enrichmentLog.json + sourceLog.json to /app/data/ — these accumulate across deploys since /app/data IS the persistent volume.
+**Fix:** Redirected bedrockWorker and enrichmentAgent to write to /tmp when RAILWAY_ENVIRONMENT is set (ephemeral, not volume). Added /api/admin/volume-audit endpoint to diagnose disk usage. Expanded cleanup-volume to also delete bedrock/, ocean_floor/, surface/, wave/, enrichmentLog.json, sourceLog.json, zips/ dirs.
+**Result:** Volume should stay under 3GB (Postgres WAL + DB only). Call /api/admin/cleanup-volume to clear accumulated JSON dirs.
