@@ -386,6 +386,10 @@ const KEYWORD_CATEGORY_MAP = {
   'buy groceries': ['grocery','supermarket'], 'pick up groceries': ['grocery','supermarket'],
   'need milk': ['grocery','convenience'], 'need eggs': ['grocery','convenience'],
   'get milk': ['grocery','convenience'], 'get eggs': ['grocery','convenience'],
+  'case of water': ['grocery','convenience'], 'water delivery': ['grocery','convenience'],
+  'bottled water': ['grocery','convenience'], 'bulk water': ['grocery','convenience'],
+  'sports drink': ['grocery','convenience'], 'gatorade': ['grocery','convenience'],
+  'beverage delivery': ['grocery','convenience'],
   // Pharmacy & health
   pharmacy: ['pharmacy'], prescription: ['pharmacy'], meds: ['pharmacy'],
   medicine: ['pharmacy'], vitamins: ['pharmacy','grocery'],
@@ -423,6 +427,15 @@ const KEYWORD_CATEGORY_MAP = {
   'hair salon': ['beauty','hairdresser'], 'barber': ['hairdresser','beauty'],
   'nail salon': ['beauty'], 'nail spa': ['beauty'], 'day spa': ['wellness','beauty'],
   'facial': ['beauty','wellness'], 'wax': ['beauty'], 'blowout': ['beauty','hairdresser'],
+  'botox': ['healthcare','beauty'], 'filler': ['healthcare','beauty'],
+  'lip filler': ['healthcare','beauty'], 'rhinoplasty': ['healthcare'],
+  'breast implant': ['healthcare'], 'cosmetic surgery': ['healthcare'],
+  'plastic surgery': ['healthcare'], 'plastic surgeon': ['healthcare'],
+  'liposuction': ['healthcare'], 'tummy tuck': ['healthcare'],
+  'medspa': ['healthcare','beauty'], 'med spa': ['healthcare','beauty'],
+  'dermatologist': ['healthcare'], 'dermatology': ['healthcare'],
+  'skin clinic': ['healthcare','beauty'], 'coolsculpting': ['healthcare','beauty'],
+  'laser treatment': ['healthcare','beauty'], 'laser hair': ['healthcare','beauty'],
   // Laundry
   laundry: ['laundry'], 'dry cleaning': ['laundry'], drycleaning: ['laundry'],
   // Bank & ATM
