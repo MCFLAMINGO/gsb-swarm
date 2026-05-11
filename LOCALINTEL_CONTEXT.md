@@ -35,10 +35,13 @@
 - `pos_type` is NOT a column — always use `pos_config->>'pos_type'`
 
 ### Vercel (Landing)
-- Project ID: `prj_xYhu03Voqiw1mtpTuQPXiXf6bnmk`
+- **CANONICAL PROJECT: `gsb-swarm-dashboard`** → this is the project mapped to `www.thelocalintel.com`
+- **CANONICAL REPO: `MCFLAMINGO/localintel-landing`** → connected to `gsb-swarm-dashboard`
+- **DEPLOY METHOD: Git push to `localintel-landing` main — Vercel auto-deploys. NO CLI DEPLOYS NEEDED.**
+- **NEVER use `--name swarm-deploy-throw` or any other project name — that is wrong and creates junk deployments**
+- **NEVER create a new Vercel project — there are already too many orphan projects**
 - orgId: `team_19iu8EDRFBkTdrRtK7s6oYuE`
-- Deploy method: `rsync -a --exclude='.git' /home/user/workspace/localintel-landing/ /tmp/li-deploy/` then `NODE_TLS_REJECT_UNAUTHORIZED=0 npx vercel --token $VERCEL_TOKEN --yes --prod --archive=tgz` from `/tmp/li-deploy/`
-- **MUST use `--archive=tgz`** — repo now has 1,475+ files, Vercel CLI per-file upload fails without it. Bundles as single tarball.
+- If a manual redeploy is ever needed: go to vercel.com/mcflamingos-projects/gsb-swarm-dashboard/deployments and click Redeploy on the latest deployment
 
 ### Git Push Commands
 - gsb-swarm: `HOME=/home/user GIT_CONFIG_GLOBAL=/home/user/.gitconfig-proxy git push origin main` with `api_credentials=["github"]`
