@@ -1,3 +1,14 @@
+## 2026-05-11 ZIP SEO — LocalBusiness category filter
+
+**Problem:** zip-seo-data endpoint returned 'LocalBusiness' (schema.org type) in top_categories for 224 ZIPs — leaked through as visible text on ZIP pages.
+
+**Fix:** Added `.filter(c => c && c !== 'LocalBusiness')` to top_categories mapping in zip-seo-data endpoint (commit 610dd5b).
+
+**Result:** All ZIP pages show real human-readable category names only.
+
+---
+
+
 # LocalIntel — Agent Context File
 > **READ THIS FIRST every session.** Updated after every commit. Source of truth for architecture, integrations, decisions, and pending tasks.
 > Last updated: 2026-05-11 (session 16 — Railway-native quarterly property reseed cron)
