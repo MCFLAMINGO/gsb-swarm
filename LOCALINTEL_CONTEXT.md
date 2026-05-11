@@ -3628,3 +3628,36 @@ Additionally, GET /search never wrote to `resolution_history` or `rfq_gaps`, so 
 - dry cleaning → cleaning, routed correctly ✅
 - No Miami, Orlando, Sarasota, Daytona results anywhere ✅
 - Every query now writes to resolution_history; 0-result queries write to rfq_gaps ✅
+
+---
+
+## Session: Disk Cleanup + Entertainment Intent (2026-05-11)
+
+**Problem 1 — Disk at 99% (3,206 MB)**
+`idx_businesses_embedding` regrew to 1,207 MB with 0 scans — `embeddingBackfillWorker` recreates it after every backfill. Embedding column heap was 706 MB (240,800 rows). Zero-scan indexes (`idx_biz_email_null`, `idx_businesses_state_cat`, `idx_businesses_state`, `idx_businesses_sunbiz_doc`, `businesses_cuisine_idx`, `idx_biz_osm_node_null`, `idx_biz_osm_recheck`, `idx_biz_email`) added ~50 MB more.
+
+**Fix:**
+- Dropped all zero-scan indexes CONCURRENTLY (no downtime)
+- Nulled `embedding` column on all 240,800 rows (data was stale anyway — no query path uses `<->`)
+- VACUUM ANALYZE businesses + source_evidence
+- Disabled `embeddingBackfillWorker` in dashboard-server.js LOCAL_INTEL_WORKERS list — it was the root cause of index regrowth
+- **3,206 MB → 2,050 MB — 1.15 GB freed**
+
+Re-enable embeddingBackfillWorker only when: (1) pgvector `<->` query path exists in GET /search, (2) selective index on claimed-only rows, (3) >1,000 claimed businesses with rich content.
+
+**Problem 2 — "concert hall" matching "hall" substring in business names**
+`resolveIntent('concert hall')` returned no category so the name ILIKE search fired first, matching "Hallmark", "Crosswater Hall", "Cook Hall", "Hallowes", etc. Same for "library" matching anything with "libr".
+
+**Fix (commit 5b90549):**
+- `lib/intentMap.js` NL_RULES: added `entertainment` rule (concert hall, music venue, live music, amphitheater, theater, nightlife, things to do, etc.) and `library` rule
+- `lib/intentMap.js` KEYWORD_MAP: added 15 entertainment keywords + library/public library
+- `localIntelAgent.js` CAT_EXPAND: added `entertainment` (concert_hall, music_venue, theatre, amphitheatre, community_centre, stadium, arena, nightclub, comedy_club) and `library`
+- Inserted **Ponte Vedra Concert Hall** into DB (category=concert_hall, group=entertainment, ZIP=32082)
+
+**Result:**
+- "concert hall" → cat:entertainment, confidence:high ✅
+- "is there a concert hall near me" → cat:entertainment, confidence:high ✅
+- "library" → cat:library, confidence:high ✅
+- "theater near me" → cat:entertainment, confidence:high ✅
+- "things to do near me" → cat:entertainment, confidence:high ✅
+- No more "Hallmark Construction" or "Crosswater Hall" showing for venue queries ✅
