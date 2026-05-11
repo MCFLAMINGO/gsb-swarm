@@ -38,7 +38,8 @@ function sleep(ms)    { return new Promise(r => setTimeout(r, ms)); }
 function readJson(fp)  { try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch { return null; } }
 
 function loadZone(zip) {
-  const zones = readJson(ZONES_PATH) || [];
+  const raw = readJson(ZONES_PATH);
+  const zones = Array.isArray(raw) ? raw : [];
   return zones.find(z => String(z.zip || z.zipCode) === String(zip)) || null;
 }
 

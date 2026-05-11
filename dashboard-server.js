@@ -6512,8 +6512,11 @@ setInterval(async () => {
     const rfqCallback  = require('./lib/rfqCallback');
     const db           = require('./lib/db');
     await rfqBroadcast.expireOldJobs();
+    // Poll rfq_jobs (broadcast system) — that table has callback_fired,
+    // response_count, caller_phone columns. rfq_requests is the v2 quote system
+    // and lacks these columns (the previous query returned "column does not exist").
     const readyJobs = await db.query(
-      `SELECT * FROM rfq_requests
+      `SELECT * FROM rfq_jobs
        WHERE status IN ('open','matched')
          AND callback_fired = FALSE
          AND response_count >= 1
