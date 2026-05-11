@@ -868,10 +868,10 @@ router.post('/', async (req, res) => {
 
     if (query && _taskSession) {
       // 1. If a follow-up is pending, this message answers it.
-      const pending = getTaskFollowUp(_taskSession);
+      const pending = await getTaskFollowUp(_taskSession);
       if (pending) {
         const venueAnswer = String(query).trim();
-        clearTaskFollowUp(_taskSession);
+        await clearTaskFollowUp(_taskSession);
         const isNone = /^(none|cancel|skip|no(ne)?|n\/a|na)$/i.test(venueAnswer);
         const enrichedQuery = isNone
           ? `Task: ${pending.taskType || 'errand'} — ${pending.cat}`
@@ -892,7 +892,7 @@ router.post('/', async (req, res) => {
       const taskIntent = detectTaskIntent(query);
       if (taskIntent && taskIntent.isTask) {
         // Store allTasks for multi-task sequential routing
-        setTaskFollowUp(_taskSession, {
+        await setTaskFollowUp(_taskSession, {
           taskType:    taskIntent.taskType,
           cat:         taskIntent.cat,
           followUpKey: taskIntent.followUpKey,
