@@ -99,6 +99,7 @@ const { createApiKeyMiddleware } = require('./lib/apiKeyMiddleware');
 const db = require('./lib/db');
 const { resolveIntent, detectOpenIntent } = require('./lib/intentMap');
 const { resolveIntent: resolveNlIntentFromRegistry } = require('./lib/intentRegistry');
+const { expandZips } = require('./lib/geoExpand');
 const { detectTaskIntent, getTaskFollowUp, setTaskFollowUp, clearTaskFollowUp } = require('./lib/taskIntent');
 const { isOpenNow } = require('./workers/hoursParseWorker');
 const { classifyIntent } = require('./workers/intentRouter');
@@ -822,6 +823,145 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip) {
   }
 }
 
+// ── Reservation handler (resolvesVia === 'reservation') ──────────────────────
+// Web: returns phone + website message + structured results.
+// Twilio SMS: sends a reservation contact SMS to the caller.
+// (Twilio voice <Dial> is handled in lib/voiceIntake.js — voice transcripts
+//  don't route through this POST handler.)
+async function handleReservation(req, res, query, customerId, zip) {
+  try {
+    // 1. Extract the business name from the query, if any.
+    //    Examples: "reservation at st augustine fish camp", "book a table at medure",
+    //    "do you take reservations at aqua grill"
+    const bizNameMatch = query.match(
+      /(?:reservations?\s+at|reserve\s+at|book\s+(?:a\s+table\s+)?at|table\s+at|get\s+a\s+table\s+at)\s+(.+?)(?:\s+(?:in|near|for|on)\s+\S|\s*$)/i
+    );
+    const bizNameRaw = bizNameMatch ? bizNameMatch[1].trim() : null;
+
+    // 2. ZIP expansion — pull in city ZIPs when a city name appears in the query.
+    const searchZips = expandZips(query, zip);
+
+    // 3. Look up matching businesses.
+    let businesses = [];
+    if (bizNameRaw) {
+      businesses = await db.query(
+        `SELECT business_id AS id, name, phone, zip, city, website, category, address
+           FROM businesses
+          WHERE zip = ANY($1::text[])
+            AND name ILIKE $2
+            AND status != 'inactive'
+          ORDER BY
+            CASE WHEN zip = ANY($3::text[]) THEN 0 ELSE 1 END,
+            length(name)
+          LIMIT 3`,
+        [searchZips, `%${bizNameRaw}%`, zip ? [zip] : ['32082','32081']]
+      );
+
+      // Fallback — word-by-word AND match for multi-word names.
+      if (!businesses.length) {
+        const words = bizNameRaw.split(/\s+/).filter(w => w.length > 2);
+        if (words.length) {
+          const likeClause = words.map((_, i) => `name ILIKE $${i + 2}`).join(' AND ');
+          businesses = await db.query(
+            `SELECT business_id AS id, name, phone, zip, city, website, category, address
+               FROM businesses
+              WHERE zip = ANY($1::text[])
+                AND (${likeClause})
+                AND status != 'inactive'
+              LIMIT 3`,
+            [searchZips, ...words.map(w => `%${w}%`)]
+          );
+        }
+      }
+    } else {
+      // No specific business — surface top restaurants in the area that have a phone.
+      businesses = await db.query(
+        `SELECT business_id AS id, name, phone, zip, city, website, category, address
+           FROM businesses
+          WHERE zip = ANY($1::text[])
+            AND (category ILIKE ANY(ARRAY['%restaurant%','%dining%','%seafood%','%fine_dining%','%bistro%']))
+            AND phone IS NOT NULL
+            AND status != 'inactive'
+          ORDER BY
+            CASE WHEN wallet IS NOT NULL THEN 0 ELSE 1 END,
+            name
+          LIMIT 5`,
+        [searchZips]
+      );
+    }
+
+    if (!businesses.length) {
+      const cityHint = bizNameRaw ? ` matching "${bizNameRaw}"` : '';
+      return res.json({
+        ok: true,
+        type: 'reservation_not_found',
+        message: `I couldn't find a restaurant${cityHint} in that area. Try a different name or check the spelling.`,
+        results: [],
+        meta: { resolves_via: 'reservation' }
+      });
+    }
+
+    const biz = businesses[0];
+    const phone = biz.phone || null;
+    const website = biz.website || null;
+
+    // 4. Detect channel — Twilio identifiers come in as E.164 (+1...).
+    const isTwilio = customerId && String(customerId).startsWith('+');
+
+    // 5. Channel-appropriate message.
+    let message;
+    if (website && website.toLowerCase().includes('opentable')) {
+      message = `Reserve a table at ${biz.name} online: ${website}`;
+    } else if (isTwilio) {
+      message = `${biz.name} reservations: call ${phone || 'them directly'}${website ? ` or visit ${website}` : ''}.`;
+      const smsBody = `LocalIntel: ${biz.name} — reservations at ${phone || 'call them'}${website ? `, ${website}` : ''}`;
+      sendRfqSms(customerId, smsBody).catch(err =>
+        console.error('[reservation] customer SMS failed:', err.message)
+      );
+    } else {
+      const parts = [`To make a reservation, call ${biz.name}`];
+      if (phone)   parts.push(`at ${phone}`);
+      if (website) parts.push(`or visit ${website}`);
+      message = parts.join(' ') + '.';
+    }
+
+    // 6. Log to resolution_history (fire-and-forget — never block on logging).
+    db.query(
+      `INSERT INTO resolution_history
+         (query, intent_class, intent_group, cuisine, zip, business_id, resolved, resolved_via, result_count, response_ms)
+       VALUES ($1, 'RESERVATION', 'food', NULL, $2, $3, true, 'reservation', $4, 0)`,
+      [query, zip || searchZips[0], biz.id, businesses.length]
+    ).catch(err => console.error('[reservation] resolution_history write failed:', err.message));
+
+    return res.json({
+      ok: true,
+      type: 'reservation',
+      message,
+      results: businesses.map(b => ({
+        id:       b.id,
+        name:     b.name,
+        phone:    b.phone,
+        address:  b.address,
+        zip:      b.zip,
+        city:     b.city,
+        website:  b.website,
+        category: b.category,
+      })),
+      meta: {
+        resolves_via:  'reservation',
+        business_name: biz.name,
+        channel:       isTwilio ? 'twilio' : 'web',
+        booking_url:   biz.website || null,
+        zips_searched: searchZips,
+      }
+    });
+
+  } catch (err) {
+    console.error('[reservation] handleReservation error:', err.message);
+    return res.status(500).json({ ok: false, error: 'Reservation lookup failed', detail: err.message });
+  }
+}
+
 // ── POST /api/local-intel — main query endpoint ───────────────────────────────
 // NL intent → group/tag mapping lives in lib/intentRegistry.js (single source of truth).
 
@@ -956,6 +1096,14 @@ router.post('/', async (req, res) => {
     // matching businesses and notifies the customer.
     if (resolvesVia === 'rfq') {
       return await handleRFQ(req, res, nlIntentEarly, query, customerId, zip);
+    }
+    // ── Reservation routing ────────────────────────────────────────────────
+    // "reservation at X", "book a table at X", "do you take reservations" →
+    // handleReservation surfaces the restaurant's phone + website (web) and
+    // sends an SMS confirmation (Twilio SMS channel). Voice channel handled
+    // separately in lib/voiceIntake.js with a TwiML <Dial>.
+    if (resolvesVia === 'reservation') {
+      return await handleReservation(req, res, query, customerId, zip);
     }
     // resolvesVia === 'search' or 'dispatch' — continue to SQL search
     // 'dispatch' is handled by the existing 0-result dispatchTask path below.
@@ -4906,7 +5054,7 @@ function detectOrderItemIntent(raw) {
   }
   // Guard: reject non-food item queries even when a business name is present.
   // "I need my back fire door fixed at McFlamingo" should NOT trigger order flow.
-  const NON_FOOD_FULL_RE = /\b(?:fixed|repair(?:ed)?|install(?:ed)?|replac(?:ed)?|clean(?:ed)?|paint(?:ed)?|built?|constructed?|renovated?|restor(?:ed)?|inspect(?:ed)?|servic(?:ed)?|maintain(?:ed)?|upgrad(?:ed)?|door|window|roof|wall|floor|ceiling|pipe|drain|wir(?:e|ing)|outlet|breaker|hvac|ac\s+unit|furnace|gutter|shingle|fence|deck|driveway|sidewalk|bathroom|kitchen\s+remodel|haircut|hair\s+cut|manicure|pedicure|massage|facial|wax|blowout|dental|teeth|oil\s+change|tire|alignment|brake|transmission|tow|locksmith|prescription|refill|vaccine|injection|appointment|reservation|table|room|hotel|flight|ticket|seat|parking|storage|unit|locker|beach\s+chair|beach\s+umbrella|kayak|paddleboard|surfboard|drill|power\s+tool|hardware|lumber|furniture|mattress|sofa|couch|clothing|apparel|shirt|pants|shoes|boots|jacket|sunscreen|sunblock|cleats|jersey|uniform|equipment|gear|supplies|supplies)\b/i;
+  const NON_FOOD_FULL_RE = /\b(?:fixed|repair(?:ed)?|install(?:ed)?|replac(?:ed)?|clean(?:ed)?|paint(?:ed)?|built?|constructed?|renovated?|restor(?:ed)?|inspect(?:ed)?|servic(?:ed)?|maintain(?:ed)?|upgrad(?:ed)?|door|window|roof|wall|floor|ceiling|pipe|drain|wir(?:e|ing)|outlet|breaker|hvac|ac\s+unit|furnace|gutter|shingle|fence|deck|driveway|sidewalk|bathroom|kitchen\s+remodel|haircut|hair\s+cut|manicure|pedicure|massage|facial|wax|blowout|dental|teeth|oil\s+change|tire|alignment|brake|transmission|tow|locksmith|prescription|refill|vaccine|injection|room|hotel|flight|ticket|seat|parking|storage|unit|locker|beach\s+chair|beach\s+umbrella|kayak|paddleboard|surfboard|drill|power\s+tool|hardware|lumber|furniture|mattress|sofa|couch|clothing|apparel|shirt|pants|shoes|boots|jacket|sunscreen|sunblock|cleats|jersey|uniform|equipment|gear|supplies|supplies)\b/i;
   if (NON_FOOD_FULL_RE.test(itemQuery)) return { isOrderItem: false, itemQuery: null, bizName: null };
   return { isOrderItem: true, itemQuery, bizName };
 }
@@ -4939,7 +5087,7 @@ function detectOrderItemPartial(raw) {
 
   // Guard: reject clearly non-food phrases — real estate, services, info requests, etc.
   // "rent a property", "find a landscaper", "know where", "book a table", etc.
-  const NON_FOOD_RE = /\b(?:rent|lease|buy|purchase|book(?:\s+a\s+(?:room|table|reservation|appointment|flight|hotel|venue))?|property|condo|apartment|house|home|land|real\s*estate|landscap|plumb|electr|construct|repair|install|service(?:s)?|appointment|reservation|hire|find\s+a|search\s+for|know\s+where|tell\s+me|show\s+me|recommend\s+a|suggest\s+a|looking\s+for\s+a\s+(?:home|house|property|place\s+to\s+live)|move|relocat|invest|hotel|vacation|travel|flight|airbnb|vrbo|haircut|hair\s+cut|hair\s+style|blowout|manicure|pedicure|nail|massage|facial|wax|barbershop|salon|spa|gym|workout|yoga|pilates|crossfit|fitness|dentist|dental|doctor|urgent\s+care|prescription|pharmacy|lawyer|attorney|accountant|insurance|mechanic|oil\s+change|car\s+wash|tire|tow|locksmith|pest\s+control|pool\s+service|landscap|irrigation|gutter|roofing|flooring|drywall|painting|fence|deck|remodel|renovation|beach\s+chair|beach\s+umbrella|beach\s+gear|beach\s+supply|outdoor\s+gear|camping\s+gear|sporting\s+goods|kayak|paddleboard|surfboard|fishing\s+gear|bike|bicycle|scooter|drill|power\s+tool|hardware|lumber|screwdriver|wrench|ladder|chainsaw|lawn\s+mower|leaf\s+blower|pressure\s+washer|furniture|mattress|sofa|couch|desk|chair|table|lamp|shelf|closet|mirror|clothing|apparel|shirt|pants|dress|shoes|sneakers|boots|jacket|coat|hat|sunglasses|swimsuit|flip\s+flops|sunscreen|sunblock|lotion|deodorant|shampoo|soap|toothpaste|toilet\s+paper|paper\s+towel|laundry|detergent|batteries|lightbulb|extension\s+cord|phone\s+charger|laptop|computer|printer|tv|television|speaker|headphones|camera|gift\s+card|flowers|florist|balloon|decoration)\b/i;
+  const NON_FOOD_RE = /\b(?:rent|lease|buy|purchase|book(?:\s+a\s+(?:flight|hotel|venue))?|property|condo|apartment|house|home|land|real\s*estate|landscap|plumb|electr|construct|repair|install|service(?:s)?|hire|find\s+a|search\s+for|know\s+where|tell\s+me|show\s+me|recommend\s+a|suggest\s+a|looking\s+for\s+a\s+(?:home|house|property|place\s+to\s+live)|move|relocat|invest|hotel|vacation|travel|flight|airbnb|vrbo|haircut|hair\s+cut|hair\s+style|blowout|manicure|pedicure|nail|massage|facial|wax|barbershop|salon|spa|gym|workout|yoga|pilates|crossfit|fitness|dentist|dental|doctor|urgent\s+care|prescription|pharmacy|lawyer|attorney|accountant|insurance|mechanic|oil\s+change|car\s+wash|tire|tow|locksmith|pest\s+control|pool\s+service|landscap|irrigation|gutter|roofing|flooring|drywall|painting|fence|deck|remodel|renovation|beach\s+chair|beach\s+umbrella|beach\s+gear|beach\s+supply|outdoor\s+gear|camping\s+gear|sporting\s+goods|kayak|paddleboard|surfboard|fishing\s+gear|bike|bicycle|scooter|drill|power\s+tool|hardware|lumber|screwdriver|wrench|ladder|chainsaw|lawn\s+mower|leaf\s+blower|pressure\s+washer|furniture|mattress|sofa|couch|desk|chair|lamp|shelf|closet|mirror|clothing|apparel|shirt|pants|dress|shoes|sneakers|boots|jacket|coat|hat|sunglasses|swimsuit|flip\s+flops|sunscreen|sunblock|lotion|deodorant|shampoo|soap|toothpaste|toilet\s+paper|paper\s+towel|laundry|detergent|batteries|lightbulb|extension\s+cord|phone\s+charger|laptop|computer|printer|tv|television|speaker|headphones|camera|gift\s+card|flowers|florist|balloon|decoration)\b/i;
   if (NON_FOOD_RE.test(itemQuery)) return { isPartial: false, itemQuery: null };
 
   return { isPartial: true, itemQuery };
