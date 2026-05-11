@@ -3733,3 +3733,11 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** Volume audit showed 736MB used with stale dirs: embeddings/ (221MB), irs_soi_2022.csv (207MB), osm/ (52MB), vertical-runs/ (18MB), surface_current/ (17MB), oracle/ (17MB), briefs/ (6MB), and others — all data already in Postgres.
 **Fix:** Expanded cleanup-volume to delete 14 stale dirs/files. Redirected surfaceCurrentWorker, oracleWorker, verticalAgentWorker to write to /tmp on Railway. irsSoiWorker already uses os.tmpdir().
 **Result:** Volume should stay near baseline (~400MB WAL + DB overhead) after cleanup.
+
+## 2026-05-11 On-Demand Worker Trigger System
+
+**Problem:** 66 workers catalogued but 6 disabled (b94b088) and many others only runnable manually. No mechanism to trigger workers individually or by group without editing code or SSH-ing into Railway.
+
+**Fix:** Added `lib/workerRunner.js` with `runWorker(name)` + `runGroup(groupName)`. Added admin endpoints `POST /api/local-intel/admin/worker/run` (individual or group trigger) and `GET /api/local-intel/admin/worker/status` (catalogue view). Worker groups: search_quality, enrichment, world_model, real_estate, self_improvement, data_ingestion, infrastructure. Workers are spawned as detached child processes (same pattern as LOCAL_INTEL_WORKERS). In-memory registry prevents double-spawn. `docs/worker_catalogue.md` committed to repo.
+
+**Result:** Any worker or group can now be triggered via authenticated admin POST without code changes. The 6 disabled workers (btrWorker, irsSoiWorker, irsMigrationWorker, fccBroadbandWorker, worldModelWorker, promptEvolutionWorker) can be individually re-enabled on-demand by calling `/api/local-intel/admin/worker/run` with `{ worker: "btrWorker" }`.
