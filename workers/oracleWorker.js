@@ -36,7 +36,7 @@ function getFlRegistry() {
 }
 
 const DATA_DIR    = path.join(__dirname, '..', 'data');
-const ORACLE_DIR  = path.join(DATA_DIR, 'oracle');
+const ORACLE_DIR  = process.env.RAILWAY_ENVIRONMENT ? '/tmp/oracle' : path.join(DATA_DIR, 'oracle');
 const INDEX_FILE  = path.join(ORACLE_DIR, '_index.json');
 const HISTORY_DIR = path.join(ORACLE_DIR, 'history'); // time-series per ZIP
 const MAX_HISTORY = 180; // keep 90 days @ 2x/day headroom

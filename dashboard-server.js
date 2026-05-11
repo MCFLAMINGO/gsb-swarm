@@ -900,6 +900,20 @@ app.post('/api/admin/cleanup-volume', (req, res) => {
       path.join(DATA_DIR, 'enrichmentLog.json'),
       path.join(DATA_DIR, 'sourceLog.json'),
       path.join(DATA_DIR, 'zips'),
+      path.join(DATA_DIR, 'embeddings'),
+      path.join(DATA_DIR, 'irs_soi_2022.csv'),
+      path.join(DATA_DIR, 'sunbiz'),
+      path.join(DATA_DIR, 'osm'),
+      path.join(DATA_DIR, 'vertical-runs'),
+      path.join(DATA_DIR, 'surface_current'),
+      path.join(DATA_DIR, 'oracle'),
+      path.join(DATA_DIR, 'briefs'),
+      path.join(DATA_DIR, 'acs'),
+      path.join(DATA_DIR, 'inference'),
+      path.join(DATA_DIR, 'btr'),
+      path.join(DATA_DIR, 'evolution'),
+      path.join(DATA_DIR, 'gaps'),
+      path.join(DATA_DIR, 'census_layer'),
     ];
     for (const target of cleanTargets) {
       try {
