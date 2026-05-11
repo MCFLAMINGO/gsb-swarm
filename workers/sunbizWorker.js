@@ -311,14 +311,8 @@ async function run() {
   await importSunbiz();
 }
 
-// Run on start, then weekly to catch new quarterly releases
-run().catch(e => console.error('[sunbizWorker] Fatal:', e.message));
-setInterval(() => {
-  // Reset completion flag weekly so new quarterly files get picked up
-  setState('import_complete', 'false')
-    .then(() => run())
-    .catch(e => console.error('[sunbizWorker] Weekly run error:', e.message));
-}, WEEKLY_MS);
-
-// Keep-alive
-setInterval(() => {}, 1 << 30);
+// DISABLED — Sunbiz data already fully seeded to Postgres. cordata.zip is 1.6GB and fills
+// the Railway volume. Do NOT re-enable without a plan to stream directly to Postgres.
+// To re-run a one-time import use: POST /api/admin/download-sunbiz + /api/admin/import-sunbiz
+console.log('[sunbizWorker] DISABLED — data already in Postgres. Exiting.');
+process.exit(0);
