@@ -1,3 +1,20 @@
+## 2026-05-11 — taskIntent.js v2: verb detection fix + multi-task + FL vocab
+
+**Problem:** v1 had three bugs: (1) PICKUP_VERB_RE required possessive so "pick up pizza", "pick up rx" failed; (2) generic errand fallback hardcoded taskType as 'errand' ignoring detected verb (dropoff/pickup); (3) CAN_YOU_RE was typed 'pickup' for all variants including drop off. No multi-task sentence support. Missing FL-specific brands and slang.
+
+**Fix (commit 84d093f):**
+- Fixed DROPOFF_VERB_RE to match "drop X off" and "drop the X" patterns
+- Split CAN_YOU_RE into CAN_YOU_DROPOFF_RE + CAN_YOU_PICKUP_RE
+- Fixed generic errand fallback to preserve detected verb type
+- Added `allTasks` array — multi-task sentences return ALL detected cats in order
+- Added cats: liquor_store, cafe, florist
+- Added FL brands: Publix, Winn-Dixie, ABC Fine Wine, Total Wine, Petco, PetSmart, CVS, Walgreens, Raising Cane's, Wingstop, First Watch, Metro Diner, Bahama Breeze
+- Added slang: uniforms, scrubs, scripts, rx abbreviation, six-pack, cold brew
+
+**Result:** 62/62 tests passing. "get my meds, grab dinner, and pick up flowers" → allTasks: [pharmacy, restaurant, florist]. All FL regions, abbreviations, and multi-task patterns work.
+
+---
+
 ## 2026-05-11 — taskIntent.js: plain language task routing
 
 **Problem:** "get me dry cleaning picked up" was routing to restaurant (wrong) or returning no results. No mechanism existed to detect task/errand requests and collect follow-up context before routing to RFQ.
