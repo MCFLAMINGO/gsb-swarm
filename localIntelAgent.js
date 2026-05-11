@@ -743,7 +743,7 @@ function toE164(raw) {
   return null;
 }
 
-async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip) {
+async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip, serviceAddress) {
   const _start = Date.now();
   try {
     const targetZips = (!zip || zip === 'all') ? TARGET_ZIPS : [zip];
@@ -762,6 +762,11 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip) {
     );
 
     // 2. Insert RFQ request row (status=open, businesses_notified=0 for now)
+    // B9: when a service address was extracted ("landscaper at 205 Odoms Mill Blvd"),
+    // embed it in the description so the bidder sees it in the dashboard view.
+    const rfqDescription = serviceAddress
+      ? `${userQuery} | service address: ${serviceAddress}`
+      : userQuery;
     const rfqRows = await db.query(
       `INSERT INTO rfq_requests_v2
          (customer_id, query, intent_group, category, zip, description, businesses_notified)
@@ -773,7 +778,7 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip) {
         nlIntent.group,
         nlIntent.category,
         zip || (targetZips[0] || 'unknown'),
-        userQuery,
+        rfqDescription,
         0
       ]
     );
@@ -797,9 +802,12 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip) {
           continue;
         }
 
-        const smsBody =
-          `[LocalIntel] New job request in ${zip || 'your area'}: "${userQuery}". ` +
-          `Reply YES to connect with this customer or NO to pass. Ref: RFQ-${rfqId}`;
+        const smsBody = serviceAddress
+          ? `[LocalIntel] New job request: ${nlIntent.category} at ${serviceAddress}` +
+            `${zip ? ` (${zip})` : ''}. Reply YES to connect with this customer or NO to pass. ` +
+            `Ref: RFQ-${rfqId}`
+          : `[LocalIntel] New job request in ${zip || 'your area'}: "${userQuery}". ` +
+            `Reply YES to connect with this customer or NO to pass. Ref: RFQ-${rfqId}`;
         const sendResult = await sendRfqSms(e164, smsBody);
         if (sendResult.sent) notified++;
         else console.warn(`[rfq] SMS not sent to ${biz.name}: ${sendResult.reason}`);
@@ -1130,6 +1138,41 @@ router.post('/', async (req, res) => {
           temporalContext: null,
         };
         return await handleRFQ(req, res, nlIntentForTask, enrichedQuery, customerId, zip || pending.zip || null);
+      }
+
+      // B9: "service at address" detection — "i need landscaper at 205 Odoms Mill Blvd"
+      // must route as RFQ with the address embedded, not get the address mis-parsed
+      // as a business name. Fire BEFORE detectTaskIntent so the address path wins.
+      const SERVICE_AT_ADDRESS_RE = /\b(landscap(?:er|ing|e)?|plumb(?:er|ing)?|electr(?:ician|ical)?|hvac|handyman|roofer|roofing|painter|painting|cleaner|cleaning\s+service|pest\s*control|pool\s*service|carpenter|contractor|exterminator)\b.{0,30}\bat\s+(\d+\s+\w[\w\s]{2,40}(?:blvd|boulevard|rd|road|st|street|ave|avenue|dr|drive|ln|lane|ct|court|cir|circle|way|pl|place|pkwy|parkway|hwy|highway)\b[\w\s]{0,30})/i;
+      const _svcAtAddrMatch = query.match(SERVICE_AT_ADDRESS_RE);
+      if (_svcAtAddrMatch) {
+        const serviceAddress = _svcAtAddrMatch[2].trim().replace(/[?.!,]+$/, '');
+        const _svcRaw = _svcAtAddrMatch[1].toLowerCase();
+        // Normalize verb form → category token used downstream (matches rfq_requests
+        // categories: landscaping, plumbing, electrical, etc.).
+        const _svcMap = {
+          landscaper: 'landscaping', landscape: 'landscaping', landscaping: 'landscaping',
+          plumber: 'plumbing', plumbing: 'plumbing',
+          electrician: 'electrical', electrical: 'electrical',
+          hvac: 'hvac', handyman: 'handyman',
+          roofer: 'roofing', roofing: 'roofing',
+          painter: 'painting', painting: 'painting',
+          cleaner: 'cleaning', 'cleaning service': 'cleaning',
+          'pest control': 'pest_control', 'pool service': 'pool_service',
+          carpenter: 'carpentry', contractor: 'general_contractor', exterminator: 'pest_control',
+        };
+        const category = _svcMap[_svcRaw] || _svcRaw.replace(/\s+/g, '_');
+        const nlIntentForAddr = {
+          taskClass: 'RFQ',
+          group: 'home',
+          category,
+          tags: null,
+          cuisine: null,
+          resolvesVia: 'rfq',
+          temporalContext: null,
+        };
+        const enrichedQuery = `${query} (service address: ${serviceAddress})`;
+        return await handleRFQ(req, res, nlIntentForAddr, enrichedQuery, customerId, zip, serviceAddress);
       }
 
       // 2. Otherwise detect a fresh task intent.
@@ -5296,6 +5339,17 @@ function _getVenueContext(sessionId) {
 // scheduling queries fall through to discovery instead of the two-turn order flow.
 const RECURRING_ORDER_RE = /\b(\d+\s+day(s)?\s+a\s+week|each\s+day|every\s+day|daily|weekly|different\s+restaurant\s+each|rotating|weekly\s+plan|meal\s+plan|subscription|recurring|repeat\s+order|5\s+days?|monday\s+through|mon.*fri)\b/i;
 
+// B9 guards — keep discovery/grocery/pharmacy queries OUT of the two-turn order flow.
+// DISCOVERY_PREFIX_RE: "where can i get tacos" is a search, not an order. Any
+// query starting with where/how/find/looking-for-style language is discovery.
+const DISCOVERY_PREFIX_RE = /^(where\s+(can\s+i|do\s+i|can\s+you|do\s+you|is|are|will\s+i|would\s+i)|how\s+(can\s+i|do\s+i)|what\s+(is|are|restaurants?|places?|spots?)|which\s+(restaurant|place|spot)|find\s+(me\s+)?a|looking\s+for|searching\s+for|show\s+me)/i;
+// GROCERY_ITEM_RE: eggs/milk/creamer/bread etc → grocery discovery, never restaurant ordering.
+const GROCERY_ITEM_RE = /\b(eggs?|milk|butter|cream(er)?|bread|produce|fruit|vegetable|veggies?|yogurt|cheese|flour|sugar|coffee\s+beans?|ground\s+coffee|orange\s+juice|OJ|cereal|oatmeal|bacon|deli\s+meat|cold\s+cuts|toilet\s+paper|paper\s+towel|laundry|detergent|dish\s+soap|shampoo|conditioner|toothpaste|deodorant|sunscreen|batteries|lightbulb|garbage\s+bag|zip\s+lock|aluminum\s+foil|plastic\s+wrap|sponge|cleaning\s+spray)\b/i;
+// PHARMACY guards: medication/rx/cvs/walgreens → fall through to detectTaskIntent
+// pharmacy pickup, not the wallet-required ordering flow.
+const PHARMACY_ITEM_RE = /\b(prescription|medication|meds?|rx\b|pills?|refill|medicine|pharmacy|insulin|inhaler|antibiotics?)\b/i;
+const PHARMACY_BIZ_RE = /\b(cvs|walgreens?|rite\s*aid|publix\s*pharm|winn\s*dixie\s*pharm|walgreen|pharmacy|drug\s*store)\b/i;
+
 // Detects whether a string is a comma/and-separated list of business names.
 // Returns array of trimmed names if 2+ detected, else null.
 // e.g. "mcflamingo, medure, aqua bar and grill, starbucks, and dicks"
@@ -5402,6 +5456,13 @@ function detectOrderItemIntent(raw) {
   const routingOnly = /^\s*(?:i(?:'d| would| wanna| want to| 'd like to| would like to)?\s+(?:like\s+to\s+)?)?(?:place\s+an?\s+order|order(?:\s+(?:some\s+)?food)?|get\s+(?:some\s+)?food|grab\s+(?:some\s+)?food|food)\s+(?:from|at)\s+/i;
   if (routingOnly.test(trimmed)) return { isOrderItem: false, itemQuery: null, bizName: null };
   if (RECURRING_ORDER_RE.test(trimmed)) return { isOrderItem: false, itemQuery: null, bizName: null };
+  // B9 Bug 1: discovery prefix wins — "where can i get tacos" is search, not order.
+  if (DISCOVERY_PREFIX_RE.test(trimmed)) return { isOrderItem: false, itemQuery: null, bizName: null };
+  // B9 Bug 2: grocery items never trigger restaurant ordering. Check raw early
+  // (itemQuery may not be extracted yet).
+  if (GROCERY_ITEM_RE.test(trimmed)) return { isOrderItem: false, itemQuery: null, bizName: null };
+  // B9 Bug 3: pharmacy items/businesses — fall through to detectTaskIntent.
+  if (PHARMACY_ITEM_RE.test(trimmed)) return { isOrderItem: false, itemQuery: null, bizName: null };
 
   let m = trimmed.match(_ORDER_ITEM_RE);
   if (!m) m = trimmed.match(_WANT_ITEM_RE);
@@ -5420,6 +5481,14 @@ function detectOrderItemIntent(raw) {
   if (!itemQuery || !bizName) return { isOrderItem: false, itemQuery: null, bizName: null };
   // Reject obviously-too-short item or biz names (avoid false positives)
   if (itemQuery.length < 2 || bizName.length < 2) {
+    return { isOrderItem: false, itemQuery: null, bizName: null };
+  }
+  // B9 Bug 3: pharmacy item or pharmacy-chain biz → not an order, taskIntent owns it.
+  if (PHARMACY_ITEM_RE.test(itemQuery) || PHARMACY_BIZ_RE.test(bizName)) {
+    return { isOrderItem: false, itemQuery: null, bizName: null };
+  }
+  // B9 Bug 2: grocery item leaked through (rare — "get me eggs from publix" splits cleanly).
+  if (GROCERY_ITEM_RE.test(itemQuery)) {
     return { isOrderItem: false, itemQuery: null, bizName: null };
   }
   // Guard: reject non-food item queries even when a business name is present.
@@ -5443,6 +5512,11 @@ function detectOrderItemPartial(raw) {
   if (routingOnly.test(trimmed)) return { isPartial: false, itemQuery: null };
   // Guard: recurring/scheduling language should fall through to discovery, not pending order flow.
   if (RECURRING_ORDER_RE.test(trimmed)) return { isPartial: false, itemQuery: null };
+  // B9 guards mirror detectOrderItemIntent — keep discovery/grocery/pharmacy
+  // queries out of the two-turn ordering flow.
+  if (DISCOVERY_PREFIX_RE.test(trimmed)) return { isPartial: false, itemQuery: null };
+  if (GROCERY_ITEM_RE.test(trimmed))     return { isPartial: false, itemQuery: null };
+  if (PHARMACY_ITEM_RE.test(trimmed))    return { isPartial: false, itemQuery: null };
 
   const m = trimmed.match(_ORDER_ITEM_PARTIAL_RE);
   if (!m) return { isPartial: false, itemQuery: null };
