@@ -1,5 +1,5 @@
 [phases.setup]
-aptPkgs = ["python3", "python3-pip"]
+aptPkgs = ["python3", "python3-pip", "mdbtools", "unzip"]
 
 [phases.install]
 cmds = ["npm install --production"]

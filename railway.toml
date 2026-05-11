@@ -1,0 +1,27 @@
+# Railway service definitions.
+#
+# The primary web service is configured in the Railway dashboard and uses
+# nixpacks.toml for its build. This file adds a quarterly cron service that
+# runs the property reseed (Duval + St. Johns) using the same image.
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+# Default deploy settings — overridden per-service below.
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 1
+
+# ── Quarterly property reseed cron ───────────────────────────────────────────
+# Runs Jan/Apr/Jul/Oct 1 at 07:33 UTC (~03:33 EDT). Cron service shares the
+# same env vars as the web service (LOCAL_INTEL_DB_URL etc).
+[[services]]
+name = "reseed-cron"
+
+  [services.build]
+  builder = "NIXPACKS"
+
+  [services.deploy]
+  startCommand = "node data-seed/reseed_cron.js"
+  cronSchedule = "33 7 1 1,4,7,10 *"
+  restartPolicyType = "NEVER"
