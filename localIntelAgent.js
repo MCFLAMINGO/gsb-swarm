@@ -4790,13 +4790,48 @@ router.get('/search', async (req, res) => {
       const venueCtx = _getVenueContext(sessionId);
       if (venueCtx && _VENUE_FOLLOWUP_RE.test(raw)) {
         const v = venueCtx;
-        const parts = [`${v.name} is your best bet.`];
-        if (v.phone) parts.push(`Call them at ${v.phone}.`);
-        if (v.website) parts.push(`Tickets and info at ${v.website}.`);
-        if (v.address) parts.push(`Located at ${v.address}.`);
+        const staticParts = [`${v.name} is your best bet.`];
+        if (v.phone) staticParts.push(`Call them at ${v.phone}.`);
+        if (v.website) staticParts.push(`Tickets and info at ${v.website}.`);
+        if (v.address) staticParts.push(`Located at ${v.address}.`);
+        const staticNarrative = staticParts.join(' ');
+
+        let answer = staticNarrative;
+        const tmKey = process.env.Ticketmaster_Consumer_Key;
+        if (tmKey && v.name) {
+          try {
+            const tmUrl = `https://app.ticketmaster.com/discovery/v2/events.json?keyword=${encodeURIComponent(v.name)}&postalCode=${v.zip || '32082'}&size=3&apikey=${tmKey}`;
+            const tmResp = await fetch(tmUrl, { signal: AbortSignal.timeout(3000) });
+            if (tmResp.ok) {
+              const tmData = await tmResp.json();
+              const events = tmData && tmData._embedded && Array.isArray(tmData._embedded.events) ? tmData._embedded.events.slice(0, 3) : [];
+              if (events.length) {
+                const lines = [`Upcoming at ${v.name}:`];
+                for (const ev of events) {
+                  const artist = ev.name || 'TBA';
+                  const localDate = ev.dates && ev.dates.start && ev.dates.start.localDate;
+                  let when = 'TBA';
+                  if (localDate) {
+                    const d = new Date(localDate + 'T00:00:00');
+                    if (!isNaN(d.getTime())) {
+                      when = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                    }
+                  }
+                  const url = ev.url || '';
+                  lines.push(`• ${artist} — ${when}${url ? ` · Buy: ${url}` : ''}`);
+                }
+                const tail = `Call ${v.phone || '(904) 209-0881'} or visit ${v.website || 'https://www.pvconcerthall.com'} for more.`;
+                answer = `${lines.join('\n')}\n${tail}`;
+              }
+            }
+          } catch (_e) {
+            // silent fallback to static narrative
+          }
+        }
+
         return res.json({
           ok: true,
-          answer: parts.join(' '),
+          answer,
           results: [v],
           intent: { taskClass: 'entertainment', group: 'entertainment' },
           followUp: true,
@@ -6988,6 +7023,27 @@ router.get('/labor-market-compare', async (req, res) => {
       [zips]
     );
     return res.json({ zips: rows, count: rows.length });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/local-intel/admin/tm-probe ───────────────────────────────────────
+// Admin-only probe to inspect raw Ticketmaster Discovery API responses for
+// venue/event lookups around Ponte Vedra (32082). Used to verify TM key + payload
+// shape before wiring TM data into the venue follow-up flow.
+router.get('/admin/tm-probe', async (req, res) => {
+  if (req.headers['x-admin-token'] !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const key = process.env.Ticketmaster_Consumer_Key;
+  if (!key) return res.json({ error: 'no TM key configured' });
+  try {
+    const venueUrl = `https://app.ticketmaster.com/discovery/v2/venues.json?keyword=ponte+vedra+concert+hall&countryCode=US&stateCode=FL&apikey=${key}`;
+    const eventUrl = `https://app.ticketmaster.com/discovery/v2/events.json?postalCode=32082&classificationName=music&size=5&apikey=${key}`;
+    const [venueResp, eventResp] = await Promise.all([fetch(venueUrl), fetch(eventUrl)]);
+    const [venueSearch, eventSearch] = await Promise.all([venueResp.json(), eventResp.json()]);
+    return res.json({ venueSearch, eventSearch });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
