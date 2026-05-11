@@ -4615,6 +4615,23 @@ const _AT_BIZ_RE = /^(?:at|from)\s+(.+?)(?:\s+(?:in|near)\s+.+)?$/i;
 const _pendingOrderIntent = new Map();
 const _PENDING_ORDER_TTL_MS = 300_000;
 
+// Venue context for follow-up questions ("can I buy a ticket", "how do I get there").
+// 10-minute TTL; stored entries: a single venue result object + ts.
+const _pendingVenueContext = new Map();
+const _VENUE_CTX_TTL_MS = 600_000;
+const _VENUE_FOLLOWUP_RE = /\b(?:buy\s+(?:a\s+)?ticket|get\s+ticket|purchase\s+ticket|tickets?\b|how\s+do\s+i\s+get\s+there|directions?\b|where\s+is\s+it|phone\s+number|call\s+them|their\s+website|website\b|what\s+time|hours\b|when\s+do\s+they\s+open|when\s+are\s+they\s+open)\b/i;
+
+function _getVenueContext(sessionId) {
+  if (!sessionId) return null;
+  const entry = _pendingVenueContext.get(sessionId);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > _VENUE_CTX_TTL_MS) {
+    _pendingVenueContext.delete(sessionId);
+    return null;
+  }
+  return entry;
+}
+
 function detectOrderItemIntent(raw) {
   if (!raw) return { isOrderItem: false, itemQuery: null, bizName: null };
   const trimmed = raw.trim();
@@ -4766,6 +4783,27 @@ router.get('/search', async (req, res) => {
     // by sessionId and ask which restaurant. The next message ("at McFlamingo")
     // is resolved against the pending intent.
     const sessionId = (req.headers['x-session-id'] || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || '').toString().split(',')[0].trim() || null;
+
+    // Venue follow-up: "can I buy a ticket", "how do I get there", etc.
+    // Resolves against the most-recent single venue result stored for this session.
+    if (sessionId && raw) {
+      const venueCtx = _getVenueContext(sessionId);
+      if (venueCtx && _VENUE_FOLLOWUP_RE.test(raw)) {
+        const v = venueCtx;
+        const parts = [`${v.name} is your best bet.`];
+        if (v.phone) parts.push(`Call them at ${v.phone}.`);
+        if (v.website) parts.push(`Tickets and info at ${v.website}.`);
+        if (v.address) parts.push(`Located at ${v.address}.`);
+        return res.json({
+          ok: true,
+          answer: parts.join(' '),
+          results: [v],
+          intent: { taskClass: 'entertainment', group: 'entertainment' },
+          followUp: true,
+          latency_ms: Date.now() - t0,
+        });
+      }
+    }
 
     const _resolveOrderItem = async (itemQuery, bizName) => {
       const nameLike = `%${bizName}%`;
@@ -5589,6 +5627,15 @@ router.get('/search', async (req, res) => {
           [intentGroup, zip || 'unknown', raw || cat || '']
         ).catch(e => console.error('[/search] rfq_gaps insert error:', e.message));
         console.warn(`[GAP /search] unresolved: "${raw || cat}" zip=${zip || 'none'} group=${intentGroup}`);
+      }
+    }
+
+    // Store venue context for follow-up questions (e.g. "can I buy a ticket")
+    if (sessionId && results.length === 1) {
+      const r = results[0];
+      const venueCategories = ['concert_hall','music_venue','theatre','theater','amphitheatre','amphitheater','community_centre','entertainment','nightclub','comedy_club','stadium','arena'];
+      if (venueCategories.includes(r.category) || r.group === 'entertainment') {
+        _pendingVenueContext.set(sessionId, { ...r, ts: Date.now() });
       }
     }
 
