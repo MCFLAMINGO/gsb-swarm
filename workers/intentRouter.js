@@ -463,16 +463,21 @@ const _ORDER_ITEM_HINT = /(?:\border(?:\s+me)?\s+|\bI(?:'d|\s+would)\s+like\s+|\
 const _NEEDS_OPEN_RE = /\b(right now|open now|open right now|currently open|near me|nearby|tonight|now)\b/i;
 
 /**
- * classifyIntent(query) →
+ * classifyIntent(query, nlHints) →
  *   { type: 'ORDER_ITEM', raw }
- *   | { type: 'CATEGORY_SEARCH', categories, cuisines, needsOpenNow, raw }
- *   | { type: 'TEXT_SEARCH', raw }
+ *   | { type: 'CATEGORY_SEARCH', categories, cuisine, cuisines, needsOpenNow, raw }
+ *   | { type: 'TEXT_SEARCH', cuisine, raw }
+ *
+ * nlHints — optional { cuisine } from the caller (e.g. nlIntentEarly.cuisine)
+ * so the downstream SQL can apply a cuisine filter. Defaults to {} so existing
+ * callers still work unchanged.
  */
-function classifyIntent(query) {
+function classifyIntent(query, nlHints = {}) {
   const raw = String(query || '');
   const q   = raw.toLowerCase().trim();
+  const hintCuisine = nlHints && nlHints.cuisine ? nlHints.cuisine : null;
 
-  if (!q) return { type: 'TEXT_SEARCH', raw };
+  if (!q) return { type: 'TEXT_SEARCH', cuisine: hintCuisine, raw };
 
   // 1) ORDER_ITEM short-circuit — keep Basalt order flow intact
   if (_ORDER_ITEM_HINT.test(raw)) {
@@ -501,6 +506,7 @@ function classifyIntent(query) {
     return {
       type: 'CATEGORY_SEARCH',
       categories,
+      cuisine: hintCuisine,
       cuisines: [],
       needsOpenNow,
       matchedKeyword: matched,
@@ -509,7 +515,7 @@ function classifyIntent(query) {
   }
 
   // 3) Fallback — full-text search
-  return { type: 'TEXT_SEARCH', raw };
+  return { type: 'TEXT_SEARCH', cuisine: hintCuisine, raw };
 }
 
 module.exports = {

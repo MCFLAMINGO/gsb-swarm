@@ -321,7 +321,25 @@ function _parseHours(h) {
 // Phase 2 — category-filter search. Returns flat array (db.query returns array).
 async function searchByCategory(intent, zip, limit = 50) {
   const cats = intent.categories;
+  const cuisine = intent.cuisine || null;
   const zips = (!zip || zip === 'all') ? TARGET_ZIPS : [zip];
+
+  // Build WHERE clause dynamically so cuisine filter can be added when present.
+  const conditions = [
+    `status != 'inactive'`,
+    `zip = ANY($1::text[])`,
+    `(category = ANY($2::text[]) OR tags && $2::text[])`,
+  ];
+  const params = [zips, cats];
+  let p = 3;
+
+  if (cuisine) {
+    conditions.push(`(cuisine ILIKE $${p} OR description ILIKE $${p} OR category ILIKE $${p})`);
+    params.push(`%${cuisine}%`);
+    p++;
+  }
+  params.push(limit);
+
   const sql = `
     SELECT
       business_id, name, address, city, zip, phone, website,
@@ -332,13 +350,11 @@ async function searchByCategory(intent, zip, limit = 50) {
       pos_config->>'pos_type' AS pos_type,
       CASE WHEN wallet IS NOT NULL THEN 1 ELSE 0 END AS has_wallet
     FROM businesses
-    WHERE status != 'inactive'
-      AND zip = ANY($1::text[])
-      AND (category = ANY($2::text[]) OR tags && $2::text[])
+    WHERE ${conditions.join(' AND ')}
     ORDER BY has_wallet DESC, confidence_score DESC, name ASC
-    LIMIT $3
+    LIMIT $${p}
   `;
-  const rows = await db.query(sql, [zips, cats, limit]);
+  const rows = await db.query(sql, params);
   if (intent.needsOpenNow) {
     const filtered = rows.filter(r => {
       const parsed = _parseHours(r.hours);
@@ -609,8 +625,22 @@ function buildNarrative(results, nlIntent, meta) {
 
     const howPhrase = meta?.semantic_search ? ' (found by meaning, not just keywords)' : '';
 
+    // Relevance gate — when the query has a cuisine, only describe results as
+    // that cuisine when the top result actually matches. Otherwise we'd be
+    // dressing up an unrelated claimed/wallet business (e.g. McFlamingo
+    // surfacing first on an "italian" query) with a confidently-wrong blurb.
     if (cuisine) {
-      return `Found ${count} ${cuisine} restaurant${count !== 1 ? 's' : ''}${timePhrase} near you${howPhrase}.`;
+      const top = results[0] || {};
+      const cuisineLc = String(cuisine).toLowerCase();
+      const fields = [top.cuisine, top.category, top.description]
+        .filter(Boolean)
+        .map(s => String(s).toLowerCase());
+      const topMatchesCuisine = fields.some(f => f.includes(cuisineLc));
+      if (topMatchesCuisine) {
+        return `Found ${count} ${cuisine} restaurant${count !== 1 ? 's' : ''}${timePhrase} near you${howPhrase}.`;
+      }
+      // Top result doesn't match the cuisine — fall through to a neutral
+      // narrative rather than claiming N "<cuisine> restaurants".
     }
     if (category) {
       return `Found ${count} ${category}${count !== 1 ? 's' : ''}${timePhrase} near you${howPhrase}.`;
@@ -1149,7 +1179,7 @@ router.post('/', async (req, res) => {
     // _phase2Intent hoisted — lets tsvector fallback scope by category (Fix 3)
     let _phase2Intent = null;
     if (query && !category && !group) {
-      const intent = classifyIntent(query);
+      const intent = classifyIntent(query, { cuisine: nlIntentEarly.cuisine || null });
       _phase2Intent = intent;
       if (intent.type === 'CATEGORY_SEARCH' || intent.type === 'TEXT_SEARCH') {
         try {
