@@ -107,7 +107,23 @@ const { dispatchTask } = require('./lib/taskDispatch');
 const { resolveBusinessAlias } = require('./lib/aliasResolver');
 const { injectShowcase } = require('./lib/showcaseBiz');
 const { logDeadEnd } = require('./lib/deadEndLog');
+const { logSmsQuery } = require('./lib/smsQueryLog');
 const apiKeyMiddleware = createApiKeyMiddleware(db);
+
+// B16 — fire-and-forget SMS query history. Only logs for Twilio channel
+// (customerId starts with '+', E.164). NEVER blocks the response.
+function maybeLogSms(req, { customerId, query, zip, intent, resolvedVia, responsePreview }) {
+  if (!customerId || !String(customerId).startsWith('+')) return;
+  logSmsQuery({
+    messageSid: req?.body?.MessageSid || null,
+    callerId: customerId,
+    query: query || '',
+    zip: zip || null,
+    intent: intent || 'unmatched',
+    resolvedVia: resolvedVia || 'unmatched',
+    responsePreview: responsePreview || null,
+  });
+}
 
 // Phase 2 — multi-ZIP fanout when caller doesn't pin a ZIP
 const TARGET_ZIPS = ['32082','32081','32250','32266','32233','32259','32034'];
@@ -860,6 +876,15 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip, service
     };
     _rfqMeta.narrative = buildNarrative([], nlIntent, { ..._rfqMeta, zip });
 
+    maybeLogSms(req, {
+      customerId,
+      query: userQuery,
+      zip,
+      intent: nlIntent?.category || nlIntent?.group || 'rfq',
+      resolvedVia: 'rfq',
+      responsePreview: customerMsg,
+    });
+
     return res.json({
       ok: true,
       rfq_id: rfqId,
@@ -978,10 +1003,19 @@ async function handleReservation(req, res, query, customerId, zip) {
         intentPath: `reservation:${bizNameRaw || 'no_name'}`,
         callerId: customerId || null,
       });
+      const _resvNotFoundMsg = `I couldn't find a restaurant${cityHint} in that area. Try a different name or check the spelling.`;
+      maybeLogSms(req, {
+        customerId,
+        query,
+        zip,
+        intent: 'reservation',
+        resolvedVia: 'unmatched',
+        responsePreview: _resvNotFoundMsg,
+      });
       return res.json({
         ok: true,
         type: 'reservation_not_found',
-        message: `I couldn't find a restaurant${cityHint} in that area. Try a different name or check the spelling.`,
+        message: _resvNotFoundMsg,
         results: [],
         meta: { resolves_via: 'reservation' }
       });
@@ -1018,6 +1052,15 @@ async function handleReservation(req, res, query, customerId, zip) {
        VALUES ($1, 'RESERVATION', 'food', NULL, $2, $3, true, 'reservation', $4, 0)`,
       [query, zip || searchZips[0], biz.id, businesses.length]
     ).catch(err => console.error('[reservation] resolution_history write failed:', err.message));
+
+    maybeLogSms(req, {
+      customerId,
+      query,
+      zip,
+      intent: 'reservation',
+      resolvedVia: 'reservation',
+      responsePreview: message,
+    });
 
     return res.json({
       ok: true,
@@ -1108,10 +1151,19 @@ router.post('/', async (req, res) => {
       const { parseSlangSubmission } = require('./lib/slangParser');
       const slangParsed = parseSlangSubmission(query);
       if (slangParsed) {
+        const _slangMsg = `Looks like a slang submission! Use: POST /api/local-intel/slang with { query: "${query}" } or tap the "Add Slang" button.`;
+        maybeLogSms(req, {
+          customerId,
+          query,
+          zip,
+          intent: 'slang',
+          resolvedVia: 'alias',
+          responsePreview: _slangMsg,
+        });
         return res.json({
           ok: true,
           type: 'slang_submission_hint',
-          message: `Looks like a slang submission! Use: POST /api/local-intel/slang with { query: "${query}" } or tap the "Add Slang" button.`,
+          message: _slangMsg,
           parsed: slangParsed,
           meta: { resolves_via: 'slang_submission' }
         });
@@ -1190,10 +1242,19 @@ router.post('/', async (req, res) => {
         const multiHint = (taskIntent.allTasks && taskIntent.allTasks.length > 1)
           ? ` (I also see ${taskIntent.allTasks.slice(1).map(t => t.cat.replace(/_/g,' ')).join(' and ')} — we\'ll handle those next)`
           : '';
+        const _followupMsg = taskIntent.followUp + multiHint;
+        maybeLogSms(req, {
+          customerId,
+          query,
+          zip,
+          intent: taskIntent.cat || 'task',
+          resolvedVia: 'task_followup',
+          responsePreview: _followupMsg,
+        });
         return res.json({
           ok: true,
           type: 'followup',
-          message: taskIntent.followUp + multiHint,
+          message: _followupMsg,
           results: [],
           meta: {
             task_type:     taskIntent.taskType,
@@ -1335,6 +1396,16 @@ router.post('/', async (req, res) => {
               { ...nlIntentEarly, category: (intent.categories && intent.categories[0]) || nlIntentEarly.category },
               { ..._phase2Meta, zip }
             );
+            maybeLogSms(req, {
+              customerId,
+              query,
+              zip,
+              intent: (intent.categories && intent.categories[0]) || intent.type || 'search',
+              resolvedVia: 'search',
+              responsePreview: _phase2Meta.narrative
+                || (enriched[0] && `Top result: ${enriched[0].name}`)
+                || '',
+            });
             return res.json({
               ok:       true,
               total:    enriched.length,
@@ -1377,11 +1448,20 @@ router.post('/', async (req, res) => {
                 resolves_via: resolvesVia,
               };
               _gapMeta.narrative = buildNarrative([], nlIntentEarly, { ..._gapMeta, zip });
+              const _gapMsg = `We're on it — looking for "${query}" in ${zip || 'your area'}. You'll hear back shortly.`;
+              maybeLogSms(req, {
+                customerId,
+                query,
+                zip,
+                intent: intent.type || 'DISCOVER',
+                resolvedVia: 'unmatched',
+                responsePreview: _gapMsg,
+              });
               return res.json({
                 ok: true,
                 taskCreated: true,
                 taskId: task.task_id,
-                message: `We're on it — looking for "${query}" in ${zip || 'your area'}. You'll hear back shortly.`,
+                message: _gapMsg,
                 businesses: [],
                 results: [],
                 total: 0,
@@ -1813,6 +1893,24 @@ router.post('/', async (req, res) => {
       coverage:      '113,684 businesses — Florida statewide',
     };
     _meta.narrative = buildNarrative(rows, nlIntent, { ..._meta, zip });
+
+    const _legacyResolvedVia = rows.length > 0
+      ? (pinnedAliasBusinessId ? 'alias' : (usedSemantic ? 'pgvector' : (usedTsFallback ? 'tsvector' : 'search')))
+      : 'unmatched';
+    const _legacyIntent = effectiveCategory
+      || effectiveGroup
+      || nlIntent?.taskClass
+      || (pinnedAliasBusinessId ? 'alias' : 'search');
+    maybeLogSms(req, {
+      customerId,
+      query,
+      zip,
+      intent: _legacyIntent,
+      resolvedVia: _legacyResolvedVia,
+      responsePreview: _meta.narrative
+        || (rows[0] && `Top result: ${rows[0].name}`)
+        || (rows.length === 0 ? `No results for "${query}" in ${zip || 'your area'}` : ''),
+    });
 
     res.json({
       ok:       true,
@@ -8361,6 +8459,31 @@ router.get('/admin/worker/status', async (req, res) => {
     return res.json(workerRunner.getCatalogue());
   } catch (e) {
     return res.status(500).json({ error: e.message });
+  }
+});
+
+// ── B16 — GET /api/local-intel/sms-log (admin) ────────────────────────────────
+// Returns the most recent SMS queries logged via lib/smsQueryLog. Auth via the
+// shared x-admin-token header used by other migrate/admin endpoints.
+router.get('/sms-log', async (req, res) => {
+  const token = req.headers['x-admin-token'];
+  if (token !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    const rows = await db.query(
+      `SELECT id, message_sid, caller_id, query, zip, intent, resolved_via,
+              response_preview, created_at
+         FROM sms_query_log
+        ORDER BY created_at DESC
+        LIMIT $1`,
+      [limit]
+    );
+    return res.json({ count: rows.length, queries: rows });
+  } catch (err) {
+    console.error('[sms-log] query failed:', err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
 
