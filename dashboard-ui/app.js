@@ -2051,6 +2051,179 @@ async function loadCesStatus() {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  CALL TRANSCRIPTS + DEAD ENDS — LocalIntel admin panels (B15)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function formatCallTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  let h = d.getHours();
+  const m = d.getMinutes().toString().padStart(2, '0');
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()} ${h}:${m} ${ampm}`;
+}
+
+function formatDuration(sec) {
+  if (sec == null || isNaN(sec)) return '—';
+  const s = Math.floor(Number(sec));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  if (m === 0) return r + 's';
+  return m + 'm ' + r + 's';
+}
+
+function transcriptStatusClass(status) {
+  const s = (status || '').toLowerCase();
+  if (s === 'transcribed' || s === 'completed' || s === 'ok') return 'green';
+  if (s === 'failed' || s === 'error') return 'red';
+  return 'gold';
+}
+
+async function loadTranscripts() {
+  const tbody = document.getElementById('tx-tbody');
+  const badge = document.getElementById('tx-count-badge');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" class="muted center">Loading…</td></tr>';
+  if (badge) badge.textContent = '…';
+
+  try {
+    const r = await fetch(`${LI_BASE}/call-transcripts?limit=50`, {
+      headers: { 'x-admin-token': LI_ADMIN_TOKEN },
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    const items = Array.isArray(data) ? data : (data.transcripts || data.items || data.calls || []);
+
+    if (!items.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="muted center" style="padding:32px">No calls yet — call (904) 506-7476 to test</td></tr>';
+      if (badge) badge.textContent = '0 calls';
+      return;
+    }
+
+    if (badge) badge.textContent = `${items.length} call${items.length === 1 ? '' : 's'}`;
+
+    tbody.innerHTML = '';
+    items.forEach((item, idx) => {
+      const time = formatCallTime(item.created_at || item.ts || item.timestamp);
+      const caller = item.caller_id || item.from || item.caller || '—';
+      const dur = formatDuration(item.duration_sec ?? item.duration ?? item.duration_seconds);
+      const status = item.status || (item.transcript ? 'transcribed' : 'pending');
+      const transcript = item.transcript || item.transcript_text || '';
+      const truncated = transcript.length > 100 ? transcript.slice(0, 100) + '…' : (transcript || '—');
+
+      const tr = document.createElement('tr');
+      tr.className = 'tx-transcript-row';
+      tr.dataset.rowIdx = idx;
+      tr.innerHTML = `
+        <td>${esc(time)}</td>
+        <td class="mono">${esc(caller)}</td>
+        <td class="mono">${esc(dur)}</td>
+        <td><span class="badge ${transcriptStatusClass(status)}">${esc(status)}</span></td>
+        <td class="tx-transcript-cell" data-full="${esc(transcript)}">${esc(truncated)}</td>`;
+      tbody.appendChild(tr);
+    });
+
+    tbody.querySelectorAll('.tx-transcript-cell').forEach(cell => {
+      cell.addEventListener('click', () => {
+        const row = cell.parentElement;
+        const full = cell.dataset.full || '';
+        if (!full) return;
+        const expanded = row.classList.toggle('expanded');
+        cell.textContent = expanded ? full : (full.length > 100 ? full.slice(0, 100) + '…' : full);
+      });
+    });
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" class="muted center" style="padding:24px;color:var(--red)">Error: ${esc(e.message)}</td></tr>`;
+    if (badge) badge.textContent = 'error';
+  }
+}
+
+let _deadEndsCache = [];
+
+function renderDeadEnds(items, filter) {
+  const tbody = document.getElementById('de-tbody');
+  const badge = document.getElementById('de-count-badge');
+  if (!tbody) return;
+
+  const filtered = filter
+    ? items.filter(it => (it.fail_reason || it.reason || '') === filter)
+    : items;
+
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="muted center" style="padding:32px">${items.length ? 'No matches for this filter' : 'No dead ends logged yet'}</td></tr>`;
+    if (badge) badge.textContent = '0';
+    return;
+  }
+
+  if (badge) badge.textContent = `${filtered.length}${filter ? ' / ' + items.length : ''}`;
+
+  tbody.innerHTML = '';
+  filtered.forEach(item => {
+    const time = formatCallTime(item.created_at || item.ts || item.timestamp);
+    const query = item.query || item.raw_query || item.query_text || '—';
+    const zip = item.zip || item.zip_code || '—';
+    const channel = (item.channel || '—').toLowerCase();
+    const failReason = item.fail_reason || item.reason || 'unknown';
+    const intentPath = item.intent_path || item.intent || item.attempted_intent || '—';
+
+    const channelClass = ['web','twilio','voice'].includes(channel) ? `channel-${channel}` : '';
+    const failClass = `fail-${failReason}`;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${esc(time)}</td>
+      <td class="tx-query-cell">${esc(query)}</td>
+      <td class="mono">${esc(zip)}</td>
+      <td><span class="badge ${channelClass}">${esc(channel)}</span></td>
+      <td><span class="badge ${failClass}">${esc(failReason)}</span></td>
+      <td class="mono muted">${esc(intentPath)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function loadDeadEnds() {
+  const tbody = document.getElementById('de-tbody');
+  const badge = document.getElementById('de-count-badge');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="6" class="muted center">Loading…</td></tr>';
+  if (badge) badge.textContent = '…';
+
+  try {
+    const r = await fetch(`${LI_BASE}/dead-ends?limit=100`, {
+      headers: { 'x-admin-token': LI_ADMIN_TOKEN },
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    const items = Array.isArray(data) ? data : (data.dead_ends || data.deadEnds || data.items || []);
+    _deadEndsCache = items;
+    const filter = document.getElementById('de-filter')?.value || '';
+    renderDeadEnds(items, filter);
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6" class="muted center" style="padding:24px;color:var(--red)">Error: ${esc(e.message)}</td></tr>`;
+    if (badge) badge.textContent = 'error';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.nav-item[data-section="transcripts"]').forEach(el => {
+    el.addEventListener('click', () => setTimeout(loadTranscripts, 50));
+  });
+  document.querySelectorAll('.nav-item[data-section="deadends"]').forEach(el => {
+    el.addEventListener('click', () => setTimeout(loadDeadEnds, 50));
+  });
+  document.getElementById('tx-refresh-btn')?.addEventListener('click', loadTranscripts);
+  document.getElementById('de-refresh-btn')?.addEventListener('click', loadDeadEnds);
+  document.getElementById('de-filter')?.addEventListener('change', () => {
+    const filter = document.getElementById('de-filter').value;
+    renderDeadEnds(_deadEndsCache, filter);
+  });
+});
+
 // Test the labor_market_intel MCP tool live against ZIP 32082
 async function testLaborMarket() {
   const outEl = document.getElementById('li-ces-test-output');

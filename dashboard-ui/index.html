@@ -30,6 +30,14 @@
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
       <span>&#9679; Intelligence</span>
     </a>
+    <a href="#transcripts" class="nav-item" data-section="transcripts">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+      <span>Transcripts</span>
+    </a>
+    <a href="#deadends" class="nav-item" data-section="deadends">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <span>Dead Ends</span>
+    </a>
     <div class="nav-section-label">GSB SWARM</div>
     <a href="#brief"  class="nav-item" data-section="brief">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
@@ -905,6 +913,65 @@
     </div>
   </section>
 
+  <!-- ── Call Transcripts ─────────────────────────────────────────────────── -->
+  <section class="section" id="section-transcripts">
+    <div class="section-header">
+      <h2>Call Transcripts</h2>
+      <span class="badge" id="tx-count-badge">—</span>
+      <button class="btn-ghost-sm" id="tx-refresh-btn" style="margin-left:auto;">↻ Refresh</button>
+    </div>
+    <div class="jobs-table-wrap">
+      <table class="jobs-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Caller</th>
+            <th>Duration</th>
+            <th>Status</th>
+            <th>Transcript</th>
+          </tr>
+        </thead>
+        <tbody id="tx-tbody">
+          <tr><td colspan="5" class="muted center">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── Dead Ends ────────────────────────────────────────────────────────── -->
+  <section class="section" id="section-deadends">
+    <div class="section-header">
+      <h2>Intent Dead Ends</h2>
+      <span class="badge" id="de-count-badge">—</span>
+      <select id="de-filter" class="de-filter-select">
+        <option value="">All reasons</option>
+        <option value="no_intent">no_intent</option>
+        <option value="no_results">no_results</option>
+        <option value="no_wallet">no_wallet</option>
+        <option value="rfq_fail">rfq_fail</option>
+        <option value="reservation_fail">reservation_fail</option>
+        <option value="unknown">unknown</option>
+      </select>
+      <button class="btn-ghost-sm" id="de-refresh-btn" style="margin-left:auto;">↻ Refresh</button>
+    </div>
+    <div class="jobs-table-wrap">
+      <table class="jobs-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Query</th>
+            <th>ZIP</th>
+            <th>Channel</th>
+            <th>Fail Reason</th>
+            <th>Intent Path</th>
+          </tr>
+        </thead>
+        <tbody id="de-tbody">
+          <tr><td colspan="6" class="muted center">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
 </main>
 

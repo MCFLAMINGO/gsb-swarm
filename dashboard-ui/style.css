@@ -1956,3 +1956,55 @@ body {
   overflow-y: auto;
   line-height: 1.5;
 }
+
+/* ── Transcripts + Dead Ends panels ─────────────────────────────────────── */
+.de-filter-select {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  outline: none;
+}
+.de-filter-select:focus { border-color: var(--accent); }
+
+.tx-transcript-cell {
+  max-width: 480px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tx-transcript-cell:hover { color: var(--accent); }
+.tx-transcript-row.expanded td {
+  white-space: normal;
+  background: var(--surface-2);
+}
+.tx-transcript-row.expanded .tx-transcript-cell {
+  white-space: pre-wrap;
+  color: var(--text);
+  max-width: none;
+}
+
+.tx-query-cell {
+  max-width: 360px;
+  font-family: var(--font-mono);
+  white-space: normal;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.badge.channel-web    { background: var(--blue-bg);   color: var(--blue); }
+.badge.channel-twilio { background: var(--gold-bg);   color: var(--gold); }
+.badge.channel-voice  { background: var(--gold-bg);   color: var(--gold); }
+.badge.fail-no_intent       { background: var(--surface-3); color: var(--text-muted); }
+.badge.fail-no_results      { background: var(--gold-bg);   color: var(--gold); }
+.badge.fail-no_wallet       { background: var(--red-bg);    color: var(--red); }
+.badge.fail-rfq_fail        { background: var(--red-bg);    color: var(--red); }
+.badge.fail-reservation_fail { background: var(--red-bg);   color: var(--red); }
+.badge.fail-unknown         { background: var(--surface-3); color: var(--text-muted); }
