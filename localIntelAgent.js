@@ -8142,6 +8142,182 @@ router.get('/admin/tm-probe', async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/backfill-sjc-cama ─────────────────────────────────
+// B13: One-shot backfill of St. Johns beds/baths/sqft/year_built from CAMA
+// files if present on the Railway volume. Safe to call when files are absent —
+// returns { status: 'no_cama_data' } rather than erroring. The next quarterly
+// reseed_cron run pulls the bundles fresh, so this endpoint exists only to
+// enrich the already-seeded 171k records immediately if the volume has them.
+//
+// Looks for CAMADataSup.mdb (StructElemViewUnit + BldView) in:
+//   /data/sjcpa/CAMADataSup.mdb
+//   /app/data/sjcpa/CAMADataSup.mdb
+//   /tmp/sjcpa/CAMADataSup.mdb
+//   $SJCPA_DATA_DIR/CAMADataSup.mdb (env override)
+//
+// Token gate: x-admin-token: localintel-migrate-2026 OR LOCAL_INTEL_ADMIN_TOKEN.
+router.post('/backfill-sjc-cama', express.json(), async (req, res) => {
+  const token = req.headers['x-admin-token'] || req.query.admin_token;
+  if (token !== process.env.LOCAL_INTEL_ADMIN_TOKEN && token !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  const { execFile } = require('child_process');
+  const { promisify } = require('util');
+  const execFileP = promisify(execFile);
+  const fs = require('fs');
+  const path = require('path');
+
+  const candidates = [
+    process.env.SJCPA_DATA_DIR ? path.join(process.env.SJCPA_DATA_DIR, 'CAMADataSup.mdb') : null,
+    '/data/sjcpa/CAMADataSup.mdb',
+    '/app/data/sjcpa/CAMADataSup.mdb',
+    '/tmp/sjcpa/CAMADataSup.mdb',
+  ].filter(Boolean);
+
+  const mdbPath = candidates.find((p) => { try { return fs.statSync(p).isFile(); } catch (_) { return false; } });
+  if (!mdbPath) {
+    return res.json({
+      status: 'no_cama_data',
+      message: 'CAMA files not on volume — will enrich on next quarterly reseed',
+      checked_paths: candidates,
+    });
+  }
+
+  function parseCsv(text) {
+    const rows = [];
+    let cur = [], field = '', inQ = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inQ) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; }
+          else { inQ = false; }
+        } else { field += c; }
+      } else {
+        if (c === '"') inQ = true;
+        else if (c === ',') { cur.push(field); field = ''; }
+        else if (c === '\n') { cur.push(field); rows.push(cur); cur = []; field = ''; }
+        else if (c === '\r') { /* skip */ }
+        else field += c;
+      }
+    }
+    if (field.length || cur.length) { cur.push(field); rows.push(cur); }
+    return rows;
+  }
+  async function mdbExportRows(tableName) {
+    const { stdout } = await execFileP('mdb-export', [mdbPath, tableName], { maxBuffer: 1024 * 1024 * 1024 });
+    const rows = parseCsv(stdout);
+    if (!rows.length) return [];
+    const header = rows[0].map((h) => h.toLowerCase().trim());
+    const out = [];
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.length === 1 && r[0] === '') continue;
+      const obj = {};
+      for (let j = 0; j < header.length; j++) obj[header[j]] = r[j] ?? '';
+      out.push(obj);
+    }
+    return out;
+  }
+
+  try {
+    const sevRows = await mdbExportRows('StructElemViewUnit');
+    const bedsByStrap  = new Map();
+    const bathsByStrap = new Map();
+    for (const r of sevRows) {
+      const strap = (r.strap || '').trim();
+      if (!strap) continue;
+      const cd = (r.cd || '').trim();
+      const unitsRaw = (r.units || '').trim();
+      if (!unitsRaw) continue;
+      const n = parseFloat(unitsRaw);
+      if (!Number.isFinite(n) || n === 0) continue;
+      if (cd === '1') bedsByStrap.set(strap,  (bedsByStrap.get(strap)  || 0) + n);
+      else if (cd === '2') bathsByStrap.set(strap, (bathsByStrap.get(strap) || 0) + n);
+    }
+
+    const bldRows = await mdbExportRows('BldView');
+    const bldByStrap = new Map();
+    for (const r of bldRows) {
+      const strap = (r.strap || '').trim();
+      if (!strap || bldByStrap.has(strap)) continue;
+      bldByStrap.set(strap, {
+        heat_ar: r.heated_ar || r.heat_ar || '',
+        act:     r.act       || '',
+        eff:     r.eff       || '',
+      });
+    }
+
+    const straps = new Set([...bedsByStrap.keys(), ...bathsByStrap.keys(), ...bldByStrap.keys()]);
+    let updated = 0;
+    let scanned = 0;
+    const BATCH = 500;
+    let batch = [];
+
+    async function flush() {
+      if (!batch.length) return;
+      const placeholders = batch.map((_, i) => `($${i * 5 + 1}, $${i * 5 + 2}::numeric, $${i * 5 + 3}::numeric, $${i * 5 + 4}::numeric, $${i * 5 + 5}::int)`).join(',');
+      const params = [];
+      for (const row of batch) {
+        params.push(row.strap, row.beds, row.baths, row.sqft, row.yr);
+      }
+      const sql = `
+        WITH src(strap, beds, baths, sqft, yr) AS (VALUES ${placeholders})
+        UPDATE property_parcels p
+        SET beds       = COALESCE(src.beds,  p.beds),
+            baths      = COALESCE(src.baths, p.baths),
+            tot_lvg_ar = COALESCE(src.sqft,  p.tot_lvg_ar),
+            act_yr_blt = COALESCE(src.yr,    p.act_yr_blt),
+            fetched_at = NOW()
+        FROM src
+        WHERE p.parcel_id = src.strap AND p.co_no = 65
+      `;
+      const r = await db.query(sql, params);
+      updated += Array.isArray(r) ? r.length : 0;
+      batch = [];
+    }
+
+    for (const strap of straps) {
+      scanned++;
+      const beds  = bedsByStrap.has(strap)  ? bedsByStrap.get(strap)  : null;
+      const baths = bathsByStrap.has(strap) ? bathsByStrap.get(strap) : null;
+      const bld   = bldByStrap.get(strap) || {};
+      const sqft  = bld.heat_ar && Number.isFinite(parseFloat(bld.heat_ar)) ? parseFloat(bld.heat_ar) : null;
+      const yr    = bld.act && Number.isFinite(parseInt(bld.act, 10)) ? parseInt(bld.act, 10) : null;
+      if (beds === null && baths === null && sqft === null && yr === null) continue;
+      batch.push({ strap, beds, baths, sqft, yr });
+      if (batch.length >= BATCH) await flush();
+    }
+    await flush();
+
+    const verify = await db.query(`
+      SELECT COUNT(*)::int AS total,
+             COUNT(beds)::int AS with_beds,
+             COUNT(baths)::int AS with_baths,
+             COUNT(tot_lvg_ar)::int AS with_sqft,
+             COUNT(act_yr_blt)::int AS with_year
+      FROM property_parcels WHERE co_no = 65
+    `);
+
+    return res.json({
+      status: 'ok',
+      source_mdb: mdbPath,
+      struct_elem_rows: sevRows.length,
+      bld_rows: bldRows.length,
+      beds_parcels: bedsByStrap.size,
+      baths_parcels: bathsByStrap.size,
+      bld_parcels: bldByStrap.size,
+      strap_union: scanned,
+      affected: updated,
+      stjohns_after: verify[0] || null,
+    });
+  } catch (e) {
+    console.error('[backfill-sjc-cama]', e && e.message ? e.message : e);
+    return res.status(500).json({ error: e && e.message ? e.message : String(e) });
+  }
+});
+
 // ── On-Demand Worker Trigger ─────────────────────────────────────────────────
 // POST /api/local-intel/admin/worker/run
 //   body: { worker: "btrWorker" }      → spawn one worker

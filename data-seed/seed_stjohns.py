@@ -2,6 +2,9 @@ import os
 """
 St. Johns seed v2 — correct field names from ParcelView inspection.
 Fields: strap, name, dor_cd, addr_1, city, zip, mkt_val, jst_val, soh_val, tax_val, tot_lnd_val, acreage
+
+B13: StructElemViewUnit parsing for beds/baths (cd=1=bed, cd=2=bath) +
+BldView fields heated_ar (living_sqft) and Act (year_built) confirmed mapped.
 """
 import subprocess, csv, io, time, os, pickle, sys
 import psycopg2
@@ -27,6 +30,46 @@ with open('/tmp/sjcpa/cama.pkl', 'rb') as f:
 bld_cama   = cama.get('bld', {})
 sales_cama = cama.get('sales', {})
 print(f"  {len(bld_cama):,} bldg, {len(sales_cama):,} sales", flush=True)
+
+# B13: StructElemViewUnit — beds (cd=1) + baths (cd=2) per parcel.
+# Aggregates by SUM across building elements per strap (a parcel can have
+# multiple buildings each contributing bed/bath rows).
+# Source: CAMADataSup.mdb. cd column identifies element type; units column
+# holds the count. Per SJCPA confirmation 2026-05-11.
+beds_cama = {}
+baths_cama = {}
+CAMASUP_MDB = '/tmp/sjcpa/CAMADataSup.mdb'
+if os.path.exists(CAMASUP_MDB):
+    print("Extracting StructElemViewUnit...", flush=True)
+    t0 = time.time()
+    sev = subprocess.run(
+        ['mdb-export', CAMASUP_MDB, 'StructElemViewUnit'],
+        capture_output=True, text=True, timeout=300
+    )
+    if sev.returncode == 0:
+        sev_reader = csv.DictReader(io.StringIO(sev.stdout))
+        for srow in sev_reader:
+            sr = {k.lower().strip(): v for k, v in srow.items()}
+            strap_k = (sr.get('strap', '') or '').strip()
+            cd      = (sr.get('cd', '') or '').strip()
+            units_s = (sr.get('units', '') or '').strip()
+            if not strap_k or not units_s:
+                continue
+            try:
+                n = float(units_s)
+            except (ValueError, TypeError):
+                continue
+            if not n or n != n:  # filter NaN/zero
+                continue
+            if cd == '1':
+                beds_cama[strap_k] = beds_cama.get(strap_k, 0) + n
+            elif cd == '2':
+                baths_cama[strap_k] = baths_cama.get(strap_k, 0) + n
+        print(f"  {len(beds_cama):,} parcels with beds, {len(baths_cama):,} parcels with baths in {time.time()-t0:.1f}s", flush=True)
+    else:
+        print(f"  WARN StructElemViewUnit export failed: {sev.stderr[:200]}", flush=True)
+else:
+    print(f"  WARN {CAMASUP_MDB} not present — beds/baths will be NULL", flush=True)
 
 # Also load SiteView for physical address if ParcelView addr_1 is mailing address
 # Actually addr_1 IS the site address for most parcels (confirmed from sample)
@@ -118,6 +161,10 @@ with open(TSV, 'w') as f:
                             sy1 = str(y if y > 100 else (2000+y if y < 50 else 1900+y))
                         except: pass
 
+        # B13: beds/baths from StructElemViewUnit
+        beds_v  = beds_cama.get(strap)
+        baths_v = baths_cama.get(strap)
+
         tsv_row = [
             esc(strap), '65', 'st_johns',
             esc(addr1), esc(city), esc(zipcd),
@@ -127,7 +174,8 @@ with open(TSV, 'w') as f:
             ni_tsv(eff_yr), ni_tsv(act_yr),
             r'\N', r'\N', esc(dor_uc),
             nf_tsv(sp1), ni_tsv(sy1), ni_tsv(sm1),
-            r'\N', r'\N',
+            ni_tsv(beds_v) if beds_v is not None else r'\N',
+            nf_tsv(baths_v) if baths_v is not None else r'\N',
         ]
         f.write('\t'.join(tsv_row) + '\n')
         total += 1
@@ -182,6 +230,8 @@ ON CONFLICT (parcel_id) DO UPDATE SET
     eff_yr_blt=EXCLUDED.eff_yr_blt, act_yr_blt=EXCLUDED.act_yr_blt,
     phy_addr1=EXCLUDED.phy_addr1, phy_city=EXCLUDED.phy_city, phy_zipcd=EXCLUDED.phy_zipcd,
     sale_prc1=EXCLUDED.sale_prc1, sale_yr1=EXCLUDED.sale_yr1,
+    beds=COALESCE(EXCLUDED.beds, property_parcels.beds),
+    baths=COALESCE(EXCLUDED.baths, property_parcels.baths),
     fetched_at=NOW()
 """)
 conn.commit()

@@ -503,6 +503,12 @@ async function seedStJohns(pool) {
   const camaSupMdb = camaSupFiles.find((f) => /CAMADataSup\.mdb$/i.test(f)) || camaSupFiles[0];
 
   // Building lookup keyed by strap (first record per strap)
+  // B13: BldView fields per SJCPA confirmation 2026-05-11:
+  //   heated_ar → tot_lvg_ar (living_sqft)
+  //   Act       → act_yr_blt (year_built)
+  //   Eff       → eff_yr_blt
+  // mdb-export lowercases headers, so we read r.heated_ar / r.act / r.eff.
+  // (Older bundles emitted r.heat_ar — fall back to it.)
   log('  parsing BldView');
   const bldRows = await mdbExportRows(camaSupMdb, 'BldView');
   const bldByStrap = new Map();
@@ -510,12 +516,38 @@ async function seedStJohns(pool) {
     const strap = (r.strap || '').trim();
     if (!strap || bldByStrap.has(strap)) continue;
     bldByStrap.set(strap, {
-      heat_ar: r.heat_ar || '',
-      eff:     r.eff     || '',
-      act:     r.act     || '',
+      heat_ar: r.heated_ar || r.heat_ar || '',
+      eff:     r.eff       || '',
+      act:     r.act       || '',
     });
   }
   log(`    ${bldByStrap.size.toLocaleString()} building records`);
+
+  // B13: StructElemViewUnit — beds (cd=1) and baths (cd=2) per parcel.
+  // SUM across building elements per strap (multi-building parcels contribute
+  // multiple rows). cd identifies element type; units holds the count.
+  log('  parsing StructElemViewUnit');
+  const sevRows = await mdbExportRows(camaSupMdb, 'StructElemViewUnit').catch((e) => {
+    log(`    WARN StructElemViewUnit export failed: ${e.message || e}`);
+    return [];
+  });
+  const bedsByStrap  = new Map();
+  const bathsByStrap = new Map();
+  for (const r of sevRows) {
+    const strap = (r.strap || '').trim();
+    if (!strap) continue;
+    const cd = (r.cd || '').trim();
+    const unitsRaw = (r.units || '').trim();
+    if (!unitsRaw) continue;
+    const n = parseFloat(unitsRaw);
+    if (!Number.isFinite(n) || n === 0) continue;
+    if (cd === '1') {
+      bedsByStrap.set(strap, (bedsByStrap.get(strap) || 0) + n);
+    } else if (cd === '2') {
+      bathsByStrap.set(strap, (bathsByStrap.get(strap) || 0) + n);
+    }
+  }
+  log(`    ${bedsByStrap.size.toLocaleString()} parcels with beds, ${bathsByStrap.size.toLocaleString()} parcels with baths`);
 
   // Sales lookup — most recent qualified sale (qu='Q' or non-empty), by strap.
   log('  parsing SalesView');
@@ -580,6 +612,8 @@ async function seedStJohns(pool) {
 
     const bld = bldByStrap.get(strap) || {};
     const sale = salesByStrap.get(strap);
+    const bedsV  = bedsByStrap.get(strap);
+    const bathsV = bathsByStrap.get(strap);
 
     const row = [
       esc(strap), '65', 'st_johns',
@@ -592,7 +626,8 @@ async function seedStJohns(pool) {
       sale ? nf(sale.price) : '\\N',
       sale ? ni(sale.year)  : '\\N',
       sale ? ni(sale.month) : '\\N',
-      '\\N', '\\N',
+      bedsV  !== undefined ? ni(bedsV)  : '\\N',
+      bathsV !== undefined ? nf(bathsV) : '\\N',
     ];
     if (!out.write(row.join('\t') + '\n')) {
       await new Promise((res) => out.once('drain', res));
@@ -604,7 +639,7 @@ async function seedStJohns(pool) {
   log(`  wrote ${tsvPath} ${(sz / 1024 / 1024).toFixed(1)}MB (${total.toLocaleString()} rows)`);
 
   // Free memory
-  bldByStrap.clear(); salesByStrap.clear();
+  bldByStrap.clear(); salesByStrap.clear(); bedsByStrap.clear(); bathsByStrap.clear();
   if (global.gc) global.gc();
 
   const upsertSql = `
@@ -620,6 +655,8 @@ async function seedStJohns(pool) {
       eff_yr_blt=EXCLUDED.eff_yr_blt, act_yr_blt=EXCLUDED.act_yr_blt,
       phy_addr1=EXCLUDED.phy_addr1, phy_city=EXCLUDED.phy_city, phy_zipcd=EXCLUDED.phy_zipcd,
       sale_prc1=EXCLUDED.sale_prc1, sale_yr1=EXCLUDED.sale_yr1,
+      beds=COALESCE(EXCLUDED.beds, property_parcels.beds),
+      baths=COALESCE(EXCLUDED.baths, property_parcels.baths),
       fetched_at=NOW()`;
   await copyAndUpsert(pool, tsvPath, 'tmp_sj', upsertSql);
 
