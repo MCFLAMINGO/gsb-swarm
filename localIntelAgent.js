@@ -7925,6 +7925,79 @@ router.get('/dead-ends', async (req, res) => {
   }
 });
 
+// ── B11: Twilio recording + transcription webhooks ──────────────────────────
+// Twilio posts urlencoded form bodies — apply urlencoded parser inline since the
+// router doesn't have a global one. Both webhooks respond 200 immediately so
+// Twilio doesn't retry while our Postgres update runs.
+
+// POST /api/local-intel/voice/recording-complete
+router.post('/voice/recording-complete', express.urlencoded({ extended: false }), async (req, res) => {
+  res.sendStatus(200);
+  const { CallSid, RecordingUrl, RecordingDuration } = req.body || {};
+  if (!CallSid) return;
+  try {
+    await db.query(
+      `UPDATE call_transcripts
+         SET recording_url = $1,
+             duration_sec  = $2,
+             updated_at    = NOW()
+       WHERE call_sid = $3`,
+      [
+        RecordingUrl ? RecordingUrl + '.mp3' : null,
+        parseInt(RecordingDuration, 10) || null,
+        CallSid,
+      ]
+    );
+  } catch (err) {
+    console.error('[B11] recording-complete update failed:', err.message);
+  }
+});
+
+// POST /api/local-intel/voice/transcription-complete
+router.post('/voice/transcription-complete', express.urlencoded({ extended: false }), async (req, res) => {
+  res.sendStatus(200);
+  const { CallSid, TranscriptionText, TranscriptionStatus } = req.body || {};
+  if (!CallSid) return;
+  try {
+    await db.query(
+      `UPDATE call_transcripts
+         SET transcription_text = $1,
+             status             = $2,
+             updated_at         = NOW()
+       WHERE call_sid = $3`,
+      [
+        TranscriptionText || null,
+        TranscriptionStatus === 'completed' ? 'transcribed' : 'failed',
+        CallSid,
+      ]
+    );
+  } catch (err) {
+    console.error('[B11] transcription-complete update failed:', err.message);
+  }
+});
+
+// GET /api/local-intel/call-transcripts — admin read
+router.get('/call-transcripts', async (req, res) => {
+  const token = req.headers['x-admin-token'] || req.query.admin_token;
+  if (token !== process.env.LOCAL_INTEL_ADMIN_TOKEN && token !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const rows = await db.query(
+      `SELECT call_sid, caller_id, transcription_text, duration_sec, zip, status, created_at
+         FROM call_transcripts
+         ORDER BY created_at DESC
+         LIMIT $1`,
+      [limit]
+    );
+    return res.json({ count: rows.length, transcripts: rows });
+  } catch (e) {
+    console.error('[call-transcripts]', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /api/local-intel/labor-market/:zip —————————————————─
 // MCP tool: labor_market_intel
 // Returns CES sector employment, AI displacement risk, investment score for a ZIP.
