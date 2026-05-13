@@ -4098,3 +4098,26 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Fix:** Added `GET /api/local-intel/zip-seo-data?zip=XXXXX` to localIntelAgent.js. Returns business_count, top_categories (top 3), population, median_income, median_home_value, affluence_pct, neighborhoods — all from Postgres (businesses + zip_intelligence/zip_signals + neighborhoods tables). No auth, read-only aggregate data. Called by generate-zip-pages.js at landing site build time to bake real per-ZIP stats into static HTML.
 
 **Result:** Each ZIP page now contains unique, substantive static content visible to Google without JavaScript. Fixes the thin-content problem causing 1,438 pages to be discovered but not indexed.
+
+---
+
+## B21 — Voice Search Intercept + V's Barbershop Nocatee Seed
+**Commit:** (pending push)
+**Date:** 2026-05-13
+
+**Problem:** Voice calls saying "haircut appointment in Ponte Vedra" hit taskIntent (verb "make" + errands cat), deflected to SMS task dispatch, and hung up immediately. Caller never got search results. Also V's Barbershop Nocatee missing from Postgres 32081.
+
+**Fix:**
+- Added `VOICE_SEARCH_RE` in `voiceIntake.js` — intercepts task dispatch when speech contains locally-searchable service keywords (haircut, barber, salon, nails, doctor, dentist, vet, gym, etc.)
+- If match: extracts ZIP via `extractZip` (handles "Ponte Vedra"→32082, "Nocatee"→32081), queries Postgres for matching categories, reads results back on call via `twimlLoop`. SMS list sent alongside for 2+ results.
+- Non-searchable errands (dry cleaning pickup, grocery run, dropoff) still use SMS task dispatch as designed.
+- `VOICE_CAT_MAP` maps voice keywords to Postgres category columns (beauty_salon, barbershop, hair_chain, healthcare, dental, etc.)
+- `scripts/seedB21.js` seeds V's Barbershop Nocatee, Great Clips Nocatee, Luxury Hair Studio For Men Nocatee in 32081.
+
+**Result:** "I wanna make an appointment for a haircut in Ponte Vedra" → searches beauty_salon/barbershop/hair_chain in 32082 → reads back names on call → loops to "Anything else?"
+
+**Also fixed in B20/B20b (same session):**
+- B20: All 9 voice Gather action URLs corrected from /api/voice/process → /api/local-intel/voice/process
+- B20b: FAREWELL_RE tightened — removed bare "no"/"nothing"/"done" that caused premature hangup on any response starting with "no"; switched from \b to $ anchor
+
+**Pending:** Run `node scripts/seedB21.js` on Railway shell
