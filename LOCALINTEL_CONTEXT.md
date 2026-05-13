@@ -4145,3 +4145,10 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** Government data APIs (Census, CAMA, labor-market, zip-signals) were siloed — no single endpoint synthesized them into a business intelligence assessment.
 **Fix:** Added GET /api/local-intel/ceo-assess?zip=&q= to localIntelAgent.js. Pulls business density, property stats, zip signals, SMS demand signals, and dead-end unmet demand from Postgres in parallel. Returns structured JSON + plain-English ceo_summary string. Zero LLM calls.
 **Result:** CEO agent page on Vercel can call this endpoint and display a full data-driven ZIP assessment. Foundation for the GSB CEO agent voice/chat interface.
+
+---
+## B28 — Fix recording_url construction in Twilio callback
+**Date:** 2026-05-13
+**Problem:** recording_url was null in all call_transcripts rows despite recording-complete callback firing (duration_sec was populating). Root cause: Twilio REST API recording callback sends RecordingUrl as relative path (/2010-04-01/Accounts/.../Recordings/RE...), not full URL. Appending .mp3 to relative path produced invalid URL.
+**Fix:** recording-complete handler now checks if RecordingUrl starts with 'http' — if not, prepends 'https://api.twilio.com' before appending '.mp3'.
+**Result:** recording_url will populate correctly on next call. Existing rows can be backfilled via B22 Twilio REST enrichment on next GET /call-transcripts.

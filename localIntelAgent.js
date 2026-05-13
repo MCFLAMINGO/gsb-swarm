@@ -8176,7 +8176,7 @@ router.post('/voice/recording-complete', express.urlencoded({ extended: false })
              updated_at    = NOW()
        WHERE call_sid = $3`,
       [
-        RecordingUrl ? RecordingUrl + '.mp3' : null,
+        RecordingUrl ? (RecordingUrl.startsWith('http') ? RecordingUrl : `https://api.twilio.com${RecordingUrl}`) + '.mp3' : null,
         parseInt(RecordingDuration, 10) || null,
         CallSid,
       ]
