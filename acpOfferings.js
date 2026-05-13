@@ -392,6 +392,25 @@ const AGENTS = [
         deliverable:   'JSON: { total, results: [{name, category, zip, lat, lon, address, phone, website, hours, confidence, sources}], zones: {population, medianIncome, homeValue, rentVsOwn} }',
         priceType:     'fixed', priceValue: 0.05, slaMinutes: 5, requiredFunds: false, isHidden: false,
       },
+      {
+        name:          'local_intel_assess',
+        description:   'Full ZIP-level market intelligence assessment powered entirely by government data — ' +
+                       'zero hallucination, zero LLM. Aggregates all 17 LocalIntel data nodes into a single ' +
+                       'structured brief: demographics (ACS), income (IRS SOI + BEA), migration flows (IRS), ' +
+                       'labor market (FRED/BLS + QWI + QCEW), sector employment (CES MSA), jobs geography (LODES), ' +
+                       'business activity (OSM + SunBiz), construction permits (BPS), broadband coverage (FCC BDC), ' +
+                       'property market (SJC CAMA parcels), world model scores, and live demand signals (SMS intents). ' +
+                       'Returns both structured JSON sections and a plain-English executive summary. ' +
+                       'Use for: client market briefs, real estate investment analysis, site selection, ' +
+                       'economic development reports, competitive market entry. ' +
+                       'Covered ZIPs: 32082, 32081, 32250, 32266, 32233, 32259, 32034 (St. Johns County FL).',
+        requirements:  JSON.stringify({ type: 'object', properties: {
+          zip:   { type: 'string', description: 'Target ZIP code (must be in St. Johns County coverage area)' },
+          query: { type: 'string', description: 'Optional context or question to focus the summary (e.g. "restaurant opportunity", "real estate entry")' },
+        }, required: ['zip'] }),
+        deliverable:   'JSON: { zip, assessed_at, populated_sections[], ceo_summary, demographics, income, migration, labor, sectors, jobs, business_activity, construction, broadband, property, world_model, demand }',
+        priceType:     'fixed', priceValue: 0.10, slaMinutes: 5, requiredFunds: false, isHidden: false,
+      },
     ],
   },
 ];

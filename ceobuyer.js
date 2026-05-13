@@ -655,6 +655,42 @@ Write a 2-3 sentence bank status. Include worker load, jobs served, and top oppo
       return;
     }
 
+    // ── local_intel_assess: forward to /api/local-intel/ceo-assess ───────────
+    if (offeringName === 'local_intel_assess') {
+      const params = input || {};
+      const zip = String(params.zip || '').trim();
+      const q   = String(params.query || '').trim();
+      if (!zip) {
+        await job.rejectPayable('Missing required field: zip.');
+        return;
+      }
+      const TARGET_ZIPS = ['32082','32081','32250','32266','32233','32259','32034'];
+      if (!TARGET_ZIPS.includes(zip)) {
+        await job.rejectPayable(`ZIP ${zip} is not in the LocalIntel coverage area. Covered: ${TARGET_ZIPS.join(', ')}.`);
+        return;
+      }
+      try {
+        const nodeFetch = (await import('node-fetch')).default;
+        const baseUrl = process.env.RAILWAY_STATIC_URL
+          ? `https://${process.env.RAILWAY_STATIC_URL}`
+          : 'http://localhost:8080';
+        const qs = new URLSearchParams({ zip });
+        if (q) qs.set('q', q);
+        const res = await nodeFetch(
+          `${baseUrl}/api/local-intel/ceo-assess?${qs.toString()}`,
+          { headers: { 'x-admin-token': process.env.ADMIN_TOKEN || 'localintel-migrate-2026' } }
+        );
+        if (!res.ok) throw new Error(`ceo-assess HTTP ${res.status}`);
+        const assessment = await res.json();
+        ceoCache.totalJobsServed++;
+        await job.deliver({ type: 'json', value: assessment });
+        console.log(`[CEO-provider] Job ${job.id} delivered (local_intel_assess) zip=${zip} sections=${(assessment.populated_sections||[]).join(',')}`);
+      } catch (err) {
+        await job.rejectPayable(`LocalIntel assess failed: ${err.message}. Payment will be refunded.`);
+      }
+      return;
+    }
+
     await job.deliver({ type: 'text', value: briefText });
     console.log(`[CEO-provider] Job ${job.id} delivered (${offeringName}).`);
     postToDashboard(briefText);
