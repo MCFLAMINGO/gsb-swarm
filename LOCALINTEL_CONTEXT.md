@@ -4220,3 +4220,9 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** upsertZipSignals silently swallowed all "does not exist" errors, making it impossible to diagnose why FRED/BEA/LODES writes fail. Workers complete with no logs, no DB rows.
 **Fix:** Removed silent swallow — now logs full error + attempted columns + re-throws. Added GET /api/admin/schema-check?table=zip_signals&prefix=fred_ endpoint to verify column presence via information_schema.
 **Result:** After next deploy + retrigger, Railway logs will show real error. Schema-check confirms whether 023 columns actually landed.
+
+## B35b — Seed voluntrackapp.com business record
+**Date:** 2026-05-13
+**Problem:** voluntrackapp.com (VolunTrack) needed to be discoverable on LocalIntel platform.
+**Fix:** Migration 024 — INSERT into businesses table: name=VolunTrack, zip=32082, category=Technology, claimed by erik@mcflamingo.com.
+**Result:** Business record live in Postgres-SUNX after next deploy.
