@@ -4131,3 +4131,10 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 - `dashboard-ui/index.html`: Added "Recording" 6th column header, updated colspan to 6.
 - `dashboard-ui/app.js`: Changed 3x colspan="5" → colspan="6"; added recording cell with `<audio controls>` player when recording_url present, else dash; changed item.transcript → item.transcription_text.
 **Result:** Transcripts page shows caller numbers, durations, and inline audio playback for recorded calls. Twilio REST enrichment runs on every GET to backfill missing metadata.
+
+---
+## B23 — Auto-run Seeds on Startup (idempotent)
+**Date:** 2026-05-13
+**Problem:** seedB19.js and seedB21.js had to be manually executed in Railway shell after every relevant deploy. Error-prone, easy to forget.
+**Fix:** Created lib/runSeeds.js with idempotency checks (skip if slug/name+zip already exists). Wired runSeeds() fire-and-forget into server startup after DB ready. Seeds for V Pizza (32082) and V's Barbershop/Great Clips/Luxury Hair Studio (32081) now auto-insert on deploy if missing.
+**Result:** No more manual Railway shell seed execution. Seeds run on every boot, skip existing rows, never duplicate.

@@ -7613,6 +7613,14 @@ app.get('/api/local-intel/confirmed-jobs', async (req, res) => {
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`[gsb-dashboard] Listening on port ${PORT}`);
 
+  // Auto-run idempotent seeds (B19/B21) — fire-and-forget, never blocks boot
+  try {
+    const { runSeeds } = require('./lib/runSeeds');
+    runSeeds().catch(e => console.error('[seed] error', e));
+  } catch (e) {
+    console.error('[seed] require failed (non-fatal):', e.message);
+  }
+
   // Start dispatch watchdog — monitors RFQ timeouts + auto-retry
   if (process.env.LOCAL_INTEL_DB_URL) {
     try {
