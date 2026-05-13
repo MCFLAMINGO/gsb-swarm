@@ -687,11 +687,19 @@ async function verify(pool) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main() {
-  log('quarterly property reseed starting');
+  const only = (process.env.RESEED_ONLY || '').toLowerCase().trim();
+  log('quarterly property reseed starting', only ? `(only=${only})` : '(full)');
   const pool = getPool();
   const errors = [];
 
-  for (const [name, fn] of [['duval', seedDuval], ['st_johns', seedStJohns]]) {
+  const allCounties = [['duval', seedDuval], ['st_johns', seedStJohns]];
+  const counties = only === 'stjohns' || only === 'st_johns'
+    ? [['st_johns', seedStJohns]]
+    : only === 'duval'
+    ? [['duval', seedDuval]]
+    : allCounties;
+
+  for (const [name, fn] of counties) {
     try {
       await fn(pool);
     } catch (err) {

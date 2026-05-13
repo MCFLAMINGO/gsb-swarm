@@ -8551,6 +8551,42 @@ router.post('/backfill-sjc-cama', express.json(), async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/admin/reseed-stjohns ─────────────────────────────
+// On-demand trigger for the St. Johns quarterly property reseed.
+// Downloads CAMAData.zip + CAMADataSup.zip from sftp.sjcpa.us, runs mdb-export,
+// and upserts beds/baths/sqft/year_built for all 171k St. Johns parcels.
+// Fire-and-forget — responds immediately with jobId; reseed runs in background.
+// Token gate: x-admin-token: localintel-migrate-2026 OR LOCAL_INTEL_ADMIN_TOKEN.
+router.post('/admin/reseed-stjohns', express.json(), async (req, res) => {
+  const token = req.headers['x-admin-token'] || req.headers['x-operator-token'] || req.query.admin_token;
+  if (token !== process.env.LOCAL_INTEL_ADMIN_TOKEN && token !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  const { spawn } = require('child_process');
+  const path = require('path');
+
+  const jobId = `reseed-stjohns-${Date.now()}`;
+  const scriptPath = path.join(__dirname, 'data-seed', 'reseed_cron.js');
+
+  // Spawn detached so it outlives the HTTP response
+  const child = spawn(process.execPath, [scriptPath, '--only=stjohns'], {
+    detached: true,
+    stdio: 'ignore',
+    env: { ...process.env, RESEED_ONLY: 'stjohns' },
+  });
+  child.unref();
+
+  console.log(`[reseed-stjohns] triggered jobId=${jobId} pid=${child.pid}`);
+
+  return res.json({
+    status: 'started',
+    jobId,
+    pid: child.pid,
+    message: 'St. Johns CAMA reseed started — downloads CAMAData.zip + CAMADataSup.zip from sftp.sjcpa.us and upserts beds/baths/sqft/year_built for 171k parcels. Runtime ~5–10 min.',
+  });
+});
+
 // ── On-Demand Worker Trigger ─────────────────────────────────────────────────
 // POST /api/local-intel/admin/worker/run
 //   body: { worker: "btrWorker" }      → spawn one worker

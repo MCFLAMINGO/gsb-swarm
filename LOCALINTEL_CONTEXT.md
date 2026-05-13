@@ -4152,3 +4152,14 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** recording_url was null in all call_transcripts rows despite recording-complete callback firing (duration_sec was populating). Root cause: Twilio REST API recording callback sends RecordingUrl as relative path (/2010-04-01/Accounts/.../Recordings/RE...), not full URL. Appending .mp3 to relative path produced invalid URL.
 **Fix:** recording-complete handler now checks if RecordingUrl starts with 'http' — if not, prepends 'https://api.twilio.com' before appending '.mp3'.
 **Result:** recording_url will populate correctly on next call. Existing rows can be backfilled via B22 Twilio REST enrichment on next GET /call-transcripts.
+
+## 2026-05-13 — B29: Nodes page full parity + CAMA on-demand reseed
+
+**Problem:** Vercel `/local-intel/nodes` page had only 10 nodes (matching old Railway version). Railway dashboard had more nodes (FRED, BEA, LODES, QWI, QCEW, CES, SJCPA CAMA) plus trigger buttons and cron schedules that were not reflected in Vercel. No way to manually trigger the St. Johns CAMA reseed outside the quarterly cron.
+
+**Fix:**
+- `gsb-swarm-dashboard` `src/app/local-intel/nodes/page.tsx`: Added 7 new nodes (FRED/BLS LAUS, BEA, LODES, QWI, QCEW, CES, SJCPA CAMA). Each node now has optional `triggerEndpoint` + `triggerLabel` fields on `NodeDef` interface — any node with one gets a `TriggerButton` component in its action row. Added `cron` field displayed on every card. Added `TriggerAllButton` in page header that fires all worker endpoints in parallel. `CompletenessStrip` updated to show dynamic total node count (17). SJCPA CAMA node calls `POST /api/local-intel/admin/reseed-stjohns`.
+- `gsb-swarm` `localIntelAgent.js`: Added `POST /api/local-intel/admin/reseed-stjohns` — fire-and-forget, spawns `data-seed/reseed_cron.js` as detached child process with `RESEED_ONLY=stjohns` env var, responds immediately with `{ status: 'started', jobId, pid }`.
+- `gsb-swarm` `data-seed/reseed_cron.js`: Added `RESEED_ONLY` env var guard in `main()` — if `RESEED_ONLY=stjohns` only runs `seedStJohns`, if `RESEED_ONLY=duval` only runs `seedDuval`, otherwise full run. Quarterly cron unaffected (no env var set).
+
+**Result:** All 17 data nodes visible on Vercel nodes page with live status, cron schedules, and individual trigger buttons. "Trigger All Workers" button fires every triggerable node at once. CAMA reseed can now be run on-demand without waiting for quarterly cron — downloads fresh CAMAData.zip + CAMADataSup.zip from sftp.sjcpa.us, runtime ~5–10 min. Pattern is the model for all future nodes: add `triggerEndpoint` + `cron` to `NodeDef` and it works automatically.
