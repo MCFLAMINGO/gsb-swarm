@@ -2088,7 +2088,7 @@ async function loadTranscripts() {
   const tbody = document.getElementById('tx-tbody');
   const badge = document.getElementById('tx-count-badge');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="5" class="muted center">Loading…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="6" class="muted center">Loading…</td></tr>';
   if (badge) badge.textContent = '…';
 
   try {
@@ -2100,7 +2100,7 @@ async function loadTranscripts() {
     const items = Array.isArray(data) ? data : (data.transcripts || data.items || data.calls || []);
 
     if (!items.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="muted center" style="padding:32px">No calls yet — call (904) 506-7476 to test</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="muted center" style="padding:32px">No calls yet — call (904) 506-7476 to test</td></tr>';
       if (badge) badge.textContent = '0 calls';
       return;
     }
@@ -2109,21 +2109,23 @@ async function loadTranscripts() {
 
     tbody.innerHTML = '';
     items.forEach((item, idx) => {
-      const time = formatCallTime(item.created_at || item.ts || item.timestamp);
       const caller = item.caller_id || item.from || item.caller || '—';
+      const zip = item.zip_code || item.zip || '—';
       const dur = formatDuration(item.duration_sec ?? item.duration ?? item.duration_seconds);
-      const status = item.status || (item.transcript ? 'transcribed' : 'pending');
-      const transcript = item.transcript || item.transcript_text || '';
+      const status = item.status || (item.transcription_text ? 'transcribed' : 'pending');
+      const recUrl = item.recording_url || null;
+      const transcript = item.transcription_text || item.transcript || item.transcript_text || '';
       const truncated = transcript.length > 100 ? transcript.slice(0, 100) + '…' : (transcript || '—');
 
       const tr = document.createElement('tr');
       tr.className = 'tx-transcript-row';
       tr.dataset.rowIdx = idx;
       tr.innerHTML = `
-        <td>${esc(time)}</td>
         <td class="mono">${esc(caller)}</td>
+        <td class="mono">${esc(zip)}</td>
         <td class="mono">${esc(dur)}</td>
         <td><span class="badge ${transcriptStatusClass(status)}">${esc(status)}</span></td>
+        <td>${recUrl ? `<audio controls style="height:28px;max-width:200px;" src="${esc(recUrl)}"></audio>` : '<span class="muted">—</span>'}</td>
         <td class="tx-transcript-cell" data-full="${esc(transcript)}">${esc(truncated)}</td>`;
       tbody.appendChild(tr);
     });
@@ -2138,7 +2140,7 @@ async function loadTranscripts() {
       });
     });
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="5" class="muted center" style="padding:24px;color:var(--red)">Error: ${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="muted center" style="padding:24px;color:var(--red)">Error: ${esc(e.message)}</td></tr>`;
     if (badge) badge.textContent = 'error';
   }
 }

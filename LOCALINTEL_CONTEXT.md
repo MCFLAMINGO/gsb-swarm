@@ -4121,3 +4121,13 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 - B20b: FAREWELL_RE tightened — removed bare "no"/"nothing"/"done" that caused premature hangup on any response starting with "no"; switched from \b to $ anchor
 
 **Pending:** Run `node scripts/seedB21.js` on Railway shell
+
+---
+## B22 — Call Transcript Enrichment + Recording Player
+**Date:** 2026-05-13
+**Problem:** Call transcript rows missing caller_id, duration_sec, recording_url (all null). Dashboard showing 5 columns with no recording playback.
+**Fix:** 
+- `localIntelAgent.js`: GET /call-transcripts SELECT now includes recording_url; on fetch, fires Twilio REST API enrichment fire-and-forget for rows missing caller_id/duration/recording_url.
+- `dashboard-ui/index.html`: Added "Recording" 6th column header, updated colspan to 6.
+- `dashboard-ui/app.js`: Changed 3x colspan="5" → colspan="6"; added recording cell with `<audio controls>` player when recording_url present, else dash; changed item.transcript → item.transcription_text.
+**Result:** Transcripts page shows caller numbers, durations, and inline audio playback for recorded calls. Twilio REST enrichment runs on every GET to backfill missing metadata.
