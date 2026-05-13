@@ -4207,3 +4207,16 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 - `gsb-swarm-dashboard` CEO page: Updated Jobs interface type + JobsPanel to match — added healthcare_jobs, high_earn_pct, low_earn_pct rows; removed top_inflow/outflow_zip.
 
 **Result:** LODES worker will now complete its block aggregation without crashing. QWI will find the correct available quarter (Q3 or Q4 2024). CEO jobs section will populate correctly once LODES runs. FRED/BEA pending env var verification.
+
+## B34 — dbMigrate rows.rows fix + Migration 023 all signal columns
+**Date:** 2026-05-13
+**Commit:** 76d1cca
+**Problem:** dbMigrate.js used rows.rows (double-wrap) causing migrations to never be marked applied. FRED/BEA/LODES/QWI workers completed but zero rows landed in zip_signals because columns fred_*/bea_*/qwi_*/qcew_*/ces_*/lodes_* did not exist in 017 schema.
+**Fix:** Fixed rows.rows bug in 2 locations in dbMigrate.js. Created migrations/023_ensure_worker_signal_columns.sql adding all missing columns via IF NOT EXISTS.
+**Result:** Migration 023 deployed. Workers retriggered. Still investigating — upsertZipSignals silent swallow may be masking remaining errors.
+
+## B35 — Expose upsertZipSignals errors + schema-check endpoint
+**Date:** 2026-05-13
+**Problem:** upsertZipSignals silently swallowed all "does not exist" errors, making it impossible to diagnose why FRED/BEA/LODES writes fail. Workers complete with no logs, no DB rows.
+**Fix:** Removed silent swallow — now logs full error + attempted columns + re-throws. Added GET /api/admin/schema-check?table=zip_signals&prefix=fred_ endpoint to verify column presence via information_schema.
+**Result:** After next deploy + retrigger, Railway logs will show real error. Schema-check confirms whether 023 columns actually landed.

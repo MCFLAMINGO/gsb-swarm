@@ -1252,6 +1252,23 @@ app.get('/api/admin/db-check', async (req, res) => {
   }
 });
 
+// GET /api/admin/schema-check — verify column presence via information_schema
+app.get('/api/admin/schema-check', async (req, res) => {
+  const { table = 'zip_signals', prefix = '' } = req.query;
+  try {
+    const db2 = require('./lib/db');
+    const rows = await db2.query(
+      `SELECT column_name, data_type FROM information_schema.columns
+       WHERE table_name = $1 AND column_name LIKE $2
+       ORDER BY column_name`,
+      [table, `${prefix}%`]
+    );
+    res.json({ table, prefix, columns: rows, count: rows.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/admin/property-debug — tests ArcGIS reachability from Railway
 app.get('/api/admin/property-debug', async (req, res) => {
   const https = require('https');
