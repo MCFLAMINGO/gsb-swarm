@@ -8622,6 +8622,133 @@ router.get('/sms-log', async (req, res) => {
   }
 });
 
+// ── B25: CEO Assessment Endpoint ──────────────────────────────────────────────
+// GET /api/local-intel/ceo-assess?zip=32081&q=restaurant
+// Synthesizes business density, property stats, zip signals, and demand signals
+// from Postgres into a structured assessment + plain-English summary. ZERO LLM calls.
+router.get('/ceo-assess', async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const zip = String(req.query.zip || '').trim();
+  const q = String(req.query.q || '').trim();
+
+  if (!zip) return res.status(400).json({ error: 'zip required' });
+  if (!TARGET_ZIPS.includes(zip)) {
+    return res.status(400).json({ error: 'ZIP not in coverage area' });
+  }
+
+  const safe = (p) => p.catch(() => null);
+
+  const [
+    densityRows,
+    propertyRows,
+    zipSignalRows,
+    totalBizRows,
+    deadEndRows,
+    smsRows,
+  ] = await Promise.all([
+    safe(db.query(
+      `SELECT category, COUNT(*)::int AS count
+         FROM businesses
+        WHERE zip = $1
+        GROUP BY category
+        ORDER BY count DESC
+        LIMIT 10`,
+      [zip]
+    )),
+    safe(db.query(
+      `SELECT AVG(beds) AS avg_beds,
+              AVG(baths) AS avg_baths,
+              AVG(assessed_value) AS avg_assessed,
+              COUNT(*)::int AS parcel_count
+         FROM properties
+        WHERE zip = $1`,
+      [zip]
+    )),
+    safe(db.query(
+      `SELECT * FROM zip_signals WHERE zip = $1 LIMIT 1`,
+      [zip]
+    )),
+    safe(db.query(
+      `SELECT COUNT(*)::int AS total FROM businesses WHERE zip = $1`,
+      [zip]
+    )),
+    safe(db.query(
+      `SELECT detected_intent, COUNT(*)::int AS count
+         FROM intent_dead_ends
+        WHERE zip = $1
+        GROUP BY detected_intent
+        ORDER BY count DESC
+        LIMIT 5`,
+      [zip]
+    )),
+    safe(db.query(
+      `SELECT detected_intent, COUNT(*)::int AS count
+         FROM sms_query_log
+        WHERE zip = $1
+        GROUP BY detected_intent
+        ORDER BY count DESC
+        LIMIT 5`,
+      [zip]
+    )),
+  ]);
+
+  const business_density = Array.isArray(densityRows) ? densityRows : [];
+  const total_businesses = Array.isArray(totalBizRows) && totalBizRows[0]
+    ? Number(totalBizRows[0].total || 0)
+    : 0;
+
+  let property_snapshot = null;
+  if (Array.isArray(propertyRows) && propertyRows[0]) {
+    const p = propertyRows[0];
+    property_snapshot = {
+      avg_beds: p.avg_beds != null ? Number(p.avg_beds) : null,
+      avg_baths: p.avg_baths != null ? Number(p.avg_baths) : null,
+      avg_assessed: p.avg_assessed != null ? Number(p.avg_assessed) : null,
+      parcel_count: p.parcel_count != null ? Number(p.parcel_count) : 0,
+    };
+  }
+
+  const zip_signals = Array.isArray(zipSignalRows) && zipSignalRows[0]
+    ? zipSignalRows[0]
+    : null;
+
+  const top_sms_intents = Array.isArray(smsRows) ? smsRows : [];
+  const unmet_demand = Array.isArray(deadEndRows) ? deadEndRows : [];
+
+  // Build plain-English CEO summary via pure string interpolation
+  const topCats = business_density.slice(0, 3)
+    .map((r) => `${r.category} (${r.count})`)
+    .join(', ');
+  const categoryCount = business_density.length;
+  const avgAssessedStr = property_snapshot && property_snapshot.avg_assessed != null
+    ? `$${Math.round(property_snapshot.avg_assessed).toLocaleString()}`
+    : 'n/a';
+  const topSmsStr = top_sms_intents.map((r) => r.detected_intent).filter(Boolean).join(', ') || 'none recorded';
+  const unmetStr = unmet_demand.map((r) => r.detected_intent).filter(Boolean).join(', ') || 'none recorded';
+  const qContextStr = q ? ` (context: ${q})` : '';
+
+  const ceo_summary =
+    `ZIP ${zip}${qContextStr} has ${total_businesses} businesses mapped across ${categoryCount} categories. ` +
+    `Top categories: ${topCats || 'none'}. ` +
+    `Property avg assessed value is ${avgAssessedStr} across ${property_snapshot?.parcel_count || 0} parcels. ` +
+    `Demand signals show top queries: ${topSmsStr}. Unmet demand (dead ends): ${unmetStr}.`;
+
+  return res.json({
+    zip,
+    query_context: q || null,
+    assessed_at: new Date().toISOString(),
+    business_density,
+    total_businesses,
+    property_snapshot,
+    zip_signals,
+    demand_signals: {
+      top_sms_intents,
+      unmet_demand,
+    },
+    ceo_summary,
+  });
+});
+
 module.exports = router;
 
 // ── Neighborhood endpoints ────────────────────────────────────────────────────

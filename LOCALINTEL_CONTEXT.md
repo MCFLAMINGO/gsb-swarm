@@ -4138,3 +4138,10 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** seedB19.js and seedB21.js had to be manually executed in Railway shell after every relevant deploy. Error-prone, easy to forget.
 **Fix:** Created lib/runSeeds.js with idempotency checks (skip if slug/name+zip already exists). Wired runSeeds() fire-and-forget into server startup after DB ready. Seeds for V Pizza (32082) and V's Barbershop/Great Clips/Luxury Hair Studio (32081) now auto-insert on deploy if missing.
 **Result:** No more manual Railway shell seed execution. Seeds run on every boot, skip existing rows, never duplicate.
+
+---
+## B25 — CEO Assessment Endpoint
+**Date:** 2026-05-13
+**Problem:** Government data APIs (Census, CAMA, labor-market, zip-signals) were siloed — no single endpoint synthesized them into a business intelligence assessment.
+**Fix:** Added GET /api/local-intel/ceo-assess?zip=&q= to localIntelAgent.js. Pulls business density, property stats, zip signals, SMS demand signals, and dead-end unmet demand from Postgres in parallel. Returns structured JSON + plain-English ceo_summary string. Zero LLM calls.
+**Result:** CEO agent page on Vercel can call this endpoint and display a full data-driven ZIP assessment. Foundation for the GSB CEO agent voice/chat interface.
