@@ -8878,13 +8878,14 @@ router.get('/ceo-assess', async (req, res) => {
 
   // 6. Jobs (LODES)
   const jobs = {};
-  if (has(sig.lodes_jobs_here))            jobs.jobs_located_here     = fmt(sig.lodes_jobs_here);
-  if (has(sig.lodes_workers_living_here))  jobs.workers_living_here   = fmt(sig.lodes_workers_living_here);
-  if (has(sig.lodes_net_flow))             jobs.net_flow              = fmt(sig.lodes_net_flow);
-  if (has(sig.lodes_retail_jobs))          jobs.retail_jobs           = fmt(sig.lodes_retail_jobs);
-  if (has(sig.lodes_food_jobs))            jobs.food_jobs             = fmt(sig.lodes_food_jobs);
-  if (has(sig.lodes_top_inflow_zip))       jobs.top_inflow_zip        = sig.lodes_top_inflow_zip;
-  if (has(sig.lodes_top_outflow_zip))      jobs.top_outflow_zip       = sig.lodes_top_outflow_zip;
+  if (has(sig.lodes_jobs_here))           jobs.jobs_located_here   = fmt(sig.lodes_jobs_here);
+  if (has(sig.lodes_workers_live_here))   jobs.workers_living_here = fmt(sig.lodes_workers_live_here);
+  if (has(sig.lodes_net_flow))            jobs.net_flow            = fmt(sig.lodes_net_flow);
+  if (has(sig.lodes_retail_jobs))         jobs.retail_jobs         = fmt(sig.lodes_retail_jobs);
+  if (has(sig.lodes_food_jobs))           jobs.food_jobs           = fmt(sig.lodes_food_jobs);
+  if (has(sig.lodes_healthcare_jobs))     jobs.healthcare_jobs     = fmt(sig.lodes_healthcare_jobs);
+  if (has(sig.lodes_high_earn_pct))       jobs.high_earn_pct       = pct(sig.lodes_high_earn_pct);
+  if (has(sig.lodes_low_earn_pct))        jobs.low_earn_pct        = pct(sig.lodes_low_earn_pct);
 
   // 7. Business Activity
   const business_activity = {
@@ -9000,7 +9001,7 @@ router.get('/ceo-assess', async (req, res) => {
   // Jobs flow
   if (has(sig.lodes_jobs_here)) {
     const flow = Number(sig.lodes_net_flow || 0);
-    lines.push(`JOBS FLOW: ${fmt(sig.lodes_jobs_here)} jobs located here, ${fmt(sig.lodes_workers_living_here)} workers live here — net ${flow >= 0 ? '+' : ''}${fmt(flow)} (${flow >= 0 ? 'job importer' : 'bedroom community'}).`);
+    lines.push(`JOBS FLOW: ${fmt(sig.lodes_jobs_here)} jobs located here, ${fmt(sig.lodes_workers_live_here)} workers live here — net ${flow >= 0 ? '+' : ''}${fmt(flow)} (${flow >= 0 ? 'job importer' : 'bedroom community'}).`);
   }
 
   // Business Activity

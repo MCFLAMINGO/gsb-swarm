@@ -86,9 +86,9 @@ async function run() {
   // Skip if run recently (LODES is annual data)
   const hb = await db.query(
     `SELECT last_run FROM worker_heartbeat WHERE worker_name = 'lodesWorker'`
-  ).catch(() => ({ rows: [] }));
-  if (hb.rows.length) {
-    const age = Date.now() - new Date(hb.rows[0].last_run).getTime();
+  ).catch(() => []);
+  if (Array.isArray(hb) && hb.length) {
+    const age = Date.now() - new Date(hb[0].last_run).getTime();
     const days = age / 86400000;
     if (days < 7) {
       console.log(`[lodes] Skipping — ran ${days.toFixed(1)} days ago (LODES is annual)`);

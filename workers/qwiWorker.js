@@ -45,15 +45,20 @@ function fetchJson(url) {
 }
 
 // Find the most recent available QWI quarter (typically 3 quarters behind current)
-function getLatestQwiQuarter() {
+// Generate a sequence of candidate QWI quarters to try, newest-first.
+// QWI typically lags 2-3 quarters, but can be longer. We try up to 8 back.
+function qwiCandidates() {
   const now = new Date();
-  const qtr = Math.floor((now.getMonth()) / 3) + 1;
-  const yr  = now.getFullYear();
-  // QWI is typically 3 quarters behind
-  let tgt_qtr = qtr - 3;
-  let tgt_yr  = yr;
-  if (tgt_qtr < 1) { tgt_qtr += 4; tgt_yr -= 1; }
-  return { year: tgt_yr, quarter: tgt_qtr };
+  let qtr = Math.floor(now.getMonth() / 3) + 1;
+  let yr  = now.getFullYear();
+  const candidates = [];
+  // Start 2 quarters back (minimum lag) and walk back 8 total
+  for (let i = 0; i < 8; i++) {
+    qtr--;
+    if (qtr < 1) { qtr = 4; yr--; }
+    candidates.push({ year: yr, quarter: qtr });
+  }
+  return candidates;
 }
 
 async function fetchQwiFL(year, quarter) {
@@ -108,18 +113,25 @@ async function run() {
   console.log('[qwi] Starting QWI worker — FL county workforce indicators');
   const start = Date.now();
 
-  const { year, quarter } = getLatestQwiQuarter();
-  console.log(`[qwi] Fetching ${year}-Q${quarter} data for all 67 FL counties...`);
+  const candidates = qwiCandidates();
+  console.log(`[qwi] Will try up to ${candidates.length} quarters: ${candidates.map(c => `${c.year}-Q${c.quarter}`).join(', ')}`);
 
-  let countyData;
-  try {
-    countyData = await fetchQwiFL(year, quarter);
-  } catch (e) {
-    // Try one quarter earlier if latest not yet available
-    console.warn(`[qwi] ${year}-Q${quarter} failed (${e.message}), trying one quarter earlier`);
-    let prevQ = quarter - 1, prevY = year;
-    if (prevQ < 1) { prevQ = 4; prevY -= 1; }
-    countyData = await fetchQwiFL(prevY, prevQ);
+  let countyData = null;
+  let usedVintage = null;
+  for (const { year, quarter } of candidates) {
+    try {
+      console.log(`[qwi] Fetching ${year}-Q${quarter} data for all 67 FL counties...`);
+      countyData = await fetchQwiFL(year, quarter);
+      usedVintage = `${year}-Q${quarter}`;
+      console.log(`[qwi] ✓ Got data for ${usedVintage}`);
+      break;
+    } catch (e) {
+      console.warn(`[qwi] ${year}-Q${quarter} not available (${e.message.slice(0, 80)}), trying earlier...`);
+    }
+  }
+  if (!countyData) {
+    console.error('[qwi] ❌ Could not find any available QWI quarter after 8 attempts');
+    process.exit(1);
   }
 
   console.log(`[qwi] Got ${Object.keys(countyData).length} counties`);
