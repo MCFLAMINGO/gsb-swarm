@@ -8723,12 +8723,13 @@ router.get('/sms-log', async (req, res) => {
 
 // ── B25: CEO Assessment Endpoint ──────────────────────────────────────────────
 // GET /api/local-intel/ceo-assess?zip=32081&q=restaurant
-// Synthesizes business density, property stats, zip signals, and demand signals
-// from Postgres into a structured assessment + plain-English summary. ZERO LLM calls.
+// Full multi-node assessment: reads ALL populated zip_signals columns + property_parcels
+// + business density + demand signals. Structures into sections matching the node map.
+// ZERO LLM calls — every data point sourced directly from Postgres.
 router.get('/ceo-assess', async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   const zip = String(req.query.zip || '').trim();
-  const q = String(req.query.q || '').trim();
+  const q   = String(req.query.q   || '').trim();
 
   if (!zip) return res.status(400).json({ error: 'zip required' });
   if (!TARGET_ZIPS.includes(zip)) {
@@ -8740,110 +8741,320 @@ router.get('/ceo-assess', async (req, res) => {
   const [
     densityRows,
     propertyRows,
-    zipSignalRows,
+    sigRows,
     totalBizRows,
     deadEndRows,
     smsRows,
   ] = await Promise.all([
     safe(db.query(
       `SELECT category, COUNT(*)::int AS count
-         FROM businesses
-        WHERE zip = $1
-        GROUP BY category
-        ORDER BY count DESC
-        LIMIT 10`,
+         FROM businesses WHERE zip = $1
+        GROUP BY category ORDER BY count DESC LIMIT 10`,
       [zip]
     )),
     safe(db.query(
-      `SELECT AVG(beds) AS avg_beds,
-              AVG(baths) AS avg_baths,
-              AVG(assessed_value) AS avg_assessed,
-              COUNT(*)::int AS parcel_count
-         FROM properties
-        WHERE zip = $1`,
+      `SELECT
+         COUNT(*)::int                      AS parcel_count,
+         ROUND(AVG(beds)::numeric, 1)       AS avg_beds,
+         ROUND(AVG(baths)::numeric, 1)      AS avg_baths,
+         ROUND(AVG(tot_lvg_ar)::numeric, 0) AS avg_sqft,
+         ROUND(AVG(assessed_value)::numeric, 0) AS avg_assessed,
+         MIN(assessed_value)                AS min_assessed,
+         MAX(assessed_value)                AS max_assessed,
+         ROUND(AVG(act_yr_blt)::numeric, 0) AS avg_year_built
+       FROM property_parcels
+      WHERE zip = $1`,
       [zip]
     )),
+    safe(db.query(`SELECT * FROM zip_signals WHERE zip = $1 LIMIT 1`, [zip])),
+    safe(db.query(`SELECT COUNT(*)::int AS total FROM businesses WHERE zip = $1`, [zip])),
     safe(db.query(
-      `SELECT * FROM zip_signals WHERE zip = $1 LIMIT 1`,
-      [zip]
-    )),
-    safe(db.query(
-      `SELECT COUNT(*)::int AS total FROM businesses WHERE zip = $1`,
+      `SELECT detected_intent, COUNT(*)::int AS count
+         FROM intent_dead_ends WHERE zip = $1
+        GROUP BY detected_intent ORDER BY count DESC LIMIT 5`,
       [zip]
     )),
     safe(db.query(
       `SELECT detected_intent, COUNT(*)::int AS count
-         FROM intent_dead_ends
-        WHERE zip = $1
-        GROUP BY detected_intent
-        ORDER BY count DESC
-        LIMIT 5`,
-      [zip]
-    )),
-    safe(db.query(
-      `SELECT detected_intent, COUNT(*)::int AS count
-         FROM sms_query_log
-        WHERE zip = $1
-        GROUP BY detected_intent
-        ORDER BY count DESC
-        LIMIT 5`,
+         FROM sms_query_log WHERE zip = $1
+        GROUP BY detected_intent ORDER BY count DESC LIMIT 5`,
       [zip]
     )),
   ]);
 
-  const business_density = Array.isArray(densityRows) ? densityRows : [];
-  const total_businesses = Array.isArray(totalBizRows) && totalBizRows[0]
-    ? Number(totalBizRows[0].total || 0)
-    : 0;
+  // ── Raw data ───────────────────────────────────────────────────────────────
+  const business_density  = Array.isArray(densityRows)  ? densityRows  : [];
+  const total_businesses  = Array.isArray(totalBizRows) && totalBizRows[0] ? Number(totalBizRows[0].total || 0) : 0;
+  const top_sms_intents   = Array.isArray(smsRows)      ? smsRows      : [];
+  const unmet_demand      = Array.isArray(deadEndRows)   ? deadEndRows   : [];
+  const sig               = Array.isArray(sigRows) && sigRows[0] ? sigRows[0] : {};
+  const pr                = Array.isArray(propertyRows)  && propertyRows[0] ? propertyRows[0] : {};
 
-  let property_snapshot = null;
-  if (Array.isArray(propertyRows) && propertyRows[0]) {
-    const p = propertyRows[0];
-    property_snapshot = {
-      avg_beds: p.avg_beds != null ? Number(p.avg_beds) : null,
-      avg_baths: p.avg_baths != null ? Number(p.avg_baths) : null,
-      avg_assessed: p.avg_assessed != null ? Number(p.avg_assessed) : null,
-      parcel_count: p.parcel_count != null ? Number(p.parcel_count) : 0,
-    };
+  // ── Helper ─────────────────────────────────────────────────────────────────
+  const fmt  = (v, decimals = 0) => v != null ? Number(v).toLocaleString('en-US', { maximumFractionDigits: decimals }) : null;
+  const pct  = (v) => v != null ? `${Number(v).toFixed(1)}%` : null;
+  const usd  = (v) => v != null ? `$${Math.round(Number(v)).toLocaleString()}` : null;
+  const yoy  = (v) => v != null ? `${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(1)}%` : null;
+  const has  = (v) => v != null && v !== '';
+
+  // ── Section builders — only include keys that have data ───────────────────
+
+  // 1. Demographics (ACS)
+  const demographics = {};
+  if (has(sig.acs_population))       demographics.population       = fmt(sig.acs_population);
+  if (has(sig.acs_households))       demographics.households       = fmt(sig.acs_households);
+  if (has(sig.acs_median_hhi))       demographics.median_hhi       = usd(sig.acs_median_hhi);
+  if (has(sig.acs_median_age))       demographics.median_age       = Number(sig.acs_median_age);
+  if (has(sig.acs_owner_occ_pct))    demographics.owner_occupied   = pct(sig.acs_owner_occ_pct);
+  if (has(sig.acs_college_pct))      demographics.college_pct      = pct(sig.acs_college_pct);
+  if (has(sig.acs_poverty_pct))      demographics.poverty_pct      = pct(sig.acs_poverty_pct);
+  if (has(sig.acs_vacancy_pct))      demographics.vacancy_pct      = pct(sig.acs_vacancy_pct);
+  if (has(sig.acs_commute_time_min)) demographics.avg_commute_min  = Number(sig.acs_commute_time_min);
+  if (has(sig.acs_vintage))          demographics.vintage          = sig.acs_vintage;
+
+  // 2. Income (IRS SOI)
+  const income = {};
+  if (has(sig.irs_agi_median))  income.median_agi     = usd(sig.irs_agi_median);
+  if (has(sig.irs_returns))     income.returns_filed  = fmt(sig.irs_returns);
+  if (has(sig.irs_wage_share))  income.wage_share     = pct(sig.irs_wage_share);
+  // BEA
+  if (has(sig.bea_per_capita_income)) income.per_capita_income   = usd(sig.bea_per_capita_income);
+  if (has(sig.bea_income_growth_1yr)) income.income_growth_1yr   = yoy(sig.bea_income_growth_1yr);
+  if (has(sig.bea_income_vs_fl_avg))  income.vs_fl_avg           = `${Number(sig.bea_income_vs_fl_avg).toFixed(2)}x`;
+  if (has(sig.bea_vintage))           income.bea_vintage         = sig.bea_vintage;
+
+  // 3. Migration (IRS Migration)
+  const migration = {};
+  if (has(sig.irs_mig_net_returns)) migration.net_returns    = fmt(sig.irs_mig_net_returns);
+  if (has(sig.irs_mig_net_agi))     migration.net_agi_k      = fmt(sig.irs_mig_net_agi);
+  if (has(sig.irs_mig_in_returns))  migration.in_returns     = fmt(sig.irs_mig_in_returns);
+  if (has(sig.irs_mig_out_returns)) migration.out_returns    = fmt(sig.irs_mig_out_returns);
+  if (has(sig.irs_mig_top_origin))  migration.top_origin     = sig.irs_mig_top_origin;
+  if (has(sig.irs_mig_top_dest))    migration.top_dest       = sig.irs_mig_top_dest;
+  if (has(sig.irs_mig_vintage))     migration.vintage        = sig.irs_mig_vintage;
+
+  // 4. Labor Market
+  const labor = {};
+  // FRED / BLS LAUS
+  if (has(sig.fred_unemployment_rate)) labor.unemployment_rate  = pct(sig.fred_unemployment_rate);
+  if (has(sig.fred_labor_force))       labor.labor_force         = fmt(sig.fred_labor_force);
+  if (has(sig.fred_employed))          labor.employed            = fmt(sig.fred_employed);
+  if (has(sig.fred_unemployment_yoy))  labor.unemployment_yoy    = yoy(sig.fred_unemployment_yoy);
+  if (has(sig.fred_vintage))           labor.fred_vintage        = sig.fred_vintage;
+  // QWI
+  if (has(sig.qwi_employment))       labor.qwi_employment      = fmt(sig.qwi_employment);
+  if (has(sig.qwi_avg_monthly_earn)) labor.avg_monthly_earn    = usd(sig.qwi_avg_monthly_earn);
+  if (has(sig.qwi_turnover_rate))    labor.turnover_rate       = pct(sig.qwi_turnover_rate);
+  if (has(sig.qwi_vintage))          labor.qwi_vintage         = sig.qwi_vintage;
+  // QCEW
+  if (has(sig.qcew_employment))       labor.qcew_employment     = fmt(sig.qcew_employment);
+  if (has(sig.qcew_avg_weekly_wages)) labor.avg_weekly_wages    = usd(sig.qcew_avg_weekly_wages);
+  if (has(sig.qcew_establishments))   labor.establishments      = fmt(sig.qcew_establishments);
+  if (has(sig.qcew_emp_yoy_pct))      labor.emp_yoy             = yoy(sig.qcew_emp_yoy_pct);
+  if (has(sig.qcew_wage_yoy_pct))     labor.wage_yoy            = yoy(sig.qcew_wage_yoy_pct);
+  if (has(sig.qcew_vintage))          labor.qcew_vintage        = sig.qcew_vintage;
+
+  // 5. Sector Employment (CES)
+  const sectors = {};
+  if (has(sig.ces_msa_name))              sectors.msa                   = sig.ces_msa_name;
+  if (has(sig.ces_total_nonfarm))         sectors.total_nonfarm_k       = fmt(sig.ces_total_nonfarm);
+  if (has(sig.ces_total_yoy_pct))         sectors.total_yoy             = yoy(sig.ces_total_yoy_pct);
+  if (has(sig.ces_healthcare_emp))        sectors.healthcare_k          = fmt(sig.ces_healthcare_emp);
+  if (has(sig.ces_healthcare_yoy_pct))    sectors.healthcare_yoy        = yoy(sig.ces_healthcare_yoy_pct);
+  if (has(sig.ces_professional_emp))      sectors.professional_k        = fmt(sig.ces_professional_emp);
+  if (has(sig.ces_professional_yoy_pct))  sectors.professional_yoy      = yoy(sig.ces_professional_yoy_pct);
+  if (has(sig.ces_leisure_emp))           sectors.leisure_k             = fmt(sig.ces_leisure_emp);
+  if (has(sig.ces_leisure_yoy_pct))       sectors.leisure_yoy           = yoy(sig.ces_leisure_yoy_pct);
+  if (has(sig.ces_construction_emp))      sectors.construction_k        = fmt(sig.ces_construction_emp);
+  if (has(sig.ces_construction_yoy_pct))  sectors.construction_yoy      = yoy(sig.ces_construction_yoy_pct);
+  if (has(sig.ces_retail_emp))            sectors.retail_k              = fmt(sig.ces_retail_emp);
+  if (has(sig.ces_retail_yoy_pct))        sectors.retail_yoy            = yoy(sig.ces_retail_yoy_pct);
+  if (has(sig.ces_dominant_sector))       sectors.dominant_sector       = sig.ces_dominant_sector;
+  if (has(sig.ces_vintage))               sectors.vintage               = sig.ces_vintage;
+  if (has(sig.ai_displacement_risk))      sectors.ai_displacement_risk  = Number(sig.ai_displacement_risk);
+  if (has(sig.investment_opportunity_score)) sectors.investment_score   = Number(sig.investment_opportunity_score);
+  if (has(sig.investment_tier))           sectors.investment_tier       = sig.investment_tier;
+  if (has(sig.dominant_growth_sector))    sectors.growth_leader         = sig.dominant_growth_sector;
+
+  // 6. Jobs (LODES)
+  const jobs = {};
+  if (has(sig.lodes_jobs_here))            jobs.jobs_located_here     = fmt(sig.lodes_jobs_here);
+  if (has(sig.lodes_workers_living_here))  jobs.workers_living_here   = fmt(sig.lodes_workers_living_here);
+  if (has(sig.lodes_net_flow))             jobs.net_flow              = fmt(sig.lodes_net_flow);
+  if (has(sig.lodes_retail_jobs))          jobs.retail_jobs           = fmt(sig.lodes_retail_jobs);
+  if (has(sig.lodes_food_jobs))            jobs.food_jobs             = fmt(sig.lodes_food_jobs);
+  if (has(sig.lodes_top_inflow_zip))       jobs.top_inflow_zip        = sig.lodes_top_inflow_zip;
+  if (has(sig.lodes_top_outflow_zip))      jobs.top_outflow_zip       = sig.lodes_top_outflow_zip;
+
+  // 7. Business Activity
+  const business_activity = {
+    total_businesses,
+    top_categories: business_density.slice(0, 5),
+  };
+  if (has(sig.zbp_total_establishments)) business_activity.zbp_establishments = fmt(sig.zbp_total_establishments);
+  if (has(sig.cbp_dominant_sector))      business_activity.cbp_dominant_sector = sig.cbp_dominant_sector;
+  if (has(sig.sunbiz_active_entities))   business_activity.sunbiz_active       = fmt(sig.sunbiz_active_entities);
+  if (has(sig.sunbiz_new_12mo))          business_activity.sunbiz_new_12mo     = fmt(sig.sunbiz_new_12mo);
+  if (has(sig.sunbiz_net_12mo))          business_activity.sunbiz_net_12mo     = fmt(sig.sunbiz_net_12mo);
+  if (has(sig.osm_biz_count))            business_activity.osm_mapped          = fmt(sig.osm_biz_count);
+  if (has(sig.osm_food_count))           business_activity.osm_food            = fmt(sig.osm_food_count);
+  if (has(sig.osm_with_phone_pct))       business_activity.osm_with_phone      = pct(sig.osm_with_phone_pct);
+
+  // 8. Construction
+  const construction = {};
+  if (has(sig.bps_total_units_annual))   construction.units_annual         = fmt(sig.bps_total_units_annual);
+  if (has(sig.bps_res_1unit_annual))     construction.single_family_annual = fmt(sig.bps_res_1unit_annual);
+  if (has(sig.bps_res_multifam_annual))  construction.multifam_annual      = fmt(sig.bps_res_multifam_annual);
+  if (has(sig.bps_total_units_mo))       construction.units_latest_month   = fmt(sig.bps_total_units_mo);
+  if (has(sig.bps_period_mo))            construction.period               = sig.bps_period_mo;
+
+  // 9. Broadband
+  const broadband = {};
+  if (sig.fcc_has_25_3  != null) broadband.has_25_3_mbps  = sig.fcc_has_25_3;
+  if (sig.fcc_has_100_20 != null) broadband.has_100_20_mbps = sig.fcc_has_100_20;
+  if (sig.fcc_has_gigabit != null) broadband.has_gigabit   = sig.fcc_has_gigabit;
+  if (sig.fcc_fiber_available != null) broadband.fiber_available = sig.fcc_fiber_available;
+  if (has(sig.fcc_providers_cnt)) broadband.provider_count = Number(sig.fcc_providers_cnt);
+  // Normalised aliases from fccBroadbandWorker newer columns
+  if (has(sig.fcc_pct_25_3))          broadband.pct_25_3          = pct(sig.fcc_pct_25_3);
+  if (has(sig.fcc_pct_100_20))        broadband.pct_100_20        = pct(sig.fcc_pct_100_20);
+  if (has(sig.fcc_provider_count))    broadband.provider_count    = Number(sig.fcc_provider_count);
+  if (has(sig.fcc_bead_unserved_pct)) broadband.bead_unserved_pct = pct(sig.fcc_bead_unserved_pct);
+
+  // 10. Property (property_parcels)
+  const property = {};
+  if (has(pr.parcel_count))  property.parcel_count  = Number(pr.parcel_count);
+  if (has(pr.avg_beds))      property.avg_beds       = Number(pr.avg_beds);
+  if (has(pr.avg_baths))     property.avg_baths      = Number(pr.avg_baths);
+  if (has(pr.avg_sqft))      property.avg_sqft       = fmt(pr.avg_sqft);
+  if (has(pr.avg_assessed))  property.avg_assessed   = usd(pr.avg_assessed);
+  if (has(pr.min_assessed))  property.min_assessed   = usd(pr.min_assessed);
+  if (has(pr.max_assessed))  property.max_assessed   = usd(pr.max_assessed);
+  if (has(pr.avg_year_built))property.avg_year_built = fmt(pr.avg_year_built);
+
+  // 11. World Model / Opportunity Scores
+  const world_model = {};
+  if (has(sig.sig_growth_score))      world_model.growth_score      = Number(sig.sig_growth_score);
+  if (has(sig.sig_opportunity_score)) world_model.opportunity_score = Number(sig.sig_opportunity_score);
+  if (has(sig.sig_risk_score))        world_model.risk_score        = Number(sig.sig_risk_score);
+  if (has(sig.sig_market_maturity))   world_model.market_maturity   = sig.sig_market_maturity;
+  if (has(sig.sig_income_tier))       world_model.income_tier       = sig.sig_income_tier;
+  if (has(sig.sig_peer_cohort))       world_model.peer_cohort       = sig.sig_peer_cohort;
+  if (has(sig.sig_biz_density_per_1k)) world_model.biz_density_per_1k = Number(sig.sig_biz_density_per_1k);
+  if (has(sig.sig_job_capture_ratio))  world_model.job_capture_ratio  = Number(sig.sig_job_capture_ratio);
+
+  // 12. Demand
+  const demand = { top_sms_intents, unmet_demand };
+
+  // ── Count populated sections ───────────────────────────────────────────────
+  const sectionData = { demographics, income, migration, labor, sectors, jobs, business_activity, construction, broadband, property, world_model };
+  const populatedSections = Object.entries(sectionData)
+    .filter(([, v]) => Object.keys(v).length > 1) // at least 1 real key beyond metadata
+    .map(([k]) => k);
+
+  // ── CEO Summary — multi-section, plain English ─────────────────────────────
+  const lines = [`ZIP ${zip}${q ? ` · Query: "${q}"` : ''}`];
+
+  // Demographics
+  if (has(sig.acs_population)) {
+    const incStr = has(sig.acs_median_hhi) ? `, median HHI ${usd(sig.acs_median_hhi)}` : '';
+    const ownStr = has(sig.acs_owner_occ_pct) ? `, ${pct(sig.acs_owner_occ_pct)} owner-occupied` : '';
+    lines.push(`DEMOGRAPHICS: Population ${fmt(sig.acs_population)}${incStr}${ownStr}.`);
   }
 
-  const zip_signals = Array.isArray(zipSignalRows) && zipSignalRows[0]
-    ? zipSignalRows[0]
-    : null;
+  // Income
+  if (has(sig.bea_per_capita_income) || has(sig.irs_agi_median)) {
+    const parts = [];
+    if (has(sig.bea_per_capita_income)) parts.push(`per capita income ${usd(sig.bea_per_capita_income)}`);
+    if (has(sig.bea_income_vs_fl_avg))  parts.push(`${Number(sig.bea_income_vs_fl_avg).toFixed(2)}x FL avg`);
+    if (has(sig.irs_agi_median))        parts.push(`median AGI ${usd(sig.irs_agi_median)}`);
+    if (parts.length) lines.push(`INCOME: ${parts.join(', ')}.`);
+  }
 
-  const top_sms_intents = Array.isArray(smsRows) ? smsRows : [];
-  const unmet_demand = Array.isArray(deadEndRows) ? deadEndRows : [];
+  // Migration
+  if (has(sig.irs_mig_net_returns)) {
+    const dir = Number(sig.irs_mig_net_returns) >= 0 ? 'gaining' : 'losing';
+    const netAgi = has(sig.irs_mig_net_agi) ? ` net AGI ${usd(Number(sig.irs_mig_net_agi) * 1000)}` : '';
+    lines.push(`MIGRATION: ZIP is ${dir} ${Math.abs(Number(sig.irs_mig_net_returns)).toLocaleString()} net returns (${sig.irs_mig_vintage || ''})${netAgi}.`);
+  }
 
-  // Build plain-English CEO summary via pure string interpolation
-  const topCats = business_density.slice(0, 3)
-    .map((r) => `${r.category} (${r.count})`)
-    .join(', ');
-  const categoryCount = business_density.length;
-  const avgAssessedStr = property_snapshot && property_snapshot.avg_assessed != null
-    ? `$${Math.round(property_snapshot.avg_assessed).toLocaleString()}`
-    : 'n/a';
-  const topSmsStr = top_sms_intents.map((r) => r.detected_intent).filter(Boolean).join(', ') || 'none recorded';
-  const unmetStr = unmet_demand.map((r) => r.detected_intent).filter(Boolean).join(', ') || 'none recorded';
-  const qContextStr = q ? ` (context: ${q})` : '';
+  // Labor
+  if (has(sig.fred_unemployment_rate) || has(sig.qcew_employment)) {
+    const parts = [];
+    if (has(sig.fred_unemployment_rate)) parts.push(`unemployment ${pct(sig.fred_unemployment_rate)}`);
+    if (has(sig.qcew_employment))        parts.push(`${fmt(sig.qcew_employment)} employed`);
+    if (has(sig.qcew_avg_weekly_wages))  parts.push(`avg wages ${usd(sig.qcew_avg_weekly_wages)}/wk`);
+    if (has(sig.qcew_emp_yoy_pct))       parts.push(`employment ${yoy(sig.qcew_emp_yoy_pct)} YoY`);
+    if (parts.length) lines.push(`LABOR: ${parts.join(', ')}.`);
+  }
 
-  const ceo_summary =
-    `ZIP ${zip}${qContextStr} has ${total_businesses} businesses mapped across ${categoryCount} categories. ` +
-    `Top categories: ${topCats || 'none'}. ` +
-    `Property avg assessed value is ${avgAssessedStr} across ${property_snapshot?.parcel_count || 0} parcels. ` +
-    `Demand signals show top queries: ${topSmsStr}. Unmet demand (dead ends): ${unmetStr}.`;
+  // Sectors
+  if (has(sig.ces_total_nonfarm)) {
+    const parts = [`${fmt(sig.ces_total_nonfarm)}k nonfarm jobs (${sig.ces_msa_name || 'MSA'})`, `${yoy(sig.ces_total_yoy_pct)} YoY`];
+    if (has(sig.ces_dominant_sector)) parts.push(`dominant: ${sig.ces_dominant_sector}`);
+    if (has(sig.investment_opportunity_score)) parts.push(`investment score ${Number(sig.investment_opportunity_score)}/100 (${sig.investment_tier || '?'})`);
+    if (has(sig.ai_displacement_risk)) parts.push(`AI risk ${Number(sig.ai_displacement_risk)}/100`);
+    lines.push(`SECTORS: ${parts.join(', ')}.`);
+  }
 
+  // Jobs flow
+  if (has(sig.lodes_jobs_here)) {
+    const flow = Number(sig.lodes_net_flow || 0);
+    lines.push(`JOBS FLOW: ${fmt(sig.lodes_jobs_here)} jobs located here, ${fmt(sig.lodes_workers_living_here)} workers live here — net ${flow >= 0 ? '+' : ''}${fmt(flow)} (${flow >= 0 ? 'job importer' : 'bedroom community'}).`);
+  }
+
+  // Business Activity
+  const topCats = business_density.slice(0, 3).map((r) => `${r.category} (${r.count})`).join(', ');
+  lines.push(`BUSINESS: ${total_businesses} businesses mapped${topCats ? ` — top: ${topCats}` : ''}.`);
+  if (has(sig.sunbiz_new_12mo)) lines.push(`FORMATION: ${fmt(sig.sunbiz_new_12mo)} new entities registered last 12 months, net ${fmt(sig.sunbiz_net_12mo || 0)}.`);
+
+  // Construction
+  if (has(sig.bps_total_units_annual)) {
+    lines.push(`CONSTRUCTION: ${fmt(sig.bps_total_units_annual)} residential units permitted (annual), ${fmt(sig.bps_res_1unit_annual || 0)} single-family.`);
+  }
+
+  // Property
+  if (Number(pr.parcel_count || 0) > 0) {
+    const parts = [`${fmt(pr.parcel_count)} parcels`];
+    if (has(pr.avg_assessed))  parts.push(`avg assessed ${usd(pr.avg_assessed)}`);
+    if (has(pr.min_assessed))  parts.push(`min ${usd(pr.min_assessed)}`);
+    if (has(pr.avg_beds))      parts.push(`avg ${Number(pr.avg_beds).toFixed(1)} beds/${Number(pr.avg_baths || 0).toFixed(1)} baths`);
+    if (has(pr.avg_sqft))      parts.push(`avg ${fmt(pr.avg_sqft)} sqft`);
+    lines.push(`PROPERTY: ${parts.join(', ')}.`);
+  }
+
+  // World model
+  if (has(sig.sig_growth_score)) {
+    lines.push(`WORLD MODEL: growth score ${sig.sig_growth_score}/100, opportunity ${sig.sig_opportunity_score}/100, maturity: ${sig.sig_market_maturity || 'n/a'}.`);
+  }
+
+  // Demand
+  const topSmsStr = top_sms_intents.map((r) => r.detected_intent).filter(Boolean).join(', ') || null;
+  const unmetStr  = unmet_demand.map((r) => r.detected_intent).filter(Boolean).join(', ') || null;
+  if (topSmsStr)  lines.push(`DEMAND: Top queries — ${topSmsStr}.`);
+  if (unmetStr)   lines.push(`UNMET DEMAND: ${unmetStr}.`);
+
+  const ceo_summary = lines.join(' ');
+
+  // ── Response ───────────────────────────────────────────────────────────────
   return res.json({
     zip,
-    query_context: q || null,
-    assessed_at: new Date().toISOString(),
-    business_density,
-    total_businesses,
-    property_snapshot,
-    zip_signals,
-    demand_signals: {
-      top_sms_intents,
-      unmet_demand,
-    },
+    query_context:      q || null,
+    assessed_at:        new Date().toISOString(),
+    populated_sections: populatedSections,
+    // Structured sections — each only present if it has data
+    demographics:       Object.keys(demographics).length   ? demographics   : undefined,
+    income:             Object.keys(income).length         ? income         : undefined,
+    migration:          Object.keys(migration).length      ? migration      : undefined,
+    labor:              Object.keys(labor).length          ? labor          : undefined,
+    sectors:            Object.keys(sectors).length        ? sectors        : undefined,
+    jobs:               Object.keys(jobs).length           ? jobs           : undefined,
+    business_activity,
+    construction:       Object.keys(construction).length   ? construction   : undefined,
+    broadband:          Object.keys(broadband).length      ? broadband      : undefined,
+    property:           Object.keys(property).length       ? property       : undefined,
+    world_model:        Object.keys(world_model).length    ? world_model    : undefined,
+    demand,
     ceo_summary,
   });
 });
