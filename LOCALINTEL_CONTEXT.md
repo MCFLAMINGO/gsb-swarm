@@ -4195,3 +4195,15 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 - `gsb-swarm-dashboard` `src/app/local-intel/ceo/page.tsx`: Full rewrite — updated CeoAssessment type to match B31 response shape. 12 dedicated section panels: DemographicsPanel, IncomePanel, MigrationPanel, LaborPanel, SectorsPanel, JobsPanel, BusinessPanel (full-width w/ bar chart), ConstructionPanel, BroadbandPanel, PropertyPanel, WorldModelPanel (full-width w/ score rings), DemandPanel (full-width). Populated-sections pill bar on summary card. CEO prompt bar context placeholder updated for brief creation workflow. Sections only render when populated_sections includes them — gracefully degrades as workers populate more data.
 
 **Result:** CEO page is now the operational brief-creation workspace. Each populated data node surfaces its section automatically. ACP agents can call `local_intel_assess` to hire the CEO for LocalIntel market intelligence. Both expand automatically as more workers populate zip_signals.
+
+## 2026-05-13 — B33: Fix LODES crash, QWI quarter walk, CEO column name mismatch
+
+**Problem:** Three bugs found from Railway logs preventing LODES/QWI from populating zip_signals. (1) LODES fatal: `Cannot read properties of undefined (reading 'length')` — heartbeat check used `hb.rows.length` but `db.query()` returns an array directly, not `{rows:[]}`. (2) QWI fatal: `JSON parse failed: Unexpected end of JSON input` — quarter calculation only tried 1 quarter back; Census QWI is currently 5+ quarters behind so both Q3 and Q2 2025 were unavailable. (3) CEO-assess `jobs` section always empty — endpoint read `sig.lodes_workers_living_here` but worker writes `lodes_workers_live_here` (different column name). Also missing `lodes_healthcare_jobs`, `lodes_high_earn_pct`, `lodes_low_earn_pct` from the jobs section. FRED/BEA: separate env var issue (keys need to be verified in Railway).
+
+**Fix:**
+- `workers/lodesWorker.js`: Heartbeat check changed from `.catch(() => ({ rows: [] }))` + `hb.rows.length` to `.catch(() => [])` + `Array.isArray(hb) && hb.length` + `hb[0].last_run`. Matches db.query() contract.
+- `workers/qwiWorker.js`: Replaced `getLatestQwiQuarter()` with `qwiCandidates()` — generates 8 candidates starting 2 quarters back, worker iterates until one succeeds. Handles Census publication lag gracefully regardless of how far behind they are.
+- `localIntelAgent.js`: Fixed `lodes_workers_living_here` → `lodes_workers_live_here` in both the jobs section builder and the ceo_summary line. Added `lodes_healthcare_jobs`, `lodes_high_earn_pct`, `lodes_low_earn_pct` to jobs section. Removed non-existent `lodes_top_inflow_zip` / `lodes_top_outflow_zip` references.
+- `gsb-swarm-dashboard` CEO page: Updated Jobs interface type + JobsPanel to match — added healthcare_jobs, high_earn_pct, low_earn_pct rows; removed top_inflow/outflow_zip.
+
+**Result:** LODES worker will now complete its block aggregation without crashing. QWI will find the correct available quarter (Q3 or Q4 2024). CEO jobs section will populate correctly once LODES runs. FRED/BEA pending env var verification.
