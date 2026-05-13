@@ -4163,3 +4163,15 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 - `gsb-swarm` `data-seed/reseed_cron.js`: Added `RESEED_ONLY` env var guard in `main()` — if `RESEED_ONLY=stjohns` only runs `seedStJohns`, if `RESEED_ONLY=duval` only runs `seedDuval`, otherwise full run. Quarterly cron unaffected (no env var set).
 
 **Result:** All 17 data nodes visible on Vercel nodes page with live status, cron schedules, and individual trigger buttons. "Trigger All Workers" button fires every triggerable node at once. CAMA reseed can now be run on-demand without waiting for quarterly cron — downloads fresh CAMAData.zip + CAMADataSup.zip from sftp.sjcpa.us, runtime ~5–10 min. Pattern is the model for all future nodes: add `triggerEndpoint` + `cron` to `NodeDef` and it works automatically.
+
+## 2026-05-13 — B30: Three node page fixes (CAMA status, trigger-osm, reseed tracking)
+
+**Problem:** Three issues in B29 nodes page: (1) No way to see reseed progress after triggering — fire-and-forget with no status feedback. (2) trigger-osm endpoint missing from dashboard-server.js — OSM trigger button would 404. (3) SJCPA CAMA node status derived from zip_signals which never contains sjc_beds/sjc_baths — card always showed PENDING incorrectly.
+
+**Fix:**
+- `dashboard-server.js`: Added `POST /api/admin/trigger-osm` — spawns overpassWorker.js, same pattern as all other trigger endpoints.
+- `localIntelAgent.js`: Reseed endpoint now writes `reseedStJohns_started_{jobId}` to worker_heartbeat before spawning. Added `GET /api/local-intel/admin/cama-status` — queries property_parcels WHERE co_no=65 for real coverage stats (total, with_beds, with_baths, with_sqft, with_year, avgs) + reads worker_heartbeat for recent job entries to surface started/complete/error state.
+- `data-seed/reseed_cron.js`: Writes `reseedStJohns_complete_{jobId}` or `reseedStJohns_error_{jobId}` to worker_heartbeat on completion.
+- `gsb-swarm-dashboard` nodes page: `NodeDef` gets `statusEndpoint` + `statusHeaders` optional fields. NodeCard fetches statusEndpoint on mount if present (bypasses zip_signals check). CAMA card shows `CamaStatusPanel` — coverage bar, avg beds/baths/sqft stats, last job timestamp. Polls every 30s while a reseed is in-progress (started_at > complete_at). Signal count row suppressed for statusEndpoint nodes.
+
+**Result:** CAMA card shows real parcel coverage from Postgres. "Reseed in progress" state visible with last-started timestamp and 30s auto-refresh. OSM trigger button works. All three points from post-B29 review addressed.

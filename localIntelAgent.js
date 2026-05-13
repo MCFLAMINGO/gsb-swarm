@@ -8569,11 +8569,20 @@ router.post('/admin/reseed-stjohns', express.json(), async (req, res) => {
   const jobId = `reseed-stjohns-${Date.now()}`;
   const scriptPath = path.join(__dirname, 'data-seed', 'reseed_cron.js');
 
+  // Write start heartbeat to Postgres so status endpoint can track progress
+  try {
+    await db.query(
+      `INSERT INTO worker_heartbeat (worker_name, last_run) VALUES ($1, NOW())
+       ON CONFLICT (worker_name) DO UPDATE SET last_run = NOW()`,
+      [`reseedStJohns_started_${jobId}`]
+    );
+  } catch (_) { /* non-fatal */ }
+
   // Spawn detached so it outlives the HTTP response
   const child = spawn(process.execPath, [scriptPath, '--only=stjohns'], {
     detached: true,
     stdio: 'ignore',
-    env: { ...process.env, RESEED_ONLY: 'stjohns' },
+    env: { ...process.env, RESEED_ONLY: 'stjohns', RESEED_JOB_ID: jobId },
   });
   child.unref();
 
@@ -8585,6 +8594,60 @@ router.post('/admin/reseed-stjohns', express.json(), async (req, res) => {
     pid: child.pid,
     message: 'St. Johns CAMA reseed started — downloads CAMAData.zip + CAMADataSup.zip from sftp.sjcpa.us and upserts beds/baths/sqft/year_built for 171k parcels. Runtime ~5–10 min.',
   });
+});
+
+// ── GET /api/local-intel/admin/cama-status ────────────────────────────────────
+// Returns St. Johns CAMA data coverage from property_parcels (co_no=65).
+// Also returns reseed job status from worker_heartbeat.
+router.get('/admin/cama-status', async (req, res) => {
+  const token = req.headers['x-admin-token'] || req.headers['x-operator-token'] || req.query.admin_token;
+  if (token !== process.env.LOCAL_INTEL_ADMIN_TOKEN && token !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  try {
+    // Coverage stats from property_parcels
+    const coverage = await db.query(`
+      SELECT
+        COUNT(*)::int                          AS total_parcels,
+        COUNT(beds)::int                       AS with_beds,
+        COUNT(baths)::int                      AS with_baths,
+        COUNT(tot_lvg_ar)::int                 AS with_sqft,
+        COUNT(act_yr_blt)::int                 AS with_year,
+        ROUND(AVG(beds)::numeric, 1)           AS avg_beds,
+        ROUND(AVG(baths)::numeric, 1)          AS avg_baths,
+        ROUND(AVG(tot_lvg_ar)::numeric, 0)     AS avg_sqft
+      FROM property_parcels
+      WHERE co_no = 65
+    `);
+
+    // Last reseed job from worker_heartbeat
+    const heartbeat = await db.query(`
+      SELECT worker_name, last_run
+      FROM worker_heartbeat
+      WHERE worker_name LIKE 'reseedStJohns%'
+      ORDER BY last_run DESC
+      LIMIT 5
+    `);
+
+    const stats = coverage[0] || {};
+    const live = (stats.with_beds || 0) > 0;
+
+    return res.json({
+      live,
+      total_parcels: stats.total_parcels || 0,
+      with_beds:     stats.with_beds     || 0,
+      with_baths:    stats.with_baths    || 0,
+      with_sqft:     stats.with_sqft     || 0,
+      with_year:     stats.with_year     || 0,
+      avg_beds:      stats.avg_beds      || null,
+      avg_baths:     stats.avg_baths     || null,
+      avg_sqft:      stats.avg_sqft      || null,
+      recent_jobs:   heartbeat,
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
 });
 
 // ── On-Demand Worker Trigger ─────────────────────────────────────────────────

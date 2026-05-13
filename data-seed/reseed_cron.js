@@ -714,6 +714,19 @@ async function main() {
     log('verify failed:', err && err.message ? err.message : err);
   }
 
+  // Write completion heartbeat — picked up by /admin/cama-status
+  const jobId = process.env.RESEED_JOB_ID || null;
+  if (jobId) {
+    const label = errors.length ? `reseedStJohns_error_${jobId}` : `reseedStJohns_complete_${jobId}`;
+    try {
+      await pool.query(
+        `INSERT INTO worker_heartbeat (worker_name, last_run) VALUES ($1, NOW())
+         ON CONFLICT (worker_name) DO UPDATE SET last_run = NOW()`,
+        [label]
+      );
+    } catch (_) { /* non-fatal */ }
+  }
+
   await pool.end().catch(() => {});
 
   if (errors.length) {

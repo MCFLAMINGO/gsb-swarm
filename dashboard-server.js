@@ -1140,6 +1140,26 @@ app.post('/api/admin/trigger-qcew', (req, res) => {
   });
 });
 
+// POST /api/admin/trigger-osm — runs overpassWorker immediately
+app.post('/api/admin/trigger-osm', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'OSM worker triggered — fetches Overpass API business data for all TARGET_ZIPS (~weekly refresh)' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/overpassWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[osm-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[osm-trigger] ' + d));
+      child.on('close', code => console.log('[admin] OSM worker done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] OSM trigger failed:', e.message); }
+  });
+});
+
 // GET /api/admin/worker-status — returns all worker heartbeats with last_run timestamps
 // Used by dashboard to show "last updated" next to every data node
 app.get('/api/admin/worker-status', async (req, res) => {
