@@ -1273,6 +1273,127 @@ router.post('/', async (req, res) => {
       ? resolveNlIntentFromRegistry(query)
       : { taskClass: null, group: null, tags: null, cuisine: null, category: null, resolvesVia: 'search', temporalContext: null };
 
+    // ── B19: SHORT_NAME_FOOD_RE — short prefix + food place type ──────────────
+    // Queries like "V pizza", "V's kitchen", "JJ tacos" should attempt a name
+    // search FIRST (against businesses table) before falling through to the
+    // generic category search. Without this, "V pizza" never matches V Pizza
+    // by name and gets bucketed as a pizza-category search returning every
+    // pizza place in the ZIP. If 0 name hits, fall through to normal routing.
+    const SHORT_NAME_FOOD_RE = /^([a-z]{1,4}['s]*)\s+(pizza|burger|grill|kitchen|cafe|bar|wings|sushi|tacos?|bbq|diner|bistro|tavern|pub|grille|house|shack|joint)\b/i;
+    if (query && !group && !category && SHORT_NAME_FOOD_RE.test(String(query).trim())) {
+      try {
+        // Resolve Tier 2/Tier 1 alias first ("v pizza" → "V Pizza")
+        const _b19Alias = await resolveBusinessAlias(query).catch(() => ({ canonical: null, business_id: null }));
+        const _b19Name = _b19Alias?.canonical || String(query).trim();
+        const _b19Pinned = _b19Alias?.business_id || null;
+        const _b19Zips = zip ? [zip] : TARGET_ZIPS;
+        let _b19Rows = [];
+        if (_b19Pinned) {
+          _b19Rows = await db.query(
+            `SELECT business_id, name, address, city, zip, phone, website,
+                    hours, category, category_group, tags, description, cuisine,
+                    confidence_score AS confidence, confidence_score, lat, lon,
+                    sunbiz_doc_number, claimed_at IS NOT NULL AS claimed, wallet,
+                    pos_config->>'pos_type' AS pos_type, is_showcase
+               FROM businesses
+              WHERE business_id = $1 AND status != 'inactive'
+              LIMIT 1`,
+            [_b19Pinned]
+          ).catch(err => { console.error('[B19] pinned name lookup error:', err.message); return []; });
+        }
+        if (!_b19Rows.length) {
+          _b19Rows = await db.query(
+            `SELECT business_id, name, address, city, zip, phone, website,
+                    hours, category, category_group, tags, description, cuisine,
+                    confidence_score AS confidence, confidence_score, lat, lon,
+                    sunbiz_doc_number, claimed_at IS NOT NULL AS claimed, wallet,
+                    pos_config->>'pos_type' AS pos_type, is_showcase
+               FROM businesses
+              WHERE status != 'inactive'
+                AND zip = ANY($1::text[])
+                AND name ILIKE $2
+              ORDER BY
+                CASE WHEN zip = ANY($3::text[]) THEN 0 ELSE 1 END,
+                (claimed_at IS NOT NULL) DESC,
+                confidence_score DESC
+              LIMIT 10`,
+            [_b19Zips, `%${_b19Name}%`, zip ? [zip] : ['32082','32081']]
+          ).catch(err => { console.error('[B19] name search error:', err.message); return []; });
+        }
+        if (_b19Rows && _b19Rows.length > 0) {
+          const _b19Sorted = sortResults(_b19Rows.slice());
+          let _b19Enriched = _b19Sorted.map(r => {
+            const out = { ...r };
+            if (r.pos_type === 'other' && r.wallet) {
+              out.ucp_order_url = 'https://surge.basalthq.com/api/ucp/checkout-sessions';
+              out.ucp_wallet    = r.wallet;
+              out.ucp_note      = 'POST ucp_order_url with shopSlug resolved via GET https://surge.basalthq.com/api/directory/shops?q=' + encodeURIComponent(r.name);
+            }
+            delete out.pos_type;
+            delete out.has_wallet;
+            delete out.confidence_score;
+            return out;
+          });
+          if (customerSession) {
+            _b19Enriched = personalizeResults(_b19Enriched, customerSession);
+          }
+          recordResolution({
+            query,
+            intent: { taskClass: 'NAME_SEARCH', group: nlIntentEarly.group, cuisine: nlIntentEarly.cuisine },
+            zip,
+            businessId: _b19Enriched[0]?.business_id ?? null,
+            resolved: true,
+            resolvedVia: 'name_search',
+            resultCount: _b19Enriched.length,
+            startTime: _reqStart
+          });
+          upsertCustomerSession({
+            customerId,
+            idType: customerIdType,
+            query,
+            businessId: _b19Enriched[0]?.business_id ?? null,
+            group: nlIntentEarly.group
+          });
+          const _b19Meta = {
+            source:        'postgres+name_prefix',
+            intent_type:   'NAME_SEARCH',
+            resolves_via:  'name_search',
+            matched_pattern: 'short_name_food',
+            personalized:  !!customerSession,
+            customer_query_count: customerSession?.query_count ?? null,
+            coverage:      '113,684 businesses — Florida statewide',
+          };
+          _b19Meta.narrative = buildNarrative(
+            _b19Enriched,
+            { ...nlIntentEarly, category: nlIntentEarly.category || 'restaurant' },
+            { ..._b19Meta, zip }
+          );
+          maybeLogSms(req, {
+            customerId,
+            query,
+            zip,
+            intent: 'name_search',
+            resolvedVia: 'name_search',
+            responsePreview: _b19Meta.narrative
+              || (_b19Enriched[0] && `Top result: ${_b19Enriched[0].name}`)
+              || '',
+          });
+          return res.json({
+            ok:       true,
+            total:    _b19Enriched.length,
+            returned: _b19Enriched.length,
+            zips:     zip ? [zip] : TARGET_ZIPS,
+            results:  _b19Enriched,
+            meta:     _b19Meta,
+          });
+        }
+        // 0 rows → fall through to normal intent routing (category search will handle it)
+      } catch (err) {
+        console.error('[B19] short-name food search failed:', err.message);
+        // swallow and fall through
+      }
+    }
+
     // ── Step 6 — Resolution path routing (How dimension) ────────────────────
     // Registry's resolvesVia drives where this request goes. ORDER → /place-order,
     // STATUS → /order-status, search/dispatch → continue below. Returns a clear
@@ -1302,7 +1423,21 @@ router.post('/', async (req, res) => {
     // Plumber, electrician, HVAC, roofer, handyman, painter, landscaper,
     // cleaner, mechanic, towing → handleRFQ broadcasts a Twilio SMS bid to
     // matching businesses and notifies the customer.
-    if (resolvesVia === 'rfq') {
+    // B19: FOOD_RFQ_BLOCK guard — food categories must never broadcast an RFQ
+    // bid to restaurants. "V pizza" with no exact match was hitting RFQ as a
+    // catch-all and texting Domino's a service-bid SMS. If a food category
+    // tries to route to RFQ, reroute to search (fall through to Phase 2).
+    const FOOD_RFQ_BLOCK = new Set([
+      'restaurant','food','pizza','dessert','grocery','coffee',
+      'bakery','seafood','sushi','tacos','wings','burger','bbq',
+      'breakfast','brunch','lunch','dinner','takeout','delivery_food'
+    ]);
+    if (resolvesVia === 'rfq'
+        && nlIntentEarly?.category
+        && FOOD_RFQ_BLOCK.has(nlIntentEarly.category)) {
+      console.log(`[B19] food RFQ block — rerouting "${query}" (cat=${nlIntentEarly.category}) from RFQ to SEARCH`);
+      // fall through — Phase 2 search below will handle it via searchByCategory
+    } else if (resolvesVia === 'rfq') {
       return await handleRFQ(req, res, nlIntentEarly, query, customerId, zip);
     }
     // ── Reservation routing ────────────────────────────────────────────────
