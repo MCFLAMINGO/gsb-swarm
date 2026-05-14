@@ -10038,6 +10038,158 @@ router.options('/create-agent-wallet', (req, res) =>
      .sendStatus(204)
 );
 
+// ── CEO County Analysis ───────────────────────────────────────────────────────
+// POST /api/local-intel/ceo-county-query
+// Body: { county, question }
+// Ranks all ZIPs in a county against a question type (QSR/upscale/healthcare/lease/general).
+const COUNTY_ZIPS = {
+  'St. Johns':  ['32082','32081','32250','32266','32259','32092','32084','32095','32080','32086'],
+  'Duval':      ['32202','32204','32205','32206','32207','32208','32209','32210','32211','32216','32217','32218','32219','32220','32221','32222','32223','32224','32225','32226','32233','32244','32246','32250','32254','32256','32257','32258','32266'],
+  'Clay':       ['32043','32065','32068','32073','32656'],
+  'Nassau':     ['32034','32046','32097'],
+  'Flagler':    ['32110','32136','32137'],
+  'Putnam':     ['32148','32177','32193'],
+};
+
+const ZIP_CITIES = {
+  '32082': 'Ponte Vedra Beach', '32081': 'Nocatee', '32250': 'Jacksonville Beach',
+  '32266': 'Neptune Beach', '32233': 'Atlantic Beach', '32259': 'St. Johns',
+  '32092': 'World Golf Village', '32084': 'St. Augustine', '32095': 'St. Augustine',
+  '32080': 'St. Augustine Beach', '32086': 'St. Augustine', '32034': 'Fernandina Beach',
+  '32046': 'Hilliard', '32097': 'Yulee', '32043': 'Green Cove Springs',
+  '32065': 'Orange Park', '32068': 'Middleburg', '32073': 'Orange Park',
+  '32202': 'Jacksonville', '32204': 'Jacksonville', '32205': 'Jacksonville',
+  '32206': 'Jacksonville', '32207': 'Jacksonville', '32208': 'Jacksonville',
+  '32209': 'Jacksonville', '32210': 'Jacksonville', '32211': 'Jacksonville',
+  '32216': 'Jacksonville', '32217': 'Jacksonville', '32218': 'Jacksonville',
+  '32219': 'Jacksonville', '32220': 'Jacksonville', '32221': 'Jacksonville',
+  '32222': 'Jacksonville', '32223': 'Jacksonville', '32224': 'Jacksonville Beach',
+  '32225': 'Jacksonville', '32226': 'Jacksonville', '32244': 'Jacksonville',
+  '32246': 'Jacksonville', '32254': 'Jacksonville', '32256': 'Jacksonville',
+  '32257': 'Jacksonville', '32258': 'Jacksonville',
+  '32110': 'Bunnell', '32136': 'Flagler Beach', '32137': 'Palm Coast',
+  '32148': 'Interlachen', '32177': 'Palatka', '32193': 'Welaka',
+};
+function getCityForZip(zip) { return ZIP_CITIES[zip] || zip; }
+
+router.post('/ceo-county-query', express.json(), async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const { county, question } = req.body;
+  if (!county || !question) return res.status(400).json({ error: 'county and question required' });
+
+  const zips = COUNTY_ZIPS[county];
+  if (!zips) return res.status(400).json({ error: `Unknown county: ${county}. Valid: ${Object.keys(COUNTY_ZIPS).join(', ')}` });
+
+  try {
+    const sigRows = await db.query(
+      `SELECT zip, acs_population, acs_median_hhi, acs_owner_occupied_pct,
+              irs_mig_net_returns, irs_mig_net_agi,
+              fred_unemployment_rate, qcew_avg_weekly_wages,
+              sig_growth_score, sig_opportunity_score, sig_risk_score,
+              sig_market_maturity, sig_income_tier
+       FROM zip_signals WHERE zip = ANY($1)`,
+      [zips]
+    );
+
+    const bizRows = await db.query(
+      `SELECT zip, COUNT(*)::int as biz_count FROM businesses WHERE zip = ANY($1) GROUP BY zip`,
+      [zips]
+    );
+    const bizMap = {};
+    for (const r of bizRows) bizMap[r.zip] = r.biz_count;
+
+    const q = question.toLowerCase();
+
+    const isQsr = ['smoothie','juice','qsr','fast casual','coffee','cafe','sandwich','pizza','taco','burger','fast food'].some(k => q.includes(k));
+    const isUpscale = ['steakhouse','steak','fine dining','upscale','premium'].some(k => q.includes(k));
+    const isCasual = ['casual','bistro','bar','grill','tavern','pub'].some(k => q.includes(k));
+    const isRestaurant = isQsr || isUpscale || isCasual || ['restaurant','dining','food','concept','open a'].some(k => q.includes(k));
+    const isRetail = ['retail','shop','store','boutique'].some(k => q.includes(k));
+    const isHealthcare = ['clinic','urgent care','medical','healthcare','health','doctor'].some(k => q.includes(k));
+    const isLease = ['lease','rent','sqft','space'].some(k => q.includes(k));
+
+    const scored = sigRows.map(sig => {
+      const hhi = sig.acs_median_hhi || 0;
+      const growth = sig.sig_growth_score || 0;
+      const opp = sig.sig_opportunity_score || 0;
+      const bizCount = bizMap[sig.zip] || 0;
+      const pop = sig.acs_population || 0;
+      let score = 0;
+      let reason = '';
+
+      if (isQsr) {
+        score = Math.round((hhi / 150000) * 40 + (growth / 100) * 35 + (opp / 100) * 25);
+        reason = `HHI $${(hhi||0).toLocaleString()}, growth ${growth}/100, opportunity ${opp}/100`;
+      } else if (isUpscale) {
+        score = Math.round((hhi / 150000) * 50 + (growth / 100) * 25 + (opp / 100) * 25);
+        reason = `HHI $${(hhi||0).toLocaleString()}, growth ${growth}/100`;
+      } else if (isHealthcare) {
+        score = Math.round((pop / 50000) * 40 + (opp / 100) * 40 + (growth / 100) * 20);
+        reason = `Population ${(pop||0).toLocaleString()}, opportunity ${opp}/100`;
+      } else if (isLease) {
+        score = Math.round((hhi / 150000) * 50 + (growth / 100) * 30 + (opp / 100) * 20);
+        reason = `HHI $${(hhi||0).toLocaleString()}, growth ${growth}/100`;
+      } else {
+        score = Math.round((growth / 100) * 40 + (opp / 100) * 35 + (hhi / 150000) * 25);
+        reason = `Growth ${growth}/100, opportunity ${opp}/100, HHI $${(hhi||0).toLocaleString()}`;
+      }
+
+      return {
+        zip: sig.zip,
+        city: getCityForZip(sig.zip),
+        score: Math.min(100, Math.max(0, score)),
+        reason,
+        hhi,
+        growth,
+        opp,
+        pop,
+        biz_count: bizCount
+      };
+    });
+
+    const topZips = scored.sort((a, b) => b.score - a.score).slice(0, 5);
+
+    const best = topZips[0];
+    let verdict = '';
+    if (best) {
+      if (isQsr) verdict = `${best.zip} (${best.city}) is the strongest match for a QSR concept in ${county} County — income profile and growth momentum align.`;
+      else if (isUpscale) verdict = `${best.zip} (${best.city}) leads for upscale dining in ${county} County with the highest income density.`;
+      else verdict = `${best.zip} (${best.city}) ranks highest in ${county} County for this concept.`;
+    } else {
+      verdict = `Insufficient data to rank ZIPs in ${county} County for this question.`;
+    }
+
+    const answer = topZips.length
+      ? `Top ZIPs in ${county} County ranked by fit: ${topZips.map((z,i) => `#${i+1} ${z.zip} ${z.city} (score ${z.score}/100 — ${z.reason})`).join('; ')}.`
+      : `No zip_signals data found for ${county} County ZIPs.`;
+
+    const withData = sigRows.length;
+    const confidence = withData >= 5 ? 'high' : withData >= 2 ? 'medium' : 'low';
+
+    return res.json({
+      county,
+      question,
+      verdict,
+      answer,
+      top_zips: topZips.map(z => ({ zip: z.zip, city: z.city, score: z.score, reason: z.reason })),
+      confidence,
+      zips_with_data: withData,
+      total_zips_in_county: zips.length
+    });
+
+  } catch (err) {
+    console.error('[ceo-county-query] error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.options('/ceo-county-query', (req, res) =>
+  res.set('Access-Control-Allow-Origin','*')
+     .set('Access-Control-Allow-Methods','POST')
+     .set('Access-Control-Allow-Headers','Content-Type')
+     .sendStatus(204)
+);
+
 module.exports = router;
 
 // ── Neighborhood endpoints ────────────────────────────────────────────────────

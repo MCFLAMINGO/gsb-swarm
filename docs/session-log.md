@@ -3984,3 +3984,8 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 **Problem:** No payment flow to convert trial users to $9.99/mo subscribers.
 **Fix:** POST /api/local-intel/subscribe creates Surge order (BASALT_API_KEY, SKU: LOCALINTEL-CHAT-MONTHLY), returns receiptId + portalUrl for Surge iframe. POST /api/local-intel/subscription-confirm verifies receipt + activates subscriber_accounts row (status='active', expires_at=+30d). Merchant wallet: 0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED.
 **Result:** Landing page can show Surge payment iframe, confirm payment via postMessage, activate subscriber in Postgres.
+
+### B50 — CEO County Analysis
+**Problem:** CEO page only showed individual ZIP analysis. No way to ask "best ZIP in St. Johns for a smoothie store" across the whole county.
+**Fix:** Added POST /api/local-intel/ceo-county-query. Accepts { county, question }. Loads zip_signals for all ZIPs in the county in parallel, scores each ZIP against the question type (QSR/upscale/healthcare/lease/general), returns top 5 ranked ZIPs with scores and reasons. County→ZIP mapping covers St. Johns, Duval, Clay, Nassau, Flagler, Putnam.
+**Result:** CEO page County Analysis mode lets Erik ask cross-ZIP questions and get ranked ZIP recommendations grounded in Postgres data.
