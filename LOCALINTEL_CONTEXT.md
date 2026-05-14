@@ -4238,3 +4238,9 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** B36 added an extra zero (LAUCN1200100000000003, 21 chars) thinking the 20-char original was wrong. New logs showed "series does not exist" again — confirmed correct format is 20 chars (LAUCN120010000000003). The original v1 errors were caused by a bad API key in Railway, not a series ID issue.
 **Fix:** Reverted series suffixes back to 0000000003/0000000006/0000000004. Kept SLEEP_MS=1000ms.
 **Result:** Series IDs now correct. FRED_API key confirmed fixed in Railway. Worker should succeed on next trigger.
+
+## B37 — Rewrite fredWorker to use GeoFRED Maps API
+**Date:** 2026-05-13
+**Problem:** FRED series/observations endpoint uses FRED-native series IDs (FLALACHUA1URN format), not BLS LAUCN format. All previous attempts failed with "series does not exist" because LAUCN IDs don't work on FRED's API.
+**Fix:** Rewrote fredWorker.js to use GeoFRED Maps API (geofred/series/data). One call with series_id=FLALACHUA1URN returns ALL FL counties at once with county FIPS codes. Second call FLALACHUA1LFN gets labor force. Eliminates 201 individual API calls — now 2 calls total, no rate limiting, <5s runtime.
+**Result:** Worker now fetches all 67 FL counties' LAUS data in 2 HTTP calls and maps FIPS → ZIPs via flZipCountyMap.
