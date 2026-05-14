@@ -3994,3 +3994,8 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 **Problem:** Chat modal had no awareness of subscriber status — paid subscribers saw the same trial counter and paywall as free users.
 **Fix:** Added GET /api/local-intel/subscriber-status — returns { status, is_subscriber, trial_remaining, expires_at } for a phone number. Landing page modal checks status on phone blur, adapts UI: subscribers see "Subscribed ✓" badge + unlimited questions, trial users see remaining count, lapsed users see renewal prompt.
 **Result:** Subscriber UX is correct end-to-end — pay once, get unlimited chat with no paywalls.
+
+### B52 — Florida Place Name Resolver
+**Problem:** Chat endpoint defaulted to ZIP 32082 when no 5-digit ZIP was in the question. "Best smoothie spot in Duval" returned 32082 data instead of Duval County analysis.
+**Fix:** Added lib/flPlaceResolver.js — pure deterministic lookup (no API, no LLM) covering all 67 FL counties, 300+ FL cities/neighborhoods → ZIP. Integrated into POST /api/local-intel/chat: replaces ZIP regex with resolvePlace(question). County queries with comparison keywords ("best","where","which") trigger multi-ZIP parallel load + county-level LLM grounding across all ZIPs in the county. Single-city queries resolve to the correct ZIP.
+**Result:** "Best smoothie in Duval" → ranks all Duval ZIPs. "Restaurant in Nocatee" → 32081 context. "Steakhouse in Brickell" → 33131 context. Full Florida coverage.

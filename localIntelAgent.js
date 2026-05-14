@@ -106,6 +106,7 @@ const { classifyIntent } = require('./workers/intentRouter');
 const { dispatchTask } = require('./lib/taskDispatch');
 const { resolveBusinessAlias } = require('./lib/aliasResolver');
 const { injectShowcase } = require('./lib/showcaseBiz');
+const { resolvePlace } = require('./lib/flPlaceResolver');
 const { logDeadEnd } = require('./lib/deadEndLog');
 const { logSmsQuery } = require('./lib/smsQueryLog');
 const { appendTurn, getContext } = require('./lib/conversationThread');
@@ -9728,9 +9729,100 @@ router.post('/chat', async (req, res) => {
     }
     const trialRemaining = isSubscriber ? null : Math.max(0, trialLimit - trialUsed);
 
-    // B) ZIP extraction
-    const zipMatch = String(question).match(/\b(\d{5})\b/);
-    const zip = (zipMatch && zipMatch[1]) || (zipIn ? String(zipIn).trim() : '') || '32082';
+    // B) Resolve place from question (FL place name → ZIP; falls back to zipIn or default)
+    const placeResult = resolvePlace(question);
+    let zip = placeResult.zip;
+    if (zipIn) {
+      const zipInTrim = String(zipIn).trim();
+      const explicitZipMatch = String(question).match(/\b(\d{5})\b/);
+      if (!explicitZipMatch && !placeResult.isCounty) {
+        // No explicit ZIP and no county/city match — prefer client-supplied zipIn
+        // when the resolver fell through to its default.
+        const fellThroughToDefault = !placeResult.countyKey && placeResult.zip === '32082';
+        if (fellThroughToDefault && /^\d{5}$/.test(zipInTrim)) zip = zipInTrim;
+      }
+    }
+    const isCountyQuery = placeResult.isCounty && placeResult.countyZips;
+
+    // B.1) County-level branch: comparison/ranking questions over a FL county
+    if (isCountyQuery && /\b(best|where|which|top|compare|recommend|highest|lowest|most|least)\b/i.test(question)) {
+      const countyZips = placeResult.countyZips;
+      const sigRowsCounty = await db.query(
+        `SELECT zip, acs_population, acs_median_hhi, acs_owner_occupied_pct,
+                fred_unemployment_rate, qcew_avg_weekly_wages,
+                sig_growth_score, sig_opportunity_score, sig_risk_score,
+                sig_market_maturity, sig_income_tier
+           FROM zip_signals WHERE zip = ANY($1)`,
+        [countyZips]
+      ).catch(() => []);
+      const rows = Array.isArray(sigRowsCounty) ? sigRowsCounty : [];
+
+      const zipSummaries = rows.map(s =>
+        `ZIP ${s.zip}: pop=${s.acs_population || '?'}, HHI=$${s.acs_median_hhi || '?'}, growth=${s.sig_growth_score || '?'}/100, opp=${s.sig_opportunity_score || '?'}/100, maturity=${s.sig_market_maturity || '?'}`
+      ).join('\n');
+
+      const withData = rows.length;
+      const missing = countyZips.filter(z => !rows.find(s => s.zip === z));
+      const data_confidence = Math.round((withData / countyZips.length) * 100);
+
+      if (!process.env.ANTHROPIC_API_KEY) {
+        return res.json({ ok: false, error: 'LLM service not configured', data_confidence, missing_signals: missing });
+      }
+
+      const groundingContextCounty = `You are LocalIntel, a Florida local business intelligence assistant.
+Answer ONLY using the data provided. Do not hallucinate. Note if data is missing.
+
+County: ${placeResult.countyKey}
+Question: ${question}
+Data coverage: ${withData}/${countyZips.length} ZIPs have data (${data_confidence}% coverage)
+Missing ZIPs (no data yet): ${missing.join(', ') || 'none'}
+
+ZIP DATA:
+${zipSummaries || 'No zip_signals data available for this county yet.'}
+
+Rank the ZIPs by fit for the concept described. If data is sparse, say so clearly.`;
+
+      const llmRes = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5',
+          max_tokens: 600,
+          messages: [{ role: 'user', content: groundingContextCounty }],
+        }),
+      });
+      const llmData = await llmRes.json();
+      const answerCounty = (llmData && llmData.content && llmData.content[0] && llmData.content[0].text) || 'Unable to generate answer.';
+      const tokensUsedCounty = ((llmData && llmData.usage && llmData.usage.input_tokens) || 0) + ((llmData && llmData.usage && llmData.usage.output_tokens) || 0);
+
+      db.query(
+        `INSERT INTO chat_log (caller_id, question, zip, data_confidence, missing_signals, llm_model, tokens_used, answer_preview)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [phone, String(question), placeResult.countyKey, data_confidence, missing, 'claude-haiku-4-5', tokensUsedCounty, String(answerCounty).slice(0, 500)]
+      ).catch(() => {});
+
+      if (!isSubscriber) {
+        db.query(
+          `UPDATE subscriber_accounts SET trial_queries_used = trial_queries_used + 1, updated_at = NOW() WHERE phone = $1`,
+          [phone]
+        ).catch(() => {});
+      }
+
+      return res.json({
+        ok: true,
+        zip: placeResult.countyKey,
+        question,
+        answer: answerCounty,
+        data_confidence,
+        missing_signals: missing,
+        trial_remaining: !isSubscriber ? Math.max(0, trialLimit - trialUsed - 1) : null,
+        is_subscriber: isSubscriber,
+      });
+    }
 
     // C) Load deterministic context (mirrors ceo-assess parallel load)
     const safe = (p) => p.catch(() => null);
