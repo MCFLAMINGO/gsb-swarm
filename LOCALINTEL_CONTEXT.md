@@ -4406,3 +4406,9 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 **Problem:** No payment flow to convert trial users to $9.99/mo subscribers.
 **Fix:** POST /api/local-intel/subscribe creates Surge order (BASALT_API_KEY, SKU: LOCALINTEL-CHAT-MONTHLY), returns receiptId + portalUrl for Surge iframe. POST /api/local-intel/subscription-confirm verifies receipt + activates subscriber_accounts row (status='active', expires_at=+30d). Merchant wallet: 0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED.
 **Result:** Landing page can show Surge payment iframe, confirm payment via postMessage, activate subscriber in Postgres.
+
+
+### B47 — Agent Wallet Creation for Subscribers
+**Problem:** Subscribers had no agent wallet — couldn't dispatch tasks or settle payments via Tempo/pathUSD on their behalf.
+**Fix:** Migration 027 (subscriber_wallets table). POST /api/local-intel/create-agent-wallet: verifies subscriber, generates Tempo-compatible viem wallet, stores address in subscriber_wallets + subscriber_accounts.path_usd_wallet. Private key NOT stored (custodial v1 — address only). Landing page shows wallet creation prompt after subscription-confirm success.
+**Result:** Subscribers can create an agent wallet in one click post-subscription. Address linked to phone. Agents can dispatch RFQs and settle pathUSD payments to/from this address on Tempo mainnet.

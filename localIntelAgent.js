@@ -9981,6 +9981,63 @@ router.post('/subscription-confirm', express.json(), async (req, res) => {
   }
 });
 
+router.post('/create-agent-wallet', express.json(), async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const { phone } = req.body || {};
+  if (!phone) return res.status(400).json({ error: 'phone required' });
+
+  try {
+    const [sub] = await db.query(
+      `SELECT * FROM subscriber_accounts WHERE phone = $1`, [phone]
+    );
+    if (!sub) return res.status(403).json({ error: 'not_subscribed' });
+
+    const existing = await db.query(
+      `SELECT wallet_address FROM subscriber_wallets WHERE subscriber_phone = $1`, [phone]
+    );
+    if (existing.length) {
+      return res.json({ ok: true, wallet_address: existing[0].wallet_address, already_existed: true });
+    }
+
+    const { generatePrivateKey, privateKeyToAccount } = require('viem/accounts');
+    const privateKey = generatePrivateKey();
+    const account = privateKeyToAccount(privateKey);
+    const walletAddress = account.address;
+
+    // NOTE: encrypted_pk is intentionally null for now — private key is NOT stored
+    // Future: encrypt with KMS before storing
+    await db.query(
+      `INSERT INTO subscriber_wallets (subscriber_phone, wallet_address, wallet_type)
+       VALUES ($1, $2, 'tempo_custodial')`,
+      [phone, walletAddress]
+    );
+
+    await db.query(
+      `UPDATE subscriber_accounts SET path_usd_wallet = $1, updated_at = NOW() WHERE phone = $2`,
+      [walletAddress, phone]
+    );
+
+    return res.json({
+      ok: true,
+      wallet_address: walletAddress,
+      wallet_type: 'tempo_custodial',
+      message: 'Agent wallet created. This address can receive pathUSD and dispatch tasks on your behalf on the Tempo network.',
+      surge_portal: `https://surge.basalthq.com/portal?recipient=${walletAddress}`,
+      already_existed: false
+    });
+  } catch (err) {
+    console.error('[create-agent-wallet] error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.options('/create-agent-wallet', (req, res) =>
+  res.set('Access-Control-Allow-Origin','*')
+     .set('Access-Control-Allow-Methods','POST')
+     .set('Access-Control-Allow-Headers','Content-Type')
+     .sendStatus(204)
+);
+
 module.exports = router;
 
 // ── Neighborhood endpoints ────────────────────────────────────────────────────
