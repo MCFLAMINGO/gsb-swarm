@@ -9683,6 +9683,203 @@ router.post('/ceo-query', express.json(), async (req, res) => {
   });
 });
 
+// ── B45: Subscriber LLM Chat Endpoint ─────────────────────────────────────────
+// POST /api/local-intel/chat
+// Phone-based subscriber auth (3 free trial queries, then $9.99/mo gates).
+// Loads zip_signals + business/property context, computes data_confidence,
+// and calls Claude Haiku via Anthropic API with grounded prompt.
+router.post('/chat', async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  try {
+    const { phone, question, zip: zipIn } = req.body || {};
+    if (!phone || !question) {
+      return res.status(400).json({ ok: false, error: 'phone and question required' });
+    }
+
+    // A) Auth / trial provisioning
+    await db.query(
+      `INSERT INTO subscriber_accounts (phone, tier, status, trial_queries_used, trial_queries_limit)
+         VALUES ($1, 'chat', 'trial', 0, 3)
+       ON CONFLICT (phone) DO NOTHING`,
+      [phone]
+    ).catch(() => {});
+
+    const subRows = await db.query(
+      `SELECT id, status, trial_queries_used, trial_queries_limit
+         FROM subscriber_accounts WHERE phone = $1 LIMIT 1`,
+      [phone]
+    ).catch(() => []);
+    const sub = Array.isArray(subRows) && subRows[0] ? subRows[0] : null;
+    if (!sub) {
+      return res.status(500).json({ ok: false, error: 'subscriber lookup failed' });
+    }
+    const isSubscriber = sub.status === 'active';
+    const trialUsed    = Number(sub.trial_queries_used || 0);
+    const trialLimit   = Number(sub.trial_queries_limit || 3);
+    const trialAllowed = sub.status === 'trial' && trialUsed < trialLimit;
+    if (!isSubscriber && !trialAllowed) {
+      return res.status(402).json({
+        ok: false,
+        error: 'trial_exhausted',
+        message: `Trial queries exhausted (${trialUsed}/${trialLimit}). Subscribe at $9.99/mo for unlimited access.`,
+        trial_remaining: 0,
+        is_subscriber: false,
+      });
+    }
+    const trialRemaining = isSubscriber ? null : Math.max(0, trialLimit - trialUsed);
+
+    // B) ZIP extraction
+    const zipMatch = String(question).match(/\b(\d{5})\b/);
+    const zip = (zipMatch && zipMatch[1]) || (zipIn ? String(zipIn).trim() : '') || '32082';
+
+    // C) Load deterministic context (mirrors ceo-assess parallel load)
+    const safe = (p) => p.catch(() => null);
+    const [sigRows, propertyRows, totalBizRows, densityRows] = await Promise.all([
+      safe(db.query(`SELECT * FROM zip_signals WHERE zip = $1 LIMIT 1`, [zip])),
+      safe(db.query(
+        `SELECT COUNT(*)::int AS parcel_count,
+                ROUND(AVG(assessed_value)::numeric, 0) AS avg_assessed
+           FROM property_parcels WHERE zip = $1`,
+        [zip]
+      )),
+      safe(db.query(`SELECT COUNT(*)::int AS total FROM businesses WHERE zip = $1`, [zip])),
+      safe(db.query(
+        `SELECT category, COUNT(*)::int AS count
+           FROM businesses WHERE zip = $1
+          GROUP BY category ORDER BY count DESC LIMIT 5`,
+        [zip]
+      )),
+    ]);
+    const sig            = Array.isArray(sigRows) && sigRows[0] ? sigRows[0] : {};
+    const pr             = Array.isArray(propertyRows) && propertyRows[0] ? propertyRows[0] : {};
+    const totalBiz       = Array.isArray(totalBizRows) && totalBizRows[0] ? Number(totalBizRows[0].total || 0) : 0;
+    const topCategories  = Array.isArray(densityRows) ? densityRows : [];
+
+    // D) Compute data_confidence
+    const keySignals = [
+      ['acs_population',         sig.acs_population],
+      ['acs_median_hhi',         sig.acs_median_hhi],
+      ['irs_net_returns',        sig.irs_net_returns],
+      ['fred_unemployment_rate', sig.fred_unemployment_rate],
+      ['qwi_avg_monthly_earn',   sig.qwi_avg_monthly_earn],
+      ['qcew_avg_weekly_wages',  sig.qcew_avg_weekly_wages],
+      ['ces_nonfarm_jobs',       sig.ces_nonfarm_jobs],
+      ['bea_per_capita_income',  sig.bea_per_capita_income],
+      ['sig_growth_score',       sig.sig_growth_score],
+      ['sig_opportunity_score',  sig.sig_opportunity_score],
+    ];
+    const missingSignals = keySignals.filter(([_, v]) => v == null).map(([k]) => k);
+    const nonNullCount   = keySignals.length - missingSignals.length;
+    const dataConfidence = Math.round((nonNullCount / keySignals.length) * 100 * 100) / 100;
+
+    // E) Grounding prompt
+    const ctxLines = [];
+    ctxLines.push(`ZIP: ${zip}`);
+    if (sig.acs_population != null)         ctxLines.push(`Population (ACS): ${sig.acs_population}`);
+    if (sig.acs_median_hhi != null)         ctxLines.push(`Median household income (ACS): $${sig.acs_median_hhi}`);
+    if (sig.bea_per_capita_income != null)  ctxLines.push(`Per-capita income (BEA): $${sig.bea_per_capita_income}`);
+    if (sig.irs_net_returns != null)        ctxLines.push(`Net migration returns (IRS): ${sig.irs_net_returns}`);
+    if (sig.fred_unemployment_rate != null) ctxLines.push(`Unemployment rate (FRED): ${sig.fred_unemployment_rate}%`);
+    if (sig.qwi_avg_monthly_earn != null)   ctxLines.push(`Avg monthly earnings (QWI): $${sig.qwi_avg_monthly_earn}`);
+    if (sig.qcew_avg_weekly_wages != null)  ctxLines.push(`Avg weekly wages (QCEW): $${sig.qcew_avg_weekly_wages}`);
+    if (sig.ces_nonfarm_jobs != null)       ctxLines.push(`Nonfarm jobs (CES): ${sig.ces_nonfarm_jobs}`);
+    if (sig.sig_growth_score != null)       ctxLines.push(`Growth score (computed): ${sig.sig_growth_score}/100`);
+    if (sig.sig_opportunity_score != null)  ctxLines.push(`Opportunity score (computed): ${sig.sig_opportunity_score}/100`);
+    if (sig.sig_market_maturity)            ctxLines.push(`Market maturity: ${sig.sig_market_maturity}`);
+    if (sig.sig_income_tier)                ctxLines.push(`Income tier: ${sig.sig_income_tier}`);
+    if (pr.parcel_count)                    ctxLines.push(`Property parcels: ${pr.parcel_count} (avg assessed: $${pr.avg_assessed || 'n/a'})`);
+    ctxLines.push(`Total businesses: ${totalBiz}`);
+    if (topCategories.length) ctxLines.push(`Top business categories: ${topCategories.map(c => `${c.category} (${c.count})`).join(', ')}`);
+    ctxLines.push(`Missing signals: ${missingSignals.length ? missingSignals.join(', ') : 'none'}`);
+
+    const grounding = ctxLines.join('\n');
+    const systemPrompt = `You are a local market intelligence analyst. Answer only from the data provided below. If the user asks about something that is not present in the data, state explicitly what data is missing and do not fabricate numbers. Be concise.\n\nLOCAL DATA FOR ZIP ${zip}:\n${grounding}`;
+
+    // F) LLM call
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return res.json({
+        ok: false,
+        error: 'LLM service not configured',
+        data_confidence: dataConfidence,
+        missing_signals: missingSignals,
+      });
+    }
+
+    let answer = '';
+    let tokensUsed = 0;
+    const model = 'claude-haiku-4-5';
+    try {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 512,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: String(question) }],
+        }),
+      });
+      const j = await r.json();
+      if (j && Array.isArray(j.content) && j.content[0] && j.content[0].text) {
+        answer = j.content[0].text;
+      } else if (j && j.error) {
+        return res.status(502).json({
+          ok: false,
+          error: `LLM error: ${j.error.message || 'unknown'}`,
+          data_confidence: dataConfidence,
+          missing_signals: missingSignals,
+        });
+      }
+      if (j && j.usage) {
+        tokensUsed = Number(j.usage.input_tokens || 0) + Number(j.usage.output_tokens || 0);
+      }
+    } catch (e) {
+      return res.status(502).json({
+        ok: false,
+        error: `LLM fetch failed: ${e.message}`,
+        data_confidence: dataConfidence,
+        missing_signals: missingSignals,
+      });
+    }
+
+    // G) Log to chat_log (fire-and-forget)
+    db.query(
+      `INSERT INTO chat_log
+        (caller_id, question, zip, data_confidence, missing_signals, llm_model, tokens_used, answer_preview)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [phone, String(question), zip, dataConfidence, missingSignals, model, tokensUsed, String(answer).slice(0, 500)]
+    ).catch(() => {});
+
+    // H) Increment trial usage (fire-and-forget)
+    if (!isSubscriber) {
+      db.query(
+        `UPDATE subscriber_accounts SET trial_queries_used = trial_queries_used + 1, updated_at = NOW() WHERE phone = $1`,
+        [phone]
+      ).catch(() => {});
+    }
+
+    // I) Response
+    return res.json({
+      ok: true,
+      zip,
+      question,
+      answer,
+      data_confidence: dataConfidence,
+      missing_signals: missingSignals,
+      trial_remaining: trialRemaining != null ? Math.max(0, trialRemaining - 1) : null,
+      is_subscriber: isSubscriber,
+    });
+  } catch (err) {
+    console.error('[chat] error:', err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;
 
 // ── Neighborhood endpoints ────────────────────────────────────────────────────

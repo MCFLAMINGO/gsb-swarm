@@ -4396,3 +4396,8 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 **Problem:** CEO assess loaded all data sections but never answered the question — queries like "can this lease support a steakhouse" were echoed, not answered.
 **Fix:** Added POST /api/local-intel/ceo-query. Accepts { zip, question }, reloads zip_signals + business data from Postgres, runs deterministic keyword-category matching (zero LLM), returns { verdict, answer, supporting_data, lease_signal, confidence }. Five categories: restaurant_concept, lease_viability, sector_gap, growth_trajectory, labor_staffing, general fallback.
 **Result:** CEO page query bar now returns reasoned answers grounded in Postgres data — income profile vs concept viability, lease support math, sector gap analysis — all zero LLM API calls.
+
+### B45 — LLM Chat Layer ($9.99/mo subscriber tier)
+**Problem:** Deterministic layer answers structured queries but can't handle open-ended conversational questions. No subscription or monetization layer existed.
+**Fix:** Migration 026 (subscriber_accounts + chat_log). POST /api/local-intel/chat: phone-based auth, 3 free trial queries, gates at $9.99/mo active status. Loads zip_signals context, computes data_confidence (0-100), builds grounding prompt, calls Claude Haiku (ANTHROPIC_API_KEY Railway env). Logs every query to chat_log with confidence + missing_signals. chatGapWorker surfaces which workers need to run to improve answer quality.
+**Result:** $9.99/mo subscribers get LLM answers grounded in Postgres. Trial users get 3 free queries. Low-confidence answers flag data gaps for deterministic roadmap.
