@@ -4244,3 +4244,9 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** FRED series/observations endpoint uses FRED-native series IDs (FLALACHUA1URN format), not BLS LAUCN format. All previous attempts failed with "series does not exist" because LAUCN IDs don't work on FRED's API.
 **Fix:** Rewrote fredWorker.js to use GeoFRED Maps API (geofred/series/data). One call with series_id=FLALACHUA1URN returns ALL FL counties at once with county FIPS codes. Second call FLALACHUA1LFN gets labor force. Eliminates 201 individual API calls — now 2 calls total, no rate limiting, <5s runtime.
 **Result:** Worker now fetches all 67 FL counties' LAUS data in 2 HTTP calls and maps FIPS → ZIPs via flZipCountyMap.
+
+## B38a — Rewrite fredWorker to use BLS API v2 batch calls
+**Date:** 2026-05-13
+**Problem:** GeoFRED series/data returned 500 on county-level series. GeoFRED requires series_group numbers not series IDs for county data. FRED individual series/observations uses FL{COUNTY} naming, not LAUCN.
+**Fix:** Rewrote fredWorker.js to use BLS Public Data API v2 (api.bls.gov/publicAPI/v2/timeseries/data/). POST batch requests, 50 series per call, 5 calls total for 67 counties × 3 measures. Uses BUREAU_OF_LABOR_STATISTICS_API key (already in Railway). LAUCN series IDs confirmed correct for BLS.
+**Result:** Worker fetches LAUS rate/lf/employed for all 67 FL counties in 5 batch HTTP calls. Maps county FIPS → ZIPs via flZipCountyMap. Next: confirm LAUS writes, then expand to full FRED data (B38b).
