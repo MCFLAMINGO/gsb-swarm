@@ -3,7 +3,7 @@
  * fredWorker.js
  * ─────────────────────────────────────────────────────────────────────────────
  * Fetches BLS Local Area Unemployment Statistics (LAUS) for all 67 FL counties
- * via the FRED API (series LAUCN{FIPS5}00000000003 = unemployment rate).
+ * via the FRED API (series LAUCN{FIPS5}0000000003 = unemployment rate).
  *
  * Each county's rate is denormalized to all ZIPs in that county in zip_signals.
  *
@@ -11,9 +11,9 @@
  *   START → read Postgres for what's done (skip if fresh) → fetch FRED → upsert → END
  *
  * FRED series used:
- *   LAUCN{FIPS5}00000000003  = unemployment rate (%)
- *   LAUCN{FIPS5}00000000006  = civilian labor force (count)
- *   LAUCN{FIPS5}00000000004  = unemployed persons (count)
+ *   LAUCN{FIPS5}0000000003  = unemployment rate (%)
+ *   LAUCN{FIPS5}0000000006  = civilian labor force (count)
+ *   LAUCN{FIPS5}0000000004  = unemployed persons (count)
  *
  * Rate limit: FRED allows ~120 requests/minute with key. We pace at 500ms/series.
  * Total calls: 67 counties × 3 series = 201 calls ≈ ~2 min with pacing.
@@ -135,9 +135,9 @@ function parseLatestAndYoY(obs) {
 async function fetchCounty(county) {
   const { fips } = county;
   // LAUCN series: LAUCN + FIPS5 + 10-char suffix
-  const rateId   = `LAUCN${fips}00000000003`;  // unemployment rate %
-  const lfId     = `LAUCN${fips}00000000006`;  // labor force
-  const unempId  = `LAUCN${fips}00000000004`;  // unemployed persons
+  const rateId   = `LAUCN${fips}0000000003`;  // unemployment rate %
+  const lfId     = `LAUCN${fips}0000000006`;  // labor force
+  const unempId  = `LAUCN${fips}0000000004`;  // unemployed persons
 
   const [rateObs, lfObs, unempObs] = await Promise.all([
     fetchFred(rateId).catch(e => { console.warn(`[fred] ${county.name} rate error: ${e.message}`); return []; }),

@@ -4232,3 +4232,9 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** fredWorker.js built LAUS series IDs with 7 zeros (LAUCN120010000000003) instead of the correct 8 zeros (LAUCN1200100000000003). Every single county returned "series does not exist". Additionally SLEEP_MS=500ms caused rate-limit errors starting at county ~40/67.
 **Fix:** Changed all 3 series suffixes (0000000003/006/004 → 00000000003/006/004). Increased SLEEP_MS from 500 to 1000. Total runtime now ~3.5min for 67 counties.
 **Result:** FRED worker will now fetch valid LAUS data and write fred_unemployment_rate, fred_labor_force, fred_employed, fred_unemployment_yoy, fred_vintage to zip_signals for all 67 FL counties.
+
+## B36b — Revert FRED series ID extra zero
+**Date:** 2026-05-13
+**Problem:** B36 added an extra zero (LAUCN1200100000000003, 21 chars) thinking the 20-char original was wrong. New logs showed "series does not exist" again — confirmed correct format is 20 chars (LAUCN120010000000003). The original v1 errors were caused by a bad API key in Railway, not a series ID issue.
+**Fix:** Reverted series suffixes back to 0000000003/0000000006/0000000004. Kept SLEEP_MS=1000ms.
+**Result:** Series IDs now correct. FRED_API key confirmed fixed in Railway. Worker should succeed on next trigger.
