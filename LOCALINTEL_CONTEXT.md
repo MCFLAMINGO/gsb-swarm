@@ -4256,3 +4256,25 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** beaWorker used GeoFips='12000' thinking it was a FL wildcard. BEA returns only the state-level row for 12000. Got 1 county, 0 ZIP upserts.
 **Fix:** Changed GeoFips to 'STATE:12' — the correct BEA syntax for all counties in FL. Also skip (NA) DataValues.
 **Result:** BEA will now return all 67 FL counties' per capita income and write bea_per_capita_income, bea_income_growth_1yr, bea_income_growth_5yr, bea_income_vs_fl_avg, bea_vintage to zip_signals.
+
+## B39a — Fix CEO populated_sections filter
+**Date:** 2026-05-14
+**Problem:** `populatedSections` filter used `Object.keys(v).length > 1` — required 2+ keys before a section was counted. Single-key sections (e.g. `property` with only `parcel_count`) were silently excluded from `populated_sections` list even though data was present.
+**Fix:** Changed filter threshold from `> 1` to `> 0` in `localIntelAgent.js` ceo-assess endpoint.
+**Result:** All sections with any data will now appear in `populated_sections`. CEO page correctly reflects full data availability for all ZIPs.
+
+## B39b — World Model Worker
+**Date:** 2026-05-14
+**Problem:** CEO assess Layer 1 returned only raw Postgres values — no derived signals, no ZIP-vs-ZIP rankings, no market context. `sig_*` columns in zip_signals were always null. World Model node showed "BUILDING" on nodes page with no trigger.
+**Fix:** Built `workers/worldModelWorker.js` — pure math, zero LLM calls. Reads all zip_signals rows + businesses counts for all 7 TARGET_ZIPS. Computes:
+  - `sig_growth_score` (0–100): rank-normalized from qcew_emp_yoy_pct (40%), sunbiz_new_12mo (35%), bps_total_units_annual (25%)
+  - `sig_opportunity_score` (0–100): rank-normalized from investment_opportunity_score (40%), lodes_net_flow (35%), biz_density_per_1k (25%)
+  - `sig_risk_score` (0–100): rank-normalized from ai_displacement_risk (40%), fred_unemployment_rate (40%), qwi_turnover_rate (20%)
+  - `sig_market_maturity` (text): "Emerging" / "Growing" / "Established" / "Mature" — derived from owner_occ_pct + median_age + emp_yoy + new_biz_12mo thresholds
+  - `sig_income_tier` (text): "Moderate" / "Above Average" / "High" / "Affluent" / "Ultra-Affluent" — absolute per_capita_income thresholds
+  - `sig_peer_cohort` (text): "Coastal Affluent" / "Suburban Growth" / "Job-Rich Suburb" / "Bedroom Community" / "Dense Commercial Core" / "Working Class Core"
+  - `sig_biz_density_per_1k`: businesses / acs_population × 1000
+  - `sig_job_capture_ratio`: lodes_jobs_here / qcew_employment
+Worker has standalone entry point (spawned by trigger). NOT in auto-start list — must run after primary workers.
+Updated nodes page: World Model node now has triggerEndpoint + status="active".
+**Result:** After triggering, CEO assess world_model section will populate with scores. CEO can show "32082 ranks #1 in St. Johns for income, #2 for growth" derived purely from Postgres.

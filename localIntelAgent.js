@@ -8950,7 +8950,7 @@ router.get('/ceo-assess', async (req, res) => {
   // ── Count populated sections ───────────────────────────────────────────────
   const sectionData = { demographics, income, migration, labor, sectors, jobs, business_activity, construction, broadband, property, world_model };
   const populatedSections = Object.entries(sectionData)
-    .filter(([, v]) => Object.keys(v).length > 1) // at least 1 real key beyond metadata
+    .filter(([, v]) => Object.keys(v).length > 0) // at least 1 key present
     .map(([k]) => k);
 
   // ── CEO Summary — multi-section, plain English ─────────────────────────────
