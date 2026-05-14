@@ -3989,3 +3989,8 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 **Problem:** CEO page only showed individual ZIP analysis. No way to ask "best ZIP in St. Johns for a smoothie store" across the whole county.
 **Fix:** Added POST /api/local-intel/ceo-county-query. Accepts { county, question }. Loads zip_signals for all ZIPs in the county in parallel, scores each ZIP against the question type (QSR/upscale/healthcare/lease/general), returns top 5 ranked ZIPs with scores and reasons. County→ZIP mapping covers St. Johns, Duval, Clay, Nassau, Flagler, Putnam.
 **Result:** CEO page County Analysis mode lets Erik ask cross-ZIP questions and get ranked ZIP recommendations grounded in Postgres data.
+
+### B51 — Subscriber-aware chat modal
+**Problem:** Chat modal had no awareness of subscriber status — paid subscribers saw the same trial counter and paywall as free users.
+**Fix:** Added GET /api/local-intel/subscriber-status — returns { status, is_subscriber, trial_remaining, expires_at } for a phone number. Landing page modal checks status on phone blur, adapts UI: subscribers see "Subscribed ✓" badge + unlimited questions, trial users see remaining count, lapsed users see renewal prompt.
+**Result:** Subscriber UX is correct end-to-end — pay once, get unlimited chat with no paywalls.

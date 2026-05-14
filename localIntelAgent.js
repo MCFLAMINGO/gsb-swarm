@@ -10190,6 +10190,44 @@ router.options('/ceo-county-query', (req, res) =>
      .sendStatus(204)
 );
 
+router.get('/subscriber-status', async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const { phone } = req.query;
+  if (!phone) return res.status(400).json({ error: 'phone required' });
+
+  try {
+    const [sub] = await db.query(
+      `SELECT status, tier, trial_queries_used, trial_queries_limit, expires_at
+       FROM subscriber_accounts WHERE phone = $1`, [phone]
+    );
+
+    if (!sub) {
+      return res.json({ status: 'none', trial_remaining: 3, is_subscriber: false });
+    }
+
+    const isActive = sub.status === 'active' && (!sub.expires_at || new Date(sub.expires_at) > new Date());
+    const trialRemaining = Math.max(0, (sub.trial_queries_limit || 3) - (sub.trial_queries_used || 0));
+
+    return res.json({
+      status: sub.status,
+      tier: sub.tier,
+      is_subscriber: isActive,
+      trial_remaining: sub.status === 'trial' ? trialRemaining : null,
+      expires_at: sub.expires_at || null
+    });
+  } catch (err) {
+    console.error('[subscriber-status] error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.options('/subscriber-status', (req, res) =>
+  res.set('Access-Control-Allow-Origin', '*')
+     .set('Access-Control-Allow-Methods', 'GET')
+     .set('Access-Control-Allow-Headers', 'Content-Type')
+     .sendStatus(204)
+);
+
 module.exports = router;
 
 // ── Neighborhood endpoints ────────────────────────────────────────────────────
