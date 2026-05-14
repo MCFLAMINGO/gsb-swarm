@@ -4250,3 +4250,9 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** GeoFRED series/data returned 500 on county-level series. GeoFRED requires series_group numbers not series IDs for county data. FRED individual series/observations uses FL{COUNTY} naming, not LAUCN.
 **Fix:** Rewrote fredWorker.js to use BLS Public Data API v2 (api.bls.gov/publicAPI/v2/timeseries/data/). POST batch requests, 50 series per call, 5 calls total for 67 counties × 3 measures. Uses BUREAU_OF_LABOR_STATISTICS_API key (already in Railway). LAUCN series IDs confirmed correct for BLS.
 **Result:** Worker fetches LAUS rate/lf/employed for all 67 FL counties in 5 batch HTTP calls. Maps county FIPS → ZIPs via flZipCountyMap. Next: confirm LAUS writes, then expand to full FRED data (B38b).
+
+## B38b — Fix BEA worker GeoFips wildcard
+**Date:** 2026-05-13
+**Problem:** beaWorker used GeoFips='12000' thinking it was a FL wildcard. BEA returns only the state-level row for 12000. Got 1 county, 0 ZIP upserts.
+**Fix:** Changed GeoFips to 'STATE:12' — the correct BEA syntax for all counties in FL. Also skip (NA) DataValues.
+**Result:** BEA will now return all 67 FL counties' per capita income and write bea_per_capita_income, bea_income_growth_1yr, bea_income_growth_5yr, bea_income_vs_fl_avg, bea_vintage to zip_signals.

@@ -53,12 +53,12 @@ function fetchBea(params) {
 }
 
 // CAINC1, Line 3 = Per Capita Personal Income
-// GeoFips "12000" returns all FL counties
+// GeoFips "STATE:12" returns all FL counties (12000 is just the state total)
 async function fetchAllFLCounties(year) {
   const data = await fetchBea({
     TableName: 'CAINC1',
     LineCode:  '3',
-    GeoFips:   '12000',   // FL wildcard — returns all FL counties
+    GeoFips:   'STATE:12',   // all counties in Florida
     Year:      String(year),
   });
   // Build map: fips5 → value
@@ -66,7 +66,8 @@ async function fetchAllFLCounties(year) {
   for (const row of data) {
     if (!row.GeoFips || !row.DataValue) continue;
     const fips = row.GeoFips.replace(/\D/g,'').padStart(5,'0');
-    // DataValue may have commas
+    // DataValue may have commas or (NA)
+    if (row.DataValue === '(NA)' || row.DataValue === '') continue;
     const val = parseInt(row.DataValue.replace(/,/g,''), 10);
     if (!isNaN(val) && val > 0) map[fips] = val;
   }
