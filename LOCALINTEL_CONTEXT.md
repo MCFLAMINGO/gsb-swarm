@@ -4226,3 +4226,9 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 **Problem:** voluntrackapp.com (VolunTrack) needed to be discoverable on LocalIntel platform.
 **Fix:** Migration 024 — INSERT into businesses table: name=VolunTrack, zip=32082, category=Technology, claimed by erik@mcflamingo.com.
 **Result:** Business record live in Postgres-SUNX after next deploy.
+
+## B36 — Fix FRED LAUS series ID (missing zero) + rate limit
+**Date:** 2026-05-13
+**Problem:** fredWorker.js built LAUS series IDs with 7 zeros (LAUCN120010000000003) instead of the correct 8 zeros (LAUCN1200100000000003). Every single county returned "series does not exist". Additionally SLEEP_MS=500ms caused rate-limit errors starting at county ~40/67.
+**Fix:** Changed all 3 series suffixes (0000000003/006/004 → 00000000003/006/004). Increased SLEEP_MS from 500 to 1000. Total runtime now ~3.5min for 67 counties.
+**Result:** FRED worker will now fetch valid LAUS data and write fred_unemployment_rate, fred_labor_force, fred_employed, fred_unemployment_yoy, fred_vintage to zip_signals for all 67 FL counties.
