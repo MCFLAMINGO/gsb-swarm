@@ -9266,17 +9266,67 @@ router.post('/ceo-query', express.json(), async (req, res) => {
   let confidence = 'medium';
 
   if (category === 'restaurant_concept') {
+    // Sub-category detection within restaurant_concept
+    const qsrKeywords = ['smoothie', 'juice', 'qsr', 'quick service', 'fast casual', 'coffee', 'cafe', 'sandwich', 'pizza', 'taco', 'burger', 'fast food', 'counter'];
+    const upscaleKeywords = ['steakhouse', 'steak', 'fine dining', 'tasting menu', 'upscale', 'premium dining'];
+    const casualKeywords = ['casual', 'bistro', 'bar', 'grill', 'tavern', 'pub'];
+
+    let subCategory = 'general';
+    if (qsrKeywords.some(k => Q.includes(k))) subCategory = 'qsr';
+    else if (upscaleKeywords.some(k => Q.includes(k))) subCategory = 'upscale';
+    else if (casualKeywords.some(k => Q.includes(k))) subCategory = 'casual';
+
     const reasons = [];
-    let viableUpscale = false;
+    let strongMatch = false;
+    let moderateMatch = false;
 
     if (median_hhi != null) {
-      if (median_hhi > 100000) {
-        reasons.push('Strong income base for upscale dining');
-        viableUpscale = true;
-      } else if (median_hhi > 75000) {
-        reasons.push('Solid income base for casual/upscale');
+      if (subCategory === 'qsr') {
+        if (median_hhi > 100000) {
+          reasons.push('Affluent market with high demand for quality fast-casual/QSR');
+          strongMatch = true;
+        } else if (median_hhi > 80000) {
+          reasons.push('Strong income base for fast-casual/QSR');
+          strongMatch = true;
+        } else if (median_hhi > 60000) {
+          reasons.push('Solid income base for QSR/fast-casual');
+          moderateMatch = true;
+        } else {
+          reasons.push('Modest income base — value-tier QSR positioning');
+        }
+      } else if (subCategory === 'upscale') {
+        if (median_hhi > 100000) {
+          reasons.push('Strong income base for upscale dining');
+          strongMatch = true;
+        } else if (median_hhi > 75000) {
+          reasons.push('Marginal income support for upscale — concept must be tightly positioned');
+          moderateMatch = true;
+        } else {
+          reasons.push('Income profile below typical upscale dining threshold');
+        }
+      } else if (subCategory === 'casual') {
+        if (median_hhi > 100000) {
+          reasons.push('Strong income base for casual dining');
+          strongMatch = true;
+        } else if (median_hhi > 75000) {
+          reasons.push('Solid income base for casual/mid-tier dining');
+          strongMatch = true;
+        } else if (median_hhi > 55000) {
+          reasons.push('Moderate income base for casual dining');
+          moderateMatch = true;
+        } else {
+          reasons.push('Modest income base — pricing must stay mid-market');
+        }
       } else {
-        reasons.push('Modest income base — pricing must stay mid-market');
+        if (median_hhi > 100000) {
+          reasons.push('Strong income base for upscale dining');
+          strongMatch = true;
+        } else if (median_hhi > 75000) {
+          reasons.push('Solid income base for casual/upscale');
+          moderateMatch = true;
+        } else {
+          reasons.push('Modest income base — pricing must stay mid-market');
+        }
       }
     }
     if (net_returns != null && net_returns > 0) reasons.push('Growing household base');
@@ -9290,11 +9340,40 @@ router.post('/ceo-query', express.json(), async (req, res) => {
     }
     if (saturationNote) reasons.push(saturationNote);
 
-    verdict = viableUpscale
-      ? 'Strong match — income profile supports upscale concept'
-      : (median_hhi != null && median_hhi > 75000
-        ? 'Moderate match — income supports casual/mid-tier concept'
-        : 'Weak match — income profile favors value/mid-market concepts');
+    // Verdict per sub-category
+    if (subCategory === 'qsr') {
+      if (strongMatch && median_hhi != null && median_hhi > 100000) {
+        verdict = 'Strong match — affluent market with high demand for quality fast-casual/QSR';
+      } else if (strongMatch) {
+        verdict = 'Strong match — income profile supports fast-casual/QSR daily visit frequency';
+      } else if (moderateMatch) {
+        verdict = 'Moderate match — income supports QSR/fast-casual pricing';
+      } else {
+        verdict = 'Weak match — value-tier QSR positioning required';
+      }
+    } else if (subCategory === 'upscale') {
+      if (strongMatch) {
+        verdict = 'Strong match — income profile supports upscale concept';
+      } else if (moderateMatch) {
+        verdict = 'Moderate match — upscale viable with tight positioning';
+      } else {
+        verdict = 'Weak match — income profile favors casual/mid-market concepts';
+      }
+    } else if (subCategory === 'casual') {
+      if (strongMatch) {
+        verdict = 'Strong match — income profile supports casual/mid-tier concept';
+      } else if (moderateMatch) {
+        verdict = 'Moderate match — casual dining viable at mid-market pricing';
+      } else {
+        verdict = 'Weak match — income profile favors value-tier concepts';
+      }
+    } else {
+      verdict = strongMatch
+        ? 'Strong match — income profile supports upscale concept'
+        : (moderateMatch
+          ? 'Moderate match — income supports casual/mid-tier concept'
+          : 'Weak match — income profile favors value/mid-market concepts');
+    }
 
     const sentences = [];
     if (population != null && median_hhi != null) {
@@ -9317,6 +9396,7 @@ router.post('/ceo-query', express.json(), async (req, res) => {
     answer = sentences.join(' ');
 
     supporting_data = {
+      concept_sub_category: subCategory,
       median_hhi: median_hhi != null ? usd(median_hhi) : null,
       income_tier,
       population: population != null ? fmt(population) : null,
@@ -9324,27 +9404,90 @@ router.post('/ceo-query', express.json(), async (req, res) => {
       food_business_count: food_biz_count,
       growth_score,
       opportunity_score,
-      top_food_categories: food_biz.slice(0, 5),
+      top_food_categories: food_biz.slice(0, 5).map(r => `${r.category} (${r.count})`).join(', '),
     };
 
-    if (median_hhi != null && median_hhi > 100000) {
-      lease_signal = {
-        viable: true,
-        note: 'Income profile supports upscale pricing ($50-90/pp avg check)',
-        min_hhi_met: true,
-      };
-    } else if (median_hhi != null && median_hhi > 75000) {
-      lease_signal = {
-        viable: true,
-        note: 'Income profile supports casual/upscale pricing ($25-50/pp avg check)',
-        min_hhi_met: true,
-      };
+    // Concept-aware lease_signal
+    if (subCategory === 'qsr') {
+      if (median_hhi != null && median_hhi > 80000) {
+        lease_signal = {
+          viable: true,
+          note: 'QSR/fast-casual lease typically $20-35/sqft — income profile strongly supports daily visit frequency',
+          min_hhi_met: true,
+        };
+      } else if (median_hhi != null && median_hhi > 55000) {
+        lease_signal = {
+          viable: true,
+          note: 'QSR/fast-casual lease typically $18-28/sqft — income supports value-to-mid-tier pricing',
+          min_hhi_met: true,
+        };
+      } else {
+        lease_signal = {
+          viable: false,
+          note: 'Income profile may not support QSR daily visit frequency at typical lease rates',
+          min_hhi_met: false,
+        };
+      }
+    } else if (subCategory === 'upscale') {
+      if (median_hhi != null && median_hhi > 100000) {
+        lease_signal = {
+          viable: true,
+          note: 'Income profile supports upscale pricing ($50-90/pp avg check)',
+          min_hhi_met: true,
+        };
+      } else if (median_hhi != null && median_hhi > 75000) {
+        lease_signal = {
+          viable: true,
+          note: 'Income profile marginally supports upscale pricing — tight concept positioning required',
+          min_hhi_met: true,
+        };
+      } else {
+        lease_signal = {
+          viable: false,
+          note: 'Income profile may not support premium steakhouse/fine-dining pricing',
+          min_hhi_met: false,
+        };
+      }
+    } else if (subCategory === 'casual') {
+      if (median_hhi != null && median_hhi > 75000) {
+        lease_signal = {
+          viable: true,
+          note: 'Income profile supports casual/mid-tier dining pricing ($20-40/pp avg check)',
+          min_hhi_met: true,
+        };
+      } else if (median_hhi != null && median_hhi > 55000) {
+        lease_signal = {
+          viable: true,
+          note: 'Income profile supports value-to-mid-tier casual dining',
+          min_hhi_met: true,
+        };
+      } else {
+        lease_signal = {
+          viable: false,
+          note: 'Income profile suggests value-tier positioning required',
+          min_hhi_met: false,
+        };
+      }
     } else {
-      lease_signal = {
-        viable: false,
-        note: 'Income profile may not support premium steakhouse pricing',
-        min_hhi_met: false,
-      };
+      if (median_hhi != null && median_hhi > 100000) {
+        lease_signal = {
+          viable: true,
+          note: 'Income profile supports upscale pricing ($50-90/pp avg check)',
+          min_hhi_met: true,
+        };
+      } else if (median_hhi != null && median_hhi > 75000) {
+        lease_signal = {
+          viable: true,
+          note: 'Income profile supports casual/upscale pricing ($25-50/pp avg check)',
+          min_hhi_met: true,
+        };
+      } else {
+        lease_signal = {
+          viable: false,
+          note: 'Income profile favors value/mid-market concepts',
+          min_hhi_met: false,
+        };
+      }
     }
 
     confidence = (median_hhi != null && population != null) ? 'high' : 'medium';
