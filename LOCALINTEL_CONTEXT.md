@@ -4391,3 +4391,8 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 **Problem:** Each Twilio SMS query was stateless — no memory of prior ZIP, business, or intent. "That place" / "near here" / follow-up queries all failed.
 **Fix:** Added `conversation_threads` table (migration 025). `lib/conversationThread.js` provides `getContext()` (loads last N turns, detects referential + zip-proxy patterns) and `appendTurn()` (fire-and-forget write). Injected into `localIntelAgent.js` POST handler: read before `resolveNlIntentFromRegistry`, write after each `res.json()` response path.
 **Result:** SMS queries now carry thread context — ZIP resolved from history, referential business names resolved, follow-up intents enriched. Foundation for richer conversational routing.
+
+### B43 — CEO Query Engine
+**Problem:** CEO assess loaded all data sections but never answered the question — queries like "can this lease support a steakhouse" were echoed, not answered.
+**Fix:** Added POST /api/local-intel/ceo-query. Accepts { zip, question }, reloads zip_signals + business data from Postgres, runs deterministic keyword-category matching (zero LLM), returns { verdict, answer, supporting_data, lease_signal, confidence }. Five categories: restaurant_concept, lease_viability, sector_gap, growth_trajectory, labor_staffing, general fallback.
+**Result:** CEO page query bar now returns reasoned answers grounded in Postgres data — income profile vs concept viability, lease support math, sector gap analysis — all zero LLM API calls.

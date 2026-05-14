@@ -9142,6 +9142,404 @@ router.get('/ceo-assess', async (req, res) => {
   });
 });
 
+// POST /api/local-intel/ceo-query
+// Body: { zip, question }
+// Re-loads zip_signals + business data, runs deterministic keyword-category
+// matching to answer Erik's question. Zero LLM calls — pure Postgres + math.
+router.post('/ceo-query', express.json(), async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const zip = String(req.body?.zip || '').trim();
+  const question = String(req.body?.question || '').trim();
+
+  if (!zip) return res.status(400).json({ error: 'zip required' });
+  if (!question) return res.status(400).json({ error: 'question required' });
+  if (!TARGET_ZIPS.includes(zip)) {
+    return res.status(400).json({ error: 'ZIP not in coverage area' });
+  }
+
+  const safe = (p) => p.catch(() => null);
+
+  const [
+    densityRows,
+    propertyRows,
+    sigRows,
+    totalBizRows,
+    deadEndRows,
+    smsRows,
+    foodBizRows,
+  ] = await Promise.all([
+    safe(db.query(
+      `SELECT category, COUNT(*)::int AS count
+         FROM businesses WHERE zip = $1
+        GROUP BY category ORDER BY count DESC LIMIT 10`,
+      [zip]
+    )),
+    safe(db.query(
+      `SELECT
+         COUNT(*)::int                      AS parcel_count,
+         ROUND(AVG(beds)::numeric, 1)       AS avg_beds,
+         ROUND(AVG(baths)::numeric, 1)      AS avg_baths,
+         ROUND(AVG(tot_lvg_ar)::numeric, 0) AS avg_sqft,
+         ROUND(AVG(assessed_value)::numeric, 0) AS avg_assessed,
+         MIN(assessed_value)                AS min_assessed,
+         MAX(assessed_value)                AS max_assessed,
+         ROUND(AVG(act_yr_blt)::numeric, 0) AS avg_year_built
+       FROM property_parcels
+      WHERE zip = $1`,
+      [zip]
+    )),
+    safe(db.query(`SELECT * FROM zip_signals WHERE zip = $1 LIMIT 1`, [zip])),
+    safe(db.query(`SELECT COUNT(*)::int AS total FROM businesses WHERE zip = $1`, [zip])),
+    safe(db.query(
+      `SELECT detected_intent, COUNT(*)::int AS count
+         FROM intent_dead_ends WHERE zip = $1
+        GROUP BY detected_intent ORDER BY count DESC LIMIT 5`,
+      [zip]
+    )),
+    safe(db.query(
+      `SELECT detected_intent, COUNT(*)::int AS count
+         FROM sms_query_log WHERE zip = $1
+        GROUP BY detected_intent ORDER BY count DESC LIMIT 5`,
+      [zip]
+    )),
+    safe(db.query(
+      `SELECT category, COUNT(*)::int AS count FROM businesses
+        WHERE zip = $1
+          AND category ILIKE ANY(ARRAY['%restaurant%','%food%','%steak%','%dining%','%bar%','%cafe%','%grill%'])
+        GROUP BY category ORDER BY count DESC LIMIT 10`,
+      [zip]
+    )),
+  ]);
+
+  const business_density = Array.isArray(densityRows) ? densityRows : [];
+  const total_businesses = Array.isArray(totalBizRows) && totalBizRows[0] ? Number(totalBizRows[0].total || 0) : 0;
+  const top_sms_intents  = Array.isArray(smsRows) ? smsRows : [];
+  const unmet_demand     = Array.isArray(deadEndRows) ? deadEndRows : [];
+  const sig              = Array.isArray(sigRows) && sigRows[0] ? sigRows[0] : {};
+  const pr               = Array.isArray(propertyRows) && propertyRows[0] ? propertyRows[0] : {};
+  const food_biz         = Array.isArray(foodBizRows) ? foodBizRows : [];
+  const food_biz_count   = food_biz.reduce((s, r) => s + Number(r.count || 0), 0);
+
+  const fmt = (v, d = 0) => v != null ? Number(v).toLocaleString('en-US', { maximumFractionDigits: d }) : null;
+  const usd = (v) => v != null ? `$${Math.round(Number(v)).toLocaleString()}` : null;
+
+  const median_hhi  = sig.acs_median_hhi != null ? Number(sig.acs_median_hhi) : null;
+  const population  = sig.acs_population != null ? Number(sig.acs_population) : null;
+  const net_returns = sig.irs_mig_net_returns != null ? Number(sig.irs_mig_net_returns) : null;
+  const net_agi_k   = sig.irs_mig_net_agi != null ? Number(sig.irs_mig_net_agi) : null;
+  const growth_score = sig.sig_growth_score != null ? Number(sig.sig_growth_score) : null;
+  const opportunity_score = sig.sig_opportunity_score != null ? Number(sig.sig_opportunity_score) : null;
+  const income_tier = sig.sig_income_tier || null;
+  const market_maturity = sig.sig_market_maturity || null;
+  const per_capita = sig.bea_per_capita_income != null ? Number(sig.bea_per_capita_income) : null;
+  const turnover_rate = sig.qwi_turnover_rate != null ? Number(sig.qwi_turnover_rate) : null;
+  const avg_monthly_earn = sig.qwi_avg_monthly_earn != null ? Number(sig.qwi_avg_monthly_earn) : null;
+  const avg_weekly_wages = sig.qcew_avg_weekly_wages != null ? Number(sig.qcew_avg_weekly_wages) : null;
+  const unemployment = sig.fred_unemployment_rate != null ? Number(sig.fred_unemployment_rate) : null;
+  const units_annual = sig.bps_total_units_annual != null ? Number(sig.bps_total_units_annual) : null;
+  const avg_assessed = pr.avg_assessed != null ? Number(pr.avg_assessed) : null;
+  const avg_sqft = pr.avg_sqft != null ? Number(pr.avg_sqft) : null;
+
+  // ── Category detection ──────────────────────────────────────────────────────
+  const Q = question.toLowerCase();
+  const hasAny = (kws) => kws.some((k) => Q.includes(k));
+
+  const KW = {
+    restaurant_concept: ['steak','steakhouse','restaurant','dining','food','cuisine','bar','grill','cafe','bistro','pizza','sushi','bbq','burger','taco','menu','concept','open a'],
+    lease_viability:    ['lease','rent','sqft','per square','space','location','landlord','afford','support'],
+    sector_gap:         ['gap','missing','opportunity','undersupplied','need','what\'s needed','what is needed','lacking','market'],
+    growth_trajectory:  ['growing','growth','trend','future','trajectory','direction','momentum','invest'],
+    labor_staffing:     ['staff','hire','labor','workers','turnover','wages','employees','hiring','workforce'],
+  };
+
+  let category = 'general';
+  // Order matters — restaurant_concept first since "bar"/"food" are specific
+  for (const cat of ['restaurant_concept','lease_viability','sector_gap','growth_trajectory','labor_staffing']) {
+    if (hasAny(KW[cat])) { category = cat; break; }
+  }
+
+  // ── Build answer per category ───────────────────────────────────────────────
+  let verdict = '';
+  let answer = '';
+  let supporting_data = {};
+  let lease_signal = null;
+  let confidence = 'medium';
+
+  if (category === 'restaurant_concept') {
+    const reasons = [];
+    let viableUpscale = false;
+
+    if (median_hhi != null) {
+      if (median_hhi > 100000) {
+        reasons.push('Strong income base for upscale dining');
+        viableUpscale = true;
+      } else if (median_hhi > 75000) {
+        reasons.push('Solid income base for casual/upscale');
+      } else {
+        reasons.push('Modest income base — pricing must stay mid-market');
+      }
+    }
+    if (net_returns != null && net_returns > 0) reasons.push('Growing household base');
+    if (growth_score != null && growth_score > 70) reasons.push('High-growth market');
+
+    let saturationNote = null;
+    if (food_biz_count > 60 && population != null && population < 35000) {
+      saturationNote = `Food category may be saturated (${food_biz_count} food businesses vs ${fmt(population)} population)`;
+    } else if (food_biz_count < 30 && population != null && population > 20000) {
+      saturationNote = `Food category appears undersupplied (only ${food_biz_count} food businesses for ${fmt(population)} residents)`;
+    }
+    if (saturationNote) reasons.push(saturationNote);
+
+    verdict = viableUpscale
+      ? 'Strong match — income profile supports upscale concept'
+      : (median_hhi != null && median_hhi > 75000
+        ? 'Moderate match — income supports casual/mid-tier concept'
+        : 'Weak match — income profile favors value/mid-market concepts');
+
+    const sentences = [];
+    if (population != null && median_hhi != null) {
+      sentences.push(`${zip} has ${fmt(population)} residents with median HHI of ${usd(median_hhi)}${income_tier ? ` (${income_tier} tier)` : ''}.`);
+    } else if (median_hhi != null) {
+      sentences.push(`${zip} has median HHI of ${usd(median_hhi)}.`);
+    }
+    if (net_returns != null) {
+      const dir = net_returns >= 0 ? 'adding' : 'losing';
+      const agiPart = net_agi_k != null ? ` with ${usd(net_agi_k * 1000)} net AGI` : '';
+      sentences.push(`Migration is ${dir} ${fmt(Math.abs(net_returns))} net households annually${agiPart}.`);
+    }
+    if (growth_score != null) {
+      sentences.push(`Growth score is ${growth_score}/100${opportunity_score != null ? `, opportunity ${opportunity_score}/100` : ''}.`);
+    }
+    if (food_biz_count > 0) {
+      sentences.push(`${food_biz_count} food-category businesses already operating.`);
+    }
+    if (saturationNote) sentences.push(saturationNote + '.');
+    answer = sentences.join(' ');
+
+    supporting_data = {
+      median_hhi: median_hhi != null ? usd(median_hhi) : null,
+      income_tier,
+      population: population != null ? fmt(population) : null,
+      net_migration_returns: net_returns != null ? fmt(net_returns) : null,
+      food_business_count: food_biz_count,
+      growth_score,
+      opportunity_score,
+      top_food_categories: food_biz.slice(0, 5),
+    };
+
+    if (median_hhi != null && median_hhi > 100000) {
+      lease_signal = {
+        viable: true,
+        note: 'Income profile supports upscale pricing ($50-90/pp avg check)',
+        min_hhi_met: true,
+      };
+    } else if (median_hhi != null && median_hhi > 75000) {
+      lease_signal = {
+        viable: true,
+        note: 'Income profile supports casual/upscale pricing ($25-50/pp avg check)',
+        min_hhi_met: true,
+      };
+    } else {
+      lease_signal = {
+        viable: false,
+        note: 'Income profile may not support premium steakhouse pricing',
+        min_hhi_met: false,
+      };
+    }
+
+    confidence = (median_hhi != null && population != null) ? 'high' : 'medium';
+  }
+  else if (category === 'lease_viability') {
+    const parts = [];
+    const densityRatio = (population != null && population > 0) ? (total_businesses / population) * 1000 : null;
+
+    if (avg_assessed != null) parts.push(`avg parcel assessed at ${usd(avg_assessed)}`);
+    if (avg_sqft != null) parts.push(`avg ${fmt(avg_sqft)} sqft`);
+    if (median_hhi != null) parts.push(`median HHI ${usd(median_hhi)}`);
+    if (per_capita != null) parts.push(`per capita income ${usd(per_capita)}`);
+    if (densityRatio != null) parts.push(`${densityRatio.toFixed(1)} businesses per 1,000 residents`);
+
+    const hhiSupportsCommercial = median_hhi != null && median_hhi >= 65000;
+    const hasDensity = total_businesses >= 100;
+
+    if (hhiSupportsCommercial && hasDensity) {
+      verdict = 'Market supports commercial lease rates';
+      confidence = 'high';
+    } else if (hhiSupportsCommercial || hasDensity) {
+      verdict = 'Marginal — lease support depends on concept fit';
+      confidence = 'medium';
+    } else {
+      verdict = 'Weak — limited income/density to support typical retail/restaurant lease';
+      confidence = 'medium';
+    }
+
+    answer = `Lease viability for ${zip}: ${parts.join(', ')}.`;
+    if (median_hhi != null && median_hhi > 100000) {
+      answer += ' Income base supports premium retail/restaurant rents ($30-60/sqft NNN range).';
+    } else if (median_hhi != null && median_hhi > 65000) {
+      answer += ' Income supports mid-market retail rents ($15-30/sqft NNN range).';
+    } else {
+      answer += ' Income profile suggests rents must stay under ~$15/sqft NNN to pencil.';
+    }
+
+    supporting_data = {
+      median_hhi: median_hhi != null ? usd(median_hhi) : null,
+      per_capita_income: per_capita != null ? usd(per_capita) : null,
+      avg_parcel_assessed: avg_assessed != null ? usd(avg_assessed) : null,
+      avg_parcel_sqft: avg_sqft != null ? fmt(avg_sqft) : null,
+      total_businesses,
+      population: population != null ? fmt(population) : null,
+      businesses_per_1k: densityRatio != null ? Number(densityRatio.toFixed(1)) : null,
+    };
+
+    lease_signal = {
+      viable: hhiSupportsCommercial && hasDensity,
+      note: hhiSupportsCommercial
+        ? 'HHI supports commercial lease pricing'
+        : 'HHI below typical commercial threshold (~$65k)',
+      min_hhi_met: hhiSupportsCommercial,
+    };
+  }
+  else if (category === 'sector_gap') {
+    const popK = population != null ? population / 1000 : null;
+    const gaps = [];
+    if (popK != null && popK > 0) {
+      const expectedPer1k = { restaurant: 2.0, retail: 3.0, healthcare: 1.5, professional: 2.5 };
+      const counts = {};
+      for (const row of business_density) {
+        const cat = (row.category || '').toLowerCase();
+        for (const key of Object.keys(expectedPer1k)) {
+          if (cat.includes(key)) counts[key] = (counts[key] || 0) + Number(row.count || 0);
+        }
+      }
+      for (const [key, expected] of Object.entries(expectedPer1k)) {
+        const actual = counts[key] || 0;
+        const expectedTotal = Math.round(expected * popK);
+        if (actual < expectedTotal) {
+          gaps.push({ sector: key, actual, expected: expectedTotal, gap: expectedTotal - actual });
+        }
+      }
+      gaps.sort((a, b) => b.gap - a.gap);
+    }
+
+    const oppLabel = opportunity_score != null
+      ? (opportunity_score > 70 ? 'high' : opportunity_score > 40 ? 'moderate' : 'low')
+      : 'unknown';
+
+    if (gaps.length > 0) {
+      verdict = `${gaps.length} sector gap(s) identified — opportunity score ${oppLabel}`;
+      const top3 = gaps.slice(0, 3).map(g => `${g.sector} (${g.actual} actual vs ${g.expected} expected, gap ${g.gap})`).join('; ');
+      answer = `Top undersupplied sectors in ${zip}: ${top3}. Opportunity score ${opportunity_score || 'n/a'}/100.`;
+    } else {
+      verdict = 'No clear sector gaps in tracked categories';
+      answer = `${zip} appears adequately covered across restaurant, retail, healthcare, and professional categories based on per-capita ratios. Opportunity score ${opportunity_score || 'n/a'}/100.`;
+    }
+
+    supporting_data = {
+      population: population != null ? fmt(population) : null,
+      opportunity_score,
+      growth_score,
+      top_categories: business_density.slice(0, 5),
+      gaps: gaps.slice(0, 5),
+    };
+    confidence = (population != null && business_density.length > 0) ? 'high' : 'low';
+  }
+  else if (category === 'growth_trajectory') {
+    const indicators = [];
+    if (growth_score != null) indicators.push(`growth score ${growth_score}/100`);
+    if (opportunity_score != null) indicators.push(`opportunity ${opportunity_score}/100`);
+    if (net_returns != null) indicators.push(`net migration ${net_returns >= 0 ? '+' : ''}${fmt(net_returns)} returns/yr`);
+    if (units_annual != null) indicators.push(`${fmt(units_annual)} residential units permitted/yr`);
+    if (market_maturity) indicators.push(`maturity: ${market_maturity}`);
+
+    let trajectory;
+    if (growth_score != null && growth_score > 70) trajectory = 'High growth';
+    else if (growth_score != null && growth_score > 40) trajectory = 'Steady growth';
+    else if (growth_score != null) trajectory = 'Slow/flat';
+    else if (net_returns != null) trajectory = net_returns > 0 ? 'Growing (migration positive)' : 'Declining (migration negative)';
+    else trajectory = 'Unknown';
+
+    verdict = `Trajectory: ${trajectory}`;
+    answer = `${zip} growth signals — ${indicators.join(', ') || 'no growth data available'}.`;
+
+    supporting_data = {
+      growth_score,
+      opportunity_score,
+      net_migration_returns: net_returns != null ? fmt(net_returns) : null,
+      net_migration_agi: net_agi_k != null ? usd(net_agi_k * 1000) : null,
+      units_permitted_annual: units_annual != null ? fmt(units_annual) : null,
+      market_maturity,
+    };
+    confidence = growth_score != null ? 'high' : 'medium';
+  }
+  else if (category === 'labor_staffing') {
+    const parts = [];
+    if (unemployment != null) parts.push(`unemployment ${unemployment.toFixed(1)}%`);
+    if (turnover_rate != null) parts.push(`turnover ${turnover_rate.toFixed(1)}%`);
+    if (avg_monthly_earn != null) parts.push(`avg monthly earn ${usd(avg_monthly_earn)}`);
+    if (avg_weekly_wages != null) parts.push(`avg weekly wages ${usd(avg_weekly_wages)}`);
+
+    const tightLabor = unemployment != null && unemployment < 3.5;
+    const highTurnover = turnover_rate != null && turnover_rate > 12;
+
+    if (tightLabor && highTurnover) {
+      verdict = 'Tight labor + high turnover — staffing will be a constraint';
+      confidence = 'high';
+    } else if (tightLabor) {
+      verdict = 'Tight labor market — expect wage pressure';
+      confidence = 'high';
+    } else if (highTurnover) {
+      verdict = 'High turnover — retention will require above-market wages';
+      confidence = 'medium';
+    } else {
+      verdict = 'Labor market appears workable for staffing';
+      confidence = 'medium';
+    }
+
+    answer = `${zip} labor signals — ${parts.join(', ') || 'limited labor data available'}.`;
+
+    supporting_data = {
+      unemployment_rate: unemployment != null ? `${unemployment.toFixed(1)}%` : null,
+      turnover_rate: turnover_rate != null ? `${turnover_rate.toFixed(1)}%` : null,
+      avg_monthly_earn: avg_monthly_earn != null ? usd(avg_monthly_earn) : null,
+      avg_weekly_wages: avg_weekly_wages != null ? usd(avg_weekly_wages) : null,
+    };
+  }
+  else {
+    // general fallback — reuse ceo-assess style summary
+    const lines = [];
+    if (population != null) lines.push(`${zip}: ${fmt(population)} residents${median_hhi != null ? `, median HHI ${usd(median_hhi)}` : ''}.`);
+    if (total_businesses > 0) {
+      const topCats = business_density.slice(0, 3).map((r) => `${r.category} (${r.count})`).join(', ');
+      lines.push(`${total_businesses} businesses${topCats ? ` — top: ${topCats}` : ''}.`);
+    }
+    if (growth_score != null) lines.push(`Growth ${growth_score}/100, opportunity ${opportunity_score || '?'}/100, maturity: ${market_maturity || 'n/a'}.`);
+
+    verdict = 'General market snapshot';
+    answer = lines.join(' ') + ' For richer answers, ask about concept viability, lease support, sector gaps, growth trajectory, or labor/staffing.';
+    supporting_data = {
+      population: population != null ? fmt(population) : null,
+      median_hhi: median_hhi != null ? usd(median_hhi) : null,
+      total_businesses,
+      growth_score,
+      opportunity_score,
+    };
+    confidence = 'low';
+  }
+
+  return res.json({
+    zip,
+    question,
+    category,
+    verdict,
+    answer,
+    supporting_data,
+    lease_signal,
+    confidence,
+    answered_at: new Date().toISOString(),
+  });
+});
+
 module.exports = router;
 
 // ── Neighborhood endpoints ────────────────────────────────────────────────────
