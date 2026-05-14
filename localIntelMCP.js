@@ -135,7 +135,115 @@ async function handleOracle(params) {
   const zip = (params.zip || '').replace(/\D/g, '').slice(0, 5);
   if (!zip) return { error: 'zip required' };
 
-  // 1. Try Postgres first — persists across deploys
+  // ── Primary: ceo-assess (World Model + all worker signals, zero LLM) ────────
+  // This is the canonical intelligence layer — reads zip_signals, property_parcels,
+  // businesses, intent_dead_ends, sms_query_log directly from Postgres.
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const db = require('./lib/db');
+
+      // Parallel queries — same as ceo-assess endpoint
+      const safe = p => p.catch(() => null);
+      const [densityRows, sigRows, totalBizRows, deadEndRows] = await Promise.all([
+        safe(db.query(
+          `SELECT category, COUNT(*)::int AS count FROM businesses WHERE zip=$1 GROUP BY category ORDER BY count DESC LIMIT 10`,
+          [zip]
+        )),
+        safe(db.query(`SELECT * FROM zip_signals WHERE zip=$1 LIMIT 1`, [zip])),
+        safe(db.query(`SELECT COUNT(*)::int AS total FROM businesses WHERE zip=$1`, [zip])),
+        safe(db.query(
+          `SELECT detected_intent, COUNT(*)::int AS count FROM intent_dead_ends WHERE zip=$1 GROUP BY detected_intent ORDER BY count DESC LIMIT 5`,
+          [zip]
+        )),
+      ]);
+
+      const sig  = Array.isArray(sigRows) && sigRows[0] ? sigRows[0] : {};
+      const total = Array.isArray(totalBizRows) && totalBizRows[0] ? Number(totalBizRows[0].total || 0) : 0;
+      const topCats = (Array.isArray(densityRows) ? densityRows : []).slice(0, 5);
+      const unmet   = (Array.isArray(deadEndRows)  ? deadEndRows  : []);
+
+      // Only return if we have at least some signal data
+      if (Object.keys(sig).some(k => sig[k] != null) || total > 0) {
+        const n  = v => v != null ? Number(v) : null;
+        const pct = v => v != null ? `${Number(v).toFixed(1)}%` : null;
+        const usd = v => v != null ? `$${Math.round(Number(v)).toLocaleString()}` : null;
+
+        return {
+          zip,
+          _source:    'ceo_assess',
+          _assessed_at: new Date().toISOString(),
+
+          // Market intelligence
+          market_intelligence: {
+            income_tier:       sig.sig_income_tier         || null,
+            peer_cohort:       sig.sig_peer_cohort         || null,
+            market_maturity:   sig.sig_market_maturity     || null,
+            growth_score:      n(sig.sig_growth_score),
+            opportunity_score: n(sig.sig_opportunity_score),
+            risk_score:        n(sig.sig_risk_score),
+            biz_density_per_1k: n(sig.sig_biz_density_per_1k),
+            job_capture_ratio: n(sig.sig_job_capture_ratio),
+          },
+
+          // Labor signals
+          labor: {
+            unemployment_rate: pct(sig.fred_unemployment_rate),
+            labor_force:       n(sig.fred_labor_force),
+            avg_weekly_wages:  usd(sig.qcew_avg_weekly_wages),
+            emp_yoy:           sig.qcew_emp_yoy_pct != null ? `${Number(sig.qcew_emp_yoy_pct) >= 0 ? '+' : ''}${Number(sig.qcew_emp_yoy_pct).toFixed(1)}%` : null,
+            dominant_sector:   sig.ces_dominant_sector     || null,
+            ai_displacement_risk: n(sig.ai_displacement_risk),
+            investment_score:  n(sig.investment_opportunity_score),
+            investment_tier:   sig.investment_tier         || null,
+          },
+
+          // Demographics
+          demographics: {
+            population:      n(sig.acs_population),
+            median_hhi:      usd(sig.acs_median_hhi),
+            owner_occupied:  pct(sig.acs_owner_occ_pct),
+            per_capita_income: usd(sig.bea_per_capita_income),
+            income_vs_fl_avg: sig.bea_income_vs_fl_avg != null ? `${Number(sig.bea_income_vs_fl_avg).toFixed(2)}x` : null,
+          },
+
+          // Migration
+          migration: {
+            net_returns:  n(sig.irs_mig_net_returns),
+            net_agi_k:    n(sig.irs_mig_net_agi),
+            top_origin:   sig.irs_mig_top_origin || null,
+            vintage:      sig.irs_mig_vintage    || null,
+          },
+
+          // Business activity
+          business_activity: {
+            total_businesses: total,
+            top_categories:   topCats,
+            osm_biz_count:    n(sig.osm_biz_count),
+            sunbiz_active:    n(sig.sunbiz_active_entities),
+            sunbiz_new_12mo:  n(sig.sunbiz_new_12mo),
+          },
+
+          // Unmet demand (real-time from dead ends)
+          unmet_demand: unmet,
+
+          // Agent guidance
+          _agent_hint: [
+            sig.sig_peer_cohort       ? `ZIP cohort: ${sig.sig_peer_cohort}.` : null,
+            sig.sig_income_tier       ? `Income tier: ${sig.sig_income_tier}.` : null,
+            sig.sig_growth_score != null ? `Growth score ${sig.sig_growth_score}/100 vs peer ZIPs.` : null,
+            sig.ces_dominant_sector   ? `Dominant sector: ${sig.ces_dominant_sector}.` : null,
+            sig.investment_tier       ? `Investment tier: ${sig.investment_tier}.` : null,
+            total > 0                 ? `${total} businesses mapped in ZIP.` : null,
+            unmet.length > 0          ? `Unmet demand detected: ${unmet.map(u => u.detected_intent).join(', ')}.` : null,
+          ].filter(Boolean).join(' '),
+        };
+      }
+    } catch (e) {
+      console.error('[handleOracle] ceo-assess path failed:', e.message);
+    }
+  }
+
+  // ── Fallback: legacy zip_intelligence.oracle_json ────────────────────────
   if (process.env.LOCAL_INTEL_DB_URL) {
     try {
       const db = require('./lib/db');
@@ -146,23 +254,14 @@ async function handleOracle(params) {
       if (row && row.oracle_json) {
         const data = typeof row.oracle_json === 'string'
           ? JSON.parse(row.oracle_json) : row.oracle_json;
-        data._source = 'postgres';
+        data._source = 'zip_intelligence_legacy';
         data._computed_at = row.computed_at;
         return cleanOracleResponse(data);
       }
     } catch (_) {}
   }
 
-  // 2. Flat file fallback (local dev only — Railway always has LOCAL_INTEL_DB_URL)
-  if (!process.env.LOCAL_INTEL_DB_URL) {
-    const oracleDir = path.join(__dirname, 'data', 'oracle');
-    const file = path.join(oracleDir, `${zip}.json`);
-    if (require('fs').existsSync(file)) {
-      const raw = JSON.parse(require('fs').readFileSync(file, 'utf8'));
-      return cleanOracleResponse(raw);
-    }
-  }
-  return { error: `Oracle not yet computed for ${zip}. The oracle worker runs every 6h — try again shortly.` };
+  return { error: `No intelligence data yet for ${zip}. Trigger data workers via the LocalIntel nodes dashboard.` };
 }
 
 

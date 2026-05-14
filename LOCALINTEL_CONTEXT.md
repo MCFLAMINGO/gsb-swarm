@@ -4278,3 +4278,109 @@ Volume hit 100% (5 GB ceiling). Regular VACUUM does NOT return bytes to the OS v
 Worker has standalone entry point (spawned by trigger). NOT in auto-start list — must run after primary workers.
 Updated nodes page: World Model node now has triggerEndpoint + status="active".
 **Result:** After triggering, CEO assess world_model section will populate with scores. CEO can show "32082 ranks #1 in St. Johns for income, #2 for growth" derived purely from Postgres.
+
+## B40 — MCP Oracle re-wire + Architecture Canon
+**Date:** 2026-05-14
+**Commit:** (see below)
+
+### Problem
+`local_intel_oracle` MCP tool read from `zip_intelligence.oracle_json` — null for all target ZIPs because the oracle worker predates the Postgres workers architecture. Every agent connecting via Smithery got no data.
+
+### Fix
+Re-wired `handleOracle()` in `localIntelMCP.js` to query `zip_signals` + `businesses` + `intent_dead_ends` directly (same parallel query pattern as ceo-assess endpoint). Returns structured market intelligence, labor signals, demographics, migration, business activity, and unmet demand. Falls back to `zip_intelligence.oracle_json` only if zip_signals has no data. Legacy oracle path preserved but demoted to fallback.
+
+**Result:** `local_intel_oracle` now returns live World Model scores, income tier, peer cohort, sector signals, and unmet demand for any ZIP that has worker data. MCP agents on Smithery get real intelligence immediately.
+
+---
+
+## ARCHITECTURE CANON — LocalIntel Platform
+**Written:** 2026-05-14
+**Purpose:** Single source of truth for what each layer is, what it does, and why it exists.
+**PRESERVE THIS SECTION — update in place, never delete.**
+
+---
+
+### The Three Access Points
+
+#### 1. CEO Page (`/local-intel/ceo` on Vercel dashboard)
+**Who:** Erik / operators — writing briefs for clients.
+**What it is:** The brief creation workspace. Pulls full CEO assess (Layer 1 Postgres, zero LLM) for any ZIP. 12 structured sections — demographics, income, migration, labor, sectors, jobs, business activity, construction, broadband, property, world model, demand. World Model scores (growth/opportunity/risk/maturity/cohort) computed by `worldModelWorker` from all worker signals.
+**Output:** Client-ready intelligence. Used to generate PDFs, market briefs, site selection reports.
+**NOT for:** Public access, agent routing, or business discovery.
+
+#### 2. MCP Server (`/api/local-intel/mcp` → Smithery)
+**Who:** AI agents (Claude, GPT, Cursor), programmatic callers, humans via Smithery.
+**What it is:** The canonical single entry point for ALL queries — market intelligence, business discovery, and task routing. 22 tools registered. `local_intel_query` is the START HERE tool — plain-English, auto-routes to the right ZIP + vertical + tool.
+**Three roles inside MCP:**
+- **Role 1 — Market Intelligence:** `local_intel_oracle` (now reads ceo-assess), `local_intel_signal`, `local_intel_sector_gap`, `local_intel_tide`, vertical agents (restaurant/healthcare/retail/construction/realtor). Answers "what is this market?" questions.
+- **Role 2 — Business Discovery:** `local_intel_search`, `local_intel_nearby`, `local_intel_context`, `local_intel_project`. Searches 205,794 FL businesses by name/category/ZIP. Statewide. No ZIP restrictions on name search — proximity-sorted by caller ZIP.
+- **Role 3 — Task Dispatch:** `local_intel_rfq` → `local_intel_rfq_status` → `local_intel_book` → `local_intel_decline_response` → `local_intel_complete`. Full loop: post job → ranked quotes → book → pay → complete. Payment on confirmed success only (Tempo/pathUSD).
+
+#### 3. Twilio (`POST /api/local-intel` + voice)
+**Who:** Regular customers — SMS and voice. No app required.
+**What it is:** The human UX for task routing. A customer texts "I need a landscaper in 32082" or calls the Twilio number and says it. Same routing logic as MCP — intentRouter → category → businesses → RFQ dispatch. SMS log in `sms_query_log`. Voice transcripts in `call_transcripts`. Dead ends in `intent_dead_ends`.
+**Positioning:** Like a Telegram bot but phone-native. No signup, no app, no login. Text or call → get routed → business gets the job.
+
+---
+
+### The Hive Mental Model
+
+**Businesses are not static links.** A claimed business in LocalIntel is a living node with:
+- SKUs, menu items, service listings (actionable by agents and humans)
+- Task templates (pre-seeded by `taskSeedWorker`, editable by owner)
+- Wallet address (receives pathUSD on job completion)
+- Hours, phone, categories — all queryable
+- Claimed status — verified via Sunbiz, owner can edit
+
+**The micro layer (bees):** Every RFQ posted, every task routed, every order placed, every reservation, every SMS query. These are atomic events. Each writes to `business_tasks`, `task_events`, `rfq_gaps`, `resolution_history`, `intent_dead_ends`, `sms_query_log`.
+
+**The macro layer (hive):** `zip_signals`, World Model scores (`sig_*`), sector gaps, business density, CES/QCEW/FRED labor data. This is the aggregate structure. Government workers (BLS, Census, BEA, IRS) provide the lagging confirmation of what task routing already shows in real time.
+
+**The feedback loop (not yet live — activates with real traffic):**
+Micro activity → `taskSignalWorker` → `zip_signals` (`sig_task_velocity`, `sig_unmet_demand_score`, `sig_category_momentum`) → World Model ingests → intelligence feeds better routing.
+
+`intent_dead_ends` is the most valuable real-time signal: every failed query where no business could fulfill the task = a sector gap. More current than any federal dataset. When live traffic flows, this closes the loop automatically.
+
+**Build order:**
+1. ✅ Government data workers (BLS/Census/BEA/IRS) — macro foundation
+2. ✅ World Model worker — computed sig_* signals from macro data
+3. ✅ MCP oracle re-wired — intelligence flows to agents via Smithery
+4. 🔜 Real traffic via Twilio/MCP → `intent_dead_ends` populates
+5. 🔜 `taskSignalWorker` — reads dead_ends + resolution_history + rfq_gaps, writes sig_task_* back to zip_signals
+6. 🔜 World Model picks up task signals alongside government signals
+
+---
+
+### Messaging as Task Routing (Strategic Direction — 2026-05-14)
+
+SMS/voice via Twilio is currently implemented but underweighted in the product vision. The insight from session 2026-05-14:
+
+**Messaging IS task routing.** The distinction between "sending a message" and "routing a task" is artificial at this layer. When someone texts "I need a plumber in Nocatee" they are not querying a database — they are initiating a workflow that ends with a confirmed booking and a payment. The message IS the task.
+
+This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat mini-programs than to Google Maps or Yelp. The difference: those platforms show you static listings. LocalIntel routes you to an actionable business node that can receive the job, respond with a quote, and get paid — all without a web app.
+
+**Implication for future builds:**
+- Twilio SMS should be treated as a first-class channel equal to MCP, not a secondary fallback
+- Messaging threads (conversation state across multiple SMS turns) are more important than single-query resolution
+- A business that has claimed their profile and set up tasks/menu items is findable AND actionable via message — this is the depth that matters
+- Consider: WhatsApp Business API, iMessage for Business, or Telegram bot as additional messaging channels alongside Twilio
+- `sms_query_log` + `call_transcripts` + `resolution_history` together = a full conversation layer. The next architectural move is threading these into stateful sessions per caller — not just individual query resolution.
+
+---
+
+### Key Tables — What Lives Where
+
+| Table | What it stores | Written by | Read by |
+|---|---|---|---|
+| `zip_signals` | All macro signals (87 columns) | All data workers | CEO assess, World Model, MCP oracle |
+| `businesses` | 205k FL businesses | OSM/YP/Sunbiz import | MCP search, RFQ routing, Twilio |
+| `business_tasks` | Task templates per business | taskSeedWorker, business owners | MCP RFQ, agent routing |
+| `intent_dead_ends` | Failed queries (0 rows — pre-traffic) | deadEndLog.js | taskSignalWorker (future) |
+| `sms_query_log` | SMS query/reply pairs | Twilio handler | CEO demand section |
+| `resolution_history` | Every resolved task outcome | Main POST handler | Analytics, routerLearningWorker |
+| `rfq_gaps` | 0-result RFQ categories | RFQ handler | routerLearningWorker, taskSignalWorker (future) |
+| `property_parcels` | 171k SJC parcels | CAMA import | CEO property section |
+| `zip_intelligence` | Legacy oracle_json blobs | oracleWorker (legacy) | MCP oracle fallback only |
+| `worker_events` | Worker START/END/ERROR logs | All workers | Nodes dashboard |
+| `worker_heartbeat` | Last run timestamp per worker | All workers | Nodes status |
+
