@@ -1,22 +1,4 @@
 'use strict';
-// ── Standalone entry point (spawned by dashboard-server.js trigger) ───────────
-if (require.main === module) {
-  const db = require('../lib/db');
-  async function logEvent(worker, type, zip, msg) {
-    try {
-      await db.query(
-        `INSERT INTO worker_events (worker_name, event_type, error_message, meta, created_at)
-         VALUES ($1, $2, NULL, $3, NOW())`,
-        [worker, type, JSON.stringify({ message: msg, zip: zip || null })]
-      );
-    } catch (_) {}
-    console.log(`[${worker}] ${type}${zip ? ' ' + zip : ''}: ${msg}`);
-  }
-  module.exports(db, logEvent)
-    .then(r => { console.log('[worldModelWorker] done:', JSON.stringify(r)); process.exit(0); })
-    .catch(e => { console.error('[worldModelWorker] fatal:', e.message); process.exit(1); });
-}
-
 /**
  * worldModelWorker.js
  * ─────────────────────────────────────────────────────────────────────────────
@@ -265,3 +247,21 @@ module.exports = async function worldModelWorker(db, logEvent) {
 
   return { computed: results.length, zips: results };
 };
+
+// ── Standalone entry point — MUST be after module.exports assignment ──────────
+if (require.main === module) {
+  const db = require('../lib/db');
+  async function logEvent(worker, type, zip, msg) {
+    try {
+      await db.query(
+        `INSERT INTO worker_events (worker_name, event_type, error_message, meta, created_at)
+         VALUES ($1, $2, NULL, $3, NOW())`,
+        [worker, type, JSON.stringify({ message: msg, zip: zip || null })]
+      );
+    } catch (_) {}
+    console.log(`[${worker}] ${type}${zip ? ' ' + zip : ''}: ${msg}`);
+  }
+  module.exports(db, logEvent)
+    .then(r => { console.log('[worldModelWorker] done:', JSON.stringify(r)); process.exit(0); })
+    .catch(e => { console.error('[worldModelWorker] fatal:', e.message); process.exit(1); });
+}
