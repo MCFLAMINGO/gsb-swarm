@@ -4384,3 +4384,10 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 | `worker_events` | Worker START/END/ERROR logs | All workers | Nodes dashboard |
 | `worker_heartbeat` | Last run timestamp per worker | All workers | Nodes status |
 
+
+---
+
+### B41 — Conversation Threading (SMS/Twilio Layer)
+**Problem:** Each Twilio SMS query was stateless — no memory of prior ZIP, business, or intent. "That place" / "near here" / follow-up queries all failed.
+**Fix:** Added `conversation_threads` table (migration 025). `lib/conversationThread.js` provides `getContext()` (loads last N turns, detects referential + zip-proxy patterns) and `appendTurn()` (fire-and-forget write). Injected into `localIntelAgent.js` POST handler: read before `resolveNlIntentFromRegistry`, write after each `res.json()` response path.
+**Result:** SMS queries now carry thread context — ZIP resolved from history, referential business names resolved, follow-up intents enriched. Foundation for richer conversational routing.

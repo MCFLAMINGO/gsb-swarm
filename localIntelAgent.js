@@ -108,6 +108,7 @@ const { resolveBusinessAlias } = require('./lib/aliasResolver');
 const { injectShowcase } = require('./lib/showcaseBiz');
 const { logDeadEnd } = require('./lib/deadEndLog');
 const { logSmsQuery } = require('./lib/smsQueryLog');
+const { appendTurn, getContext } = require('./lib/conversationThread');
 const apiKeyMiddleware = createApiKeyMiddleware(db);
 
 // B16 — fire-and-forget SMS query history. Only logs for Twilio channel
@@ -885,6 +886,10 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip, service
       responsePreview: customerMsg,
     });
 
+    // B41: Append turns (fire-and-forget)
+    appendTurn({ callerId: customerId, channel: 'sms', role: 'user',   content: userQuery,   zip, intent: nlIntent?.category || nlIntent?.group || 'rfq' }).catch(() => {});
+    appendTurn({ callerId: customerId, channel: 'sms', role: 'system', content: customerMsg, zip, rfqId, resolvesVia: 'rfq' }).catch(() => {});
+
     return res.json({
       ok: true,
       rfq_id: rfqId,
@@ -1012,6 +1017,9 @@ async function handleReservation(req, res, query, customerId, zip) {
         resolvedVia: 'unmatched',
         responsePreview: _resvNotFoundMsg,
       });
+      // B41: Append turns (fire-and-forget)
+      appendTurn({ callerId: customerId, channel: 'sms', role: 'user',   content: query,             zip, intent: 'reservation' }).catch(() => {});
+      appendTurn({ callerId: customerId, channel: 'sms', role: 'system', content: _resvNotFoundMsg,  zip, resolvesVia: 'reservation' }).catch(() => {});
       return res.json({
         ok: true,
         type: 'reservation_not_found',
@@ -1062,6 +1070,13 @@ async function handleReservation(req, res, query, customerId, zip) {
       responsePreview: message,
     });
 
+    // B41: Append turns (fire-and-forget)
+    appendTurn({ callerId: customerId, channel: 'sms', role: 'user',   content: query,   zip, intent: 'reservation' }).catch(() => {});
+    appendTurn({ callerId: customerId, channel: 'sms', role: 'system', content: message, zip,
+      businessId:   biz.id,
+      businessName: biz.name,
+      resolvesVia:  'reservation' }).catch(() => {});
+
     return res.json({
       ok: true,
       type: 'reservation',
@@ -1104,7 +1119,10 @@ async function handleReservation(req, res, query, customerId, zip) {
 
 router.post('/', async (req, res) => {
   const _reqStart = Date.now();
-  const { zip, query, category, group, limit = 50, minConfidence = 0 } = req.body || {};
+  let { zip, query, category, group, limit = 50, minConfidence = 0 } = req.body || {};
+  // B41: thread-resolvable business reference (filled by getContext below).
+  let businessId = null;
+  let businessName = null;
 
   // Step 5 — customer identity. Twilio sends phone in `From` (E.164). Web
   // callers send nothing → anonymous (no personalization, no upsert).
@@ -1124,6 +1142,24 @@ router.post('/', async (req, res) => {
       customerSession = csRows[0] ?? null;
     } catch (err) {
       console.error('[customer_session] fetch failed:', err.message);
+    }
+  }
+
+  // B41: Load conversation thread context (rolling window keyed on customerId)
+  const threadCtx = customerId
+    ? await getContext(customerId, query || '').catch(() => null)
+    : null;
+  if (threadCtx) {
+    // Fill missing ZIP from thread history
+    if (!zip && threadCtx.zip) zip = threadCtx.zip;
+    // Referential resolution: "that place", "same spot", "that one"
+    if (threadCtx.isReferential && threadCtx.lastBusinessId && !businessId) {
+      businessId   = threadCtx.lastBusinessId;
+      businessName = threadCtx.lastBusinessName;
+    }
+    // ZIP proxy: "near here", "same area" — use last known zip
+    if (threadCtx.isZipProxy && threadCtx.zip && !zip) {
+      zip = threadCtx.zip;
     }
   }
 
@@ -1160,6 +1196,9 @@ router.post('/', async (req, res) => {
           resolvedVia: 'alias',
           responsePreview: _slangMsg,
         });
+        // B41: Append turns (fire-and-forget)
+        appendTurn({ callerId: customerId, channel: 'sms', role: 'user',   content: query,     zip, intent: 'slang' }).catch(() => {});
+        appendTurn({ callerId: customerId, channel: 'sms', role: 'system', content: _slangMsg, zip, resolvesVia: 'slang_submission' }).catch(() => {});
         return res.json({
           ok: true,
           type: 'slang_submission_hint',
@@ -1251,6 +1290,9 @@ router.post('/', async (req, res) => {
           resolvedVia: 'task_followup',
           responsePreview: _followupMsg,
         });
+        // B41: Append turns (fire-and-forget)
+        appendTurn({ callerId: customerId, channel: 'sms', role: 'user',   content: query,         zip, intent: taskIntent.cat || 'task' }).catch(() => {});
+        appendTurn({ callerId: customerId, channel: 'sms', role: 'system', content: _followupMsg,  zip, resolvesVia: 'task_followup' }).catch(() => {});
         return res.json({
           ok: true,
           type: 'followup',
@@ -1378,6 +1420,18 @@ router.post('/', async (req, res) => {
               || (_b19Enriched[0] && `Top result: ${_b19Enriched[0].name}`)
               || '',
           });
+          // B41: Append turns (fire-and-forget)
+          {
+            const _b41Top = _b19Enriched[0] || null;
+            const _b41Summary = _b19Meta.narrative
+              || (_b41Top && `Top result: ${_b41Top.name}`)
+              || `${_b19Enriched.length} name match(es)`;
+            appendTurn({ callerId: customerId, channel: 'sms', role: 'user',   content: query,        zip, intent: 'name_search' }).catch(() => {});
+            appendTurn({ callerId: customerId, channel: 'sms', role: 'system', content: _b41Summary,  zip,
+              businessId:   _b41Top?.business_id ?? null,
+              businessName: _b41Top?.name        ?? null,
+              resolvesVia:  'name_search' }).catch(() => {});
+          }
           return res.json({
             ok:       true,
             total:    _b19Enriched.length,
@@ -1541,6 +1595,19 @@ router.post('/', async (req, res) => {
                 || (enriched[0] && `Top result: ${enriched[0].name}`)
                 || '',
             });
+            // B41: Append turns (fire-and-forget)
+            {
+              const _b41Top = enriched[0] || null;
+              const _b41Summary = _phase2Meta.narrative
+                || (_b41Top && `Top result: ${_b41Top.name}`)
+                || `${enriched.length} result(s)`;
+              const _b41Intent = (intent.categories && intent.categories[0]) || intent.type || 'search';
+              appendTurn({ callerId: customerId, channel: 'sms', role: 'user',   content: query,       zip, intent: _b41Intent }).catch(() => {});
+              appendTurn({ callerId: customerId, channel: 'sms', role: 'system', content: _b41Summary, zip,
+                businessId:   _b41Top?.business_id ?? null,
+                businessName: _b41Top?.name        ?? null,
+                resolvesVia:  'search' }).catch(() => {});
+            }
             return res.json({
               ok:       true,
               total:    enriched.length,
@@ -1592,6 +1659,9 @@ router.post('/', async (req, res) => {
                 resolvedVia: 'unmatched',
                 responsePreview: _gapMsg,
               });
+              // B41: Append turns (fire-and-forget)
+              appendTurn({ callerId: customerId, channel: 'sms', role: 'user',   content: query,   zip, intent: intent.type || 'DISCOVER' }).catch(() => {});
+              appendTurn({ callerId: customerId, channel: 'sms', role: 'system', content: _gapMsg, zip, resolvesVia: 'dispatch' }).catch(() => {});
               return res.json({
                 ok: true,
                 taskCreated: true,
@@ -2047,6 +2117,18 @@ router.post('/', async (req, res) => {
         || (rows.length === 0 ? `No results for "${query}" in ${zip || 'your area'}` : ''),
     });
 
+    // B41: Append turns (fire-and-forget)
+    {
+      const _b41Top = rows[0] || null;
+      const _b41Summary = _meta.narrative
+        || (_b41Top && `Top result: ${_b41Top.name}`)
+        || (rows.length === 0 ? `No results for "${query}" in ${zip || 'your area'}` : `${rows.length} result(s)`);
+      appendTurn({ callerId: customerId, channel: 'sms', role: 'user',   content: query,       zip, intent: _legacyIntent }).catch(() => {});
+      appendTurn({ callerId: customerId, channel: 'sms', role: 'system', content: _b41Summary, zip,
+        businessId:   _b41Top?.business_id ?? null,
+        businessName: _b41Top?.name        ?? null,
+        resolvesVia:  _legacyResolvedVia }).catch(() => {});
+    }
     res.json({
       ok:       true,
       total:    realTotal,
