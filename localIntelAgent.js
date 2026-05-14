@@ -9880,6 +9880,107 @@ router.post('/chat', async (req, res) => {
   }
 });
 
+// ── B46: Surge Subscription Endpoints ─────────────────────────────────────────
+router.options('/chat', (req, res) =>
+  res.set('Access-Control-Allow-Origin', '*')
+     .set('Access-Control-Allow-Methods', 'POST')
+     .set('Access-Control-Allow-Headers', 'Content-Type')
+     .sendStatus(204)
+);
+
+router.options('/subscribe', (req, res) =>
+  res.set('Access-Control-Allow-Origin', '*')
+     .set('Access-Control-Allow-Methods', 'POST')
+     .set('Access-Control-Allow-Headers', 'Content-Type')
+     .sendStatus(204)
+);
+
+router.options('/subscription-confirm', (req, res) =>
+  res.set('Access-Control-Allow-Origin', '*')
+     .set('Access-Control-Allow-Methods', 'POST')
+     .set('Access-Control-Allow-Headers', 'Content-Type')
+     .sendStatus(204)
+);
+
+router.post('/subscribe', express.json(), async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const { phone } = req.body || {};
+  if (!phone) return res.status(400).json({ error: 'phone required' });
+
+  try {
+    const surgeRes = await fetch('https://surge.basalthq.com/api/orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Ocp-Apim-Subscription-Key': process.env.BASALT_API_KEY
+      },
+      body: JSON.stringify({
+        items: [{ sku: 'LOCALINTEL-CHAT-MONTHLY', qty: 1 }]
+      })
+    });
+    const surgeData = await surgeRes.json();
+    const receiptId = surgeData?.receipt?.receiptId;
+
+    if (!receiptId) {
+      console.error('[subscribe] Surge order failed:', JSON.stringify(surgeData));
+      return res.status(502).json({ error: 'payment_init_failed', detail: surgeData });
+    }
+
+    await db.query(
+      `INSERT INTO subscriber_accounts (phone, status, trial_queries_used)
+       VALUES ($1, 'trial', 0)
+       ON CONFLICT (phone) DO NOTHING`,
+      [phone]
+    ).catch(() => {});
+
+    const MERCHANT_WALLET = '0xe66cE7E6d31A5F69899Ecad2E4F3B141557e0dED';
+    const portalUrl = `https://surge.basalthq.com/portal/${receiptId}?recipient=${MERCHANT_WALLET}&embedded=1&correlationId=${phone.replace(/\W/g,'')}&forcePortalTheme=1`;
+
+    return res.json({ ok: true, receiptId, portalUrl, amount: 9.99 });
+  } catch (err) {
+    console.error('[subscribe] error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/subscription-confirm', express.json(), async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const { phone, receiptId, token } = req.body || {};
+  if (!phone || !receiptId) return res.status(400).json({ error: 'phone and receiptId required' });
+
+  try {
+    const verifyRes = await fetch(`https://surge.basalthq.com/api/receipts/status?receiptId=${encodeURIComponent(receiptId)}`, {
+      headers: { 'Ocp-Apim-Subscription-Key': process.env.BASALT_API_KEY }
+    });
+    const verifyData = await verifyRes.json();
+
+    const confirmed = ['completed','paid','confirmed','success'].includes(String(verifyData?.status || '').toLowerCase());
+
+    if (!confirmed) {
+      console.warn('[subscription-confirm] receipt not confirmed:', verifyData?.status);
+    }
+
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await db.query(
+      `INSERT INTO subscriber_accounts (phone, status, tier, subscribed_at, expires_at)
+       VALUES ($1, 'active', 'chat', NOW(), $2)
+       ON CONFLICT (phone) DO UPDATE SET
+         status = 'active',
+         tier = 'chat',
+         subscribed_at = NOW(),
+         expires_at = $2,
+         updated_at = NOW()`,
+      [phone, expiresAt]
+    );
+
+    console.log(`[subscription-confirm] activated ${phone} receiptId=${receiptId}`);
+    return res.json({ ok: true, status: 'active', expires_at: expiresAt });
+  } catch (err) {
+    console.error('[subscription-confirm] error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 
 // ── Neighborhood endpoints ────────────────────────────────────────────────────
