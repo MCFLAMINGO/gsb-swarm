@@ -7498,6 +7498,7 @@ app.use((req, res, next) => {
     // { name: 'Embedding Backfill',          file: 'workers/embeddingBackfillWorker.js' }, // disabled — index recreates at 1.2GB, 0 scans, no query path uses <-> operator yet
     { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' },
     { name: 'Permit Worker',               file: 'workers/permitWorker.js' },
+    { name: 'FDOT AADT Worker',              file: 'workers/fdotWorker.js'   },
     // ── World model signal workers ──
     // { name: 'FCC Broadband Worker',        file: 'workers/fccBroadbandWorker.js'  }, // disabled — FCC broadband data not used in search quality
     // { name: 'IRS Migration Worker',        file: 'workers/irsMigrationWorker.js'  }, // disabled — IRS migration data not consumed by any query path yet

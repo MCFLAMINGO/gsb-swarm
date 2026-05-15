@@ -9780,7 +9780,8 @@ router.post('/ceo-query', express.json(), async (req, res) => {
                     acs_college_pct, acs_median_age, acs_poverty_pct,
                     fred_unemployment_rate, sig_growth_score, sig_opportunity_score,
                     sig_market_maturity, osm_biz_count, zbp_total_establishments,
-                    bps_total_units_annual, qcew_avg_weekly_wages
+                    bps_total_units_annual, qcew_avg_weekly_wages,
+                    fdot_max_aadt, fdot_avg_aadt, fdot_top_road
                FROM zip_signals WHERE zip = ANY($1)`,
             [countyZips]
           ).catch(() => []);
@@ -9790,31 +9791,42 @@ router.post('/ceo-query', express.json(), async (req, res) => {
           const Q2 = question.toLowerCase();
           let scoreZip;
           if (['smoothie','juice','qsr','fast casual','coffee','cafe','sandwich','pizza','taco','burger','fast food','wendy','mcdonald','chick-fil','subway','chipotle'].some(k => Q2.includes(k))) {
-            // QSR weights: HHI + growth + opportunity + population + college pct
+            // QSR weights: HHI + growth + opportunity + population + AADT road traffic
             scoreZip = (s) => {
               let sc = 0;
-              const hhi = Number(s.acs_median_hhi || 0);
-              const gr  = Number(s.sig_growth_score || 0);
-              const op  = Number(s.sig_opportunity_score || 0);
-              const pop = Number(s.acs_population || 0);
-              const col = Number(s.acs_college_pct || 0);
+              const hhi   = Number(s.acs_median_hhi || 0);
+              const gr    = Number(s.sig_growth_score || 0);
+              const op    = Number(s.sig_opportunity_score || 0);
+              const pop   = Number(s.acs_population || 0);
+              const col   = Number(s.acs_college_pct || 0);
               const unemp = Number(s.fred_unemployment_rate || 99);
-              const biz = Number(s.osm_biz_count || s.zbp_total_establishments || 0);
+              const aadt  = Number(s.fdot_max_aadt || 0);
+              const biz   = Number(s.osm_biz_count || s.zbp_total_establishments || 0);
               if (hhi >= 100000) sc += 35; else if (hhi >= 80000) sc += 25; else if (hhi >= 60000) sc += 15;
               if (gr  >= 70) sc += 20; else if (gr >= 50) sc += 10;
               if (op  >= 70) sc += 20; else if (op >= 50) sc += 10;
               if (pop >= 20000) sc += 10; else if (pop >= 10000) sc += 5;
               if (col >= 40) sc += 5;
               if (unemp <= 4) sc += 5;
-              // Traffic proxy: commercial density signals busiest roads
-              if (biz >= 500) sc += 5; else if (biz >= 200) sc += 3;
+              // Road traffic: FDOT AADT when available, fall back to business density proxy
+              if (aadt > 0) {
+                if (aadt >= 80000) sc += 10;      // major corridor (I-95/US-1 level)
+                else if (aadt >= 40000) sc += 7;  // arterial
+                else if (aadt >= 20000) sc += 4;  // collector
+                else if (aadt >= 5000)  sc += 2;  // local road
+              } else {
+                if (biz >= 500) sc += 5; else if (biz >= 200) sc += 3;
+              }
+              const trafficLabel = aadt > 0
+                ? `AADT ${Math.round(aadt/1000)}k${s.fdot_top_road ? ' (' + s.fdot_top_road.slice(0,40) + ')' : ''}`
+                : biz >= 200 ? `${biz} biz (density proxy)` : null;
               const reason = [
                 hhi >= 100000 ? `HHI $${Math.round(hhi/1000)}k (affluent QSR market)` : hhi >= 80000 ? `HHI $${Math.round(hhi/1000)}k (solid QSR income)` : `HHI $${Math.round(hhi/1000)}k`,
                 gr >= 70 ? `growth ${gr}/100` : null,
                 op >= 70 ? `gap opportunity ${op}/100` : null,
-                pop >= 20000 ? `pop ${Math.round(pop/1000)}k (traffic base)` : null,
-                biz >= 200 ? `${biz} businesses (commercial corridor)` : null,
-              ].filter(Boolean).slice(0, 3).join(', ');
+                pop >= 20000 ? `pop ${Math.round(pop/1000)}k` : null,
+                trafficLabel,
+              ].filter(Boolean).slice(0, 4).join(', ');
               return { score: Math.min(sc, 100), reason };
             };
           } else if (['steakhouse','steak','fine dining','upscale','tasting menu'].some(k => Q2.includes(k))) {
@@ -9832,10 +9844,14 @@ router.post('/ceo-query', express.json(), async (req, res) => {
               if (op  >= 70) sc += 15;
               if (age >= 38) sc += 10;
               if (col >= 50) sc += 5;
+              // Fine dining: low-traffic is fine, but high-traffic corridors with right demographics are better
+              const aadt = Number(s.fdot_max_aadt || 0);
+              if (aadt >= 40000) sc += 5; else if (aadt >= 15000) sc += 2;
               const reason = [
                 `HHI $${Math.round(hhi/1000)}k`,
                 own >= 60 ? `${own.toFixed(0)}% owner-occupied` : null,
                 gr >= 70  ? `growth ${gr}/100` : null,
+                aadt >= 15000 ? `AADT ${Math.round(aadt/1000)}k road` : null,
               ].filter(Boolean).join(', ');
               return { score: Math.min(sc, 100), reason };
             };
@@ -9862,6 +9878,8 @@ router.post('/ceo-query', express.json(), async (req, res) => {
                 pop:      s.acs_population ? Math.round(Number(s.acs_population)/1000) + 'k' : null,
                 growth:   s.sig_growth_score,
                 maturity: s.sig_market_maturity,
+                aadt:     s.fdot_max_aadt ? Math.round(Number(s.fdot_max_aadt)/1000) + 'k' : null,
+                top_road: s.fdot_top_road || null,
               };
             })
             .sort((a, b) => b.score - a.score)
@@ -9873,7 +9891,7 @@ router.post('/ceo-query', express.json(), async (req, res) => {
               concept:      category,
               zips_scored:  rankRows.length,
               zips_in_county: countyZips.length,
-              note:         'Traffic proxy: commercial business density used (road AADT data not yet in dataset)',
+              note:         'Road traffic: FDOT AADT 2025 (fdot_max_aadt). Falls back to commercial business density if AADT not yet populated for this ZIP.',  // fdotWorker populates live
               rankings:     scored,
             };
             // Prepend ranking to answer
