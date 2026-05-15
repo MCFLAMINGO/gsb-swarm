@@ -9826,21 +9826,94 @@ router.post('/chat', async (req, res) => {
     }
     const isCountyQuery = placeResult.isCounty && placeResult.countyZips;
 
-    // B.1) County-level branch: comparison/ranking questions over a FL county
-    if (isCountyQuery && /\b(best|where|which|top|compare|recommend|highest|lowest|most|least)\b/i.test(question)) {
+    // B.1) County-level branch: comparison/ranking + elaboration questions over a FL county
+    const isCountyRanking     = isCountyQuery && /\b(best|where|which|top|compare|recommend|highest|lowest|most|least)\b/i.test(question);
+    const isCountyElaboration = isCountyQuery && /\b(tell me more|elaborate|explain|what about|drill|detail|why|how does|more on|expand)\b/i.test(question);
+    if (isCountyRanking || isCountyElaboration) {
       const countyZips = placeResult.countyZips;
       const sigRowsCounty = await db.query(
-        `SELECT zip, acs_population, acs_median_hhi, acs_owner_occ_pct,
-                fred_unemployment_rate, qcew_avg_weekly_wages,
+        `SELECT zip, acs_population, acs_median_hhi, acs_owner_occ_pct, acs_college_pct,
+                acs_median_age, acs_poverty_pct, fred_unemployment_rate, qcew_avg_weekly_wages,
                 sig_growth_score, sig_opportunity_score, sig_risk_score,
-                sig_market_maturity, sig_income_tier
+                sig_market_maturity, sig_income_tier, bps_total_units_annual
            FROM zip_signals WHERE zip = ANY($1)`,
         [countyZips]
       ).catch(() => []);
       const rows = Array.isArray(sigRowsCounty) ? sigRowsCounty : [];
 
+      // ── Concept detection — drives ZIP scoring weights and LLM instructions ──
+      const Qc = question.toLowerCase();
+      const conceptIs = (kws) => kws.some(k => Qc.includes(k));
+      let conceptType  = 'general';
+      let conceptLabel = 'this concept';
+      let scoringGuide = '';
+
+      if (conceptIs(['smoothie','juice bar','qsr','fast casual','coffee','cafe','sandwich','pizza','taco','burger','fast food'])) {
+        conceptType  = 'qsr';
+        conceptLabel = 'QSR / fast-casual';
+        scoringGuide = `Score each ZIP 0-100 for QSR/fast-casual viability using these weights:
+- HHI $100k+: +35pts (affluent base drives premium QSR spend)
+- HHI $80-100k: +25pts
+- HHI $60-80k: +15pts
+- Growth score >70: +20pts (expanding customer base)
+- Growth score >50: +10pts
+- Opportunity score >70: +20pts (undersupplied market)
+- Opportunity score >50: +10pts
+- Population >20k: +10pts (traffic base)
+- College pct >40%: +5pts (fast-casual preference demographic)
+- Unemployment <4%: +5pts (disposable income signal)
+For each ZIP: state the score, the top 2 reasons it ranks where it does, and one specific risk or advantage for THIS concept type (QSR/fast-casual), not generic market commentary.`;
+      } else if (conceptIs(['steakhouse','steak','fine dining','tasting menu','upscale dining','premium dining','white tablecloth'])) {
+        conceptType  = 'upscale';
+        conceptLabel = 'upscale / fine dining';
+        scoringGuide = `Score each ZIP 0-100 for upscale/fine dining viability using these weights:
+- HHI $130k+: +40pts (primary signal for fine dining spend capacity)
+- HHI $100-130k: +30pts
+- HHI $80-100k: +15pts
+- Owner occupied pct >60%: +15pts (stable resident base, not transient)
+- Growth score >70: +15pts
+- Opportunity score >70: +15pts (fine dining gap)
+- Median age >38: +10pts (older demographics dine out more at upscale)
+- College pct >50%: +5pts
+For each ZIP: state the score, whether income SPECIFICALLY supports $80-$150+ check averages, and the competitive risk (is fine dining already saturated here).`;
+      } else if (conceptIs(['casual dining','bar','grill','tavern','pub','bistro','brunch','neighborhood restaurant'])) {
+        conceptType  = 'casual';
+        conceptLabel = 'casual dining';
+        scoringGuide = `Score each ZIP 0-100 for casual dining viability:
+- HHI $75k+: +30pts
+- HHI $55-75k: +20pts
+- Growth score >60: +20pts
+- Opportunity score >60: +20pts
+- Population >15k: +15pts
+- Unemployment <5%: +10pts
+- Owner occupied pct >50%: +5pts
+For each ZIP: state the score and whether the market is over- or under-served for casual dining specifically.`;
+      } else if (conceptIs(['retail','shop','store','boutique','fitness','gym','salon','spa','service'])) {
+        conceptType  = 'retail';
+        conceptLabel = 'retail / service';
+        scoringGuide = `Score each ZIP 0-100 for retail/service concept viability:
+- HHI $90k+: +30pts
+- Growth score >65: +25pts
+- Opportunity score >65: +20pts
+- Owner occupied pct >55%: +15pts (stable spender base)
+- Population density (pop >25k): +10pts
+For each ZIP: state the score and name the specific retail gap or saturation risk.`;
+      } else {
+        scoringGuide = `Score each ZIP 0-100 for general business viability:
+- Growth score contributes 35% of total
+- Opportunity score contributes 35% of total
+- HHI (normalized, $50k=0 to $150k=30pts) contributes 30%
+For each ZIP: state the score and the single most important data point.`;
+      }
+
       const zipSummaries = rows.map(s =>
-        `ZIP ${s.zip}: pop=${s.acs_population || '?'}, HHI=$${s.acs_median_hhi || '?'}, growth=${s.sig_growth_score || '?'}/100, opp=${s.sig_opportunity_score || '?'}/100, maturity=${s.sig_market_maturity || '?'}`
+        `ZIP ${s.zip} (${s.sig_market_maturity || 'unknown maturity'}): ` +
+        `HHI=$${s.acs_median_hhi || '?'}, pop=${s.acs_population || '?'}, ` +
+        `growth=${s.sig_growth_score || '?'}/100, opp=${s.sig_opportunity_score || '?'}/100, ` +
+        `owner_occ=${s.acs_owner_occ_pct || '?'}%, college=${s.acs_college_pct || '?'}%, ` +
+        `median_age=${s.acs_median_age || '?'}, poverty=${s.acs_poverty_pct || '?'}%, ` +
+        `unemployment=${s.fred_unemployment_rate || '?'}%, wages=${s.qcew_avg_weekly_wages || '?'}/wk, ` +
+        `new_units_annual=${s.bps_total_units_annual || '?'}`
       ).join('\n');
 
       const withData = rows.length;
@@ -9852,7 +9925,7 @@ router.post('/chat', async (req, res) => {
           ok: true,
           zip: placeResult.countyKey,
           question,
-          answer: `No zip_signals data is available yet for ${placeResult.countyKey} County. Data workers have currently run on St. Johns County ZIPs (32082, 32081, 32250, 32266, 32259, 32034). Try asking about a specific St. Johns County ZIP or city — for example: "best ZIP in St. Johns County for a pizza place" or "can a smoothie QSR work in Nocatee?"`,
+          answer: `No zip_signals data is available yet for ${placeResult.countyKey} County. Try asking about a specific St. Johns County ZIP: 32082 (Ponte Vedra Beach), 32081 (Nocatee), 32250 (Jacksonville Beach), 32266 (Neptune Beach), 32259 (St. Johns), or 32034 (Fernandina Beach).`,
           data_confidence: 0,
           missing_signals: countyZips,
           trial_remaining: !isSubscriber ? Math.max(0, trialLimit - trialUsed) : null,
@@ -9865,18 +9938,39 @@ router.post('/chat', async (req, res) => {
         return res.json({ ok: false, error: 'LLM service not configured', data_confidence, missing_signals: missing });
       }
 
-      const groundingContextCounty = `You are LocalIntel, a Florida local business intelligence assistant.
-Answer ONLY using the data provided. Do not hallucinate. Note if data is missing.
+      // Load conversation history for this subscriber+county (enables elaboration follow-ups)
+      let countyConvMessages = [];
+      try {
+        const countyHistRows = await db.query(
+          `SELECT question, answer FROM chat_log
+             WHERE caller_id = $1 AND zip = $2 AND answer IS NOT NULL
+             ORDER BY created_at DESC LIMIT 10`,
+          [phone, placeResult.countyKey]
+        ).catch(() => []);
+        const countyHist = Array.isArray(countyHistRows) ? countyHistRows.reverse() : [];
+        for (const h of countyHist) {
+          countyConvMessages.push({ role: 'user',      content: h.question });
+          countyConvMessages.push({ role: 'assistant', content: String(h.answer || '').slice(0, 800) });
+        }
+      } catch (_) { countyConvMessages = []; }
+      countyConvMessages.push({ role: 'user', content: question });
 
+      const groundingContextCounty = `You are LocalIntel, a Florida local business intelligence analyst.
+Answer ONLY using the data provided. Do not hallucinate or generalize beyond the data.
+
+Concept: ${conceptLabel}
 County: ${placeResult.countyKey}
-Question: ${question}
-Data coverage: ${withData}/${countyZips.length} ZIPs have data (${data_confidence}% coverage)
-Missing ZIPs (no data yet): ${missing.join(', ') || 'none'}
+Data coverage: ${withData}/${countyZips.length} ZIPs (${data_confidence}%)
+Missing ZIPs (no data): ${missing.join(', ') || 'none'}
 
 ZIP DATA:
-${zipSummaries || 'No zip_signals data available for this county yet.'}
+${zipSummaries}
 
-Rank the ZIPs by fit for the concept described. If data is sparse, say so clearly.`;
+SCORING INSTRUCTIONS — apply to THIS concept specifically:
+${scoringGuide}
+
+If the user asks to elaborate on a specific ZIP, give a detailed breakdown of that ZIP only.
+If ranking, list top ZIPs with scores and concept-specific reasons. Be specific, not generic.`;
 
       const llmRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -9895,7 +9989,7 @@ Rank the ZIPs by fit for the concept described. If data is sparse, say so clearl
             text:          groundingContextCounty,
             cache_control: { type: 'ephemeral' },
           }],
-          messages: [{ role: 'user', content: question }],
+          messages: countyConvMessages,
         }),
       });
       const llmData = await llmRes.json();
