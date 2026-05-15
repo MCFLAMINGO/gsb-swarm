@@ -198,7 +198,9 @@ async function getStatewideBounds() {
         MIN(acs_population) as pop_min, MAX(acs_population) as pop_max,
         MIN(biz_density_per_1k) as density_min, MAX(biz_density_per_1k) as density_max,
         MIN(acs_owner_occ_pct) as own_min, MAX(acs_owner_occ_pct) as own_max,
-        MIN(acs_median_age) as age_min, MAX(acs_median_age) as age_max
+        MIN(acs_median_age) as age_min, MAX(acs_median_age) as age_max,
+        MAX(osm_golf_count) as golf_max, MAX(osm_arts_count) as arts_max,
+        MAX(osm_worship_count) as worship_max, MAX(osm_fitness_count) as fitness_max
       FROM zip_signals
       WHERE fdot_max_aadt IS NOT NULL
     `);
@@ -213,6 +215,12 @@ async function getStatewideBounds() {
       population:  { min: Number(r.pop_min) || 0,     max: Number(r.pop_max) || 500000 },
       owner_occ:   { min: Number(r.own_min) || 0,     max: Number(r.own_max) || 100 },
       age_index:   { min: Number(r.age_min) || 25,    max: Number(r.age_max) || 65 },
+      psycho_index:{ min: 0,                          max: 100 },
+      // Per-component maxes used by computePsychoIndex for sane normalization.
+      golf_max:    Number(r.golf_max)    || 10,
+      arts_max:    Number(r.arts_max)    || 20,
+      worship_max: Number(r.worship_max) || 50,
+      fitness_max: Number(r.fitness_max) || 30,
     };
     _statewideBoundsAt = now;
     return _statewideBoundsCache;
@@ -228,6 +236,11 @@ async function getStatewideBounds() {
       population:  { min: 0, max: 500000 },
       owner_occ:   { min: 0, max: 100 },
       age_index:   { min: 25, max: 65 },
+      psycho_index:{ min: 0, max: 100 },
+      golf_max:    10,
+      arts_max:    20,
+      worship_max: 50,
+      fitness_max: 30,
     };
   }
 }
@@ -9840,7 +9853,9 @@ router.post('/ceo-query', express.json(), async (req, res) => {
                     zbp_total_establishments, bps_total_units_annual, qcew_avg_weekly_wages,
                     fdot_max_aadt, fdot_avg_aadt, fdot_top_road,
                     lodes_jobs_here, biz_density_per_1k,
-                    osm_road_class, osm_access_score, osm_fast_food_count
+                    osm_road_class, osm_access_score, osm_fast_food_count,
+                    osm_golf_count, osm_arts_count, osm_worship_count, osm_fitness_count,
+                    acs_pct_bachelors_plus, acs_pct_stem_occupations, psycho_index
                FROM zip_signals WHERE zip = ANY($1)`,
             [countyZips]
           ).catch(() => []);
@@ -10655,7 +10670,9 @@ router.post('/ceo-county-query', express.json(), async (req, res) => {
               sig_market_maturity, sig_income_tier,
               fdot_max_aadt, fdot_top_road,
               lodes_jobs_here, biz_density_per_1k,
-              osm_road_class, osm_access_score, osm_fast_food_count
+              osm_road_class, osm_access_score, osm_fast_food_count,
+              osm_golf_count, osm_arts_count, osm_worship_count, osm_fitness_count,
+              acs_pct_bachelors_plus, acs_pct_stem_occupations, psycho_index
        FROM zip_signals WHERE zip = ANY($1)`,
       [zips]
     );

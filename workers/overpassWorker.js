@@ -202,6 +202,38 @@ function buildRoadClassQuery(bbox) {
   return `[out:json][timeout:25];\nway["highway"~"^(trunk|primary|secondary|tertiary|residential)$"](${bb});\nout tags;`;
 }
 
+// B63 psychographic queries — each returns `out count;` so we read elements[0].tags.total
+function buildGolfQuery(bbox) {
+  const { minLat, maxLat, minLon, maxLon } = bbox;
+  const bb = `${minLat},${minLon},${maxLat},${maxLon}`;
+  return `[out:json][timeout:25];\n(\n  node["leisure"="golf_course"](${bb});\n  way["leisure"="golf_course"](${bb});\n  relation["leisure"="golf_course"](${bb});\n);\nout count;`;
+}
+
+function buildArtsQuery(bbox) {
+  const { minLat, maxLat, minLon, maxLon } = bbox;
+  const bb = `${minLat},${minLon},${maxLat},${maxLon}`;
+  return `[out:json][timeout:25];\n(\n  node["amenity"~"^(theatre|cinema|arts_centre)$"](${bb});\n  way["amenity"~"^(theatre|cinema|arts_centre)$"](${bb});\n  node["tourism"~"^(museum|gallery|artwork)$"](${bb});\n  way["tourism"~"^(museum|gallery|artwork)$"](${bb});\n);\nout count;`;
+}
+
+function buildWorshipQuery(bbox) {
+  const { minLat, maxLat, minLon, maxLon } = bbox;
+  const bb = `${minLat},${minLon},${maxLat},${maxLon}`;
+  return `[out:json][timeout:25];\n(\n  node["amenity"="place_of_worship"](${bb});\n  way["amenity"="place_of_worship"](${bb});\n);\nout count;`;
+}
+
+function buildFitnessQuery(bbox) {
+  const { minLat, maxLat, minLon, maxLon } = bbox;
+  const bb = `${minLat},${minLon},${maxLat},${maxLon}`;
+  return `[out:json][timeout:25];\n(\n  node["leisure"~"^(fitness_centre|sports_centre|swimming_pool)$"](${bb});\n  way["leisure"~"^(fitness_centre|sports_centre|swimming_pool)$"](${bb});\n  node["sport"~"^(yoga|tennis|fitness)$"](${bb});\n);\nout count;`;
+}
+
+function extractCount(res) {
+  const el = Array.isArray(res?.elements) && res.elements[0];
+  if (!el) return 0;
+  const c = Number(el.tags?.total ?? el.count ?? 0);
+  return isNaN(c) ? 0 : c;
+}
+
 const ROAD_CLASS_TIER = { trunk: 5, primary: 4, secondary: 3, tertiary: 2, residential: 1 };
 const ROAD_CLASS_BASE = { trunk: 95, primary: 80, secondary: 60, tertiary: 40, residential: 20 };
 
@@ -235,12 +267,13 @@ async function fetchSiteAccessSignals(zip, bbox) {
   let osm_fast_food_count = null;
   let osm_road_class = null;
   let osm_access_score = null;
+  let osm_golf_count = null;
+  let osm_arts_count = null;
+  let osm_worship_count = null;
+  let osm_fitness_count = null;
   try {
     const ffRes = await overpassPost(buildFastFoodQuery(bbox));
-    const cnt = Array.isArray(ffRes.elements) && ffRes.elements[0]
-      ? Number(ffRes.elements[0].tags?.total ?? ffRes.elements[0].count ?? 0)
-      : 0;
-    osm_fast_food_count = isNaN(cnt) ? 0 : cnt;
+    osm_fast_food_count = extractCount(ffRes);
   } catch (e) {
     console.warn(`[overpass] ${zip} fast_food count failed: ${e.message}`);
   }
@@ -254,7 +287,34 @@ async function fetchSiteAccessSignals(zip, bbox) {
   } catch (e) {
     console.warn(`[overpass] ${zip} road_class fetch failed: ${e.message}`);
   }
-  return { osm_fast_food_count, osm_road_class, osm_access_score };
+  await sleep(RATE_MS);
+  try {
+    osm_golf_count = extractCount(await overpassPost(buildGolfQuery(bbox)));
+  } catch (e) {
+    console.warn(`[overpass] ${zip} golf count failed: ${e.message}`);
+  }
+  await sleep(RATE_MS);
+  try {
+    osm_arts_count = extractCount(await overpassPost(buildArtsQuery(bbox)));
+  } catch (e) {
+    console.warn(`[overpass] ${zip} arts count failed: ${e.message}`);
+  }
+  await sleep(RATE_MS);
+  try {
+    osm_worship_count = extractCount(await overpassPost(buildWorshipQuery(bbox)));
+  } catch (e) {
+    console.warn(`[overpass] ${zip} worship count failed: ${e.message}`);
+  }
+  await sleep(RATE_MS);
+  try {
+    osm_fitness_count = extractCount(await overpassPost(buildFitnessQuery(bbox)));
+  } catch (e) {
+    console.warn(`[overpass] ${zip} fitness count failed: ${e.message}`);
+  }
+  return {
+    osm_fast_food_count, osm_road_class, osm_access_score,
+    osm_golf_count, osm_arts_count, osm_worship_count, osm_fitness_count,
+  };
 }
 
 // ── HTTP POST to Overpass ─────────────────────────────────────────────────────
@@ -357,11 +417,15 @@ async function processZip(zip, freshZipSet) {
       osm_fast_food_count: siteSig.osm_fast_food_count,
       osm_road_class:      siteSig.osm_road_class,
       osm_access_score:    siteSig.osm_access_score,
+      osm_golf_count:      siteSig.osm_golf_count,
+      osm_arts_count:      siteSig.osm_arts_count,
+      osm_worship_count:   siteSig.osm_worship_count,
+      osm_fitness_count:   siteSig.osm_fitness_count,
       osm_updated_at:      new Date(),
     }).catch(e => console.warn(`[overpass] ${zip} site signals write failed: ${e.message}`));
   }
 
-  console.log(`[overpass] ${zip} → ${pois.length} named POIs, fast_food=${siteSig.osm_fast_food_count}, road=${siteSig.osm_road_class}, access=${siteSig.osm_access_score}`);
+  console.log(`[overpass] ${zip} → ${pois.length} named POIs, fast_food=${siteSig.osm_fast_food_count}, road=${siteSig.osm_road_class}, access=${siteSig.osm_access_score}, golf=${siteSig.osm_golf_count}, arts=${siteSig.osm_arts_count}, worship=${siteSig.osm_worship_count}, fitness=${siteSig.osm_fitness_count}`);
   return { zip, count: pois.length };
 }
 

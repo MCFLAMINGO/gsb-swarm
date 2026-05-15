@@ -177,6 +177,10 @@ async function processZip(zip) {
   // Simpler: use B08135_001E = aggregate travel time, B08101_001E = total workers for commute
   const commute2 = await fetchACS(zip, ['B08135_001E','B08101_001E']);
 
+  // B63: C24010 — occupation by sex (civilian employed 16+)
+  // _001E = total, _038E = computer/math, _039E = architecture/engineering, _041E = life/physical/social science
+  const stem = await fetchACS(zip, ['C24010_001E','C24010_038E','C24010_039E','C24010_041E']);
+
   // ── Compute derived fields ───────────────────────────────────────────────
   const totalWorkers = toN(commute?.B08301_001E);
   const wfhWorkers   = toN(commute?.B08301_021E);
@@ -243,6 +247,16 @@ async function processZip(zip) {
   const commuteWrkrs = toN(commute2?.B08101_001E);
   const commute_time_min = commuteWrkrs > 0 ? Math.round((aggCommute / commuteWrkrs) * 10) / 10 : null;
 
+  // B63 — explicit bachelors+ pct and STEM occupations pct for psycho_index
+  const acs_pct_bachelors_plus = totalEdu > 0
+    ? Math.round((collegeUp / totalEdu) * 100 * 10) / 10
+    : null;
+  const totalEmployed = toN(stem?.C24010_001E);
+  const stemEmployed  = toN(stem?.C24010_038E) + toN(stem?.C24010_039E) + toN(stem?.C24010_041E);
+  const acs_pct_stem_occupations = totalEmployed > 0
+    ? Math.round((stemEmployed / totalEmployed) * 100 * 10) / 10
+    : null;
+
   // Consumer profile heuristic
   let consumer_profile = 'mixed';
   if (affluence_pct > 55 && retiree_index < 20)      consumer_profile = 'affluent_family';
@@ -272,6 +286,9 @@ async function processZip(zip) {
     foreign_born_pct,
     family_pct,
     commute_time_min,
+    // B63 — psychographic inputs
+    acs_pct_bachelors_plus,
+    acs_pct_stem_occupations,
     // raw for debugging
     _raw: {
       totalWorkers, wfhWorkers,
@@ -297,9 +314,11 @@ async function processZip(zip) {
     acs_vacancy_pct:      result.vacancy_pct,
     acs_foreign_born_pct: result.foreign_born_pct,
     acs_family_pct:       result.family_pct,
-    acs_commute_time_min: result.commute_time_min,
-    acs_vintage:          '2022 5-year',
-    acs_updated_at:       new Date(),
+    acs_commute_time_min:    result.commute_time_min,
+    acs_pct_bachelors_plus:  result.acs_pct_bachelors_plus,
+    acs_pct_stem_occupations: result.acs_pct_stem_occupations,
+    acs_vintage:             '2022 5-year',
+    acs_updated_at:          new Date(),
   }).catch(() => {});
 
   return result;
