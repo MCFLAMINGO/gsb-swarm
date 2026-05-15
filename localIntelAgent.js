@@ -10031,7 +10031,7 @@ If ranking, list top ZIPs with scores and concept-specific reasons. Be specific,
 
     // C) Load deterministic context (mirrors ceo-assess parallel load)
     const safe = (p) => p.catch(() => null);
-    const [sigRows, propertyRows, totalBizRows, densityRows] = await Promise.all([
+    const [sigRows, propertyRows, totalBizRows, densityRows, geoRows] = await Promise.all([
       safe(db.query(`SELECT * FROM zip_signals WHERE zip = $1 LIMIT 1`, [zip])),
       safe(db.query(
         `SELECT COUNT(*)::int AS parcel_count,
@@ -10046,11 +10046,13 @@ If ranking, list top ZIPs with scores and concept-specific reasons. Be specific,
           GROUP BY category ORDER BY count DESC LIMIT 5`,
         [zip]
       )),
+      safe(db.query(`SELECT county FROM fl_zip_geo WHERE zip = $1 LIMIT 1`, [zip])),
     ]);
     const sig            = Array.isArray(sigRows) && sigRows[0] ? sigRows[0] : {};
     const pr             = Array.isArray(propertyRows) && propertyRows[0] ? propertyRows[0] : {};
     const totalBiz       = Array.isArray(totalBizRows) && totalBizRows[0] ? Number(totalBizRows[0].total || 0) : 0;
     const topCategories  = Array.isArray(densityRows) ? densityRows : [];
+    const zipCounty      = (Array.isArray(geoRows) && geoRows[0]?.county) ? geoRows[0].county : null;
 
     // D) Compute data_confidence
     const keySignals = [
@@ -10104,7 +10106,18 @@ If ranking, list top ZIPs with scores and concept-specific reasons. Be specific,
     ctxLines.push(`Missing signals: ${missingSignals.length ? missingSignals.join(', ') : 'none'}`);
 
     const grounding = ctxLines.join('\n');
-    const systemText = `You are a local market intelligence analyst. Answer only from the data provided below. If the user asks about something that is not present in the data, state explicitly what data is missing and do not fabricate numbers. Be concise.\n\nLOCAL DATA FOR ZIP ${zip}:\n${grounding}`;
+    const countyLabel = zipCounty ? `${zipCounty} County, Florida` : 'Florida';
+    const systemText = `You are LocalIntel, a Florida local business intelligence analyst.
+You have data ONLY for ZIP ${zip} (${countyLabel}). Never reference any other county by name — you do not have data for other counties unless explicitly provided.
+Answer strictly from the data below. Do not fabricate statistics, traffic counts, road rankings, competitor locations, or real estate data that is not in the dataset.
+If the user asks about something not in the data (e.g. traffic counts, specific road rankings, competitor locations):
+1. State clearly what specific data is missing
+2. State what you CAN answer from the available data
+3. End with ONE specific offer: "I can rank ZIPs in ${countyLabel.replace(' County, Florida','')} County by [relevant signal] — would that help?"
+Do NOT recommend contacting government agencies. Do NOT say "use commercial site selection tools."
+Be concise — 3-5 sentences max unless ranking is requested.
+
+LOCAL DATA FOR ZIP ${zip} (${countyLabel}):\n${grounding}`;
 
     // E.1) Load conversation history from chat_log (multi-turn context)
     // Reconstruct last N turns for this subscriber+ZIP session
@@ -10225,7 +10238,9 @@ If ranking, list top ZIPs with scores and concept-specific reasons. Be specific,
     }
 
     // H) Increment trial usage (fire-and-forget)
-    if (!isSubscriber && dataConfidence > 0) {
+    // Don't charge trial when the LLM couldn't answer due to missing data
+    const answerIsPartial = /I cannot answer|missing data|traffic.*not available|road.*data.*not|don't have.*road|do not have.*traffic|contact.*department|site selection tool/i.test(answer);
+    if (!isSubscriber && dataConfidence > 0 && !answerIsPartial) {
       db.query(
         `UPDATE subscriber_accounts SET trial_queries_used = trial_queries_used + 1, updated_at = NOW() WHERE phone = $1`,
         [phone]
