@@ -7510,6 +7510,7 @@ app.use((req, res, next) => {
     // { name: 'FCC Broadband Worker',        file: 'workers/fccBroadbandWorker.js'  }, // disabled — not consumed by any query path
     // { name: 'IRS Migration Worker',        file: 'workers/irsMigrationWorker.js'  }, // disabled — not consumed by any query path
     { name: 'World Model Worker',            file: 'workers/worldModelWorker.js'    },
+    { name: 'Business Signal Worker',        file: 'workers/businessSignalWorker.js' },  // B65 — 24h freshness; derives claimed/wallet/task/closure rates → zip_signals
   ];
 
   function spawnLocalIntelWorker(w, attempt = 0) {

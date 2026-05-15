@@ -200,7 +200,9 @@ async function getStatewideBounds() {
         MIN(acs_owner_occ_pct) as own_min, MAX(acs_owner_occ_pct) as own_max,
         MIN(acs_median_age) as age_min, MAX(acs_median_age) as age_max,
         MAX(osm_golf_count) as golf_max, MAX(osm_arts_count) as arts_max,
-        MAX(osm_worship_count) as worship_max, MAX(osm_fitness_count) as fitness_max
+        MAX(osm_worship_count) as worship_max, MAX(osm_fitness_count) as fitness_max,
+        MIN(sig_wallet_rate)  as wallet_min,  MAX(sig_wallet_rate)  as wallet_max,
+        MIN(sig_task_density) as taskden_min, MAX(sig_task_density) as taskden_max
       FROM zip_signals
       WHERE fdot_max_aadt IS NOT NULL
     `);
@@ -216,6 +218,9 @@ async function getStatewideBounds() {
       owner_occ:   { min: Number(r.own_min) || 0,     max: Number(r.own_max) || 100 },
       age_index:   { min: Number(r.age_min) || 25,    max: Number(r.age_max) || 65 },
       psycho_index:{ min: 0,                          max: 100 },
+      // B65 — business-layer signal bounds (businessSignalWorker)
+      sig_wallet_rate:  { min: Number(r.wallet_min)  || 0, max: Number(r.wallet_max)  || 100 },
+      sig_task_density: { min: Number(r.taskden_min) || 0, max: Number(r.taskden_max) || 100 },
       // Per-component maxes used by computePsychoIndex for sane normalization.
       golf_max:    Number(r.golf_max)    || 10,
       arts_max:    Number(r.arts_max)    || 20,
@@ -237,6 +242,8 @@ async function getStatewideBounds() {
       owner_occ:   { min: 0, max: 100 },
       age_index:   { min: 25, max: 65 },
       psycho_index:{ min: 0, max: 100 },
+      sig_wallet_rate:  { min: 0, max: 100 },
+      sig_task_density: { min: 0, max: 100 },
       golf_max:    10,
       arts_max:    20,
       worship_max: 50,
