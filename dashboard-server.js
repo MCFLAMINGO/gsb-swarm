@@ -7502,7 +7502,7 @@ app.use((req, res, next) => {
     // ── World model signal workers ──
     // { name: 'FCC Broadband Worker',        file: 'workers/fccBroadbandWorker.js'  }, // disabled — FCC broadband data not used in search quality
     // { name: 'IRS Migration Worker',        file: 'workers/irsMigrationWorker.js'  }, // disabled — IRS migration data not consumed by any query path yet
-    // { name: 'World Model Worker',          file: 'workers/worldModelWorker.js'    }, // disabled — ZIP z-score forecasting expensive, no consumer on hot path yet
+    { name: 'World Model Worker',            file: 'workers/worldModelWorker.js'    },
   ];
 
   function spawnLocalIntelWorker(w, attempt = 0) {

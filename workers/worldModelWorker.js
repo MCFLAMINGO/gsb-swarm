@@ -2,69 +2,107 @@
 /**
  * worldModelWorker.js
  * ─────────────────────────────────────────────────────────────────────────────
- * Computes derived sig_* signals for all TARGET_ZIPS.
+ * Computes derived sig_* signals for ALL FL ZIPs from fl_zip_geo.
  * Pure math — ZERO LLM calls. Reads zip_signals + businesses table.
  * Runs AFTER primary workers (ACS, FRED, QWI, QCEW, CES, LODES, BEA) have
  * written their data. Safe to re-run at any time (idempotent upserts).
  *
+ * ZIP source: fl_zip_geo (1,473 FL ZIPs) — POSTGRES IS KING.
+ * No hardcoded ZIP lists. Picks up every ZIP that has at least one signal row.
+ *
  * Writes to zip_signals:
- *   sig_growth_score        numeric  0–100
- *   sig_opportunity_score   numeric  0–100
- *   sig_risk_score          numeric  0–100
+ *   sig_growth_score        numeric  0–100  (rank among FL ZIPs with data)
+ *   sig_opportunity_score   numeric  0–100  (rank among FL ZIPs with data)
+ *   sig_risk_score          numeric  0–100  (rank among FL ZIPs with data)
  *   sig_market_maturity     text     "Emerging" | "Growing" | "Established" | "Mature"
  *   sig_income_tier         text     "Moderate" | "Above Average" | "High" | "Affluent" | "Ultra-Affluent"
  *   sig_peer_cohort         text     e.g. "Coastal Affluent" | "Suburban Growth" | "Working Class Core"
  *   sig_biz_density_per_1k  numeric  businesses per 1,000 residents
- *   sig_job_capture_ratio   numeric  lodes_jobs_here / qcew_employment (how many jobs the ZIP captures)
+ *   sig_job_capture_ratio   numeric  lodes_jobs_here / qcew_employment
+ *
+ * Scores are relative ranks within Florida — a score of 90 means this ZIP is
+ * in the top 10% of FL ZIPs for that composite among ZIPs that have data.
+ * Absolute signals (HHI, AADT, permits) are written directly by their workers
+ * and not re-computed here.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-const TARGET_ZIPS = ['32082', '32081', '32250', '32266', '32233', '32259', '32034'];
-
 module.exports = async function worldModelWorker(db, logEvent) {
   const workerName = 'worldModelWorker';
-  await logEvent(workerName, 'START', null, `Computing derived signals for ${TARGET_ZIPS.length} ZIPs`);
 
-  // ── 1. Load all zip_signals rows for target ZIPs ──────────────────────────
-  const rows = await db.query(
-    `SELECT * FROM zip_signals WHERE zip = ANY($1)`,
-    [TARGET_ZIPS]
+  // ── 1. Load all FL ZIPs from fl_zip_geo (POSTGRES IS KING) ───────────────
+  let allFLZips;
+  try {
+    const geoRows = await db.query(
+      `SELECT zip FROM fl_zip_geo WHERE state = 'FL' ORDER BY zip`
+    );
+    allFLZips = Array.isArray(geoRows) ? geoRows.map(r => r.zip) : [];
+  } catch (e) {
+    await logEvent(workerName, 'ERROR', null, `Failed to load ZIPs from fl_zip_geo: ${e.message}`);
+    return { skipped: true, reason: 'fl_zip_geo_unavailable' };
+  }
+
+  if (allFLZips.length === 0) {
+    await logEvent(workerName, 'SKIP', null, 'fl_zip_geo returned 0 rows — run migration 029 first');
+    return { skipped: true, reason: 'no_zips' };
+  }
+
+  await logEvent(workerName, 'START', null,
+    `Computing derived signals for up to ${allFLZips.length} FL ZIPs from fl_zip_geo`
   );
-  if (!rows.length) {
+
+  // ── 2. Load zip_signals rows for all FL ZIPs ──────────────────────────────
+  // Only process ZIPs that have at least one signal row written by a worker.
+  // ZIPs with no data at all would produce meaningless null scores.
+  let rows;
+  try {
+    rows = await db.query(
+      `SELECT * FROM zip_signals WHERE zip = ANY($1)`,
+      [allFLZips]
+    );
+  } catch (e) {
+    await logEvent(workerName, 'ERROR', null, `zip_signals query failed: ${e.message}`);
+    return { skipped: true, reason: 'query_failed' };
+  }
+
+  if (!rows || rows.length === 0) {
     await logEvent(workerName, 'SKIP', null, 'No zip_signals rows found — run primary workers first');
     return { skipped: true, reason: 'no_rows' };
   }
 
-  // ── 2. Load business counts per ZIP ──────────────────────────────────────
+  // Work only with ZIPs that have signal rows
+  const activeZips = rows.map(r => r.zip);
+  console.log(`[worldModelWorker] ${allFLZips.length} FL ZIPs in geo | ${activeZips.length} have zip_signals rows`);
+
+  // ── 3. Load business counts for active ZIPs ───────────────────────────────
   const bizRows = await db.query(
     `SELECT zip, COUNT(*)::int AS biz_count FROM businesses WHERE zip = ANY($1) GROUP BY zip`,
-    [TARGET_ZIPS]
-  );
+    [activeZips]
+  ).catch(() => []);
   const bizMap = {};
   for (const r of bizRows) bizMap[r.zip] = Number(r.biz_count || 0);
 
-  // Index rows by ZIP
+  // Index signal rows by ZIP
   const sigMap = {};
   for (const r of rows) sigMap[r.zip] = r;
 
-  // ── 3. Helper: safe numeric parse ────────────────────────────────────────
+  // ── 4. Helper: safe numeric parse ─────────────────────────────────────────
   const n = (v) => (v != null && v !== '' ? Number(v) : null);
-  const orZero = (v) => (n(v) ?? 0);
 
-  // ── 4. Compute per-ZIP raw metrics ────────────────────────────────────────
-  // We rank ZIPs against each other for growth + opportunity + risk.
-  // Each metric contributes a sub-score; final scores are 0–100.
-
-  const metrics = TARGET_ZIPS.map((zip) => {
+  // ── 5. Build per-ZIP metrics from what Postgres has ───────────────────────
+  // Each field reads directly from zip_signals — written by its own worker.
+  // If a worker hasn't run yet for a ZIP, the field is null and that ZIP
+  // simply won't contribute to that metric's ranking.
+  const metrics = activeZips.map((zip) => {
     const s = sigMap[zip] || {};
     const bizCount = bizMap[zip] || 0;
     const pop = n(s.acs_population);
 
-    // Biz density per 1k residents
+    // Biz density per 1k residents (from businesses table count + ACS population)
     const biz_density_per_1k = pop && pop > 0 ? (bizCount / pop) * 1000 : null;
 
     // Job capture ratio: lodes_jobs_here / qcew_employment
-    // >1 = ZIP is a job destination; <1 = bedroom community
+    // >1 = ZIP attracts workers from outside; <1 = bedroom community
     const lodes_jobs = n(s.lodes_jobs_here);
     const qcew_emp   = n(s.qcew_employment);
     const job_capture_ratio = lodes_jobs != null && qcew_emp != null && qcew_emp > 0
@@ -72,36 +110,38 @@ module.exports = async function worldModelWorker(db, logEvent) {
 
     return {
       zip,
-      // Growth inputs
-      emp_yoy:           n(s.qcew_emp_yoy_pct),      // employment YoY %
-      new_biz_12mo:      n(s.sunbiz_new_12mo),        // new entity formations
-      units_permitted:   n(s.bps_total_units_annual), // residential permits
-      // Opportunity inputs
-      invest_score:      n(s.investment_opportunity_score), // CES composite
-      net_flow:          n(s.lodes_net_flow),           // worker net flow
-      biz_density_per_1k,
-      // Risk inputs
-      ai_risk:           n(s.ai_displacement_risk),
-      unemployment_rate: n(s.fred_unemployment_rate),
-      turnover_rate:     n(s.qwi_turnover_rate),
-      // Income tier inputs
-      per_capita_income: n(s.bea_per_capita_income),
-      median_hhi:        n(s.acs_median_hhi),
-      // Maturity inputs
-      owner_occ_pct:     n(s.acs_owner_occ_pct),
-      median_age:        n(s.acs_median_age),
-      // Job capture
+      // ── Growth inputs (written by: qcewWorker, sunbizWorker, permitWorker)
+      emp_yoy:         n(s.qcew_emp_yoy_pct),       // QCEW: employment YoY %
+      new_biz_12mo:    n(s.sunbiz_new_12mo),         // SunBiz: new entity formations
+      units_permitted: n(s.bps_total_units_annual),  // Census BPS: residential permits
+      // ── Opportunity inputs (written by: cesWorker, lodesWorker)
+      invest_score:    n(s.investment_opportunity_score), // CES composite
+      net_flow:        n(s.lodes_net_flow),               // LODES: worker net flow
+      biz_density_per_1k,                                 // derived above
+      // ── Risk inputs (written by: cesWorker, fredWorker, qwiWorker)
+      ai_risk:         n(s.ai_displacement_risk),    // CES: AI displacement risk
+      unemp_rate:      n(s.fred_unemployment_rate),  // FRED: unemployment %
+      turnover_rate:   n(s.qwi_turnover_rate),       // QWI: job turnover rate
+      // ── Income tier inputs (written by: beaWorker, acsWorker)
+      per_capita_income: n(s.bea_per_capita_income), // BEA: per capita personal income
+      median_hhi:        n(s.acs_median_hhi),         // ACS B19013: median HHI
+      // ── Maturity inputs (written by: acsWorker, qcewWorker, sunbizWorker)
+      owner_occ_pct:   n(s.acs_owner_occ_pct),       // ACS: owner-occupancy %
+      median_age:      n(s.acs_median_age),            // ACS: median age
+      // ── Derived
       job_capture_ratio,
     };
   });
 
-  // ── 5. Rank-normalize helper ──────────────────────────────────────────────
-  // For a given metric key, returns a map of zip → 0–100 score.
-  // higher_is_better = true means highest value → 100.
+  // ── 6. Rank-normalize helper ──────────────────────────────────────────────
+  // Returns zip → 0–100 score based on rank among ZIPs that have this field.
+  // Only ZIPs with non-null values participate in the ranking.
+  // A ZIP with null for a metric is excluded from that metric's ranking and
+  // that metric does not contribute to its composite score.
   function rankScore(key, higherIsBetter = true) {
     const vals = metrics
-      .map((m) => ({ zip: m.zip, v: m[key] }))
-      .filter((x) => x.v != null);
+      .map(m => ({ zip: m.zip, v: m[key] }))
+      .filter(x => x.v != null && !isNaN(x.v));
 
     if (vals.length === 0) return {};
 
@@ -111,113 +151,114 @@ module.exports = async function worldModelWorker(db, logEvent) {
     const total = sorted.length;
     const out = {};
     sorted.forEach((x, i) => {
-      // Rank 0 = best → score 100; rank (total-1) = worst → score 0
       out[x.zip] = total === 1 ? 100 : Math.round(((total - 1 - i) / (total - 1)) * 100);
     });
     return out;
   }
 
-  // ── 6. Compute composite scores ──────────────────────────────────────────
+  // ── 7. Compute rank scores for each input field ───────────────────────────
+  const rEmpYoy   = rankScore('emp_yoy',         true);   // higher YoY % = better growth
+  const rNewBiz   = rankScore('new_biz_12mo',    true);   // more formations = better growth
+  const rPermits  = rankScore('units_permitted', true);   // more permits = better growth
 
-  // GROWTH SCORE — weighted average of rank scores
-  // emp_yoy (40%), new_biz_12mo (35%), units_permitted (25%)
-  const rEmpYoy   = rankScore('emp_yoy', true);
-  const rNewBiz   = rankScore('new_biz_12mo', true);
-  const rPermits  = rankScore('units_permitted', true);
+  const rInvest   = rankScore('invest_score',       true);  // CES opportunity composite
+  const rFlow     = rankScore('net_flow',            true);  // positive net worker flow = opportunity
+  const rDensity  = rankScore('biz_density_per_1k', true);  // denser = more commercial activity
 
-  // OPPORTUNITY SCORE
-  // invest_score (40%), net_flow (35%), biz_density_per_1k (25%)
-  const rInvest   = rankScore('invest_score', true);
-  const rFlow     = rankScore('net_flow', true);
-  const rDensity  = rankScore('biz_density_per_1k', true);
+  const rAiRisk   = rankScore('ai_risk',       true);  // higher AI risk = higher risk score
+  const rUnemp    = rankScore('unemp_rate',    true);  // higher unemployment = higher risk
+  const rTurnover = rankScore('turnover_rate', true);  // higher turnover = higher risk
 
-  // RISK SCORE — higher = riskier
-  // ai_risk (40%), unemployment_rate (40%), turnover_rate (20%)
-  const rAiRisk   = rankScore('ai_risk', true);        // higher ai_risk = higher risk score
-  const rUnemp    = rankScore('unemployment_rate', true);
-  const rTurnover = rankScore('turnover_rate', true);
-
-  function weightedAvg(scores, weights) {
-    // scores: array of { map: {zip: score}, weight }
-    // Returns {zip: score}
+  // ── 8. Weighted composite score ───────────────────────────────────────────
+  // Weights express relative importance of each input within its composite.
+  // Only inputs with actual data contribute — weight is re-normalized per ZIP
+  // so a ZIP missing one input still gets a valid composite from the others.
+  function weightedAvg(inputs, zips) {
     const out = {};
-    let totalWeight = 0;
-    for (const { map, weight } of scores) {
-      totalWeight += weight;
-      for (const zip of TARGET_ZIPS) {
+    for (const zip of zips) {
+      let total = 0;
+      let usedW = 0;
+      for (const { map, weight } of inputs) {
         if (map[zip] != null) {
-          out[zip] = (out[zip] || 0) + map[zip] * weight;
+          total += map[zip] * weight;
+          usedW += weight;
         }
       }
-    }
-    // Normalize by actual weight used per ZIP
-    const usedWeight = {};
-    for (const { map, weight } of scores) {
-      for (const zip of TARGET_ZIPS) {
-        if (map[zip] != null) usedWeight[zip] = (usedWeight[zip] || 0) + weight;
-      }
-    }
-    for (const zip of TARGET_ZIPS) {
-      if (usedWeight[zip]) out[zip] = Math.round(out[zip] / usedWeight[zip]);
+      out[zip] = usedW > 0 ? Math.round(total / usedW) : null;
     }
     return out;
   }
 
-  const growthScores      = weightedAvg([{ map: rEmpYoy, weight: 40 }, { map: rNewBiz, weight: 35 }, { map: rPermits, weight: 25 }]);
-  const opportunityScores = weightedAvg([{ map: rInvest, weight: 40 }, { map: rFlow,   weight: 35 }, { map: rDensity, weight: 25 }]);
-  const riskScores        = weightedAvg([{ map: rAiRisk, weight: 40 }, { map: rUnemp,  weight: 40 }, { map: rTurnover, weight: 20 }]);
+  const growthScores = weightedAvg([
+    { map: rEmpYoy,  weight: 40 },  // Employment YoY % — most current growth signal
+    { map: rNewBiz,  weight: 35 },  // New business formations — forward-looking
+    { map: rPermits, weight: 25 },  // Residential permits — population growth proxy
+  ], activeZips);
 
-  // ── 7. Income tier (absolute thresholds, not relative) ───────────────────
+  const opportunityScores = weightedAvg([
+    { map: rInvest,  weight: 40 },  // CES investment composite — sector-level demand
+    { map: rFlow,    weight: 35 },  // LODES net worker flow — are people moving here to work?
+    { map: rDensity, weight: 25 },  // Business density — existing commercial activity
+  ], activeZips);
+
+  const riskScores = weightedAvg([
+    { map: rAiRisk,   weight: 40 },  // AI displacement risk — structural employment threat
+    { map: rUnemp,    weight: 40 },  // Unemployment rate — current labor health
+    { map: rTurnover, weight: 20 },  // Job turnover — labor market stability
+  ], activeZips);
+
+  // ── 9. Income tier (absolute thresholds — not relative) ──────────────────
+  // Based on BEA per capita income. Falls back to ACS median HHI / 2.5 estimate.
+  // Thresholds sourced from BEA regional income quintiles for Florida.
   function incomeTier(pci, hhi) {
-    // Use per_capita_income if available, fall back to median_hhi / 2.5 estimate
     const val = pci ?? (hhi != null ? hhi / 2.5 : null);
     if (val == null) return null;
-    if (val >= 90000)  return 'Ultra-Affluent';
-    if (val >= 65000)  return 'Affluent';
-    if (val >= 45000)  return 'High';
-    if (val >= 32000)  return 'Above Average';
+    if (val >= 90000) return 'Ultra-Affluent';
+    if (val >= 65000) return 'Affluent';
+    if (val >= 45000) return 'High';
+    if (val >= 32000) return 'Above Average';
     return 'Moderate';
   }
 
-  // ── 8. Market maturity (owner-occ + median age thresholds) ───────────────
+  // ── 10. Market maturity (deterministic thresholds) ───────────────────────
+  // Mature = high owner-occ + older age + low new business activity
+  // Emerging = low owner-occ + younger + high new business activity
   function marketMaturity(ownerOcc, medAge, empYoy, newBiz12mo) {
-    // Mature = high owner-occ + older median age + low/no new formations
-    // Emerging = low owner-occ + younger + high new business activity
-    const oo   = ownerOcc ?? 50;
-    const age  = medAge   ?? 38;
-    const yoy  = empYoy   ?? 0;
+    const oo   = ownerOcc   ?? 50;
+    const age  = medAge     ?? 38;
+    const yoy  = empYoy     ?? 0;
     const newB = newBiz12mo ?? 0;
-
-    const maturityScore = (oo / 100) * 40 + (age / 60) * 30 + (1 - Math.min(yoy / 10, 1)) * 20 + (1 - Math.min(newB / 500, 1)) * 10;
-
-    if (maturityScore >= 70) return 'Mature';
-    if (maturityScore >= 50) return 'Established';
-    if (maturityScore >= 30) return 'Growing';
+    const score =
+      (oo / 100)                        * 40 +
+      (Math.min(age, 60) / 60)          * 30 +
+      (1 - Math.min(yoy  / 10,  1))     * 20 +
+      (1 - Math.min(newB / 500, 1))     * 10;
+    if (score >= 70) return 'Mature';
+    if (score >= 50) return 'Established';
+    if (score >= 30) return 'Growing';
     return 'Emerging';
   }
 
-  // ── 9. Peer cohort — cluster label based on income + density + job capture ─
-  function peerCohort(incomeTierVal, bizDensity, jobCapture, ownerOcc) {
-    const oo  = ownerOcc ?? 50;
-    const jc  = jobCapture ?? 0.5;
-    const bd  = bizDensity ?? 5;
-
-    if (incomeTierVal === 'Ultra-Affluent' || incomeTierVal === 'Affluent') {
-      if (oo >= 75) return 'Coastal Affluent';
-      return 'Urban Affluent';
+  // ── 11. Peer cohort label ─────────────────────────────────────────────────
+  function peerCohort(tier, bizDensity, jobCapture, ownerOcc) {
+    const oo = ownerOcc   ?? 50;
+    const jc = jobCapture ?? 0.5;
+    const bd = bizDensity ?? 5;
+    if (tier === 'Ultra-Affluent' || tier === 'Affluent') {
+      return oo >= 75 ? 'Coastal Affluent' : 'Urban Affluent';
     }
-    if (incomeTierVal === 'High') {
-      if (jc >= 0.8) return 'Job-Rich Suburb';
-      return 'Suburban Growth';
+    if (tier === 'High') {
+      return jc >= 0.8 ? 'Job-Rich Suburb' : 'Suburban Growth';
     }
-    if (jc < 0.4) return 'Bedroom Community';
-    if (bd >= 15) return 'Dense Commercial Core';
+    if (jc < 0.4)  return 'Bedroom Community';
+    if (bd >= 15)  return 'Dense Commercial Core';
     return 'Working Class Core';
   }
 
-  // ── 10. Build signals per ZIP + upsert ───────────────────────────────────
+  // ── 12. Upsert all ZIPs ───────────────────────────────────────────────────
   const { upsertZipSignals } = require('../lib/pgStore');
   const results = [];
+  let written = 0;
 
   for (const m of metrics) {
     const { zip } = m;
@@ -226,29 +267,41 @@ module.exports = async function worldModelWorker(db, logEvent) {
     const cohort   = peerCohort(tier, m.biz_density_per_1k, m.job_capture_ratio, m.owner_occ_pct);
 
     const signals = {
-      sig_growth_score:        growthScores[zip]      ?? null,
-      sig_opportunity_score:   opportunityScores[zip] ?? null,
-      sig_risk_score:          riskScores[zip]        ?? null,
-      sig_market_maturity:     maturity,
-      sig_income_tier:         tier,
-      sig_peer_cohort:         cohort,
-      sig_biz_density_per_1k:  m.biz_density_per_1k != null ? Math.round(m.biz_density_per_1k * 10) / 10 : null,
-      sig_job_capture_ratio:   m.job_capture_ratio   != null ? Math.round(m.job_capture_ratio * 1000) / 1000 : null,
+      sig_growth_score:       growthScores[zip]      ?? null,
+      sig_opportunity_score:  opportunityScores[zip] ?? null,
+      sig_risk_score:         riskScores[zip]        ?? null,
+      sig_market_maturity:    maturity,
+      sig_income_tier:        tier,
+      sig_peer_cohort:        cohort,
+      sig_biz_density_per_1k: m.biz_density_per_1k != null
+        ? Math.round(m.biz_density_per_1k * 10) / 10 : null,
+      sig_job_capture_ratio:  m.job_capture_ratio != null
+        ? Math.round(m.job_capture_ratio * 1000) / 1000 : null,
     };
 
-    await upsertZipSignals(zip, signals);
+    try {
+      await upsertZipSignals(zip, signals);
+      written++;
+    } catch (e) {
+      console.warn(`[worldModelWorker] upsert failed for ${zip}:`, e.message);
+    }
+
     results.push({ zip, ...signals });
-    console.log(`[worldModelWorker] ${zip} → growth=${signals.sig_growth_score} opp=${signals.sig_opportunity_score} risk=${signals.sig_risk_score} tier=${tier} cohort=${cohort}`);
+
+    if (written % 100 === 0) {
+      console.log(`[worldModelWorker] progress: ${written}/${activeZips.length} ZIPs written`);
+    }
   }
 
   await logEvent(workerName, 'END', null,
-    `World Model computed for ${results.length} ZIPs. Scores written to sig_* columns.`
+    `World Model complete — ${written}/${activeZips.length} ZIPs written. ` +
+    `${allFLZips.length - activeZips.length} ZIPs skipped (no signal data yet).`
   );
 
-  return { computed: results.length, zips: results };
+  return { computed: written, total_geo: allFLZips.length, active: activeZips.length };
 };
 
-// ── Standalone entry point — MUST be after module.exports assignment ──────────
+// ── Standalone entry point ────────────────────────────────────────────────────
 if (require.main === module) {
   const db = require('../lib/db');
   async function logEvent(worker, type, zip, msg) {
