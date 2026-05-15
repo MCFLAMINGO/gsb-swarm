@@ -9919,6 +9919,36 @@ router.post('/ceo-query', express.json(), async (req, res) => {
     lease_signal,
     confidence,
     county_ranking,
+    scoring_explanation: county_ranking ? {
+      how_scores_work: 'Each ZIP is scored 0–100. Points are awarded across 5–7 factors depending on concept type. Scores are relative — a 90 in a rural county and a 90 in Broward mean the same within their county context.',
+      factors: county_ranking.concept === 'restaurant_concept'
+        ? [
+            { factor: 'Household Income (HHI)',   max_pts: 35, note: '$100k+ = 35pts, $80k+ = 25pts, $60k+ = 15pts. QSR customers need disposable income.' },
+            { factor: 'Growth Score',              max_pts: 20, note: '70+ = 20pts, 50+ = 10pts. Growing markets have rising foot traffic.' },
+            { factor: 'Opportunity Score',         max_pts: 20, note: '70+ = 20pts. Measures unmet demand — fewer competitors in category.' },
+            { factor: 'Population',                max_pts: 10, note: '20k+ = 10pts, 10k+ = 5pts. More residents = more drive-by traffic base.' },
+            { factor: 'College %',                 max_pts:  5, note: '40%+ = 5pts. College-educated areas skew toward QSR frequency.' },
+            { factor: 'Low Unemployment',          max_pts:  5, note: 'Under 4% = 5pts. Employed population = spending power.' },
+            { factor: 'Road Traffic (AADT)',        max_pts: 10, note: '80k+ daily = 10pts (major corridor like I-95/US-1), 40k+ = 7pts (arterial), 20k+ = 4pts (collector), 5k+ = 2pts. Uses FDOT 2025 data. Falls back to commercial business density if AADT not yet populated.' },
+          ]
+        : county_ranking.concept?.includes('upscale') || county_ranking.concept?.includes('fine')
+        ? [
+            { factor: 'Household Income (HHI)',   max_pts: 40, note: '$130k+ = 40pts, $100k+ = 30pts, $80k+ = 15pts. Fine dining requires high discretionary spend.' },
+            { factor: 'Owner-Occupancy Rate',      max_pts: 15, note: '60%+ = 15pts. Homeowners are more likely to be repeat fine dining customers.' },
+            { factor: 'Growth Score',              max_pts: 15, note: '70+ = 15pts. Growing affluent markets fill white-tablecloth seats.' },
+            { factor: 'Opportunity Score',         max_pts: 15, note: '70+ = 15pts. Fewer upscale competitors = stronger position.' },
+            { factor: 'Median Age',                max_pts: 10, note: '38+ = 10pts. Older demographics have higher restaurant spend.' },
+            { factor: 'College %',                 max_pts:  5, note: '50%+ = 5pts.' },
+            { factor: 'Road Traffic (AADT)',        max_pts:  5, note: '40k+ = 5pts, 15k+ = 2pts. Visibility matters but demographics dominate for upscale.' },
+          ]
+        : [
+            { factor: 'Growth Score',    max_pts: 35, note: 'General market growth trajectory.' },
+            { factor: 'Opportunity Score', max_pts: 35, note: 'Unmet demand relative to supply.' },
+            { factor: 'Household Income', max_pts: 30, note: 'Income base for consumer spending.' },
+          ],
+      traffic_source: 'FDOT Florida Traffic Online (FTO) — ArcGIS Layer 7, 2025 AADT. Road segments spatially joined to ZIP centroids (~5km radius). Updates annually.',
+      data_note: 'All signals from Postgres (zip_signals table). Workers: acsWorker (HHI/demographics), worldModelWorker (growth/opportunity scores), fdotWorker (AADT), overpassWorker (business density fallback).',
+    } : null,
     answered_at: new Date().toISOString(),
   });
 });
