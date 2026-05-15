@@ -24,7 +24,7 @@
 | [postgres-schema.md](docs/postgres-schema.md) | All tables, key columns, migration index (001–027) |
 | [intent-routing.md](docs/intent-routing.md) | Intent layer, W5 reasoning, resolvesVia routing, conversational design |
 | [infrastructure.md](docs/infrastructure.md) | Repos, Railway IDs, Vercel projects, git commands, env vars list |
-| [session-log.md](docs/session-log.md) | Full B-series changelog (B1–B54), Problem/Fix/Result |
+| [session-log.md](docs/session-log.md) | Full B-series changelog (B1–B58), Problem/Fix/Result |
 | [mcflamingo.md](docs/mcflamingo.md) | McFlamingo reference — business_id, address, wallet, Surge catalog |
 | [ceo-layer.md](docs/ceo-layer.md) | CEO page, ceo-assess, ceo-query engine, 12 sections, zero LLM |
 | [mcp-server.md](docs/mcp-server.md) | MCP server, 22 tools, market intel / discovery / task dispatch |
@@ -34,5 +34,5 @@
 
 ## Active B-Series
 See [session-log.md](docs/session-log.md) for full history.
-Latest: B54 — Migration 029 fl_zip_geo + acsWorker acs_median_hhi fix + statewide TARGET_ZIPS (2026-05-14)
+Latest: B58 — CEO query county ranking — deterministic multi-ZIP QSR/upscale/general scoring for comparative questions (2026-05-15)
 Next pending: Trigger acsWorker re-run to populate acs_median_hhi for all 1,473 FL ZIPs
