@@ -84,6 +84,18 @@ async function run() {
     process.exit(1);
   }
 
+  // Freshness check — skip if ran within 30 days (BEA releases annual data with ~2yr lag)
+  try {
+    const hb = await db.query(`SELECT last_run FROM worker_heartbeat WHERE worker_name = 'beaWorker'`);
+    if (Array.isArray(hb) && hb[0]?.last_run) {
+      const ageDays = (Date.now() - new Date(hb[0].last_run).getTime()) / 86400000;
+      if (ageDays < 30) {
+        console.log(`[bea] Data fresh (${ageDays.toFixed(1)} days old) — skipping run`);
+        process.exit(0);
+      }
+    }
+  } catch (_) { /* no heartbeat yet — run */ }
+
   console.log('[bea] Starting BEA CAINC1 worker — fetching FL county per capita income');
   const start = Date.now();
 

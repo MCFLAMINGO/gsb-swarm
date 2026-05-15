@@ -171,6 +171,18 @@ async function run() {
     process.exit(1);
   }
 
+  // Freshness check — skip if ran within 30 days (LAUS data is monthly, BLS lags ~4 weeks)
+  try {
+    const hb = await db.query(`SELECT last_run FROM worker_heartbeat WHERE worker_name = 'fredWorker'`);
+    if (Array.isArray(hb) && hb[0]?.last_run) {
+      const ageDays = (Date.now() - new Date(hb[0].last_run).getTime()) / 86400000;
+      if (ageDays < 30) {
+        console.log(`[fred] Data fresh (${ageDays.toFixed(1)} days old) — skipping run`);
+        process.exit(0);
+      }
+    }
+  } catch (_) { /* no heartbeat yet — run */ }
+
   console.log(`[fred] Starting FRED/BLS LAUS worker — ${FL_COUNTIES.length} FL counties via BLS API v2`);
   const start = Date.now();
 

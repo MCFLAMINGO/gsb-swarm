@@ -110,6 +110,18 @@ async function run() {
     process.exit(1);
   }
 
+  // Freshness check — skip if ran within 14 days (QWI is quarterly, lags ~6 months)
+  try {
+    const hb = await db.query(`SELECT last_run FROM worker_heartbeat WHERE worker_name = 'qwiWorker'`);
+    if (Array.isArray(hb) && hb[0]?.last_run) {
+      const ageDays = (Date.now() - new Date(hb[0].last_run).getTime()) / 86400000;
+      if (ageDays < 14) {
+        console.log(`[qwi] Data fresh (${ageDays.toFixed(1)} days old) — skipping run`);
+        process.exit(0);
+      }
+    }
+  } catch (_) { /* no heartbeat yet — run */ }
+
   console.log('[qwi] Starting QWI worker — FL county workforce indicators');
   const start = Date.now();
 

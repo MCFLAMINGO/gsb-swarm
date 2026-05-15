@@ -7499,9 +7499,16 @@ app.use((req, res, next) => {
     { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' },
     { name: 'Permit Worker',               file: 'workers/permitWorker.js' },
     { name: 'FDOT AADT Worker',              file: 'workers/fdotWorker.js'   },
-    // ── World model signal workers ──
-    // { name: 'FCC Broadband Worker',        file: 'workers/fccBroadbandWorker.js'  }, // disabled — FCC broadband data not used in search quality
-    // { name: 'IRS Migration Worker',        file: 'workers/irsMigrationWorker.js'  }, // disabled — IRS migration data not consumed by any query path yet
+    // ── World model input workers (run on boot, self-throttle via heartbeat) ──
+    { name: 'FRED Unemployment Worker',      file: 'workers/fredWorker.js'          },  // 30-day freshness check
+    { name: 'BEA Income Worker',             file: 'workers/beaWorker.js'           },  // 30-day freshness check
+    { name: 'LODES Jobs Worker',             file: 'workers/lodesWorker.js'         },  // 7-day freshness check (built-in)
+    { name: 'QWI Workforce Worker',          file: 'workers/qwiWorker.js'           },  // 14-day freshness check
+    { name: 'CES Employment Worker',         file: 'workers/cesWorker.js'           },  // 2-day freshness check (built-in)
+    { name: 'QCEW Wages Worker',             file: 'workers/qcewWorker.js'          },  // 30-day freshness check (built-in)
+    // ── World model derived signals (runs after input workers) ──
+    // { name: 'FCC Broadband Worker',        file: 'workers/fccBroadbandWorker.js'  }, // disabled — not consumed by any query path
+    // { name: 'IRS Migration Worker',        file: 'workers/irsMigrationWorker.js'  }, // disabled — not consumed by any query path
     { name: 'World Model Worker',            file: 'workers/worldModelWorker.js'    },
   ];
 
