@@ -9765,6 +9765,20 @@ router.post('/chat', async (req, res) => {
       const missing = countyZips.filter(z => !rows.find(s => s.zip === z));
       const data_confidence = Math.round((withData / countyZips.length) * 100);
 
+      if (withData === 0) {
+        return res.json({
+          ok: true,
+          zip: placeResult.countyKey,
+          question,
+          answer: `No zip_signals data is available yet for ${placeResult.countyKey} County. Data workers have currently run on St. Johns County ZIPs (32082, 32081, 32250, 32266, 32259, 32034). Try asking about a specific St. Johns County ZIP or city — for example: "best ZIP in St. Johns County for a pizza place" or "can a smoothie QSR work in Nocatee?"`,
+          data_confidence: 0,
+          missing_signals: countyZips,
+          trial_remaining: !isSubscriber ? Math.max(0, trialLimit - trialUsed) : null,
+          is_subscriber: isSubscriber,
+          no_data: true,
+        });
+      }
+
       if (!process.env.ANTHROPIC_API_KEY) {
         return res.json({ ok: false, error: 'LLM service not configured', data_confidence, missing_signals: missing });
       }
@@ -9799,13 +9813,15 @@ Rank the ZIPs by fit for the concept described. If data is sparse, say so clearl
       const answerCounty = (llmData && llmData.content && llmData.content[0] && llmData.content[0].text) || 'Unable to generate answer.';
       const tokensUsedCounty = ((llmData && llmData.usage && llmData.usage.input_tokens) || 0) + ((llmData && llmData.usage && llmData.usage.output_tokens) || 0);
 
-      db.query(
-        `INSERT INTO chat_log (caller_id, question, zip, data_confidence, missing_signals, llm_model, tokens_used, answer_preview)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [phone, String(question), placeResult.countyKey, data_confidence, missing, 'claude-haiku-4-5', tokensUsedCounty, String(answerCounty).slice(0, 500)]
-      ).catch(() => {});
+      if (data_confidence > 0) {
+        db.query(
+          `INSERT INTO chat_log (caller_id, question, zip, data_confidence, missing_signals, llm_model, tokens_used, answer_preview)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [phone, String(question), placeResult.countyKey, data_confidence, missing, 'claude-haiku-4-5', tokensUsedCounty, String(answerCounty).slice(0, 500)]
+        ).catch(() => {});
+      }
 
-      if (!isSubscriber) {
+      if (!isSubscriber && data_confidence > 0) {
         db.query(
           `UPDATE subscriber_accounts SET trial_queries_used = trial_queries_used + 1, updated_at = NOW() WHERE phone = $1`,
           [phone]
@@ -9819,7 +9835,7 @@ Rank the ZIPs by fit for the concept described. If data is sparse, say so clearl
         answer: answerCounty,
         data_confidence,
         missing_signals: missing,
-        trial_remaining: !isSubscriber ? Math.max(0, trialLimit - trialUsed - 1) : null,
+        trial_remaining: !isSubscriber ? Math.max(0, trialLimit - trialUsed - (data_confidence > 0 ? 1 : 0)) : null,
         is_subscriber: isSubscriber,
       });
     }
@@ -9863,6 +9879,20 @@ Rank the ZIPs by fit for the concept described. If data is sparse, say so clearl
     const missingSignals = keySignals.filter(([_, v]) => v == null).map(([k]) => k);
     const nonNullCount   = keySignals.length - missingSignals.length;
     const dataConfidence = Math.round((nonNullCount / keySignals.length) * 100 * 100) / 100;
+
+    if (dataConfidence === 0) {
+      return res.json({
+        ok: true,
+        zip,
+        question,
+        answer: `No data is available yet for ZIP ${zip}. Try asking about a St. Johns County ZIP: 32082 (Ponte Vedra Beach), 32081 (Nocatee), 32250 (Jacksonville Beach), 32266 (Neptune Beach), 32259 (St. Johns), or 32034 (Fernandina Beach).`,
+        data_confidence: 0,
+        missing_signals: missingSignals,
+        trial_remaining: !isSubscriber ? Math.max(0, trialLimit - trialUsed) : null,
+        is_subscriber: isSubscriber,
+        no_data: true,
+      });
+    }
 
     // E) Grounding prompt
     const ctxLines = [];
@@ -9940,15 +9970,17 @@ Rank the ZIPs by fit for the concept described. If data is sparse, say so clearl
     }
 
     // G) Log to chat_log (fire-and-forget)
-    db.query(
-      `INSERT INTO chat_log
-        (caller_id, question, zip, data_confidence, missing_signals, llm_model, tokens_used, answer_preview)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [phone, String(question), zip, dataConfidence, missingSignals, model, tokensUsed, String(answer).slice(0, 500)]
-    ).catch(() => {});
+    if (dataConfidence > 0) {
+      db.query(
+        `INSERT INTO chat_log
+          (caller_id, question, zip, data_confidence, missing_signals, llm_model, tokens_used, answer_preview)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [phone, String(question), zip, dataConfidence, missingSignals, model, tokensUsed, String(answer).slice(0, 500)]
+      ).catch(() => {});
+    }
 
     // H) Increment trial usage (fire-and-forget)
-    if (!isSubscriber) {
+    if (!isSubscriber && dataConfidence > 0) {
       db.query(
         `UPDATE subscriber_accounts SET trial_queries_used = trial_queries_used + 1, updated_at = NOW() WHERE phone = $1`,
         [phone]
