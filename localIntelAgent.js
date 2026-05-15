@@ -244,6 +244,61 @@ async function getStatewideBounds() {
     };
   }
 }
+
+// B64: enrich MCP tool/call responses (oracle/signal/sector_gap) with site_intelligence.
+// Parses content[0].text JSON, attaches scoring block, re-serializes. Never throws —
+// any failure returns the original data untouched so routing/billing never breaks.
+async function enrichMcpResponseWithScore(data, toolName, args) {
+  try {
+    if (!data || !data.result || !Array.isArray(data.result.content)) return data;
+    const textNode = data.result.content.find(c => c && c.type === 'text' && typeof c.text === 'string');
+    if (!textNode) return data;
+
+    let payload;
+    try { payload = JSON.parse(textNode.text); } catch (_) { return data; }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return data;
+
+    const zip = (payload.zip || args?.zip || '').toString().replace(/\D/g, '').slice(0, 5);
+    if (!zip) return data;
+
+    // Concept text: prefer explicit query; for sector_gap fall back to gap category.
+    const queryText =
+      args?.query ||
+      args?.question ||
+      args?.q ||
+      (toolName === 'local_intel_sector_gap'
+        ? (args?.category || args?.sector || payload.category || payload.sector || '')
+        : '');
+    const concept = detectConcept(queryText || '') || 'GENERAL';
+    const profile = CONCEPT_PROFILES[concept] || CONCEPT_PROFILES.GENERAL;
+
+    const sigRows = await db.query(
+      `SELECT * FROM zip_signals WHERE zip = $1 LIMIT 1`,
+      [zip]
+    );
+    if (!Array.isArray(sigRows) || sigRows.length === 0) return data;
+
+    const bounds = await getStatewideBounds();
+    const scoreResult = scoreZipForConcept(sigRows[0], profile, bounds);
+
+    payload.site_intelligence = {
+      concept_detected:      concept,
+      concept_name:          profile.name,
+      total_score:           scoreResult.total_score,
+      factor_breakdown:      scoreResult.factor_breakdown,
+      hard_floor_triggered:  scoreResult.hard_floor_triggered,
+      hard_floor_reason:     scoreResult.hard_floor_reason,
+      psycho_index:          scoreResult.psycho_index,
+    };
+
+    textNode.text = JSON.stringify(payload, null, 2);
+    return data;
+  } catch (e) {
+    console.warn('[localIntelAgent] enrichMcpResponseWithScore failed:', e.message);
+    return data;
+  }
+}
+
 const apiKeyMiddleware = createApiKeyMiddleware(db);
 
 // B16 — fire-and-forget SMS query history. Only logs for Twilio channel
@@ -2281,6 +2336,31 @@ router.post('/', async (req, res) => {
         businessName: _b41Top?.name        ?? null,
         resolvesVia:  _legacyResolvedVia }).catch(() => {});
     }
+    // B64: non-blocking ZIP score enrichment — wrapped in try/catch so scoring
+    // failure never breaks routing. zip_score is null when ZIP unknown / no signals.
+    let zipScore = null;
+    if (zip) {
+      try {
+        const sigRows = await db.query(
+          `SELECT * FROM zip_signals WHERE zip = $1 LIMIT 1`,
+          [zip]
+        );
+        if (Array.isArray(sigRows) && sigRows.length > 0) {
+          const concept = detectConcept(query || '') || 'GENERAL';
+          const profile = CONCEPT_PROFILES[concept] || CONCEPT_PROFILES.GENERAL;
+          const bounds = await getStatewideBounds();
+          const scoreResult = scoreZipForConcept(sigRows[0], profile, bounds);
+          zipScore = {
+            zip,
+            concept_detected: concept,
+            total_score:      scoreResult.total_score,
+            factor_breakdown: scoreResult.factor_breakdown,
+            psycho_index:     scoreResult.psycho_index,
+          };
+        }
+      } catch (_) { /* non-blocking */ }
+    }
+
     res.json({
       ok:       true,
       total:    realTotal,
@@ -2288,6 +2368,7 @@ router.post('/', async (req, res) => {
       zips:     zip ? [zip] : [],
       results:  rows,
       meta:     _meta,
+      zip_score: zipScore,
     });
   } catch (e) {
     console.error('[local-intel query]', e.message);
@@ -4178,7 +4259,12 @@ router.post('/mcp', express.json(), apiKeyMiddleware, async (req, res) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const data = await response.json();
+    let data = await response.json();
+    // B64: enrich oracle/signal/sector_gap responses with site_intelligence scoring
+    if (body.method === 'tools/call'
+        && ['local_intel_oracle','local_intel_signal','local_intel_sector_gap'].includes(body.params?.name)) {
+      data = await enrichMcpResponseWithScore(data, body.params.name, body.params.arguments || {});
+    }
     res.status(response.status).json(data);
   } catch (e) {
     res.status(503).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'MCP server unavailable: ' + e.message } });
@@ -4223,7 +4309,12 @@ router.post('/mcp/x402', express.json(), async (req, res, next) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const data = await response.json();
+    let data = await response.json();
+    // B64: enrich oracle/signal/sector_gap responses with site_intelligence scoring
+    if (body.method === 'tools/call'
+        && ['local_intel_oracle','local_intel_signal','local_intel_sector_gap'].includes(body.params?.name)) {
+      data = await enrichMcpResponseWithScore(data, body.params.name, body.params.arguments || {});
+    }
     res.status(response.status).json(data);
   } catch (e) {
     res.status(503).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'MCP unavailable: ' + e.message } });
