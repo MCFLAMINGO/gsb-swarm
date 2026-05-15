@@ -281,7 +281,7 @@ async function isFresh() {
     );
     if (!row) return false;
     const ageDays = (Date.now() - new Date(row.last_run).getTime()) / 86400000;
-    return ageDays < 2;  // Re-run if more than 2 days old (monthly data, but worker is cheap)
+    return ageDays < 30;  // CES is monthly — released first Friday of following month, 30-day window is sufficient
   } catch { return false; }
 }
 

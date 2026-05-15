@@ -115,8 +115,8 @@ async function run() {
     const hb = await db.query(`SELECT last_run FROM worker_heartbeat WHERE worker_name = 'qwiWorker'`);
     if (Array.isArray(hb) && hb[0]?.last_run) {
       const ageDays = (Date.now() - new Date(hb[0].last_run).getTime()) / 86400000;
-      if (ageDays < 14) {
-        console.log(`[qwi] Data fresh (${ageDays.toFixed(1)} days old) — skipping run`);
+      if (ageDays < 90) {  // QWI is quarterly, ~9mo lag — re-run every 90 days
+        console.log(`[qwi] Data fresh (${ageDays.toFixed(1)} days old, window 90d) — skipping run`);
         process.exit(0);
       }
     }

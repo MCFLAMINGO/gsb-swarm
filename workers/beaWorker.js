@@ -89,8 +89,8 @@ async function run() {
     const hb = await db.query(`SELECT last_run FROM worker_heartbeat WHERE worker_name = 'beaWorker'`);
     if (Array.isArray(hb) && hb[0]?.last_run) {
       const ageDays = (Date.now() - new Date(hb[0].last_run).getTime()) / 86400000;
-      if (ageDays < 30) {
-        console.log(`[bea] Data fresh (${ageDays.toFixed(1)} days old) — skipping run`);
+      if (ageDays < 365) {  // BEA is annual data with 2yr lag — no need to re-fetch within a year
+        console.log(`[bea] Data fresh (${ageDays.toFixed(1)} days old, window 365d) — skipping run`);
         process.exit(0);
       }
     }

@@ -90,7 +90,7 @@ async function run() {
   if (Array.isArray(hb) && hb.length) {
     const age = Date.now() - new Date(hb[0].last_run).getTime();
     const days = age / 86400000;
-    if (days < 7) {
+    if (days < 365) {  // LODES is annual — released each December, no point re-fetching within a year
       console.log(`[lodes] Skipping — ran ${days.toFixed(1)} days ago (LODES is annual)`);
       process.exit(0);
     }

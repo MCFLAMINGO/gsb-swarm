@@ -202,7 +202,7 @@ async function isFresh() {
     );
     if (!row) return false;
     const ageMs = Date.now() - new Date(row.last_run).getTime();
-    return ageMs < 30 * 24 * 60 * 60 * 1000;  // 30 days
+    return ageMs < 90 * 24 * 60 * 60 * 1000;  // 90 days — QCEW is quarterly data, benchmarked annually
   } catch {
     return false;
   }
