@@ -65,8 +65,12 @@ async function handleQuery(params) {
 
   const r = route(query);
 
-  // Override ZIP if caller provided one explicitly; fall back to primary coverage ZIP
-  const zip = (params.zip || r.zip || '').replace(/\D/g, '').slice(0, 5) || r.zip || '32082';
+  // Resolve ZIP: explicit param > lat/lon coords > intent router > default
+  const zipRes = await resolveZipParam(params);
+  const zip = zipRes.zip || (r.zip || '').replace(/\D/g, '').slice(0, 5) || '32082';
+  if (zipRes.resolved_from === 'coords') {
+    console.log(`[localIntelMCP] handleQuery: resolved ZIP ${zip} from coords (${zipRes.coords.lat},${zipRes.coords.lon})`);
+  }
 
   // Cache check
   if (r.vertical) {
@@ -709,39 +713,83 @@ function getGroup(cat) {
   return 'other';
 }
 
-// ── ZIP centroids ─────────────────────────────────────────────────────────────
-const ZIP_CENTERS = {
-  // ── Core St Johns County (original coverage) ───────────────────────────────
-  '32082': { lat: 30.1893, lon: -81.3815, label: 'Ponte Vedra Beach' },
-  '32081': { lat: 30.1100, lon: -81.4175, label: 'Nocatee' },
-  '32092': { lat: 30.0820, lon: -81.5270, label: 'World Golf Village' },
-  '32084': { lat: 29.8943, lon: -81.3145, label: 'St. Augustine' },
-  '32086': { lat: 29.8290, lon: -81.3100, label: 'St. Augustine South' },
-  '32095': { lat: 30.1360, lon: -81.3870, label: 'Palm Valley' },
-  '32080': { lat: 29.8590, lon: -81.2680, label: 'St. Augustine Beach' },
-  // ── Expansion ZIPs — St Johns / Duval / Clay / Nassau (C1 candidates) ──────
-  '32259': { lat: 30.0610, lon: -81.5720, label: 'Fruit Cove / Saint Johns' },
-  '32250': { lat: 30.2760, lon: -81.3960, label: 'Jacksonville Beach' },
-  '32266': { lat: 30.3140, lon: -81.4100, label: 'Neptune Beach' },
-  '32258': { lat: 30.1330, lon: -81.6020, label: 'Bartram Park' },
-  '32226': { lat: 30.4580, lon: -81.4900, label: 'North Jacksonville' },
-  '32003': { lat: 30.1030, lon: -81.7120, label: 'Fleming Island' },
-  '32034': { lat: 30.6680, lon: -81.4620, label: 'Fernandina Beach' },
-  '32065': { lat: 30.1490, lon: -81.7920, label: 'Orange Park / Oakleaf' },
-  '32097': { lat: 30.6340, lon: -81.5860, label: 'Yulee' },
-  // ── Jacksonville Southside / Intracoastal (existing data) ──────────────────
-  '32256': { lat: 30.1910, lon: -81.5610, label: 'Baymeadows / Tinseltown' },
-  '32257': { lat: 30.1690, lon: -81.5720, label: 'Mandarin South' },
-  '32224': { lat: 30.2830, lon: -81.4700, label: 'Jacksonville Intracoastal' },
-  '32225': { lat: 30.3340, lon: -81.5100, label: 'Jacksonville Arlington' },
-  '32246': { lat: 30.3030, lon: -81.5300, label: 'Jacksonville Regency' },
-  '32233': { lat: 30.3470, lon: -81.3940, label: 'Atlantic Beach' },
-  '32211': { lat: 30.3320, lon: -81.5820, label: 'Jacksonville East' },
-  '32216': { lat: 30.2670, lon: -81.5510, label: 'Southside Blvd' },
-  '32217': { lat: 30.2450, lon: -81.5710, label: 'San Jose' },
-  '32207': { lat: 30.2920, lon: -81.6240, label: 'Jacksonville Southbank' },
-  '32073': { lat: 30.1760, lon: -81.7790, label: 'Orange Park' },
-};
+// ── ZIP centroid resolution — POSTGRES IS KING ───────────────────────────────
+// fl_zip_geo (migration 029) is the authoritative source for all 1,473 FL ZIPs.
+// ZIP_CENTERS kept as a fast in-process cache — populated from Postgres on startup.
+// resolveZipFromCoords() finds the nearest FL ZIP to any lat/lon coordinate.
+let ZIP_CENTERS = {};  // { zip: { lat, lon, label } } — loaded from fl_zip_geo
+
+async function loadZipCenters() {
+  try {
+    const { db } = require('./lib/db');
+    const rows = await db.query(
+      `SELECT zip, lat, lon, county FROM fl_zip_geo WHERE lat IS NOT NULL AND lon IS NOT NULL`
+    );
+    if (rows && rows.length > 0) {
+      ZIP_CENTERS = {};
+      for (const r of rows) {
+        ZIP_CENTERS[r.zip] = { lat: Number(r.lat), lon: Number(r.lon), label: r.county || r.zip };
+      }
+      console.log(`[localIntelMCP] ZIP_CENTERS loaded from fl_zip_geo: ${rows.length} FL ZIPs`);
+    }
+  } catch (e) {
+    console.warn('[localIntelMCP] fl_zip_geo not ready, ZIP_CENTERS empty:', e.message);
+  }
+}
+loadZipCenters(); // fire on startup, non-blocking
+
+// Nearest FL ZIP to a lat/lon — pure JS haversine over ZIP_CENTERS cache
+// Falls back to Postgres query if cache is empty (e.g. called before loadZipCenters resolves)
+async function resolveZipFromCoords(lat, lon) {
+  const la = Number(lat);
+  const lo = Number(lon);
+  if (isNaN(la) || isNaN(lo)) return null;
+
+  // Fast path: in-process cache
+  const zips = Object.keys(ZIP_CENTERS);
+  if (zips.length > 0) {
+    let best = null, bestDist = Infinity;
+    for (const zip of zips) {
+      const c = ZIP_CENTERS[zip];
+      const d = distanceMiles(la, lo, c.lat, c.lon);
+      if (d < bestDist) { bestDist = d; best = zip; }
+    }
+    return best;
+  }
+
+  // Slow path: direct Postgres query (cache not ready yet)
+  try {
+    const { db } = require('./lib/db');
+    const rows = await db.query(
+      `SELECT zip,
+         (point($1,$2) <@> point(lon::float8, lat::float8)) AS dist
+       FROM fl_zip_geo
+       WHERE lat IS NOT NULL AND lon IS NOT NULL
+       ORDER BY dist LIMIT 1`,
+      [lo, la]  // PostGIS point operator uses lon,lat order
+    );
+    return rows && rows[0] ? rows[0].zip : null;
+  } catch (e) {
+    console.warn('[localIntelMCP] resolveZipFromCoords Postgres fallback failed:', e.message);
+    return null;
+  }
+}
+
+// Shared ZIP resolver — used by all tools that accept zip OR lat/lon
+// Returns { zip, resolved_from } where resolved_from is 'param' | 'coords' | 'default'
+async function resolveZipParam(params, defaultZip = null) {
+  if (params.zip && /^\d{5}$/.test(String(params.zip).trim())) {
+    return { zip: String(params.zip).trim(), resolved_from: 'param' };
+  }
+  const lat = params.lat != null ? Number(params.lat) : null;
+  const lon = params.lon != null ? Number(params.lon) : null;
+  if (lat !== null && lon !== null && !isNaN(lat) && !isNaN(lon)) {
+    const zip = await resolveZipFromCoords(lat, lon);
+    if (zip) return { zip, resolved_from: 'coords', coords: { lat, lon } };
+  }
+  if (defaultZip) return { zip: defaultZip, resolved_from: 'default' };
+  return { zip: null, resolved_from: null };
+}
 
 // ── Compass bearing label ─────────────────────────────────────────────────────
 function bearing(lat1, lon1, lat2, lon2) {
@@ -778,27 +826,28 @@ function fmtBusiness(b, refLat, refLon) {
  * Returns a full spatial context block for a zip code or lat/lon.
  * This is the primary tool — gives an agent everything it needs in one call.
  */
-function toolContext({ zip, lat, lon, radius_miles = 1.0 }) {
+async function toolContext({ zip, lat, lon, radius_miles = 1.0 }) {
   const businesses = loadBusinesses();
   const zones = loadZones();
 
-  // Resolve center point
+  // Resolve center point — zip param > lat/lon > error
   let centerLat, centerLon, label;
-  if (lat && lon) {
-    centerLat = parseFloat(lat);
-    centerLon = parseFloat(lon);
-    // Find nearest zip
-    const nearestZip = Object.entries(ZIP_CENTERS)
-      .sort((a, b) => distanceMiles(centerLat, centerLon, a[1].lat, a[1].lon) -
-                      distanceMiles(centerLat, centerLon, b[1].lat, b[1].lon))[0];
-    zip = nearestZip[0];
-    label = nearestZip[1].label;
-  } else if (zip && ZIP_CENTERS[zip]) {
+  const zipRes = await resolveZipParam({ zip, lat, lon });
+  if (!zipRes.zip) {
+    return { error: 'zip or lat/lon required. Pass a FL ZIP code or a lat/lon coordinate pair.' };
+  }
+  zip = zipRes.zip;
+  // Use fl_zip_geo centroid if available, else businesses bounding box
+  if (ZIP_CENTERS[zip]) {
     centerLat = ZIP_CENTERS[zip].lat;
     centerLon = ZIP_CENTERS[zip].lon;
     label = ZIP_CENTERS[zip].label;
+  } else if (lat && lon) {
+    centerLat = parseFloat(lat);
+    centerLon = parseFloat(lon);
+    label = zip;
   } else {
-    return { error: `ZIP ${zip} not in covered dataset. Covered: ${Object.keys(ZIP_CENTERS).join(', ')}` };
+    return { error: `No centroid available for ZIP ${zip}. fl_zip_geo may not be seeded yet.` };
   }
 
   // Find anchor (highest confidence business near center)
@@ -1380,11 +1429,19 @@ async function toolNearby({ lat, lon, zip, radius_miles = 5, category, group, li
  * local_intel_zone
  * Returns spending zone + demographic intelligence for a zip.
  */
-function toolZone({ zip }) {
+async function toolZone(params) {
   const zones = loadZones();
+  const zipRes = await resolveZipParam(params);
+  const zip = zipRes.zip;
+  if (!zip) return { error: 'zip or lat/lon required' };
   const zoneData = zones.zones?.[zip];
   if (!zoneData) {
-    return { error: `No zone data for ${zip}. Covered: ${Object.keys(zones.zones || {}).join(', ')}` };
+    return {
+      error: `No zone data for ${zip} yet.`,
+      resolved_from: zipRes.resolved_from,
+      zip,
+      hint: 'zip_signals has live data for this ZIP — call local_intel_zip_intelligence for demographics.',
+    };
   }
   const center = ZIP_CENTERS[zip];
   const lines = [
@@ -1936,12 +1993,14 @@ const MCP_MANIFEST = {
   tools: [
     {
       name: 'local_intel_query',
-      description: 'START HERE. Natural language entry point — send any plain-English question about any Florida market and get a structured answer. Auto-detects ZIP, industry vertical, and routes to the right tool. No tool knowledge required. Examples: "Is 32082 oversaturated with dentists?", "Where should I open a clinic in Northeast Florida?", "What food gaps exist in Nocatee?" Trained on 500+ real market queries across restaurant, healthcare, retail, construction, and real estate verticals.',
+      description: 'START HERE. Natural language entry point — send any plain-English question about any Florida market and get a structured answer. Auto-detects ZIP, industry vertical, and routes to the right tool. Pass lat/lon instead of zip for location-aware queries (e.g. from a vehicle or mobile app). Examples: "Is 32082 oversaturated with dentists?", "What food gaps exist near me?" Trained on 500+ real market queries.',
       inputSchema: {
         type: 'object',
         properties: {
           query: { type: 'string', description: 'Any plain-English market question. ZIP can be in the query or passed separately.' },
-          zip:   { type: 'string', description: 'Optional ZIP override. If omitted, ZIP is detected from the query.' },
+          zip:   { type: 'string', description: 'Optional ZIP override. If omitted, ZIP is detected from the query or resolved from lat/lon.' },
+          lat:   { type: 'number', description: 'Optional latitude (WGS84). Resolves to nearest FL ZIP. Use instead of zip for coordinate-based queries.' },
+          lon:   { type: 'number', description: 'Optional longitude (WGS84). Required if lat is provided.' },
         },
         required: ['query'],
       },
@@ -1949,13 +2008,13 @@ const MCP_MANIFEST = {
     },
     {
       name: 'local_intel_context',
-      description: 'Full spatial context block for a zip or lat/lon. Returns anchor business, nearby businesses in distance rings, zone intelligence, and category breakdown. Best first call for any location query.',
+      description: 'Full spatial context block for any FL zip or lat/lon. Returns anchor business, nearby businesses in distance rings, zone intelligence, and category breakdown. Best first call for any location query. Covers all 1,473 FL ZIPs via fl_zip_geo.',
       inputSchema: {
         type: 'object',
         properties: {
-          zip:          { type: 'string', description: 'ZIP code (32081 or 32082)' },
-          lat:          { type: 'number', description: 'Latitude (alternative to zip)' },
-          lon:          { type: 'number', description: 'Longitude (alternative to zip)' },
+          zip:          { type: 'string', description: 'Any FL ZIP code' },
+          lat:          { type: 'number', description: 'Latitude (WGS84) — resolves to nearest FL ZIP' },
+          lon:          { type: 'number', description: 'Longitude (WGS84) — required if lat is provided' },
           radius_miles: { type: 'number', description: 'Search radius in miles (default 1.0)' },
         },
       },
@@ -1995,12 +2054,13 @@ const MCP_MANIFEST = {
     },
     {
       name: 'local_intel_zone',
-      description: 'Spending zone and demographic data for a ZIP code: population, income, home value, rent, ownership rate, zone score.',
+      description: 'Spending zone and demographic data for a ZIP code: population, income, home value, rent, ownership rate, zone score. Pass zip or lat/lon.',
       inputSchema: {
         type: 'object',
-        required: ['zip'],
         properties: {
-          zip: { type: 'string', description: 'ZIP code (32081 or 32082)' },
+          zip: { type: 'string', description: 'FL ZIP code' },
+          lat: { type: 'number', description: 'Latitude (WGS84) — resolves to nearest FL ZIP' },
+          lon: { type: 'number', description: 'Longitude (WGS84) — required if lat is provided' },
         },
       },
       annotations: { readOnly: true },
@@ -2124,31 +2184,31 @@ const MCP_MANIFEST = {
     {
       name: 'local_intel_realtor',
       description: 'Real estate intelligence for a ZIP. Ask natural-language questions: demographics, commercial gaps, flood risk, school proximity, infrastructure signals, market saturation. Returns structured data with confidence score. Trained on 100 realtor use-case prompts.',
-      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question (e.g. "What is the flood risk for this ZIP?", "What commercial gaps exist?")' }, zip: { type: 'string', description: 'ZIP code to analyze' } }, required: ['query', 'zip'] },
+      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question (e.g. "What is the flood risk for this ZIP?", "What commercial gaps exist?")' }, zip: { type: 'string', description: 'ZIP code to analyze' }, lat: { type: 'number', description: 'Latitude (WGS84) — resolves to nearest FL ZIP' }, lon: { type: 'number', description: 'Longitude (WGS84)' } }, required: ['query'] },
       annotations: { readOnly: true },
     },
     {
       name: 'local_intel_healthcare',
       description: 'Healthcare market intelligence for a ZIP. Ask about provider density, patient demographics, demand gaps, senior population. Returns structured data with confidence score. Trained on 100 healthcare business prompts.',
-      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question about healthcare market' }, zip: { type: 'string', description: 'ZIP code to analyze' } }, required: ['query', 'zip'] },
+      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question about healthcare market' }, zip: { type: 'string', description: 'ZIP code to analyze' }, lat: { type: 'number', description: 'Latitude (WGS84) — resolves to nearest FL ZIP' }, lon: { type: 'number', description: 'Longitude (WGS84)' } }, required: ['query'] },
       annotations: { readOnly: true },
     },
     {
       name: 'local_intel_retail',
       description: 'Retail market intelligence for a ZIP. Ask about store categories, spending capture rates, consumer profile, undersupplied niches. Returns structured data with confidence score. Trained on 100 retail business prompts.',
-      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question about retail market' }, zip: { type: 'string', description: 'ZIP code to analyze' } }, required: ['query', 'zip'] },
+      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question about retail market' }, zip: { type: 'string', description: 'ZIP code to analyze' }, lat: { type: 'number', description: 'Latitude (WGS84) — resolves to nearest FL ZIP' }, lon: { type: 'number', description: 'Longitude (WGS84)' } }, required: ['query'] },
       annotations: { readOnly: true },
     },
     {
       name: 'local_intel_construction',
       description: 'Construction and home services market intelligence for a ZIP. Ask about contractor density, active permits, housing starts, population growth driving demand. Returns structured data with confidence score. Trained on 100 construction business prompts.',
-      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question about construction market' }, zip: { type: 'string', description: 'ZIP code to analyze' } }, required: ['query', 'zip'] },
+      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question about construction market' }, zip: { type: 'string', description: 'ZIP code to analyze' }, lat: { type: 'number', description: 'Latitude (WGS84) — resolves to nearest FL ZIP' }, lon: { type: 'number', description: 'Longitude (WGS84)' } }, required: ['query'] },
       annotations: { readOnly: true },
     },
     {
       name: 'local_intel_restaurant',
       description: 'Restaurant and food service market intelligence for a ZIP. Ask about saturation scores, price-tier gaps, capture rates, corridor analysis, tidal momentum. Returns structured data with confidence score. Trained on 100 restaurant business prompts.',
-      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question about restaurant market' }, zip: { type: 'string', description: 'ZIP code to analyze' } }, required: ['query', 'zip'] },
+      inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Natural language question about restaurant market' }, zip: { type: 'string', description: 'ZIP code to analyze' }, lat: { type: 'number', description: 'Latitude (WGS84) — resolves to nearest FL ZIP' }, lon: { type: 'number', description: 'Longitude (WGS84)' } }, required: ['query'] },
       annotations: { readOnly: true },
     },
     {
