@@ -174,6 +174,63 @@ async function resolvePlace(question) {
 const { logDeadEnd } = require('./lib/deadEndLog');
 const { logSmsQuery } = require('./lib/smsQueryLog');
 const { appendTurn, getContext } = require('./lib/conversationThread');
+// B62: unified site intelligence scoring engine
+const { scoreZipForConcept } = require('./lib/scoringEngine');
+const { CONCEPT_PROFILES } = require('./lib/conceptProfiles');
+const { detectConcept } = require('./lib/detectConcept');
+
+// B62: statewide normalization bounds (lazy-cached per-process for 5min).
+let _statewideBoundsCache = null;
+let _statewideBoundsAt = 0;
+async function getStatewideBounds() {
+  const now = Date.now();
+  if (_statewideBoundsCache && (now - _statewideBoundsAt) < 5 * 60 * 1000) {
+    return _statewideBoundsCache;
+  }
+  try {
+    const rows = await db.query(`
+      SELECT
+        MIN(fdot_max_aadt) as aadt_min, MAX(fdot_max_aadt) as aadt_max,
+        MIN(acs_median_hhi) as hhi_min, MAX(acs_median_hhi) as hhi_max,
+        MIN(lodes_jobs_here) as lodes_min, MAX(lodes_jobs_here) as lodes_max,
+        MIN(sig_growth_score) as growth_min, MAX(sig_growth_score) as growth_max,
+        MIN(sig_opportunity_score) as opp_min, MAX(sig_opportunity_score) as opp_max,
+        MIN(acs_population) as pop_min, MAX(acs_population) as pop_max,
+        MIN(biz_density_per_1k) as density_min, MAX(biz_density_per_1k) as density_max,
+        MIN(acs_owner_occ_pct) as own_min, MAX(acs_owner_occ_pct) as own_max,
+        MIN(acs_median_age) as age_min, MAX(acs_median_age) as age_max
+      FROM zip_signals
+      WHERE fdot_max_aadt IS NOT NULL
+    `);
+    const r = (Array.isArray(rows) && rows[0]) ? rows[0] : {};
+    _statewideBoundsCache = {
+      aadt:        { min: Number(r.aadt_min) || 0,    max: Number(r.aadt_max) || 100000 },
+      hhi:         { min: Number(r.hhi_min) || 20000, max: Number(r.hhi_max) || 200000 },
+      daytime_pop: { min: 0,                          max: (Number(r.lodes_max) || 0) + (Number(r.pop_max) || 0) || 200000 },
+      food_gap:    { min: 0,                          max: 100 },
+      growth:      { min: Number(r.growth_min) || 0,  max: Number(r.growth_max) || 100 },
+      opportunity: { min: Number(r.opp_min) || 0,     max: Number(r.opp_max) || 100 },
+      population:  { min: Number(r.pop_min) || 0,     max: Number(r.pop_max) || 500000 },
+      owner_occ:   { min: Number(r.own_min) || 0,     max: Number(r.own_max) || 100 },
+      age_index:   { min: Number(r.age_min) || 25,    max: Number(r.age_max) || 65 },
+    };
+    _statewideBoundsAt = now;
+    return _statewideBoundsCache;
+  } catch (e) {
+    console.warn('[localIntelAgent] statewide bounds load failed:', e.message);
+    return {
+      aadt:        { min: 0, max: 100000 },
+      hhi:         { min: 20000, max: 200000 },
+      daytime_pop: { min: 0, max: 200000 },
+      food_gap:    { min: 0, max: 100 },
+      growth:      { min: 0, max: 100 },
+      opportunity: { min: 0, max: 100 },
+      population:  { min: 0, max: 500000 },
+      owner_occ:   { min: 0, max: 100 },
+      age_index:   { min: 25, max: 65 },
+    };
+  }
+}
 const apiKeyMiddleware = createApiKeyMiddleware(db);
 
 // B16 — fire-and-forget SMS query history. Only logs for Twilio channel
@@ -9779,101 +9836,35 @@ router.post('/ceo-query', express.json(), async (req, res) => {
             `SELECT zip, acs_median_hhi, acs_population, acs_owner_occ_pct,
                     acs_college_pct, acs_median_age, acs_poverty_pct,
                     fred_unemployment_rate, sig_growth_score, sig_opportunity_score,
-                    sig_market_maturity, osm_biz_count, zbp_total_establishments,
-                    bps_total_units_annual, qcew_avg_weekly_wages,
-                    fdot_max_aadt, fdot_avg_aadt, fdot_top_road
+                    sig_risk_score, sig_market_maturity, osm_biz_count,
+                    zbp_total_establishments, bps_total_units_annual, qcew_avg_weekly_wages,
+                    fdot_max_aadt, fdot_avg_aadt, fdot_top_road,
+                    lodes_jobs_here, biz_density_per_1k,
+                    osm_road_class, osm_access_score, osm_fast_food_count
                FROM zip_signals WHERE zip = ANY($1)`,
             [countyZips]
           ).catch(() => []);
           const rankRows = Array.isArray(rankSigRows) ? rankSigRows : [];
 
-          // Concept-specific scoring weights (mirrors county chat scoring guide)
-          const Q2 = question.toLowerCase();
-          let scoreZip;
-          if (['smoothie','juice','qsr','fast casual','coffee','cafe','sandwich','pizza','taco','burger','fast food','wendy','mcdonald','chick-fil','subway','chipotle'].some(k => Q2.includes(k))) {
-            // QSR weights: HHI + growth + opportunity + population + AADT road traffic
-            scoreZip = (s) => {
-              let sc = 0;
-              const hhi   = Number(s.acs_median_hhi || 0);
-              const gr    = Number(s.sig_growth_score || 0);
-              const op    = Number(s.sig_opportunity_score || 0);
-              const pop   = Number(s.acs_population || 0);
-              const col   = Number(s.acs_college_pct || 0);
-              const unemp = Number(s.fred_unemployment_rate || 99);
-              const aadt  = Number(s.fdot_max_aadt || 0);
-              const biz   = Number(s.osm_biz_count || s.zbp_total_establishments || 0);
-              if (hhi >= 100000) sc += 35; else if (hhi >= 80000) sc += 25; else if (hhi >= 60000) sc += 15;
-              if (gr  >= 70) sc += 20; else if (gr >= 50) sc += 10;
-              if (op  >= 70) sc += 20; else if (op >= 50) sc += 10;
-              if (pop >= 20000) sc += 10; else if (pop >= 10000) sc += 5;
-              if (col >= 40) sc += 5;
-              if (unemp <= 4) sc += 5;
-              // Road traffic: FDOT AADT when available, fall back to business density proxy
-              if (aadt > 0) {
-                if (aadt >= 80000) sc += 10;      // major corridor (I-95/US-1 level)
-                else if (aadt >= 40000) sc += 7;  // arterial
-                else if (aadt >= 20000) sc += 4;  // collector
-                else if (aadt >= 5000)  sc += 2;  // local road
-              } else {
-                if (biz >= 500) sc += 5; else if (biz >= 200) sc += 3;
-              }
-              const trafficLabel = aadt > 0
-                ? `AADT ${Math.round(aadt/1000)}k${s.fdot_top_road ? ' (' + s.fdot_top_road.slice(0,40) + ')' : ''}`
-                : biz >= 200 ? `${biz} biz (density proxy)` : null;
-              const reason = [
-                hhi >= 100000 ? `HHI $${Math.round(hhi/1000)}k (affluent QSR market)` : hhi >= 80000 ? `HHI $${Math.round(hhi/1000)}k (solid QSR income)` : `HHI $${Math.round(hhi/1000)}k`,
-                gr >= 70 ? `growth ${gr}/100` : null,
-                op >= 70 ? `gap opportunity ${op}/100` : null,
-                pop >= 20000 ? `pop ${Math.round(pop/1000)}k` : null,
-                trafficLabel,
-              ].filter(Boolean).slice(0, 4).join(', ');
-              return { score: Math.min(sc, 100), reason };
-            };
-          } else if (['steakhouse','steak','fine dining','upscale','tasting menu'].some(k => Q2.includes(k))) {
-            scoreZip = (s) => {
-              let sc = 0;
-              const hhi = Number(s.acs_median_hhi || 0);
-              const gr  = Number(s.sig_growth_score || 0);
-              const op  = Number(s.sig_opportunity_score || 0);
-              const own = Number(s.acs_owner_occ_pct || 0);
-              const age = Number(s.acs_median_age || 0);
-              const col = Number(s.acs_college_pct || 0);
-              if (hhi >= 130000) sc += 40; else if (hhi >= 100000) sc += 30; else if (hhi >= 80000) sc += 15;
-              if (own >= 60) sc += 15;
-              if (gr  >= 70) sc += 15;
-              if (op  >= 70) sc += 15;
-              if (age >= 38) sc += 10;
-              if (col >= 50) sc += 5;
-              // Fine dining: low-traffic is fine, but high-traffic corridors with right demographics are better
-              const aadt = Number(s.fdot_max_aadt || 0);
-              if (aadt >= 40000) sc += 5; else if (aadt >= 15000) sc += 2;
-              const reason = [
-                `HHI $${Math.round(hhi/1000)}k`,
-                own >= 60 ? `${own.toFixed(0)}% owner-occupied` : null,
-                gr >= 70  ? `growth ${gr}/100` : null,
-                aadt >= 15000 ? `AADT ${Math.round(aadt/1000)}k road` : null,
-              ].filter(Boolean).join(', ');
-              return { score: Math.min(sc, 100), reason };
-            };
-          } else {
-            // General: growth 35% + opportunity 35% + HHI 30%
-            scoreZip = (s) => {
-              const hhi = Number(s.acs_median_hhi || 0);
-              const gr  = Number(s.sig_growth_score || 0);
-              const op  = Number(s.sig_opportunity_score || 0);
-              const hhiPts = Math.min(30, Math.max(0, ((hhi - 50000) / 100000) * 30));
-              const sc = Math.round(gr * 0.35 + op * 0.35 + hhiPts);
-              return { score: Math.min(sc, 100), reason: `growth ${gr}/100, opportunity ${op}/100, HHI $${Math.round(hhi/1000)}k` };
-            };
-          }
+          // B62: route this question through the unified scoring engine.
+          const conceptKey = detectConcept(question);
+          const profile = CONCEPT_PROFILES[conceptKey] || CONCEPT_PROFILES.GENERAL;
+          const bounds = await getStatewideBounds();
 
           const scored = rankRows
             .map(s => {
-              const { score, reason } = scoreZip(s);
+              const result = scoreZipForConcept(s, profile, bounds);
+              const top = (result.factor_breakdown || []).slice().sort((a,b) => b.points - a.points).slice(0,3);
+              const reason = result.hard_floor_triggered
+                ? `Filtered: ${result.hard_floor_reason}`
+                : top.map(f => `${f.label} ${f.points}pts`).join(', ') || 'no factors';
               return {
                 zip:      s.zip,
-                score,
+                score:    result.total_score,
                 reason,
+                factor_breakdown: result.factor_breakdown,
+                hard_floor_triggered: result.hard_floor_triggered,
+                hard_floor_reason:    result.hard_floor_reason,
                 hhi:      s.acs_median_hhi ? `$${Math.round(Number(s.acs_median_hhi)/1000)}k` : null,
                 pop:      s.acs_population ? Math.round(Number(s.acs_population)/1000) + 'k' : null,
                 growth:   s.sig_growth_score,
@@ -9888,18 +9879,19 @@ router.post('/ceo-query', express.json(), async (req, res) => {
           if (scored.length > 0) {
             county_ranking = {
               county:       zipCounty,
-              concept:      category,
+              concept:      conceptKey,
+              concept_name: profile.name,
               zips_scored:  rankRows.length,
               zips_in_county: countyZips.length,
-              note:         'Road traffic: FDOT AADT 2025 (fdot_max_aadt). Falls back to commercial business density if AADT not yet populated for this ZIP.',  // fdotWorker populates live
+              note:         'B62 unified scoring: min-max / Gaussian / sigmoid normalization against statewide bounds, weighted per concept profile. Hard floors filter unfit ZIPs.',
               rankings:     scored,
             };
             // Prepend ranking to answer
             const top3 = scored.slice(0, 3).map((z, i) =>
               `#${i+1} ${z.zip} (score ${z.score}/100 — ${z.reason})`
             ).join('; ');
-            answer = `Top ZIPs in ${zipCounty} County for this concept: ${top3}. ${answer}`;
-            verdict = `${zipCounty} County ranked — see county_ranking for full list`;
+            answer = `Top ZIPs in ${zipCounty} County for ${profile.name}: ${top3}. ${answer}`;
+            verdict = `${zipCounty} County ranked for ${profile.name} — see county_ranking + factor_breakdown for transparent scoring`;
             confidence = 'high';
           }
         }
@@ -9913,6 +9905,8 @@ router.post('/ceo-query', express.json(), async (req, res) => {
     zip,
     question,
     category,
+    concept_detected: county_ranking?.concept || detectConcept(question),
+    concept_name: county_ranking?.concept_name || (CONCEPT_PROFILES[detectConcept(question)] || CONCEPT_PROFILES.GENERAL).name,
     verdict,
     answer,
     supporting_data,
@@ -10652,12 +10646,16 @@ router.post('/ceo-county-query', express.json(), async (req, res) => {
   const getCityForZip = (zip) => zipCityMap[zip] || zip;
 
   try {
+    // B62: pull the full set of fields the unified scoring engine needs.
     const sigRows = await db.query(
       `SELECT zip, acs_population, acs_median_hhi, acs_owner_occ_pct,
-              irs_mig_net_returns, irs_mig_net_agi,
+              acs_median_age, irs_mig_net_returns, irs_mig_net_agi,
               fred_unemployment_rate, qcew_avg_weekly_wages,
               sig_growth_score, sig_opportunity_score, sig_risk_score,
-              sig_market_maturity, sig_income_tier
+              sig_market_maturity, sig_income_tier,
+              fdot_max_aadt, fdot_top_road,
+              lodes_jobs_here, biz_density_per_1k,
+              osm_road_class, osm_access_score, osm_fast_food_count
        FROM zip_signals WHERE zip = ANY($1)`,
       [zips]
     );
@@ -10669,52 +10667,35 @@ router.post('/ceo-county-query', express.json(), async (req, res) => {
     const bizMap = {};
     for (const r of bizRows) bizMap[r.zip] = r.biz_count;
 
-    const q = question.toLowerCase();
-
-    const isQsr = ['smoothie','juice','qsr','fast casual','coffee','cafe','sandwich','pizza','taco','burger','fast food'].some(k => q.includes(k));
-    const isUpscale = ['steakhouse','steak','fine dining','upscale','premium'].some(k => q.includes(k));
-    const isCasual = ['casual','bistro','bar','grill','tavern','pub'].some(k => q.includes(k));
-    const isRestaurant = isQsr || isUpscale || isCasual || ['restaurant','dining','food','concept','open a'].some(k => q.includes(k));
-    const isRetail = ['retail','shop','store','boutique'].some(k => q.includes(k));
-    const isHealthcare = ['clinic','urgent care','medical','healthcare','health','doctor'].some(k => q.includes(k));
-    const isLease = ['lease','rent','sqft','space'].some(k => q.includes(k));
+    // B62: detect concept + load statewide bounds once for all ZIPs in this county.
+    const conceptKey = detectConcept(question);
+    const profile = CONCEPT_PROFILES[conceptKey] || CONCEPT_PROFILES.GENERAL;
+    const bounds = await getStatewideBounds();
 
     const scored = sigRows.map(sig => {
-      const hhi = sig.acs_median_hhi || 0;
-      const growth = sig.sig_growth_score || 0;
-      const opp = sig.sig_opportunity_score || 0;
-      const bizCount = bizMap[sig.zip] || 0;
-      const pop = sig.acs_population || 0;
-      let score = 0;
-      let reason = '';
-
-      if (isQsr) {
-        score = Math.round((hhi / 150000) * 40 + (growth / 100) * 35 + (opp / 100) * 25);
-        reason = `HHI $${(hhi||0).toLocaleString()}, growth ${growth}/100, opportunity ${opp}/100`;
-      } else if (isUpscale) {
-        score = Math.round((hhi / 150000) * 50 + (growth / 100) * 25 + (opp / 100) * 25);
-        reason = `HHI $${(hhi||0).toLocaleString()}, growth ${growth}/100`;
-      } else if (isHealthcare) {
-        score = Math.round((pop / 50000) * 40 + (opp / 100) * 40 + (growth / 100) * 20);
-        reason = `Population ${(pop||0).toLocaleString()}, opportunity ${opp}/100`;
-      } else if (isLease) {
-        score = Math.round((hhi / 150000) * 50 + (growth / 100) * 30 + (opp / 100) * 20);
-        reason = `HHI $${(hhi||0).toLocaleString()}, growth ${growth}/100`;
-      } else {
-        score = Math.round((growth / 100) * 40 + (opp / 100) * 35 + (hhi / 150000) * 25);
-        reason = `Growth ${growth}/100, opportunity ${opp}/100, HHI $${(hhi||0).toLocaleString()}`;
-      }
+      const result = scoreZipForConcept(sig, profile, bounds);
+      const hhi = Number(sig.acs_median_hhi || 0);
+      const growth = Number(sig.sig_growth_score || 0);
+      const opp = Number(sig.sig_opportunity_score || 0);
+      const pop = Number(sig.acs_population || 0);
+      const top = (result.factor_breakdown || []).slice().sort((a,b) => b.points - a.points).slice(0,3);
+      const reason = result.hard_floor_triggered
+        ? `Filtered: ${result.hard_floor_reason}`
+        : top.map(f => `${f.label} ${f.points}pts`).join(', ') || 'no factors';
 
       return {
         zip: sig.zip,
         city: getCityForZip(sig.zip),
-        score: Math.min(100, Math.max(0, score)),
+        score: result.total_score,
         reason,
+        factor_breakdown: result.factor_breakdown,
+        hard_floor_triggered: result.hard_floor_triggered,
+        hard_floor_reason: result.hard_floor_reason,
         hhi,
         growth,
         opp,
         pop,
-        biz_count: bizCount
+        biz_count: bizMap[sig.zip] || 0,
       };
     });
 
@@ -10722,16 +10703,16 @@ router.post('/ceo-county-query', express.json(), async (req, res) => {
 
     const best = topZips[0];
     let verdict = '';
-    if (best) {
-      if (isQsr) verdict = `${best.zip} (${best.city}) is the strongest match for a QSR concept in ${county} County — income profile and growth momentum align.`;
-      else if (isUpscale) verdict = `${best.zip} (${best.city}) leads for upscale dining in ${county} County with the highest income density.`;
-      else verdict = `${best.zip} (${best.city}) ranks highest in ${county} County for this concept.`;
+    if (best && best.score > 0) {
+      if (conceptKey === 'QSR_DRIVE_BY') verdict = `${best.zip} (${best.city}) is the strongest match for a QSR/drive-by concept in ${county} County — see factor_breakdown for the contributing signals.`;
+      else if (conceptKey === 'DESTINATION_DINING') verdict = `${best.zip} (${best.city}) leads for destination dining in ${county} County.`;
+      else verdict = `${best.zip} (${best.city}) ranks highest in ${county} County for this concept (${profile.name}).`;
     } else {
       verdict = `Insufficient data to rank ZIPs in ${county} County for this question.`;
     }
 
     const answer = topZips.length
-      ? `Top ZIPs in ${county} County ranked by fit: ${topZips.map((z,i) => `#${i+1} ${z.zip} ${z.city} (score ${z.score}/100 — ${z.reason})`).join('; ')}.`
+      ? `Top ZIPs in ${county} County ranked by fit (${profile.name}): ${topZips.map((z,i) => `#${i+1} ${z.zip} ${z.city} (score ${z.score}/100 — ${z.reason})`).join('; ')}.`
       : `No zip_signals data found for ${county} County ZIPs.`;
 
     const withData = sigRows.length;
@@ -10740,9 +10721,19 @@ router.post('/ceo-county-query', express.json(), async (req, res) => {
     return res.json({
       county,
       question,
+      concept_detected: conceptKey,
+      concept_name: profile.name,
       verdict,
       answer,
-      top_zips: topZips.map(z => ({ zip: z.zip, city: z.city, score: z.score, reason: z.reason })),
+      top_zips: topZips.map(z => ({
+        zip: z.zip,
+        city: z.city,
+        score: z.score,
+        reason: z.reason,
+        factor_breakdown: z.factor_breakdown,
+        hard_floor_triggered: z.hard_floor_triggered,
+        hard_floor_reason: z.hard_floor_reason,
+      })),
       confidence,
       zips_with_data: withData,
       total_zips_in_county: zips.length

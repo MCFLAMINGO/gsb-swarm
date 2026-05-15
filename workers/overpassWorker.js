@@ -188,6 +188,75 @@ function buildQuery(bbox) {
   return `[out:json][timeout:30];\n(\n${tagUnion}\n);\nout center 400;`;
 }
 
+// B62: count amenity=fast_food nodes for QSR competitor density signal.
+function buildFastFoodQuery(bbox) {
+  const { minLat, maxLat, minLon, maxLon } = bbox;
+  const bb = `${minLat},${minLon},${maxLat},${maxLon}`;
+  return `[out:json][timeout:25];\nnode["amenity"="fast_food"](${bb});\nout count;`;
+}
+
+// B62: pull dominant highway tag in ZIP bbox for site accessibility scoring.
+function buildRoadClassQuery(bbox) {
+  const { minLat, maxLat, minLon, maxLon } = bbox;
+  const bb = `${minLat},${minLon},${maxLat},${maxLon}`;
+  return `[out:json][timeout:25];\nway["highway"~"^(trunk|primary|secondary|tertiary|residential)$"](${bb});\nout tags;`;
+}
+
+const ROAD_CLASS_TIER = { trunk: 5, primary: 4, secondary: 3, tertiary: 2, residential: 1 };
+const ROAD_CLASS_BASE = { trunk: 95, primary: 80, secondary: 60, tertiary: 40, residential: 20 };
+
+function deriveRoadClassMetrics(elements) {
+  const ways = (elements || []).filter(el => el.tags && el.tags.highway);
+  if (!ways.length) return { road_class: null, access_score: 10 };
+
+  const counts = {};
+  let onewayHit = false;
+  let multiLaneHit = false;
+  for (const w of ways) {
+    const cls = w.tags.highway;
+    if (ROAD_CLASS_TIER[cls]) counts[cls] = (counts[cls] || 0) + 1;
+    if (w.tags.oneway === 'yes') onewayHit = true;
+    const lanes = parseInt(w.tags.lanes, 10);
+    if (!isNaN(lanes) && lanes >= 4) multiLaneHit = true;
+  }
+  const present = Object.keys(counts);
+  if (!present.length) return { road_class: null, access_score: 10 };
+
+  // Pick highest tier present (not just most common)
+  const dominant = present.sort((a, b) => ROAD_CLASS_TIER[b] - ROAD_CLASS_TIER[a])[0];
+  let score = ROAD_CLASS_BASE[dominant] || 10;
+  if (onewayHit) score -= 10;
+  if (multiLaneHit) score += 10;
+  score = Math.max(0, Math.min(100, score));
+  return { road_class: dominant, access_score: score };
+}
+
+async function fetchSiteAccessSignals(zip, bbox) {
+  let osm_fast_food_count = null;
+  let osm_road_class = null;
+  let osm_access_score = null;
+  try {
+    const ffRes = await overpassPost(buildFastFoodQuery(bbox));
+    const cnt = Array.isArray(ffRes.elements) && ffRes.elements[0]
+      ? Number(ffRes.elements[0].tags?.total ?? ffRes.elements[0].count ?? 0)
+      : 0;
+    osm_fast_food_count = isNaN(cnt) ? 0 : cnt;
+  } catch (e) {
+    console.warn(`[overpass] ${zip} fast_food count failed: ${e.message}`);
+  }
+  // Stay inside Overpass rate budget — small delay between sub-queries.
+  await sleep(RATE_MS);
+  try {
+    const rcRes = await overpassPost(buildRoadClassQuery(bbox));
+    const m = deriveRoadClassMetrics(rcRes.elements);
+    osm_road_class = m.road_class;
+    osm_access_score = m.access_score;
+  } catch (e) {
+    console.warn(`[overpass] ${zip} road_class fetch failed: ${e.message}`);
+  }
+  return { osm_fast_food_count, osm_road_class, osm_access_score };
+}
+
 // ── HTTP POST to Overpass ─────────────────────────────────────────────────────
 function overpassPost(query) {
   return new Promise((resolve, reject) => {
@@ -278,7 +347,21 @@ async function processZip(zip, freshZipSet) {
   // Promote POIs to businesses table — this is the key Postgres-first change
   await promoteOsmToBusinesses(zip, pois);
 
-  console.log(`[overpass] ${zip} → ${pois.length} named POIs`);
+  // B62: fetch fast_food competitor count + dominant road class for site scoring.
+  // Sequential after main fetch so we respect Overpass rate budget.
+  await sleep(RATE_MS);
+  const siteSig = await fetchSiteAccessSignals(zip, bbox);
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    const { upsertZipSignals } = require('../lib/pgStore');
+    upsertZipSignals(zip, {
+      osm_fast_food_count: siteSig.osm_fast_food_count,
+      osm_road_class:      siteSig.osm_road_class,
+      osm_access_score:    siteSig.osm_access_score,
+      osm_updated_at:      new Date(),
+    }).catch(e => console.warn(`[overpass] ${zip} site signals write failed: ${e.message}`));
+  }
+
+  console.log(`[overpass] ${zip} → ${pois.length} named POIs, fast_food=${siteSig.osm_fast_food_count}, road=${siteSig.osm_road_class}, access=${siteSig.osm_access_score}`);
   return { zip, count: pois.length };
 }
 
