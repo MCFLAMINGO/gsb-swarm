@@ -9748,7 +9748,7 @@ router.post('/chat', async (req, res) => {
     if (isCountyQuery && /\b(best|where|which|top|compare|recommend|highest|lowest|most|least)\b/i.test(question)) {
       const countyZips = placeResult.countyZips;
       const sigRowsCounty = await db.query(
-        `SELECT zip, acs_population, acs_median_hhi, acs_owner_occupied_pct,
+        `SELECT zip, acs_population, acs_median_hhi, acs_owner_occ_pct,
                 fred_unemployment_rate, qcew_avg_weekly_wages,
                 sig_growth_score, sig_opportunity_score, sig_risk_score,
                 sig_market_maturity, sig_income_tier
@@ -9867,7 +9867,7 @@ Rank the ZIPs by fit for the concept described. If data is sparse, say so clearl
     const keySignals = [
       ['acs_population',         sig.acs_population],
       ['acs_median_hhi',         sig.acs_median_hhi],
-      ['irs_net_returns',        sig.irs_net_returns],
+      ['irs_mig_net_returns',    sig.irs_mig_net_returns],
       ['fred_unemployment_rate', sig.fred_unemployment_rate],
       ['qwi_avg_monthly_earn',   sig.qwi_avg_monthly_earn],
       ['qcew_avg_weekly_wages',  sig.qcew_avg_weekly_wages],
@@ -9900,7 +9900,7 @@ Rank the ZIPs by fit for the concept described. If data is sparse, say so clearl
     if (sig.acs_population != null)         ctxLines.push(`Population (ACS): ${sig.acs_population}`);
     if (sig.acs_median_hhi != null)         ctxLines.push(`Median household income (ACS): $${sig.acs_median_hhi}`);
     if (sig.bea_per_capita_income != null)  ctxLines.push(`Per-capita income (BEA): $${sig.bea_per_capita_income}`);
-    if (sig.irs_net_returns != null)        ctxLines.push(`Net migration returns (IRS): ${sig.irs_net_returns}`);
+    if (sig.irs_mig_net_returns != null)   ctxLines.push(`Net migration returns (IRS): ${sig.irs_mig_net_returns}`);
     if (sig.fred_unemployment_rate != null) ctxLines.push(`Unemployment rate (FRED): ${sig.fred_unemployment_rate}%`);
     if (sig.qwi_avg_monthly_earn != null)   ctxLines.push(`Avg monthly earnings (QWI): $${sig.qwi_avg_monthly_earn}`);
     if (sig.qcew_avg_weekly_wages != null)  ctxLines.push(`Avg weekly wages (QCEW): $${sig.qcew_avg_weekly_wages}`);
@@ -10206,7 +10206,7 @@ router.post('/ceo-county-query', express.json(), async (req, res) => {
 
   try {
     const sigRows = await db.query(
-      `SELECT zip, acs_population, acs_median_hhi, acs_owner_occupied_pct,
+      `SELECT zip, acs_population, acs_median_hhi, acs_owner_occ_pct,
               irs_mig_net_returns, irs_mig_net_agi,
               fred_unemployment_rate, qcew_avg_weekly_wages,
               sig_growth_score, sig_opportunity_score, sig_risk_score,
