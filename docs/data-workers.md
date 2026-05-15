@@ -59,7 +59,9 @@ Dynamic column upsert: any subset of zip_signals columns passed as object. Build
 
 #### Worker Migrations (all additive — no structural changes to existing logic)
 Every worker now ALSO writes to zip_signals immediately after its existing write:
-- `acsWorker.js` → `acs_population`, `acs_households`, `acs_owner_occ_pct`, `acs_vintage`, `acs_updated_at`
+- `acsWorker.js` → `acs_population`, `acs_households`, `acs_owner_occ_pct`, `acs_median_hhi` (B19013), `acs_median_age` (B01002), `acs_college_pct` (B15003), `acs_poverty_pct` (B17001), `acs_vacancy_pct` (B25002), `acs_foreign_born_pct` (B05001), `acs_family_pct` (B11001), `acs_commute_time_min` (B08135/B08101), `acs_vintage`, `acs_updated_at`
+  - **B54 fix:** Previously only wrote 5 fields — `acs_median_hhi` was always null causing all county scoring to return HHI $0. Now fetches B19013 directly and writes all 8 demographic signals in the same `upsertZipSignals` call.
+  - **ZIP discovery:** Now reads from `fl_zip_geo` (migration 029, 1,473 FL ZIPs). Falls back to `businesses` table ZIPs if fl_zip_geo not ready.
 - `irsSoiWorker.js` → `irs_agi_median`, `irs_returns`, `irs_wage_share`, `irs_updated_at`
 - `censusLayerWorker.js` → `zbp_total_establishments`, `zbp_total_employees`, `zbp_sector_json` (in ingestZBP) + `cbp_total_establishments`, `cbp_total_employees`, `cbp_total_payroll_k`, `cbp_dominant_sector` (in ingestCBP)
 - `overpassWorker.js` → `osm_biz_count`, `osm_with_phone_pct`, `osm_with_website_pct`, `osm_with_hours_pct`, `osm_food_count`, `osm_retail_count`, `osm_worship_count`, `osm_education_count`, `osm_healthcare_count` — computed from POIs array at write time

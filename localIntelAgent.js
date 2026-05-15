@@ -192,7 +192,24 @@ function maybeLogSms(req, { customerId, query, zip, intent, resolvedVia, respons
 }
 
 // Phase 2 — multi-ZIP fanout when caller doesn't pin a ZIP
-const TARGET_ZIPS = ['32082','32081','32250','32266','32233','32259','32034'];
+// Seeded from fl_zip_geo on startup (migration 029) — all FL ZIPs, not just NE FL
+// Falls back to NE FL bootstrap set if DB not ready at startup
+let TARGET_ZIPS = ['32082','32081','32250','32266','32233','32259','32034'];
+
+(async () => {
+  try {
+    const { getAllZipsFromGeo } = require('./lib/pgStore');
+    const zips = await getAllZipsFromGeo();
+    if (zips && zips.length > 0) {
+      TARGET_ZIPS = zips;
+      console.log(`[localIntelAgent] TARGET_ZIPS loaded from fl_zip_geo: ${zips.length} FL ZIPs`);
+    } else {
+      console.warn('[localIntelAgent] fl_zip_geo empty or not ready — using NE FL bootstrap ZIPs');
+    }
+  } catch (e) {
+    console.warn('[localIntelAgent] TARGET_ZIPS DB load failed, using bootstrap:', e.message);
+  }
+})();
 
 // Step 3 — fire-and-forget write to resolution_history. Never blocks the
 // response, never throws — failures log only. Call from any path that has

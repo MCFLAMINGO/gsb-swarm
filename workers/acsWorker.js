@@ -28,14 +28,26 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const ACS_DIR  = path.join(DATA_DIR, 'acs');
 const ZIPS_DIR = path.join(DATA_DIR, 'zips');
 
-// All ZIPs we cover — Postgres first (durable), flat file fallback for local dev
+// All ZIPs we cover — fl_zip_geo is the authoritative FL ZIP registry (POSTGRES IS KING)
+// Falls back to businesses table ZIPs, then flat files for local dev
 async function getAllZips() {
   if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const { getAllZipsFromGeo } = require('../lib/pgStore');
+      const zips = await getAllZipsFromGeo();
+      if (zips.length > 0) {
+        console.log(`[acsWorker] ZIP discovery: ${zips.length} FL ZIPs from fl_zip_geo`);
+        return zips;
+      }
+    } catch (e) {
+      console.warn('[acsWorker] fl_zip_geo query failed, falling back to businesses table:', e.message);
+    }
+    // Secondary fallback: businesses table (only ZIPs with known businesses)
     try {
       const { getDistinctZips } = require('../lib/pgStore');
       const zips = await getDistinctZips();
       if (zips.length > 0) {
-        console.log(`[acsWorker] ZIP discovery: ${zips.length} ZIPs from Postgres`);
+        console.log(`[acsWorker] ZIP discovery: ${zips.length} ZIPs from businesses table (fl_zip_geo not ready)`);
         return zips;
       }
     } catch (e) {
@@ -139,6 +151,32 @@ async function processZip(zip) {
   // B01003: Total population
   const pop = await fetchACS(zip, ['B01003_001E']);
 
+  // B19013: Median household income (the number everyone wants)
+  const medHhi = await fetchACS(zip, ['B19013_001E']);
+
+  // B01002: Median age
+  const medAge = await fetchACS(zip, ['B01002_001E']);
+
+  // B15003: Educational attainment — B15003_022E = bachelor's, _023E = master's, _024E = prof, _025E = doctorate
+  // B15003_001E = total 25+ population
+  const edu = await fetchACS(zip, ['B15003_001E','B15003_022E','B15003_023E','B15003_024E','B15003_025E']);
+
+  // B17001: Poverty status — B17001_002E = below poverty, B17001_001E = total
+  const poverty = await fetchACS(zip, ['B17001_001E','B17001_002E']);
+
+  // B25002: Occupancy status — B25002_001E = total units, B25002_003E = vacant
+  const vacancy = await fetchACS(zip, ['B25002_001E','B25002_003E']);
+
+  // B05001: Nativity — B05001_001E = total, B05001_006E = not a US citizen (foreign-born proxy)
+  const foreign = await fetchACS(zip, ['B05001_001E','B05001_006E']);
+
+  // B11001: Family households — B11001_002E = family, B11001_001E = total (already fetched above)
+  const family = await fetchACS(zip, ['B11001_001E','B11001_002E']);
+
+  // B08303: Travel time to work — B08303_001E = total workers, compute weighted avg bucket midpoints
+  // Simpler: use B08135_001E = aggregate travel time, B08101_001E = total workers for commute
+  const commute2 = await fetchACS(zip, ['B08135_001E','B08101_001E']);
+
   // ── Compute derived fields ───────────────────────────────────────────────
   const totalWorkers = toN(commute?.B08301_001E);
   const wfhWorkers   = toN(commute?.B08301_021E);
@@ -167,6 +205,44 @@ async function processZip(zip) {
   const total_households = toN(hh?.B11001_001E);
   const population       = toN(pop?.B01003_001E);
 
+  // Median HHI (B19013) — the primary income signal
+  const median_hhi_raw = toN(medHhi?.B19013_001E);
+  const median_hhi = median_hhi_raw > 0 ? median_hhi_raw : null;
+
+  // Median age (B01002)
+  const median_age = toN(medAge?.B01002_001E) || null;
+
+  // College attainment — % of 25+ with bachelor's or higher
+  const totalEdu   = toN(edu?.B15003_001E);
+  const collegeUp  = ['B15003_022E','B15003_023E','B15003_024E','B15003_025E']
+                       .reduce((s,k) => s + toN(edu?.[k]), 0);
+  const college_pct = totalEdu > 0 ? Math.round((collegeUp / totalEdu) * 100 * 10) / 10 : null;
+
+  // Poverty rate
+  const totalPov   = toN(poverty?.B17001_001E);
+  const belowPov   = toN(poverty?.B17001_002E);
+  const poverty_pct = totalPov > 0 ? Math.round((belowPov / totalPov) * 100 * 10) / 10 : null;
+
+  // Vacancy rate
+  const totalUnits  = toN(vacancy?.B25002_001E);
+  const vacantUnits = toN(vacancy?.B25002_003E);
+  const vacancy_pct = totalUnits > 0 ? Math.round((vacantUnits / totalUnits) * 100 * 10) / 10 : null;
+
+  // Foreign-born pct
+  const totalNat    = toN(foreign?.B05001_001E);
+  const foreignBorn = toN(foreign?.B05001_006E);
+  const foreign_born_pct = totalNat > 0 ? Math.round((foreignBorn / totalNat) * 100 * 10) / 10 : null;
+
+  // Family household pct
+  const totalHhFam  = toN(family?.B11001_001E);
+  const familyHh    = toN(family?.B11001_002E);
+  const family_pct  = totalHhFam > 0 ? Math.round((familyHh / totalHhFam) * 100 * 10) / 10 : null;
+
+  // Average commute time (minutes) — aggregate minutes / total workers
+  const aggCommute   = toN(commute2?.B08135_001E);
+  const commuteWrkrs = toN(commute2?.B08101_001E);
+  const commute_time_min = commuteWrkrs > 0 ? Math.round((aggCommute / commuteWrkrs) * 10) / 10 : null;
+
   // Consumer profile heuristic
   let consumer_profile = 'mixed';
   if (affluence_pct > 55 && retiree_index < 20)      consumer_profile = 'affluent_family';
@@ -187,6 +263,15 @@ async function processZip(zip) {
     retiree_index,
     owner_occupied_pct,
     consumer_profile,
+    // B54 additions
+    median_hhi,
+    median_age,
+    college_pct,
+    poverty_pct,
+    vacancy_pct,
+    foreign_born_pct,
+    family_pct,
+    commute_time_min,
     // raw for debugging
     _raw: {
       totalWorkers, wfhWorkers,
@@ -205,6 +290,14 @@ async function processZip(zip) {
     acs_population:       result.population || null,
     acs_households:       result.total_households || null,
     acs_owner_occ_pct:    result.owner_occupied_pct || null,
+    acs_median_hhi:       result.median_hhi,
+    acs_median_age:       result.median_age,
+    acs_college_pct:      result.college_pct,
+    acs_poverty_pct:      result.poverty_pct,
+    acs_vacancy_pct:      result.vacancy_pct,
+    acs_foreign_born_pct: result.foreign_born_pct,
+    acs_family_pct:       result.family_pct,
+    acs_commute_time_min: result.commute_time_min,
     acs_vintage:          '2022 5-year',
     acs_updated_at:       new Date(),
   }).catch(() => {});

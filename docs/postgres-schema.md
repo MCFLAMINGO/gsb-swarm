@@ -91,13 +91,42 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 
 ---
 
+## Migration Index
+
+| # | File | What it does |
+|---|---|---|
+| 017 | 017_world_model_schema.sql | zip_signals (168 cols), zip_signal_catalog, zip_intelligence_view |
+| 018 | 018_*.sql | property_parcels, enrichment columns |
+| 019 | 019_*.sql | rfq_jobs, rfq_broadcasts, rfq_responses |
+| 020 | 020_*.sql | confirmed_jobs, sms_query_log |
+| 021 | 021_*.sql | call_transcripts, voice_sessions |
+| 022 | 022_*.sql | caller_identities, agent_memory |
+| 023 | 023_ensure_worker_signal_columns.sql | ALTER TABLE zip_signals ADD COLUMN IF NOT EXISTS for all acs_* columns |
+| 024 | 024_*.sql | router_learning_log, resolution_history |
+| 025 | 025_*.sql | zip_enrichment, business_tasks |
+| 026 | 026_*.sql | subscriber_accounts, chat_log |
+| 027 | 027_*.sql | subscriber_wallets, agent_memory |
+| 028 | 028_fl_place_index.sql | fl_place_index + fl_county_zips — all 67 FL counties, 150+ cities (replaces lib/flPlaceResolver.js) |
+| 029 | 029_fl_zip_geo.sql | fl_zip_geo — 1,473 FL ZIPs with county, fips, lat/lon, population, median_hhi (replaces two static data files) |
+
+### fl_zip_geo (migration 029)
+```
+fl_zip_geo — zip(PK), county, county_fips, state(default FL),
+             lat, lon, population, median_hhi,
+             created_at, updated_at
+Indexes: fl_zip_geo_county_idx, fl_zip_geo_fips_idx
+1,473 rows seeded — all FL ZIPs (951 with median_hhi, all with lat/lon + county)
+```
+
+---
+
 ## Key Tables — What Lives Where (Architecture Canon)
 
 ### Key Tables — What Lives Where
 
 | Table | What it stores | Written by | Read by |
 |---|---|---|---|
-| `zip_signals` | All macro signals (87 columns) | All data workers | CEO assess, World Model, MCP oracle |
+| `zip_signals` | All macro signals (168 columns) | All data workers | CEO assess, World Model, MCP oracle |
 | `businesses` | 205k FL businesses | OSM/YP/Sunbiz import | MCP search, RFQ routing, Twilio |
 | `business_tasks` | Task templates per business | taskSeedWorker, business owners | MCP RFQ, agent routing |
 | `intent_dead_ends` | Failed queries (0 rows — pre-traffic) | deadEndLog.js | taskSignalWorker (future) |
