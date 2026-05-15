@@ -106,7 +106,71 @@ const { classifyIntent } = require('./workers/intentRouter');
 const { dispatchTask } = require('./lib/taskDispatch');
 const { resolveBusinessAlias } = require('./lib/aliasResolver');
 const { injectShowcase } = require('./lib/showcaseBiz');
-const { resolvePlace } = require('./lib/flPlaceResolver');
+// B53: resolvePlace — FL place name → ZIP, fully from Postgres (migration 028)
+// Priority: explicit ZIP → county_alias → county → city → default 32082
+async function resolvePlace(question) {
+  const q = String(question || '').toLowerCase();
+
+  // 1. Explicit 5-digit ZIP in question
+  const zipMatch = q.match(/\b(\d{5})\b/);
+  if (zipMatch) return { zip: zipMatch[1], isCounty: false, countyKey: null, countyZips: null };
+
+  // 2. County aliases (longer phrases checked first to avoid partial matches)
+  const aliasRows = await db.query(
+    `SELECT name_normalized, primary_zip, county_key FROM fl_place_index
+     WHERE place_type = 'county_alias' ORDER BY length(name_normalized) DESC`
+  ).catch(() => []);
+  for (const row of aliasRows) {
+    if (q.includes(row.name_normalized)) {
+      const czRows = await db.query(
+        `SELECT zip FROM fl_county_zips WHERE county_key = $1 ORDER BY sort_order`,
+        [row.county_key]
+      ).catch(() => []);
+      const countyZips = czRows.map(r => r.zip);
+      return {
+        zip: row.primary_zip || '32082',
+        isCounty: true,
+        countyKey: row.county_key,
+        countyZips: countyZips.length ? countyZips : null,
+      };
+    }
+  }
+
+  // 3. County names (longer names first)
+  const countyRows = await db.query(
+    `SELECT name_normalized, primary_zip, county_key FROM fl_place_index
+     WHERE place_type = 'county' ORDER BY length(name_normalized) DESC`
+  ).catch(() => []);
+  for (const row of countyRows) {
+    if (q.includes(row.name_normalized)) {
+      const czRows = await db.query(
+        `SELECT zip FROM fl_county_zips WHERE county_key = $1 ORDER BY sort_order`,
+        [row.county_key]
+      ).catch(() => []);
+      const countyZips = czRows.map(r => r.zip);
+      return {
+        zip: row.primary_zip || '32082',
+        isCounty: true,
+        countyKey: row.county_key,
+        countyZips: countyZips.length ? countyZips : null,
+      };
+    }
+  }
+
+  // 4. City / neighborhood names (longer names first)
+  const cityRows = await db.query(
+    `SELECT name_normalized, primary_zip FROM fl_place_index
+     WHERE place_type = 'city' ORDER BY length(name_normalized) DESC`
+  ).catch(() => []);
+  for (const row of cityRows) {
+    if (q.includes(row.name_normalized)) {
+      return { zip: row.primary_zip || '32082', isCounty: false, countyKey: null, countyZips: null };
+    }
+  }
+
+  // 5. Default
+  return { zip: '32082', isCounty: false, countyKey: null, countyZips: null };
+}
 const { logDeadEnd } = require('./lib/deadEndLog');
 const { logSmsQuery } = require('./lib/smsQueryLog');
 const { appendTurn, getContext } = require('./lib/conversationThread');
@@ -9730,7 +9794,8 @@ router.post('/chat', async (req, res) => {
     const trialRemaining = isSubscriber ? null : Math.max(0, trialLimit - trialUsed);
 
     // B) Resolve place from question (FL place name → ZIP; falls back to zipIn or default)
-    const placeResult = resolvePlace(question);
+    // B53: resolvePlace is now async — queries fl_place_index + fl_county_zips in Postgres
+    const placeResult = await resolvePlace(question);
     let zip = placeResult.zip;
     if (zipIn) {
       const zipInTrim = String(zipIn).trim();
@@ -10166,43 +10231,42 @@ router.options('/create-agent-wallet', (req, res) =>
 // POST /api/local-intel/ceo-county-query
 // Body: { county, question }
 // Ranks all ZIPs in a county against a question type (QSR/upscale/healthcare/lease/general).
-const COUNTY_ZIPS = {
-  'St. Johns':  ['32082','32081','32250','32266','32259','32092','32084','32095','32080','32086'],
-  'Duval':      ['32202','32204','32205','32206','32207','32208','32209','32210','32211','32216','32217','32218','32219','32220','32221','32222','32223','32224','32225','32226','32233','32244','32246','32250','32254','32256','32257','32258','32266'],
-  'Clay':       ['32043','32065','32068','32073','32656'],
-  'Nassau':     ['32034','32046','32097'],
-  'Flagler':    ['32110','32136','32137'],
-  'Putnam':     ['32148','32177','32193'],
-};
-
-const ZIP_CITIES = {
-  '32082': 'Ponte Vedra Beach', '32081': 'Nocatee', '32250': 'Jacksonville Beach',
-  '32266': 'Neptune Beach', '32233': 'Atlantic Beach', '32259': 'St. Johns',
-  '32092': 'World Golf Village', '32084': 'St. Augustine', '32095': 'St. Augustine',
-  '32080': 'St. Augustine Beach', '32086': 'St. Augustine', '32034': 'Fernandina Beach',
-  '32046': 'Hilliard', '32097': 'Yulee', '32043': 'Green Cove Springs',
-  '32065': 'Orange Park', '32068': 'Middleburg', '32073': 'Orange Park',
-  '32202': 'Jacksonville', '32204': 'Jacksonville', '32205': 'Jacksonville',
-  '32206': 'Jacksonville', '32207': 'Jacksonville', '32208': 'Jacksonville',
-  '32209': 'Jacksonville', '32210': 'Jacksonville', '32211': 'Jacksonville',
-  '32216': 'Jacksonville', '32217': 'Jacksonville', '32218': 'Jacksonville',
-  '32219': 'Jacksonville', '32220': 'Jacksonville', '32221': 'Jacksonville',
-  '32222': 'Jacksonville', '32223': 'Jacksonville', '32224': 'Jacksonville Beach',
-  '32225': 'Jacksonville', '32226': 'Jacksonville', '32244': 'Jacksonville',
-  '32246': 'Jacksonville', '32254': 'Jacksonville', '32256': 'Jacksonville',
-  '32257': 'Jacksonville', '32258': 'Jacksonville',
-  '32110': 'Bunnell', '32136': 'Flagler Beach', '32137': 'Palm Coast',
-  '32148': 'Interlachen', '32177': 'Palatka', '32193': 'Welaka',
-};
-function getCityForZip(zip) { return ZIP_CITIES[zip] || zip; }
+// B53: COUNTY_ZIPS and ZIP_CITIES static objects removed — all lookups via Postgres fl_county_zips + fl_place_index
 
 router.post('/ceo-county-query', express.json(), async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   const { county, question } = req.body;
   if (!county || !question) return res.status(400).json({ error: 'county and question required' });
 
-  const zips = COUNTY_ZIPS[county];
-  if (!zips) return res.status(400).json({ error: `Unknown county: ${county}. Valid: ${Object.keys(COUNTY_ZIPS).join(', ')}` });
+  // Resolve county_key from display name (e.g. "St. Johns" → "st. johns")
+  const countyNorm = county.toLowerCase().replace(' county', '').trim();
+  const countyLookup = await db.query(
+    `SELECT county_key, primary_zip FROM fl_place_index
+     WHERE place_type IN ('county','county_alias') AND name_normalized = $1
+     LIMIT 1`,
+    [countyNorm]
+  ).catch(() => []);
+  const countyKey = countyLookup[0]?.county_key || countyNorm;
+
+  // Pull ZIPs for this county from Postgres
+  const zipRows = await db.query(
+    `SELECT zip FROM fl_county_zips WHERE county_key = $1 ORDER BY sort_order`,
+    [countyKey]
+  ).catch(() => []);
+  const zips = zipRows.map(r => r.zip);
+  if (!zips.length) return res.status(400).json({ error: `Unknown county: ${county}. Make sure it matches a Florida county name.` });
+
+  // City name lookup from fl_place_index for display
+  const cityLookupRows = await db.query(
+    `SELECT primary_zip, name FROM fl_place_index
+     WHERE place_type = 'city' AND primary_zip = ANY($1)`,
+    [zips]
+  ).catch(() => []);
+  const zipCityMap = {};
+  for (const r of cityLookupRows) {
+    if (!zipCityMap[r.primary_zip]) zipCityMap[r.primary_zip] = r.name;
+  }
+  const getCityForZip = (zip) => zipCityMap[zip] || zip;
 
   try {
     const sigRows = await db.query(
