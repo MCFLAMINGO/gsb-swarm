@@ -1160,6 +1160,66 @@ app.post('/api/admin/trigger-osm', (req, res) => {
   });
 });
 
+// POST /api/admin/trigger-irs-income — runs irsSoiWorker immediately
+app.post('/api/admin/trigger-irs-income', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'IRS SOI Income worker triggered — ZIP-level AGI, returns, wage share for all FL ZIPs' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/irsSoiWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[irs-income-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[irs-income-trigger] ' + d));
+      child.on('close', code => console.log('[admin] IRS SOI worker done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] irs-income trigger failed:', e.message); }
+  });
+});
+
+// POST /api/admin/trigger-sunbiz — runs sunbizWorker immediately
+app.post('/api/admin/trigger-sunbiz', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'Sunbiz worker triggered — FL DOS entity registry, active formations, dissolusions' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/sunbizWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[sunbiz-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[sunbiz-trigger] ' + d));
+      child.on('close', code => console.log('[admin] Sunbiz worker done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] sunbiz trigger failed:', e.message); }
+  });
+});
+
+// POST /api/admin/trigger-zbp — runs censusLayerWorker immediately (ZBP + CBP layers)
+app.post('/api/admin/trigger-zbp', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'Census ZBP/CBP worker triggered — ZIP + county business patterns, sector breakdown, establishment counts' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/censusLayerWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[zbp-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[zbp-trigger] ' + d));
+      child.on('close', code => console.log('[admin] ZBP worker done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] zbp trigger failed:', e.message); }
+  });
+});
+
 // GET /api/admin/worker-status — returns all worker heartbeats with last_run timestamps
 // Used by dashboard to show "last updated" next to every data node
 app.get('/api/admin/worker-status', async (req, res) => {
