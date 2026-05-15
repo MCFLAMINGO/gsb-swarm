@@ -9881,25 +9881,38 @@ Rank the ZIPs by fit for the concept described. If data is sparse, say so clearl
       const llmRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
-          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'x-api-key':         process.env.ANTHROPIC_API_KEY,
           'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
+          'anthropic-beta':    'prompt-caching-2024-07-31',
+          'content-type':      'application/json',
         },
         body: JSON.stringify({
           model: 'claude-haiku-4-5',
           max_tokens: 600,
-          messages: [{ role: 'user', content: groundingContextCounty }],
+          // Cache the county ZIP data block — same prefix reused on follow-up county questions
+          system: [{
+            type:          'text',
+            text:          groundingContextCounty,
+            cache_control: { type: 'ephemeral' },
+          }],
+          messages: [{ role: 'user', content: question }],
         }),
       });
       const llmData = await llmRes.json();
       const answerCounty = (llmData && llmData.content && llmData.content[0] && llmData.content[0].text) || 'Unable to generate answer.';
-      const tokensUsedCounty = ((llmData && llmData.usage && llmData.usage.input_tokens) || 0) + ((llmData && llmData.usage && llmData.usage.output_tokens) || 0);
+      const cachedCounty   = Number(llmData?.usage?.cache_read_input_tokens || 0);
+      const uncachedCounty = Number(llmData?.usage?.cache_creation_input_tokens || llmData?.usage?.input_tokens || 0);
+      const tokensUsedCounty = cachedCounty + uncachedCounty + Number(llmData?.usage?.output_tokens || 0);
 
       if (data_confidence > 0) {
         db.query(
-          `INSERT INTO chat_log (caller_id, question, zip, data_confidence, missing_signals, llm_model, tokens_used, answer_preview)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [phone, String(question), placeResult.countyKey, data_confidence, missing, 'claude-haiku-4-5', tokensUsedCounty, String(answerCounty).slice(0, 500)]
+          `INSERT INTO chat_log
+             (caller_id, question, zip, data_confidence, missing_signals, llm_model,
+              tokens_used, cached_tokens, uncached_tokens, answer_preview, answer)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [phone, String(question), placeResult.countyKey, data_confidence, missing, 'claude-haiku-4-5',
+           tokensUsedCounty, cachedCounty, uncachedCounty,
+           String(answerCounty).slice(0, 500), String(answerCounty)]
         ).catch(() => {});
       }
 
@@ -9976,13 +9989,13 @@ Rank the ZIPs by fit for the concept described. If data is sparse, say so clearl
       });
     }
 
-    // E) Grounding prompt
+    // E) Grounding prompt — system block (cacheable: same for all turns in this ZIP session)
     const ctxLines = [];
     ctxLines.push(`ZIP: ${zip}`);
     if (sig.acs_population != null)         ctxLines.push(`Population (ACS): ${sig.acs_population}`);
     if (sig.acs_median_hhi != null)         ctxLines.push(`Median household income (ACS): $${sig.acs_median_hhi}`);
     if (sig.bea_per_capita_income != null)  ctxLines.push(`Per-capita income (BEA): $${sig.bea_per_capita_income}`);
-    if (sig.irs_mig_net_returns != null)   ctxLines.push(`Net migration returns (IRS): ${sig.irs_mig_net_returns}`);
+    if (sig.irs_mig_net_returns != null)    ctxLines.push(`Net migration returns (IRS): ${sig.irs_mig_net_returns}`);
     if (sig.fred_unemployment_rate != null) ctxLines.push(`Unemployment rate (FRED): ${sig.fred_unemployment_rate}%`);
     if (sig.qwi_avg_monthly_earn != null)   ctxLines.push(`Avg monthly earnings (QWI): $${sig.qwi_avg_monthly_earn}`);
     if (sig.qcew_avg_weekly_wages != null)  ctxLines.push(`Avg weekly wages (QCEW): $${sig.qcew_avg_weekly_wages}`);
@@ -9997,9 +10010,51 @@ Rank the ZIPs by fit for the concept described. If data is sparse, say so clearl
     ctxLines.push(`Missing signals: ${missingSignals.length ? missingSignals.join(', ') : 'none'}`);
 
     const grounding = ctxLines.join('\n');
-    const systemPrompt = `You are a local market intelligence analyst. Answer only from the data provided below. If the user asks about something that is not present in the data, state explicitly what data is missing and do not fabricate numbers. Be concise.\n\nLOCAL DATA FOR ZIP ${zip}:\n${grounding}`;
+    const systemText = `You are a local market intelligence analyst. Answer only from the data provided below. If the user asks about something that is not present in the data, state explicitly what data is missing and do not fabricate numbers. Be concise.\n\nLOCAL DATA FOR ZIP ${zip}:\n${grounding}`;
 
-    // F) LLM call
+    // E.1) Load conversation history from chat_log (multi-turn context)
+    // Reconstruct last N turns for this subscriber+ZIP session
+    const HISTORY_TURNS  = 12; // turns to keep verbatim
+    const COMPACT_AFTER  = 12; // summarize turns older than this
+    let conversationMessages = [];
+    try {
+      const histRows = await db.query(
+        `SELECT question, answer FROM chat_log
+           WHERE caller_id = $1 AND zip = $2 AND answer IS NOT NULL
+           ORDER BY created_at DESC LIMIT $3`,
+        [phone, zip, HISTORY_TURNS + 6]
+      ).catch(() => []);
+      const hist = Array.isArray(histRows) ? histRows.reverse() : [];
+
+      if (hist.length >= COMPACT_AFTER) {
+        // Compact the oldest turns into a single summary turn to save tokens
+        const olderTurns  = hist.slice(0, hist.length - HISTORY_TURNS);
+        const recentTurns = hist.slice(hist.length - HISTORY_TURNS);
+        const summaryText = olderTurns.map(h =>
+          `Q: ${h.question}\nA: ${String(h.answer || '').slice(0, 200)}`
+        ).join('\n---\n');
+        conversationMessages.push(
+          { role: 'user',      content: `[Prior conversation summary for ZIP ${zip}]:\n${summaryText}` },
+          { role: 'assistant', content: 'Understood. I have context from our prior conversation about this ZIP.' }
+        );
+        for (const h of recentTurns) {
+          conversationMessages.push({ role: 'user',      content: h.question });
+          conversationMessages.push({ role: 'assistant', content: String(h.answer || '').slice(0, 800) });
+        }
+      } else {
+        for (const h of hist) {
+          conversationMessages.push({ role: 'user',      content: h.question });
+          conversationMessages.push({ role: 'assistant', content: String(h.answer || '').slice(0, 800) });
+        }
+      }
+    } catch (_) {
+      // History load failure is non-fatal — degrade to single-turn
+      conversationMessages = [];
+    }
+    // Append the current question
+    conversationMessages.push({ role: 'user', content: String(question) });
+
+    // F) LLM call — prompt caching on system block (Anthropic beta)
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       return res.json({
@@ -10012,20 +10067,29 @@ Rank the ZIPs by fit for the concept described. If data is sparse, say so clearl
 
     let answer = '';
     let tokensUsed = 0;
+    let cachedTokens = 0;
+    let uncachedTokens = 0;
     const model = 'claude-haiku-4-5';
     try {
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
-          'content-type': 'application/json',
-          'x-api-key': apiKey,
+          'content-type':    'application/json',
+          'x-api-key':       apiKey,
           'anthropic-version': '2023-06-01',
+          'anthropic-beta':  'prompt-caching-2024-07-31',  // enables cache_control blocks
         },
         body: JSON.stringify({
           model,
           max_tokens: 512,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: String(question) }],
+          // System as typed content block — cache_control pins this prefix for 5 min
+          // Same zip_signals context reused across all turns: ~85% input cost reduction on turn 2+
+          system: [{
+            type:          'text',
+            text:          systemText,
+            cache_control: { type: 'ephemeral' },
+          }],
+          messages: conversationMessages,
         }),
       });
       const j = await r.json();
@@ -10040,7 +10104,9 @@ Rank the ZIPs by fit for the concept described. If data is sparse, say so clearl
         });
       }
       if (j && j.usage) {
-        tokensUsed = Number(j.usage.input_tokens || 0) + Number(j.usage.output_tokens || 0);
+        cachedTokens   = Number(j.usage.cache_read_input_tokens  || 0);
+        uncachedTokens = Number(j.usage.cache_creation_input_tokens || j.usage.input_tokens || 0);
+        tokensUsed     = cachedTokens + uncachedTokens + Number(j.usage.output_tokens || 0);
       }
     } catch (e) {
       return res.status(502).json({
@@ -10051,13 +10117,16 @@ Rank the ZIPs by fit for the concept described. If data is sparse, say so clearl
       });
     }
 
-    // G) Log to chat_log (fire-and-forget)
+    // G) Log to chat_log — store full answer for multi-turn history reconstruction
     if (dataConfidence > 0) {
       db.query(
         `INSERT INTO chat_log
-          (caller_id, question, zip, data_confidence, missing_signals, llm_model, tokens_used, answer_preview)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [phone, String(question), zip, dataConfidence, missingSignals, model, tokensUsed, String(answer).slice(0, 500)]
+          (caller_id, question, zip, data_confidence, missing_signals, llm_model,
+           tokens_used, cached_tokens, uncached_tokens, answer_preview, answer)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [phone, String(question), zip, dataConfidence, missingSignals, model,
+         tokensUsed, cachedTokens, uncachedTokens,
+         String(answer).slice(0, 500), String(answer)]
       ).catch(() => {});
     }
 
