@@ -108,6 +108,10 @@ caller_identities    — phone(PK), name, email, email_pending, zip,
 | 027 | 027_*.sql | subscriber_wallets, agent_memory |
 | 028 | 028_fl_place_index.sql | fl_place_index + fl_county_zips — all 67 FL counties, 150+ cities (replaces lib/flPlaceResolver.js) |
 | 029 | 029_fl_zip_geo.sql | fl_zip_geo — 1,473 FL ZIPs with county, fips, lat/lon, population, median_hhi (replaces two static data files) |
+| 032 | 032_scoring_engine.sql | osm_fast_food_count, osm_road_class, osm_access_score, norm_* on zip_signals |
+| 033 | 033_psychographic_signals.sql | osm_golf_count, osm_arts_count, osm_worship_count, osm_fitness_count, acs_pct_bachelors_plus, acs_pct_stem_occupations, acs_median_age, psycho_index on zip_signals |
+| 034 | 034_business_signals.sql | sig_claimed_rate, sig_wallet_rate, sig_task_density, sig_closure_rate_food, sig_unmet_demand_score on zip_signals |
+| 035 | 035_claim_outreach.sql | contact_email + contact_email_source on businesses; claim_outreach table |
 
 ### fl_zip_geo (migration 029)
 ```
@@ -116,6 +120,14 @@ fl_zip_geo — zip(PK), county, county_fips, state(default FL),
              created_at, updated_at
 Indexes: fl_zip_geo_county_idx, fl_zip_geo_fips_idx
 1,473 rows seeded — all FL ZIPs (951 with median_hhi, all with lat/lon + county)
+```
+
+### claim_outreach (migration 035)
+```
+claim_outreach — id(PK), business_id(FK→businesses), channel(sms|email),
+                 sent_at, message_sid, email_id, replied(bool),
+                 reply_at, reply_body, claimed(bool), claimed_at, error
+Indexes: idx_claim_outreach_business, idx_claim_outreach_channel
 ```
 
 ---

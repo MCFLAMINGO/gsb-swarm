@@ -4034,3 +4034,100 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 **Problem:** CEO `ceo-query` returned a single-ZIP profile dump for questions like "where should I invest in a Wendy's based on road that is busiest population and money." No comparative analysis — same generic answer regardless of concept type.
 **Fix:** Comparative intent detection regex (`where should | which zip | best zip | best location | where to invest | invest in a | best area`). On match: (1) get county from `fl_zip_geo` for the queried ZIP, (2) load all county ZIPs from `fl_zip_geo`, (3) query `zip_signals` for all of them in one shot, (4) run concept-specific `scoreZip()` — QSR (Wendy's, McDonald's, coffee, fast casual) weights HHI + growth + opportunity + population + commercial density (osm_biz_count / zbp_total_establishments as traffic proxy); upscale weights HHI $130k+ + owner-occ + median age; general weights growth + opportunity + HHI proportionally. Returns top 8 ZIPs with scores and reasons. Prepends top-3 summary to answer string. Zero LLM. Note: AADT road traffic not yet in dataset — commercial density used as proxy.
 **Result:** "Where should I invest in a Wendy's" now returns county-ranked ZIPs scored by QSR concept weights. Deterministic, instant, zero API cost. FDOT AADT worker is future upgrade path for true road traffic data.
+
+### B59 — FDOT AADT Worker + Real Road Traffic in Scoring
+**Date:** 2026-05-15
+**Commit:** 588ef6d
+**Problem:** CEO query scoring for QSR concepts used `osm_biz_count / zbp_total_establishments` as a traffic proxy. No real road traffic data existed in zip_signals. "Where should a Wendy's go" couldn't answer based on actual vehicle counts.
+**Fix:** Built `workers/fdotWorker.js` — queries FDOT ArcGIS Layer 7 (Florida Traffic Online) via bbox spatial query per ZIP. Fetches AADT (Annual Average Daily Traffic) for 2025 from `https://gis.fdot.gov/arcgis/rest/services/FTO/fto_PROD/MapServer/7/query`. 8 concurrent ZIP requests, 120ms delay between batches. Writes `fdot_max_aadt`, `fdot_avg_aadt`, `fdot_top_road` to `zip_signals`. Migration 031 (`031_fdot_aadt.sql`) adds these columns. Worker registered as daemon in LOCAL_INTEL_WORKERS. Triggerable via admin endpoint `/api/local-intel/admin/trigger-worker/fdot`. `ceo-query` scoring upgraded: QSR concept now uses real `fdot_max_aadt` instead of commercial density proxy.
+**Result:** 1,473 FL ZIPs get real FDOT AADT road traffic data. QSR scoring is grounded in actual vehicle counts. No API key required — FDOT ArcGIS is public.
+
+### B59b — CEO Query Scoring Explanation (Transparent Factor Breakdown)
+**Date:** 2026-05-15
+**Commit:** 1afde9b
+**Problem:** CEO query returned scores like "32082 scores 77/100" with no explanation of why. "Are you applying arbitrary numbers I don't know" — user had no visibility into scoring logic.
+**Fix:** Added `scoring_explanation` field to `ceo-query` response. Per-factor breakdown: each factor shows its name, raw value, weight applied, and point contribution. Cited sources per factor (FDOT 2025, ACS, worldModelWorker composite, etc.). Concept type is named explicitly in the response.
+**Result:** Every score response now shows exactly why a ZIP scored the way it did — factor by factor with source attribution.
+
+### B60 — worldModelWorker All FL ZIPs
+**Date:** 2026-05-15
+**Commit:** 165d74b
+**Problem:** worldModelWorker was hardcoded to 7 NE FL ZIPs. 1,466 FL ZIPs had no sig_* scores computed. worldModelWorker was also in the disabled list — never ran as a daemon.
+**Fix:** Rewrote worldModelWorker to load all FL ZIPs from `fl_zip_geo` at startup. Removed hardcoded TARGET_ZIPS array. Removed from disabled list — enabled as daemon in LOCAL_INTEL_WORKERS boot list.
+**Result:** worldModelWorker now covers all 1,473 FL ZIPs. After trigger: 1473/1473 ZIPs written, 0 skipped. Full FL ZIP coverage for sig_growth_score, sig_opportunity_score, sig_risk_score, sig_market_maturity, sig_peer_cohort.
+
+### B61 — Input Workers → Daemon Boot List + Freshness Checks
+**Date:** 2026-05-15
+**Commit:** 9aa85fe
+**Problem:** fredWorker, beaWorker, qwiWorker had no heartbeat freshness checks — they re-fetched data on every Railway deploy regardless of data age. The 6 world model input workers (fred/bea/lodes/qwi/ces/qcew) were not in the LOCAL_INTEL_WORKERS daemon boot list.
+**Fix:** Added freshness checks to fredWorker (30d), beaWorker (365d), qwiWorker (90d) — check `worker_heartbeat` before fetching. Added all 6 input workers to LOCAL_INTEL_WORKERS daemon boot list in dashboard-server.js.
+**Result:** Workers only re-fetch when data is genuinely stale. All 6 input workers boot automatically on Railway start.
+
+### B61b — Freshness Windows Corrected to Match Real Release Cadences
+**Date:** 2026-05-15
+**Commit:** 57052b1
+**Problem:** Freshness windows were set by guess, not by actual federal data release cadences. LODES was set to 90d but releases annually. BEA was set to 90d but has an 18-month lag.
+**Fix:** Corrected all freshness windows to match actual release schedules: lodesWorker → 365d (annual Dec release), beaWorker → 365d (annual, 2yr lag), qwiWorker → 90d (quarterly), qcewWorker → 90d (quarterly), cesWorker → 30d (monthly), fredWorker → 30d (monthly).
+**Result:** Workers fetch exactly as often as new data is available — no wasted API calls, no stale-data gaps.
+
+### B62 — Unified Site Intelligence Scoring Engine (MCDA/WLC)
+**Date:** 2026-05-15
+**Commit:** d3c50aa
+**Problem:** ceo-query and ceo-county-query had duplicate, divergent scoring logic. ceo-county-query used `(hhi/150000)*40 + (growth/100)*35 + (opp/100)*25` — arbitrary weights, not concept-aware, no AADT. A Wendy's query and a steakhouse query returned the same scoring logic. No transparency into why a ZIP scored the way it did.
+**Fix:** Built complete MCDA/WLC scoring engine:
+- `migrations/032_scoring_engine.sql` — adds `osm_fast_food_count`, `osm_road_class`, `osm_access_score`, `norm_*` columns to zip_signals
+- `workers/overpassWorker.js` — new per-ZIP queries: `amenity=fast_food` competitor count, dominant highway tag (trunk/primary/secondary/tertiary/residential), `osm_access_score` (0–100 proxy from road class + oneway + lanes)
+- `lib/scoringEngine.js` — `scoreZipForConcept(sigRow, conceptProfile, statewideBounds)`. Normalization: min-max for linear signals, Gaussian bell curve for HHI sweet spot (QSR peak $65k, sigma $25k — sourced from McDonald's/Wendy's FDD target demographic), sigmoid for AADT saturation (40k+ diminishing returns). Hard floor filters: QSR AADT < 5000 = 0 score, residential road class = 0 score.
+- `lib/conceptProfiles.js` — 5 profiles with published-source weights: QSR_DRIVE_BY (AADT 30%, daytime_pop 25%, HHI sweet spot 20%, food_gap 15%, growth 10%), DESTINATION_DINING (HHI 40%, owner_occ 20%, food_gap 20%, growth 15%, age 5%), RETAIL_STRIP, HEALTHCARE, GENERAL
+- `lib/detectConcept.js` — unified keyword→concept router: wendy/mcdonald/chick-fil → QSR_DRIVE_BY; fish camp/fine dining/steakhouse → DESTINATION_DINING; etc.
+- `localIntelAgent.js` — both `ceo-query` and `ceo-county-query` now call `scoreZipForConcept()`. Both return `factor_breakdown` (per-factor raw value, normalized, weight, points, source) and `concept_detected`.
+- Statewide normalization bounds computed live from zip_signals MIN/MAX aggregation — never hardcoded.
+- `lodes_daytime_pop` derived: `lodes_jobs_here + acs_population`.
+**Result:** Single scoring engine for all paths. A Wendy's query scores on AADT + $65k HHI sweet spot. A fine dining query scores on high HHI monotonically. Every score shows exactly why via factor_breakdown.
+
+### B63 — Psychographic Signal Layer
+**Date:** 2026-05-15
+**Commit:** 21a9b36
+**Problem:** Scoring engine had no lifestyle/culture signals. A ZIP with 5 golf courses, 3 art galleries, and 40% bachelor's-degree residents scored identically to a ZIP with none of those. No way to distinguish "vibe" or cultural fit beyond pure demographics and traffic.
+**Fix:**
+- `migrations/033_psychographic_signals.sql` — 8 new columns: `osm_golf_count`, `osm_arts_count`, `osm_worship_count`, `osm_fitness_count`, `acs_pct_bachelors_plus`, `acs_pct_stem_occupations`, `acs_median_age`, `psycho_index`
+- `workers/overpassWorker.js` — 4 new per-ZIP Overpass queries: golf courses (`leisure=golf_course`), arts/culture (`amenity=theatre|cinema|arts_centre` + `tourism=museum|gallery`), places of worship (`amenity=place_of_worship`), fitness (`leisure=fitness_centre` + `sport=yoga|tennis`)
+- `workers/acsWorker.js` — added C24010 STEM occupation variables + bachelor's+ derivation (B15003). Both written to zip_signals.
+- `lib/scoringEngine.js` — `computePsychoIndex()`: arts 30%, golf 25%, education 20%, STEM 10%, worship 8%, fitness 5%, age sweet spot 2% (Gaussian peak 42). Returns 0–100. Added `normFn:'precomputed'` branch for factors that skip normalization.
+- `lib/conceptProfiles.js` — `psycho_index` added at 10% weight to DESTINATION_DINING, RETAIL_STRIP, GENERAL. QSR_DRIVE_BY and HEALTHCARE untouched.
+- `localIntelAgent.js` — new columns added to both endpoint SELECTs. `getStatewideBounds()` exports OSM psychographic maxes.
+**Result:** A Ponte Vedra ZIP with golf courses, educated residents, and arts venues now scores higher for destination dining than a demographically similar ZIP with none of those signals.
+
+### B64 — Scoring Engine Wired to All Entry Points
+**Date:** 2026-05-15
+**Commit:** c5ed0d1
+**Problem:** Scoring engine only wired to ceo-query and ceo-county-query. MCP tools (local_intel_oracle, local_intel_signal, local_intel_sector_gap) and Twilio POST handler returned raw zip_signals data without concept scoring. Multiple routing paths → different response quality.
+**Fix:** Single file change — `localIntelAgent.js` (+93/-2):
+- New `enrichMcpResponseWithScore()` helper — parses MCP result JSON, detects concept from query, scores via `scoreZipForConcept()`, attaches `site_intelligence` block (concept_detected, concept_name, total_score, factor_breakdown, psycho_index, hard_floor_triggered), re-serializes. Fully wrapped in try/catch.
+- MCP proxies (`/mcp` and `/mcp/x402`) now enrich responses for `local_intel_oracle`, `local_intel_signal`, `local_intel_sector_gap`.
+- Twilio `POST /` handler — after ZIP resolution, attaches `zip_score` to response (non-blocking try/catch — never breaks routing). Used correct column `zip` (verified against existing queries).
+**Result:** Every entry point returns concept-aware scores with factor_breakdown. SMS: zip_score. MCP agents: site_intelligence. CEO: factor_breakdown. One system, one Postgres, all paths scored.
+
+### B65 — Business Layer Signals Worker
+**Date:** 2026-05-15
+**Commit:** 8805c6c
+**Problem:** Scoring engine read only zip_signals + fl_zip_geo. The businesses table — claimed rate, wallet coverage, task density, food closure events — was invisible to scoring. A ZIP with 40 active claimed businesses with wallets scored identically to a ZIP with 40 unclaimed ghost listings.
+**Fix:**
+- `migrations/034_business_signals.sql` — 5 new columns: `sig_claimed_rate`, `sig_wallet_rate`, `sig_task_density`, `sig_closure_rate_food`, `sig_unmet_demand_score`
+- `workers/businessSignalWorker.js` — NEW 24h-fresh daemon. Single aggregation query across all FL ZIPs: counts total businesses, claimed, wallet-holding, food closures, active food by ZIP. Joins `business_tasks` for task count per ZIP. Derives: `sig_claimed_rate` (% claimed), `sig_wallet_rate` (% with wallet), `sig_task_density` (tasks per business, scaled 0–100, 5 tasks/biz = 100), `sig_closure_rate_food` (food closure rate 0–100), `sig_unmet_demand_score` (0 placeholder until traffic flows). Skips ZIPs with 0 businesses to keep statewide bounds honest. `business_tasks` PK confirmed as `id` (not `task_id`) via taskSeedWorker.js.
+- `lib/conceptProfiles.js` — `sig_wallet_rate` added at 5% to QSR_DRIVE_BY (ecosystem health), `sig_task_density` added at 5% to GENERAL (actionability signal). Weights rebalanced, sums = 1.0.
+- `lib/scoringEngine.js` — food closure rate penalty multiplier applied post-sum for QSR_DRIVE_BY + DESTINATION_DINING (50% closure rate = 7.5% max score reduction).
+- `localIntelAgent.js` — `getStatewideBounds()` includes MIN/MAX for new business signal columns.
+- `lib/workerRunner.js` + `dashboard-server.js` — businessSignalWorker registered in daemon boot list.
+**Result:** Scoring engine now reads business ecosystem health from Postgres. ZIPs with active claimed wallet-holding businesses score higher. Food closure rate penalizes QSR and dining scores in areas with high business mortality.
+
+### B66 — Business Email Harvest + Outbound Claim Flow (SPEC — build pending)
+**Date:** 2026-05-17
+**Status:** Spec written at /home/user/workspace/b66_objective.md — not yet built
+**Problem:** 205k businesses in Postgres — nearly all unclaimed. No outbound mechanism to invite businesses to claim their profile. No email addresses on record for outreach.
+**Planned Fix:**
+- `migrations/035_claim_outreach.sql` — `contact_email` + `contact_email_source` on businesses; new `claim_outreach` table (tracks every SMS/email send, reply, claim event)
+- `workers/websiteEnricherWorker.js` — extend existing homepage fetch to also extract `mailto:` links and plain email patterns. Add /contact page fallback fetch. Statewide scope (all businesses with websites, not just target ZIPs). Estimated yield: 25–35k emails.
+- `workers/claimOutreachWorker.js` — NEW worker: queries unclaimed businesses not contacted in 30 days, sends SMS (200/day, Twilio, A2P registered) + email (200/day, Resend, from intel@thelocalintel.com). SMS: "LocalIntel: [Name] is listed. Claim your free profile to receive job requests & get paid. Reply CLAIM." Email: HTML with claim link `thelocalintel.com/claim?biz=[business_id]`. Writes every send to claim_outreach. Manual-trigger only (not auto-daemon) — outreach is a deliberate action.
+- `localIntelAgent.js` — CLAIM reply handler in Twilio POST: detects "CLAIM" reply, looks up business by From phone, marks outreach as replied, sends claim link.
+**Anticipated Result:** Automated outreach pipeline to 60–70% of businesses via SMS + 25–35k via email. CLAIM reply flow routes directly to claim page. claim_outreach table tracks every touchpoint for follow-up and analytics.

@@ -63,6 +63,19 @@ Official product roadmap, north star $546k, pending setup items, strategic direc
 
 **North star:** Lay people use LocalIntel like Google. Small businesses save money and see ROI. Engineers are impressed by the architecture. The task/RFQ/order flow feels like a friend that knows everything.
 
+### Scoring Engine + Signal Layer ✅ COMPLETE (B62–B65, 2026-05-15)
+1. ✅ `lib/scoringEngine.js` — MCDA/WLC with min-max, Gaussian HHI sweet spot, sigmoid AADT saturation, hard floors, statewide normalization bounds
+2. ✅ `lib/conceptProfiles.js` — 5 concept profiles with published-source weights (QSR_DRIVE_BY, DESTINATION_DINING, RETAIL_STRIP, HEALTHCARE, GENERAL)
+3. ✅ `lib/detectConcept.js` — unified keyword→concept router, all entry points
+4. ✅ Psychographic layer (B63) — OSM golf/arts/worship/fitness + ACS education/STEM + psycho_index composite
+5. ✅ All entry points wired (B64) — MCP oracle/signal/sector-gap + Twilio POST all return factor_breakdown
+6. ✅ businessSignalWorker (B65) — ecosystem signals (claimed_rate/wallet_rate/task_density/closure_rate) → zip_signals
+
+### Claim Outreach 🔜 IN SPEC (B66)
+1. 🔜 Email harvest — websiteEnricherWorker extended to extract contact emails statewide (~25–35k yield)
+2. 🔜 claimOutreachWorker — SMS (200/day) + email (200/day) to unclaimed businesses, 30d dedup
+3. 🔜 CLAIM reply handler — inbound SMS "CLAIM" → look up business by phone → send claim link
+
 #### NOW — Deepen the Moat
 1. **pgvector semantic search** — nomic-embed-text as Railway sidecar, embeddings stored in Postgres via pgvector extension. Zero external API calls. Closes vocabulary gap (user says "light and fresh lunch", system finds the right restaurant without keyword match). Replaces brittle tsvector fallback with true semantic similarity.
 2. **RFQ flow for non-food verticals** — plumber, electrician, contractor. User sends task request → LocalIntel routes structured RFQ to matching businesses in graph → businesses bid → user picks → fee on close. Real revenue model beyond food ordering.

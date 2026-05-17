@@ -24,6 +24,9 @@ ephemeral; nothing persists across redeploys except Postgres**:
 | routerLearningWorker | `SELECT MAX(run_at) FROM router_learning_log` (skip if <30 min) | `router_learning_log` |
 | enrichmentFillWorker | `SELECT business_id FROM businesses WHERE zip = ANY(TARGET_ZIPS) AND category_intel IS NOT NULL AND enrichment_source IS NOT NULL` | `businesses` (services_text, description, category_intel, enrichment_source, enrichment_updated_at) |
 | taskSeedWorker | `SELECT DISTINCT business_id FROM business_tasks` (run-once) | `business_tasks` |
+| fdotWorker | worker_heartbeat freshness 48h | zip_signals (fdot_max_aadt, fdot_avg_aadt, fdot_top_road) |
+| businessSignalWorker | worker_heartbeat freshness 24h | zip_signals (sig_claimed_rate, sig_wallet_rate, sig_task_density, sig_closure_rate_food, sig_unmet_demand_score) |
+| claimOutreachWorker | claim_outreach table dedup 30d | claim_outreach, businesses.contact_email |
 
 `embeddingWorker` is **disabled** in `dashboard-server.js` — needs pgvector
 to be revived.
@@ -155,6 +158,10 @@ Worker produces current BDC data (semiannual FCC releases, June+December). Dashb
 | FL ArcGIS Permits | permitWorker | FL county ArcGIS | Live | live | none |
 | OSM Overpass | overpassWorker | overpass-api.de | Weekly | real-time | none |
 | FL Sunbiz | sunbizWorker | sunbiz.org | Monthly | ~1mo | none |
+| FDOT AADT | fdotWorker | gis.fdot.gov ArcGIS | 48h loop | Live 2025 | none (public) |
+| Business Signals | businessSignalWorker | Postgres (businesses + business_tasks) | 24h | Real-time | none |
+| Email Harvest | websiteEnricherWorker (extended) | Business websites (mailto extraction) | Weekly | Real-time | none |
+| Claim Outreach | claimOutreachWorker | Twilio + Resend | Manual trigger | Real-time | TWILIO_*, RESEND_API_KEY |
 
 
 ---

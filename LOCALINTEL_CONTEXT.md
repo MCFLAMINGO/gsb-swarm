@@ -1,6 +1,6 @@
 # LocalIntel Context Index
 
-> Last updated: 2026-05-14
+> Last updated: 2026-05-17
 > This file is the table of contents. All detailed context lives in docs/.
 
 ## Quick Reference
@@ -34,5 +34,6 @@
 
 ## Active B-Series
 See [session-log.md](docs/session-log.md) for full history.
-Latest: B58 — CEO query county ranking — deterministic multi-ZIP QSR/upscale/general scoring for comparative questions (2026-05-15)
-Next pending: Trigger acsWorker re-run to populate acs_median_hhi for all 1,473 FL ZIPs
+Latest: B65 — businessSignalWorker — business ecosystem signals (claimed_rate/wallet_rate/task_density/closure_rate) → zip_signals → scoring engine (2026-05-15)
+Spec ready: B66 — email harvest + outbound claim flow (websiteEnricherWorker + claimOutreachWorker + CLAIM reply handler)
+Next build: B66
