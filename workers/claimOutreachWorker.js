@@ -23,8 +23,17 @@ const EMAIL_DAILY_LIMIT      = 200;
 const OUTREACH_COOLDOWN_DAYS = 30;
 const CLAIM_BASE_URL         = process.env.CLAIM_BASE_URL || 'https://thelocalintel.com/claim';
 
+// ── Safety guard ────────────────────────────────────────────────────────────
+// Set CLAIM_OUTREACH_LIVE=true in Railway env to actually send.
+// Until then, all sends are simulated — no Twilio or Resend calls made.
+const LIVE_MODE = process.env.CLAIM_OUTREACH_LIVE === 'true';
+
 // ── Twilio (copied pattern from localIntelAgent.js sendRfqSms) ──────────────
 async function sendOutreachSms(toE164Phone, body) {
+  if (!LIVE_MODE) {
+    console.log(`[claim-outreach] DRY RUN SMS → ${toE164Phone}: ${body.slice(0, 60)}...`);
+    return { sent: true, sid: 'dry_run' };
+  }
   const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER } = process.env;
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_FROM_NUMBER) {
     return { sent: false, reason: 'twilio_not_configured' };
@@ -55,6 +64,10 @@ function toE164(raw) {
 
 // ── Resend (email) ──────────────────────────────────────────────────────────
 async function sendOutreachEmail(toEmail, subject, html) {
+  if (!LIVE_MODE) {
+    console.log(`[claim-outreach] DRY RUN EMAIL → ${toEmail}: ${subject.slice(0, 60)}...`);
+    return { sent: true, id: 'dry_run' };
+  }
   const { RESEND_API_KEY } = process.env;
   if (!RESEND_API_KEY) {
     return { sent: false, reason: 'resend_not_configured' };
@@ -91,8 +104,7 @@ function truncateName(name, max = 40) {
 
 function buildSmsBody(biz) {
   const shortName = truncateName(biz.name, 40);
-  // Keep under 160 chars
-  return `LocalIntel: ${shortName} is listed on thelocalintel.com. Claim your free profile to receive job requests & get paid. Reply CLAIM to start.`;
+  return `${shortName}, we're building the alternative to Google for local business in Florida. Claim your free LocalIntel profile, list what you do, and connect with customers in your area. Reply CLAIM. thelocalintel.com`;
 }
 
 function buildEmailHtml(biz) {
@@ -133,6 +145,9 @@ async function recordOutreach({ business_id, channel, message_sid = null, email_
 
 async function run() {
   console.log('[claim-outreach] START');
+  if (!LIVE_MODE) {
+    console.log('[claim-outreach] ⚠️  DRY RUN MODE — set CLAIM_OUTREACH_LIVE=true in Railway env to send real messages');
+  }
   const limit = SMS_DAILY_LIMIT + EMAIL_DAILY_LIMIT;
 
   const rows = await db.query(
