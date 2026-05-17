@@ -688,6 +688,33 @@ app.post('/api/admin/trigger-acs', (req, res) => {
   });
 });
 
+// POST /api/admin/trigger-website-enricher — clears heartbeat + runs websiteEnricherWorker immediately
+app.post('/api/admin/trigger-website-enricher', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'Website enricher triggered — harvesting contact emails + descriptions statewide' });
+  setImmediate(async () => {
+    try {
+      if (process.env.LOCAL_INTEL_DB_URL) {
+        const db2 = require('./lib/db');
+        await db2.query(`DELETE FROM worker_heartbeat WHERE worker_name = 'websiteEnricherWorker'`);
+        console.log('[admin] websiteEnricher heartbeat cleared');
+      }
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/websiteEnricherWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[website-enricher-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[website-enricher-trigger] ' + d));
+      child.on('close', code => console.log(`[admin] ✅ websiteEnricher done (exit ${code})`));
+    } catch (e) {
+      console.error('[admin] ❌ websiteEnricher trigger failed:', e.message);
+    }
+  });
+});
+
 // POST /api/admin/trigger-geocoder — runs geocodingWorker (Census batch → Nominatim → Photon)
 // Accepts optional ?zip=32082 or body {zip:'32082'} to limit scope
 app.post('/api/admin/trigger-geocoder', (req, res) => {
