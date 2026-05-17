@@ -196,7 +196,6 @@ async function getStatewideBounds() {
         MIN(sig_growth_score) as growth_min, MAX(sig_growth_score) as growth_max,
         MIN(sig_opportunity_score) as opp_min, MAX(sig_opportunity_score) as opp_max,
         MIN(acs_population) as pop_min, MAX(acs_population) as pop_max,
-        MIN(biz_density_per_1k) as density_min, MAX(biz_density_per_1k) as density_max,
         MIN(acs_owner_occ_pct) as own_min, MAX(acs_owner_occ_pct) as own_max,
         MIN(acs_median_age) as age_min, MAX(acs_median_age) as age_max,
         MAX(osm_golf_count) as golf_max, MAX(osm_arts_count) as arts_max,

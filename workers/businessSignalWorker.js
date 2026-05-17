@@ -93,6 +93,19 @@ async function run() {
       active_food:   Number(r.active_food) || 0,
     };
   }
+
+  // ── B67: ZIP population for biz_density_per_1k derivation ──────────────────
+  const popMap = {};
+  try {
+    const popRows = await db.query(
+      `SELECT zip, acs_population FROM zip_signals WHERE zip IS NOT NULL`
+    );
+    for (const r of (popRows || [])) {
+      popMap[r.zip] = Number(r.acs_population) || 0;
+    }
+  } catch (e) {
+    console.warn('[businessSignalWorker] acs_population lookup failed (density → null):', e.message);
+  }
   console.log(`[businessSignalWorker] aggregated business stats for ${Object.keys(bizMap).length} ZIPs`);
 
   // ── Aggregate task counts per ZIP via join through businesses ──────────────
@@ -143,6 +156,12 @@ async function run() {
     // engine can reference it without errors.
     const sig_unmet_demand_score = 0;
 
+    // B67: businesses per 1k residents — null when population unknown/zero
+    const pop = popMap[zip];
+    const biz_density_per_1k = (pop && pop > 0)
+      ? Math.round((total / pop) * 1000 * 10) / 10
+      : null;
+
     try {
       await pgStore.upsertZipSignals(zip, {
         sig_claimed_rate:       Math.round(sig_claimed_rate * 10) / 10,
@@ -150,6 +169,7 @@ async function run() {
         sig_task_density:       Math.round(sig_task_density * 10) / 10,
         sig_closure_rate_food:  Math.round(sig_closure_rate_food * 10) / 10,
         sig_unmet_demand_score,
+        biz_density_per_1k,
       });
       written++;
       if (written % 250 === 0) {
