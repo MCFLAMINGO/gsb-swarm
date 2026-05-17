@@ -1015,6 +1015,27 @@ app.post('/api/admin/trigger-world-model', (req, res) => {
   });
 });
 
+// POST /api/admin/trigger-claim-outreach — B66 — manually runs claimOutreachWorker
+// (NOT in auto-boot list — outreach is a deliberate action, not auto-fired on deploy)
+app.post('/api/admin/trigger-claim-outreach', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'Claim outreach worker triggered — SMS + email to unclaimed businesses' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/claimOutreachWorker.js'], {
+        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[claim-outreach-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[claim-outreach-trigger] ' + d));
+      child.on('close', code => console.log('[admin] claim-outreach done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] claim-outreach trigger failed:', e.message); }
+  });
+});
+
 // POST /api/admin/trigger-fred — runs FRED LAUS county unemployment worker
 app.post('/api/admin/trigger-fred', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;

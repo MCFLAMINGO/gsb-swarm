@@ -1343,6 +1343,50 @@ router.post('/', async (req, res) => {
   const customerId = req.body?.From || req.body?.from || req.body?.phone || null;
   const customerIdType = customerId ? 'phone' : 'anonymous';
 
+  // ── B66: CLAIM reply handler ────────────────────────────────────────────────
+  // When a business owner replies "CLAIM" to the outreach SMS sent by
+  // claimOutreachWorker, this catches it BEFORE all other intent routing so
+  // the reply gets a claim link instead of being misrouted to search/RFQ/etc.
+  try {
+    const _from = req.body?.From || req.body?.from || null;
+    const _smsBody = (req.body?.Body || req.body?.body || req.body?.query || '').toString();
+    const _isClaimReply = /^\s*CLAIM\s*$/i.test(_smsBody.trim());
+    if (_isClaimReply && _from) {
+      const _digits = String(_from).replace(/\D/g, '');
+      const bizRows = await db.query(
+        `SELECT business_id, name, zip FROM businesses
+          WHERE phone ILIKE $1 OR phone = $2
+          LIMIT 1`,
+        [`%${_digits}%`, _from]
+      );
+
+      if (bizRows.length > 0) {
+        const biz = bizRows[0];
+        await db.query(
+          `UPDATE claim_outreach
+              SET replied = true, reply_at = NOW(), reply_body = $1
+            WHERE business_id = $2 AND replied = false`,
+          [_smsBody, biz.business_id]
+        );
+        const replyMsg = `Thanks! Claim your LocalIntel profile here: https://thelocalintel.com/claim?biz=${biz.business_id}\nQuestions? Reply or call us.`;
+        await sendRfqSms(_from, replyMsg).catch(err =>
+          console.warn('[claim-reply] sendRfqSms failed:', err.message)
+        );
+        return res.json({ ok: true, intent: 'claim_reply', business_id: biz.business_id });
+      }
+
+      // No business matched by phone — still respond with a generic claim link.
+      const replyMsg = `Thanks for your interest! Start your claim here: https://thelocalintel.com/claim\nQuestions? Text us anytime.`;
+      await sendRfqSms(_from, replyMsg).catch(err =>
+        console.warn('[claim-reply] sendRfqSms failed:', err.message)
+      );
+      return res.json({ ok: true, intent: 'claim_reply_no_match' });
+    }
+  } catch (e) {
+    console.error('[claim-reply] handler error:', e.message);
+    // Fall through to normal routing on failure.
+  }
+
   // Step 5 — fetch customer session up-front so both Phase 2 and legacy paths
   // can personalize. Best-effort — any failure leaves customerSession null and
   // every personalization call no-ops.
