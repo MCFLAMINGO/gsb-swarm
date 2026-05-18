@@ -178,6 +178,7 @@ const { appendTurn, getContext } = require('./lib/conversationThread');
 const { scoreZipForConcept } = require('./lib/scoringEngine');
 const { CONCEPT_PROFILES } = require('./lib/conceptProfiles');
 const { detectConcept } = require('./lib/detectConcept');
+const { buildConceptOrderBy } = require('./lib/searchRank');
 
 // B62: statewide normalization bounds (lazy-cached per-process for 5min).
 let _statewideBoundsCache = null;
@@ -551,22 +552,22 @@ function _parseHours(h) {
 }
 
 // Phase 2 — category-filter search. Returns flat array (db.query returns array).
-async function searchByCategory(intent, zip, limit = 50) {
+async function searchByCategory(intent, zip, limit = 50, concept = 'GENERAL') {
   const cats = intent.categories;
   const cuisine = intent.cuisine || null;
   const zips = (!zip || zip === 'all') ? TARGET_ZIPS : [zip];
 
   // Build WHERE clause dynamically so cuisine filter can be added when present.
   const conditions = [
-    `status != 'inactive'`,
-    `zip = ANY($1::text[])`,
-    `(category = ANY($2::text[]) OR tags && $2::text[])`,
+    `b.status != 'inactive'`,
+    `b.zip = ANY($1::text[])`,
+    `(b.category = ANY($2::text[]) OR b.tags && $2::text[])`,
   ];
   const params = [zips, cats];
   let p = 3;
 
   if (cuisine) {
-    conditions.push(`(cuisine ILIKE $${p} OR description ILIKE $${p} OR category ILIKE $${p})`);
+    conditions.push(`(b.cuisine ILIKE $${p} OR b.description ILIKE $${p} OR b.category ILIKE $${p})`);
     params.push(`%${cuisine}%`);
     p++;
   }
@@ -574,17 +575,18 @@ async function searchByCategory(intent, zip, limit = 50) {
 
   const sql = `
     SELECT
-      business_id, name, address, city, zip, phone, website,
-      hours, category, category_group, tags, description, cuisine,
-      confidence_score AS confidence, confidence_score, lat, lon, sunbiz_doc_number,
-      claimed_at IS NOT NULL AS claimed,
-      wallet,
-      pos_config->>'pos_type' AS pos_type,
-      CASE WHEN wallet IS NOT NULL THEN 1 ELSE 0 END AS has_wallet,
-      is_showcase
-    FROM businesses
+      b.business_id, b.name, b.address, b.city, b.zip, b.phone, b.website,
+      b.hours, b.category, b.category_group, b.tags, b.description, b.cuisine,
+      b.confidence_score AS confidence, b.confidence_score, b.lat, b.lon, b.sunbiz_doc_number,
+      b.claimed_at IS NOT NULL AS claimed,
+      b.wallet,
+      b.pos_config->>'pos_type' AS pos_type,
+      CASE WHEN b.wallet IS NOT NULL THEN 1 ELSE 0 END AS has_wallet,
+      b.is_showcase
+    FROM businesses b
+    LEFT JOIN zip_signals zs ON zs.zip = b.zip
     WHERE ${conditions.join(' AND ')}
-    ORDER BY has_wallet DESC, confidence_score DESC, name ASC
+    ORDER BY ${buildConceptOrderBy(concept, 'zs', 'b')}
     LIMIT $${p}
   `;
   const rows = await db.query(sql, params);
@@ -609,7 +611,7 @@ async function searchByCategory(intent, zip, limit = 50) {
 }
 
 // Phase 2 — tsvector full-text search.
-async function searchByText(query, zip, limit = 50) {
+async function searchByText(query, zip, limit = 50, concept = 'GENERAL') {
   const tokens = String(query || '').trim().toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
   if (!tokens.length) return [];
@@ -617,20 +619,21 @@ async function searchByText(query, zip, limit = 50) {
   const zips = (!zip || zip === 'all') ? TARGET_ZIPS : [zip];
   const sql = `
     SELECT
-      business_id, name, address, city, zip, phone, website,
-      hours, category, category_group, tags, description, cuisine,
-      confidence_score AS confidence, confidence_score, lat, lon, sunbiz_doc_number,
-      claimed_at IS NOT NULL AS claimed,
-      wallet,
-      pos_config->>'pos_type' AS pos_type,
-      ts_rank(search_vector, to_tsquery('english', $2)) AS rank,
-      CASE WHEN wallet IS NOT NULL THEN 1 ELSE 0 END AS has_wallet,
-      is_showcase
-    FROM businesses
-    WHERE status != 'inactive'
-      AND zip = ANY($1::text[])
-      AND search_vector @@ to_tsquery('english', $2)
-    ORDER BY has_wallet DESC, rank DESC, confidence_score DESC
+      b.business_id, b.name, b.address, b.city, b.zip, b.phone, b.website,
+      b.hours, b.category, b.category_group, b.tags, b.description, b.cuisine,
+      b.confidence_score AS confidence, b.confidence_score, b.lat, b.lon, b.sunbiz_doc_number,
+      b.claimed_at IS NOT NULL AS claimed,
+      b.wallet,
+      b.pos_config->>'pos_type' AS pos_type,
+      ts_rank(b.search_vector, to_tsquery('english', $2)) AS rank,
+      CASE WHEN b.wallet IS NOT NULL THEN 1 ELSE 0 END AS has_wallet,
+      b.is_showcase
+    FROM businesses b
+    LEFT JOIN zip_signals zs ON zs.zip = b.zip
+    WHERE b.status != 'inactive'
+      AND b.zip = ANY($1::text[])
+      AND b.search_vector @@ to_tsquery('english', $2)
+    ORDER BY ts_rank(b.search_vector, to_tsquery('english', $2)) DESC, ${buildConceptOrderBy(concept, 'zs', 'b')}
     LIMIT $3
   `;
   return db.query(sql, [zips, tsq, limit]);
@@ -1773,9 +1776,10 @@ router.post('/', async (req, res) => {
       if (intent.type === 'CATEGORY_SEARCH' || intent.type === 'TEXT_SEARCH') {
         try {
           const lim = Math.min(Number(limit) || 50, 200);
+          const phase2Concept = detectConcept(query || '') || 'GENERAL';
           let phase2Rows = intent.type === 'CATEGORY_SEARCH'
-            ? await searchByCategory(intent, zip, lim)
-            : await searchByText(intent.raw, zip, lim);
+            ? await searchByCategory(intent, zip, lim, phase2Concept)
+            : await searchByText(intent.raw, zip, lim, phase2Concept);
 
           // Step 4 — temporal post-filter (When dimension). Same data-hole
           // protection as legacy path: if the filter would drop every row,
@@ -2072,40 +2076,45 @@ router.post('/', async (req, res) => {
         const _fbCats = (_phase2Intent && _phase2Intent.type === 'CATEGORY_SEARCH' && _phase2Intent.categories && _phase2Intent.categories.length)
           ? _phase2Intent.categories
           : null;
+        // B70: concept-aware ORDER BY (zip_signals weighted by detected concept).
+        const _fbConcept = detectConcept(query || '') || 'GENERAL';
+        const _fbRanked  = buildConceptOrderBy(_fbConcept, 'zs', 'b');
         const fbSql = _fbCats
           ? `
           SELECT
-            business_id, name, address, city, zip, phone, website,
-            hours, category, category_group, tags, description, cuisine,
-            confidence_score AS confidence, confidence_score, lat, lon, sunbiz_doc_number,
-            claimed_at IS NOT NULL AS claimed,
-            wallet,
-            pos_config->>'pos_type' AS pos_type,
-            is_showcase,
-            ts_rank(search_vector, to_tsquery('english', $1)) AS rank
-          FROM businesses
-          WHERE status != 'inactive'
-            AND zip = ANY($2::text[])
-            AND category = ANY($3::text[])
-            AND search_vector @@ to_tsquery('english', $1)
-          ORDER BY rank DESC, confidence_score DESC
+            b.business_id, b.name, b.address, b.city, b.zip, b.phone, b.website,
+            b.hours, b.category, b.category_group, b.tags, b.description, b.cuisine,
+            b.confidence_score AS confidence, b.confidence_score, b.lat, b.lon, b.sunbiz_doc_number,
+            b.claimed_at IS NOT NULL AS claimed,
+            b.wallet,
+            b.pos_config->>'pos_type' AS pos_type,
+            b.is_showcase,
+            ts_rank(b.search_vector, to_tsquery('english', $1)) AS rank
+          FROM businesses b
+          LEFT JOIN zip_signals zs ON zs.zip = b.zip
+          WHERE b.status != 'inactive'
+            AND b.zip = ANY($2::text[])
+            AND b.category = ANY($3::text[])
+            AND b.search_vector @@ to_tsquery('english', $1)
+          ORDER BY rank DESC, ${_fbRanked}
           LIMIT 20
           `
           : `
           SELECT
-            business_id, name, address, city, zip, phone, website,
-            hours, category, category_group, tags, description, cuisine,
-            confidence_score AS confidence, confidence_score, lat, lon, sunbiz_doc_number,
-            claimed_at IS NOT NULL AS claimed,
-            wallet,
-            pos_config->>'pos_type' AS pos_type,
-            is_showcase,
-            ts_rank(search_vector, to_tsquery('english', $1)) AS rank
-          FROM businesses
-          WHERE status != 'inactive'
-            AND zip = ANY($2::text[])
-            AND search_vector @@ to_tsquery('english', $1)
-          ORDER BY rank DESC, confidence_score DESC
+            b.business_id, b.name, b.address, b.city, b.zip, b.phone, b.website,
+            b.hours, b.category, b.category_group, b.tags, b.description, b.cuisine,
+            b.confidence_score AS confidence, b.confidence_score, b.lat, b.lon, b.sunbiz_doc_number,
+            b.claimed_at IS NOT NULL AS claimed,
+            b.wallet,
+            b.pos_config->>'pos_type' AS pos_type,
+            b.is_showcase,
+            ts_rank(b.search_vector, to_tsquery('english', $1)) AS rank
+          FROM businesses b
+          LEFT JOIN zip_signals zs ON zs.zip = b.zip
+          WHERE b.status != 'inactive'
+            AND b.zip = ANY($2::text[])
+            AND b.search_vector @@ to_tsquery('english', $1)
+          ORDER BY rank DESC, ${_fbRanked}
           LIMIT 20
         `;
         try {
@@ -6585,8 +6594,11 @@ router.get('/search', async (req, res) => {
         const resolvedCat = svcDetect.category;
 
         // ── Provider lookup with automatic neighbor expansion on zero results ──
-        const SVC_PROVIDER_QUERY = `SELECT name, zip, address, city, phone, website, category, lat, lon,
-                    confidence_score, claimed_at, wallet`;
+        // B70: concept-aware ranking via zip_signals JOIN.
+        const _svcConcept = detectConcept(raw || resolvedCat || '') || 'GENERAL';
+        const _svcRanked  = buildConceptOrderBy(_svcConcept, 'zs', 'b');
+        const SVC_PROVIDER_QUERY = `SELECT b.name, b.zip, b.address, b.city, b.phone, b.website, b.category, b.lat, b.lon,
+                    b.confidence_score, b.claimed_at, b.wallet`;
         let providerCount = 0;
         let topProviders  = [];
         let actualZip     = resolvedZip; // may change to a neighbor ZIP
@@ -6594,13 +6606,14 @@ router.get('/search', async (req, res) => {
           // Helper: query providers for a given zip (null = all NE FL)
           const fetchProviders = async (z) => {
             const p = z ? [`%${resolvedCat}%`, z, 5] : [`%${resolvedCat}%`, 5];
-            const clause = z ? ' AND zip = $2' : '';
+            const clause = z ? ' AND b.zip = $2' : '';
             const lim = z ? '$3' : '$2';
             return db.query(
-              SVC_PROVIDER_QUERY + ` FROM businesses
-               WHERE status != 'inactive'
-                 AND (category ILIKE $1 OR category_group ILIKE $1)${clause}
-               ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+              SVC_PROVIDER_QUERY + ` FROM businesses b
+               LEFT JOIN zip_signals zs ON zs.zip = b.zip
+               WHERE b.status != 'inactive'
+                 AND (b.category ILIKE $1 OR b.category_group ILIKE $1)${clause}
+               ORDER BY ${_svcRanked}
                LIMIT ${lim}`, p
             );
           };
@@ -6752,11 +6765,20 @@ router.get('/search', async (req, res) => {
     // Florida ZIP prefix ranges for state-scoping fallback results
     const FL_ZIPS = (z) => { const n = parseInt(z,10); return n >= 32004 && n <= 34997; };
 
-    const BASE_SELECT = `SELECT name, zip, address, city, phone, website, category, category_group,
-      description, tags, hours, hours_json, price_tier, services_text,
-      lat, lon, confidence_score, claimed_at, wallet, status
-      FROM businesses WHERE status != 'inactive'
-      AND NOT ('likely_person_not_business' = ANY(COALESCE(quality_flags, ARRAY[]::text[])))`;
+    // B70: aliased + LEFT JOIN zip_signals so concept-profile ORDER BY can read zs.*
+    // signals. LEFT JOIN keeps businesses without a zip_signals row in results
+    // (they sort with 0 contribution from zip-level factors).
+    const BASE_SELECT = `SELECT b.name, b.zip, b.address, b.city, b.phone, b.website, b.category, b.category_group,
+      b.description, b.tags, b.hours, b.hours_json, b.price_tier, b.services_text,
+      b.lat, b.lon, b.confidence_score, b.claimed_at, b.wallet, b.status
+      FROM businesses b
+      LEFT JOIN zip_signals zs ON zs.zip = b.zip
+      WHERE b.status != 'inactive'
+      AND NOT ('likely_person_not_business' = ANY(COALESCE(b.quality_flags, ARRAY[]::text[])))`;
+
+    // B70: concept-aware ORDER BY (zip_signals weighted by concept profile).
+    const _searchConcept = detectConcept(q || raw || '') || 'GENERAL';
+    const RANKED_ORDER = buildConceptOrderBy(_searchConcept, 'zs', 'b');
 
     // Deflect out-of-scope queries gracefully
     if (nlDeflect) {
@@ -6776,17 +6798,17 @@ router.get('/search', async (req, res) => {
     if (q && !skipNameSearch) {
       // Geo-guard: if no ZIP supplied, restrict to TARGET_ZIPS (our coverage area)
       // Only widen to statewide FL if still nothing found
-      const zipWhere    = zip ? ` AND zip = $2 `                  : ` AND zip = ANY($2) `;
+      const zipWhere    = zip ? ` AND b.zip = $2 `                  : ` AND b.zip = ANY($2) `;
       const zipParam    = zip ? zip                                : TARGET_ZIPS;
       rows = await db.query(
-        BASE_SELECT + zipWhere + ` AND (name ILIKE $1 OR services_text ILIKE $1 OR description ILIKE $1) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`,
+        BASE_SELECT + zipWhere + ` AND (b.name ILIKE $1 OR b.services_text ILIKE $1 OR b.description ILIKE $1) ORDER BY ${RANKED_ORDER} LIMIT $3`,
         [`%${q}%`, zipParam, limit * 2]
       );
 
       // Widen to all FL only if coverage-area search returned nothing
       if (!rows.length) {
         rows = await db.query(
-          BASE_SELECT + ` AND zip BETWEEN '32004' AND '34997' AND (name ILIKE $1 OR services_text ILIKE $1 OR description ILIKE $1) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+          BASE_SELECT + ` AND b.zip BETWEEN '32004' AND '34997' AND (b.name ILIKE $1 OR b.services_text ILIKE $1 OR b.description ILIKE $1) ORDER BY ${RANKED_ORDER} LIMIT $2`,
           [`%${q}%`, limit * 2]
         );
       }
@@ -6799,7 +6821,7 @@ router.get('/search', async (req, res) => {
           .sort((a,b) => b.length - a.length); // longest first = most specific
         for (const tok of tokens) {
           const r = await db.query(
-            BASE_SELECT + ` AND zip = ANY($1) AND (name ILIKE $2 OR services_text ILIKE $2 OR description ILIKE $2) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`,
+            BASE_SELECT + ` AND b.zip = ANY($1) AND (b.name ILIKE $2 OR b.services_text ILIKE $2 OR b.description ILIKE $2) ORDER BY ${RANKED_ORDER} LIMIT $3`,
             [TARGET_ZIPS, `%${tok}%`, limit * 2]
           );
           if (r.length) { rows = r; break; }
@@ -6903,8 +6925,8 @@ router.get('/search', async (req, res) => {
         if (nlTags && nlTags.length) {
           const tagRows = await db.query(
             BASE_SELECT +
-            (zip ? ` AND category = ANY($1) AND zip = $2 AND tags && $3 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $4`
-                 : ` AND category = ANY($1) AND zip = ANY($2) AND tags && $3 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $4`),
+            (zip ? ` AND b.category = ANY($1) AND b.zip = $2 AND b.tags && $3 ORDER BY ${RANKED_ORDER} LIMIT $4`
+                 : ` AND b.category = ANY($1) AND b.zip = ANY($2) AND b.tags && $3 ORDER BY ${RANKED_ORDER} LIMIT $4`),
             zip ? [expanded, zip, nlTags, limit] : [expanded, TARGET_ZIPS, nlTags, limit]
           );
           if (tagRows.length) rows = tagRows;
@@ -6912,11 +6934,11 @@ router.get('/search', async (req, res) => {
         // Fall through to unfiltered cat search if tag-filtered returned nothing
         if (!rows.length) {
           if (zip) {
-            catWhere  = ` AND category = ANY($1) AND zip = $2 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`;
+            catWhere  = ` AND b.category = ANY($1) AND b.zip = $2 ORDER BY ${RANKED_ORDER} LIMIT $3`;
             catParams = [expanded, zip, limit];
           } else {
             // Geo-guard: restrict to TARGET_ZIPS coverage area
-            catWhere  = ` AND category = ANY($1) AND zip = ANY($2) ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $3`;
+            catWhere  = ` AND b.category = ANY($1) AND b.zip = ANY($2) ORDER BY ${RANKED_ORDER} LIMIT $3`;
             catParams = [expanded, TARGET_ZIPS, limit];
           }
           rows = await db.query(BASE_SELECT + catWhere, catParams);
@@ -6925,11 +6947,11 @@ router.get('/search', async (req, res) => {
         const params = zip
           ? [`%${term}%`, zip, limit]
           : [`%${term}%`, TARGET_ZIPS, limit];
-        const zipClause = zip ? ' AND zip = $2' : ' AND zip = ANY($2)';
+        const zipClause = zip ? ' AND b.zip = $2' : ' AND b.zip = ANY($2)';
         const lim = '$3';
         rows = await db.query(
-          BASE_SELECT + ` AND (category ILIKE $1 OR category_group ILIKE $1 OR name ILIKE $1)${zipClause}
-          ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT ${lim}`,
+          BASE_SELECT + ` AND (b.category ILIKE $1 OR b.category_group ILIKE $1 OR b.name ILIKE $1)${zipClause}
+          ORDER BY ${RANKED_ORDER} LIMIT ${lim}`,
           params
         );
       }
@@ -6943,19 +6965,20 @@ router.get('/search', async (req, res) => {
           .map(t => t.replace(/[^a-zA-Z0-9]/g, '') + ':*')
           .join(' & ');
         if (tsQuery) {
-          const tsZipClause = zip ? ' AND zip = $2' : ' AND zip = ANY($2)';
+          const tsZipClause = zip ? ' AND b.zip = $2' : ' AND b.zip = ANY($2)';
           const tsZipParam  = zip ? zip : TARGET_ZIPS;
           try {
             rows = await db.query(
-              `SELECT name, zip, address, city, phone, website, category, category_group,
-                description, tags, hours, hours_json, price_tier, services_text,
-                lat, lon, confidence_score, claimed_at, wallet, status,
-                ts_rank(search_vector, to_tsquery('english', $1)) AS _rank
-               FROM businesses
-               WHERE status != 'inactive'
-                 AND NOT ('likely_person_not_business' = ANY(COALESCE(quality_flags, ARRAY[]::text[])))
-                 AND search_vector @@ to_tsquery('english', $1)${tsZipClause}
-               ORDER BY _rank DESC, (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC
+              `SELECT b.name, b.zip, b.address, b.city, b.phone, b.website, b.category, b.category_group,
+                b.description, b.tags, b.hours, b.hours_json, b.price_tier, b.services_text,
+                b.lat, b.lon, b.confidence_score, b.claimed_at, b.wallet, b.status,
+                ts_rank(b.search_vector, to_tsquery('english', $1)) AS _rank
+               FROM businesses b
+               LEFT JOIN zip_signals zs ON zs.zip = b.zip
+               WHERE b.status != 'inactive'
+                 AND NOT ('likely_person_not_business' = ANY(COALESCE(b.quality_flags, ARRAY[]::text[])))
+                 AND b.search_vector @@ to_tsquery('english', $1)${tsZipClause}
+               ORDER BY _rank DESC, ${RANKED_ORDER}
                LIMIT $3`,
               [tsQuery, tsZipParam, limit]
             );
@@ -6969,7 +6992,7 @@ router.get('/search', async (req, res) => {
     // 3. ZIP-only browse
     if (!rows.length && zip) {
       rows = await db.query(
-        BASE_SELECT + ` AND zip = $1 ORDER BY (wallet IS NOT NULL) DESC, (claimed_at IS NOT NULL) DESC, confidence_score DESC LIMIT $2`,
+        BASE_SELECT + ` AND b.zip = $1 ORDER BY ${RANKED_ORDER} LIMIT $2`,
         [zip, limit]
       );
     }
