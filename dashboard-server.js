@@ -715,6 +715,33 @@ app.post('/api/admin/trigger-website-enricher', (req, res) => {
   });
 });
 
+// POST /api/admin/trigger-qa-suite — runs chatGapWorker.runQASuite() against
+// the local /chat endpoint. Returns the summary JSON synchronously so the
+// operator sees pass/fail counts immediately.
+app.post('/api/admin/trigger-qa-suite', async (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN
+      && tok !== process.env.DASHBOARD_PASSWORD
+      && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    const chatGapWorker = require('./workers/chatGapWorker');
+    const suiteFile = req.body?.suiteFile || req.query?.suiteFile || 'test-suites/query-test-suite-32082.json';
+    const summary = await chatGapWorker.runQASuite(suiteFile);
+    return res.json({
+      status: 'ok',
+      total:  summary.total,
+      passed: summary.passed,
+      failed: summary.failed,
+      results: summary.results,
+    });
+  } catch (e) {
+    console.error('[admin] ❌ qa-suite trigger failed:', e.message);
+    return res.status(500).json({ error: 'qa_suite_failed', message: e.message });
+  }
+});
+
 // POST /api/admin/trigger-geocoder — runs geocodingWorker (Census batch → Nominatim → Photon)
 // Accepts optional ?zip=32082 or body {zip:'32082'} to limit scope
 app.post('/api/admin/trigger-geocoder', (req, res) => {

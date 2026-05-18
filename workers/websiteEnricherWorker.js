@@ -146,6 +146,57 @@ function classifyFromText(text) {
   return null;
 }
 
+// B77: Keyword tag extractor — scans description/title text for known dietary,
+// dining-style, service, and wellness keywords and returns a deduped tag list.
+// Used to enrich businesses.tags before the description UPDATE.
+function extractTagsFromText(text) {
+  if (!text) return [];
+  const t = text.toLowerCase();
+  const tags = [];
+
+  // Food & dietary
+  if (/\bhealthy\b|\bhealth.conscious\b/.test(t)) tags.push('healthy');
+  if (/\borganic\b/.test(t)) tags.push('organic');
+  if (/\bgluten.free\b|\bgluten free\b/.test(t)) tags.push('gluten_free');
+  if (/\bvegan\b/.test(t)) tags.push('vegan');
+  if (/\bvegetarian\b/.test(t)) tags.push('vegetarian');
+  if (/\bkosher\b/.test(t)) tags.push('kosher');
+  if (/\bhalal\b/.test(t)) tags.push('halal');
+  if (/\bfarm.to.table\b|\bfarm to table\b/.test(t)) tags.push('farm_to_table');
+  if (/\bplant.based\b|\bplant based\b/.test(t)) tags.push('plant_based');
+
+  // Dining style
+  if (/\bfine dining\b|\bupscale\b|\bwhite tablecloth\b/.test(t)) tags.push('fine_dining');
+  if (/\bwine\b/.test(t)) tags.push('wine');
+  if (/\bcocktail|\bcraft beer\b|\bcraftbeer\b/.test(t)) tags.push('cocktails');
+  if (/\broof(top)?\b|\brooftop\b/.test(t)) tags.push('rooftop');
+  if (/\boutdoor seating\b|\bpatio\b|\bal fresco\b/.test(t)) tags.push('outdoor_seating');
+  if (/\blive music\b/.test(t)) tags.push('live_music');
+  if (/\bhappy hour\b/.test(t)) tags.push('happy_hour');
+  if (/\bbuffet\b/.test(t)) tags.push('buffet');
+  if (/\bbrunch\b/.test(t)) tags.push('brunch');
+  if (/\btakeout\b|\btake.out\b|\bto.go\b/.test(t)) tags.push('takeout');
+  if (/\bdelivery\b/.test(t)) tags.push('delivery');
+
+  // Services
+  if (/\b24.hour\b|\b24\/7\b/.test(t)) tags.push('24_hour');
+  if (/\bwheelchair\b|\baccessible\b|\bada\b/.test(t)) tags.push('accessible');
+  if (/\bpet.friendly\b|\bdogs? welcome\b/.test(t)) tags.push('pet_friendly');
+  if (/\bkid.friendly\b|\bfamily.friendly\b/.test(t)) tags.push('family_friendly');
+  if (/\bwifi\b|\bfree wifi\b/.test(t)) tags.push('wifi');
+  if (/\bparking\b/.test(t)) tags.push('parking');
+  if (/\breservation\b|\bbook (a )?table\b/.test(t)) tags.push('reservations');
+
+  // Wellness/fitness
+  if (/\byoga\b/.test(t)) tags.push('yoga');
+  if (/\bpilates\b/.test(t)) tags.push('pilates');
+  if (/\bpersonal training\b/.test(t)) tags.push('personal_training');
+  if (/\bmedical spa\b|\bmedspa\b|\bmed spa\b/.test(t)) tags.push('med_spa');
+  if (/\bbotox\b|\bfiller\b/.test(t)) tags.push('aesthetics');
+
+  return [...new Set(tags)];
+}
+
 function buildDescription(name, meta, category, city, zip) {
   // Prefer meta description if it's meaningful and not generic chain copy
   const genericPhrases = ['find a location','store locator','locations near','click here','learn more','our website','page not found','404'];
@@ -237,6 +288,25 @@ if (require.main === module) {
               );
               emailsFound++;
             }
+          }
+
+          // B77: Extract keyword tags from title + meta description + new
+          // description text. Union-merge with existing tags so we never
+          // remove anything operators or other workers have already attached.
+          const tagSource = `${meta.title || ''} ${meta.description || ''} ${newDesc || ''}`.trim();
+          const newTags = extractTagsFromText(tagSource);
+          if (newTags.length > 0) {
+            await db.query(
+              `UPDATE businesses
+                  SET tags = (
+                        SELECT ARRAY(
+                          SELECT DISTINCT unnest(COALESCE(tags, ARRAY[]::text[]) || $1::text[])
+                        )
+                      ),
+                      updated_at = NOW()
+                WHERE business_id = $2`,
+              [newTags, biz.business_id]
+            );
           }
 
           if (!newDesc && !newCat) { skipped++; return; }
