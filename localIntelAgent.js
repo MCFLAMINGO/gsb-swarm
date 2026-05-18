@@ -10146,6 +10146,14 @@ router.post('/chat', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'phone and question required' });
     }
 
+    // B73: Owner bypass — Erik (or any operator) skips the trial gate.
+    // Set OWNER_PHONE in Railway env (comma-separated for multiple numbers).
+    const OWNER_PHONES = (process.env.OWNER_PHONE || '')
+      .split(',')
+      .map(p => p.trim())
+      .filter(Boolean);
+    const isOwner = OWNER_PHONES.includes(String(phone || '').trim());
+
     // A) Auth / trial provisioning
     await db.query(
       `INSERT INTO subscriber_accounts (phone, tier, status, trial_queries_used, trial_queries_limit)
@@ -10167,7 +10175,7 @@ router.post('/chat', async (req, res) => {
     const trialUsed    = Number(sub.trial_queries_used || 0);
     const trialLimit   = Number(sub.trial_queries_limit || 3);
     const trialAllowed = sub.status === 'trial' && trialUsed < trialLimit;
-    if (!isSubscriber && !trialAllowed) {
+    if (!isOwner && !isSubscriber && !trialAllowed) {
       return res.status(402).json({
         ok: false,
         error: 'trial_exhausted',
@@ -10176,7 +10184,7 @@ router.post('/chat', async (req, res) => {
         is_subscriber: false,
       });
     }
-    const trialRemaining = isSubscriber ? null : Math.max(0, trialLimit - trialUsed);
+    const trialRemaining = (isOwner || isSubscriber) ? null : Math.max(0, trialLimit - trialUsed);
 
     // B) Resolve place from question (FL place name → ZIP; falls back to zipIn or default)
     // B53: resolvePlace is now async — queries fl_place_index + fl_county_zips in Postgres
@@ -10296,8 +10304,9 @@ For each ZIP: state the score and the single most important data point.`;
           answer: `No zip_signals data is available yet for ${placeResult.countyKey} County. Try asking about a specific St. Johns County ZIP: 32082 (Ponte Vedra Beach), 32081 (Nocatee), 32250 (Jacksonville Beach), 32266 (Neptune Beach), 32259 (St. Johns), or 32034 (Fernandina Beach).`,
           data_confidence: 0,
           missing_signals: countyZips,
-          trial_remaining: !isSubscriber ? Math.max(0, trialLimit - trialUsed) : null,
+          trial_remaining: isOwner ? 999 : (!isSubscriber ? Math.max(0, trialLimit - trialUsed) : null),
           is_subscriber: isSubscriber,
+          is_owner: isOwner,
           no_data: true,
         });
       }
@@ -10378,7 +10387,7 @@ If ranking, list top ZIPs with scores and concept-specific reasons. Be specific,
         ).catch(() => {});
       }
 
-      if (!isSubscriber && data_confidence > 0) {
+      if (!isOwner && !isSubscriber && data_confidence > 0) {
         db.query(
           `UPDATE subscriber_accounts SET trial_queries_used = trial_queries_used + 1, updated_at = NOW() WHERE phone = $1`,
           [phone]
@@ -10392,8 +10401,9 @@ If ranking, list top ZIPs with scores and concept-specific reasons. Be specific,
         answer: answerCounty,
         data_confidence,
         missing_signals: missing,
-        trial_remaining: !isSubscriber ? Math.max(0, trialLimit - trialUsed - (data_confidence > 0 ? 1 : 0)) : null,
+        trial_remaining: isOwner ? 999 : (!isSubscriber ? Math.max(0, trialLimit - trialUsed - (data_confidence > 0 ? 1 : 0)) : null),
         is_subscriber: isSubscriber,
+        is_owner: isOwner,
       });
     }
 
@@ -10447,8 +10457,9 @@ If ranking, list top ZIPs with scores and concept-specific reasons. Be specific,
         answer: `No data is available yet for ZIP ${zip}. Try asking about a St. Johns County ZIP: 32082 (Ponte Vedra Beach), 32081 (Nocatee), 32250 (Jacksonville Beach), 32266 (Neptune Beach), 32259 (St. Johns), or 32034 (Fernandina Beach).`,
         data_confidence: 0,
         missing_signals: missingSignals,
-        trial_remaining: !isSubscriber ? Math.max(0, trialLimit - trialUsed) : null,
+        trial_remaining: isOwner ? 999 : (!isSubscriber ? Math.max(0, trialLimit - trialUsed) : null),
         is_subscriber: isSubscriber,
+        is_owner: isOwner,
         no_data: true,
       });
     }
@@ -10608,7 +10619,7 @@ LOCAL DATA FOR ZIP ${zip} (${countyLabel}):\n${grounding}`;
     // H) Increment trial usage (fire-and-forget)
     // Don't charge trial when the LLM couldn't answer due to missing data
     const answerIsPartial = /I cannot answer|missing data|traffic.*not available|road.*data.*not|don't have.*road|do not have.*traffic|contact.*department|site selection tool/i.test(answer);
-    if (!isSubscriber && dataConfidence > 0 && !answerIsPartial) {
+    if (!isOwner && !isSubscriber && dataConfidence > 0 && !answerIsPartial) {
       db.query(
         `UPDATE subscriber_accounts SET trial_queries_used = trial_queries_used + 1, updated_at = NOW() WHERE phone = $1`,
         [phone]
@@ -10623,8 +10634,9 @@ LOCAL DATA FOR ZIP ${zip} (${countyLabel}):\n${grounding}`;
       answer,
       data_confidence: dataConfidence,
       missing_signals: missingSignals,
-      trial_remaining: trialRemaining != null ? Math.max(0, trialRemaining - 1) : null,
+      trial_remaining: isOwner ? 999 : (trialRemaining != null ? Math.max(0, trialRemaining - 1) : null),
       is_subscriber: isSubscriber,
+      is_owner: isOwner,
     });
   } catch (err) {
     console.error('[chat] error:', err.message);
