@@ -253,7 +253,9 @@
     "added_at": "2026-04-21T06:02:35.213Z",
     "last_enriched": "2026-04-21T12:51:40.116Z",
     "group": "food",
-    "category_group": "food"
+    "category_group": "food",
+    "cuisine": "american",
+    "tags": ["healthy", "organic", "gluten_free", "vegan_friendly", "best_of_ponte_vedra", "local_favorite", "yelp_top_rated", "no_sugar_added", "salads", "sandwiches", "homemade_desserts", "dine_in", "takeout", "online_ordering"]
   },
   {
     "name": "Tony's Pizza",
