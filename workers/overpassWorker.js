@@ -132,7 +132,8 @@ async function promoteOsmToBusinesses(zip, pois) {
         lat:              poi.lat || null,
         lon:              poi.lon || null,
         confidence_score: 0.70,
-        tags:             [],
+        tags:             poi.tags || [],
+        cuisine:          poi.cuisine || null,
         description:      null,
         source_id:        'osm',
         source_weight:    0.3,
@@ -352,25 +353,47 @@ function normalisePois(elements) {
   return elements
     .filter(el => el.tags && Object.keys(el.tags).length > 0)
     .map(el => {
-      const tags = el.tags;
+      const t = el.tags;
       const lat  = el.lat  ?? el.center?.lat ?? null;
       const lon  = el.lon  ?? el.center?.lon ?? null;
-      const cat  = MAX_POI_TAGS.find(t => tags[t]) || 'other';
+      const cat  = MAX_POI_TAGS.find(k => t[k]) || 'other';
+
+      // Extract cuisine
+      const cuisine = t.cuisine || null;
+
+      // Extract dietary/service tags into array
+      const tags = [];
+      if (t.cuisine) tags.push(...t.cuisine.split(';').map(c => c.trim().toLowerCase()).filter(Boolean));
+      if (t['diet:vegan'] === 'yes' || t['diet:vegan'] === 'only') tags.push('vegan');
+      if (t['diet:vegetarian'] === 'yes' || t['diet:vegetarian'] === 'only') tags.push('vegetarian');
+      if (t['diet:gluten_free'] === 'yes' || t['diet:gluten_free'] === 'only') tags.push('gluten_free');
+      if (t['diet:halal'] === 'yes') tags.push('halal');
+      if (t['diet:kosher'] === 'yes') tags.push('kosher');
+      if (t['diet:organic'] === 'yes') tags.push('organic');
+      if (t.organic === 'yes') tags.push('organic');
+      if (t.takeaway === 'yes' || t.takeaway === 'only') tags.push('takeout');
+      if (t.delivery === 'yes') tags.push('delivery');
+      if (t.outdoor_seating === 'yes') tags.push('outdoor_seating');
+      if (t.wheelchair === 'yes') tags.push('wheelchair_accessible');
+      if (t.stars) tags.push(`stars_${t.stars}`);
+
       return {
         id      : el.id,
         type    : el.type,
-        name    : tags.name || tags['name:en'] || null,
+        name    : t.name || t['name:en'] || null,
         category: cat,
-        subtype : tags[cat] || null,
+        subtype : t[cat] || null,
         lat, lon,
         addr    : {
-          street : tags['addr:street']   || null,
-          city   : tags['addr:city']     || null,
-          postcode: tags['addr:postcode'] || null,
+          street : t['addr:street']   || null,
+          city   : t['addr:city']     || null,
+          postcode: t['addr:postcode'] || null,
         },
-        phone   : tags.phone || tags['contact:phone'] || null,
-        website : tags.website || tags['contact:website'] || null,
-        hours   : tags.opening_hours || null,
+        phone   : t.phone || t['contact:phone'] || null,
+        website : t.website || t['contact:website'] || null,
+        hours   : t.opening_hours || null,
+        cuisine,
+        tags,
       };
     })
     .filter(p => p.name); // only named POIs
