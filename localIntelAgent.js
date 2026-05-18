@@ -10148,11 +10148,12 @@ router.post('/chat', async (req, res) => {
 
     // B73: Owner bypass — Erik (or any operator) skips the trial gate.
     // Set OWNER_PHONE in Railway env (comma-separated for multiple numbers).
+    const normalizePhone = (p) => (p || '').replace(/\D/g, '');
     const OWNER_PHONES = (process.env.OWNER_PHONE || '')
       .split(',')
-      .map(p => p.trim())
+      .map(p => normalizePhone(p))
       .filter(Boolean);
-    const isOwner = OWNER_PHONES.includes(String(phone || '').trim());
+    const isOwner = OWNER_PHONES.includes(normalizePhone(phone));
 
     // A) Auth / trial provisioning
     await db.query(
