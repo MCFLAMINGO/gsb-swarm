@@ -10218,7 +10218,19 @@ router.post('/chat', async (req, res) => {
       ).catch(() => []);
       const rows = Array.isArray(sigRowsCounty) ? sigRowsCounty : [];
 
-      // B74: Pull business rollup per ZIP for this county
+      // B75: detect food/dining concept to filter out non-food categories from business lists
+      const FOOD_CONCEPT_RE = /\b(restaurant|food|eat|dining|dinner|lunch|bar|drink|healthy|cafe|coffee|cuisine|chef|menu)/i;
+      const isFoodConcept = FOOD_CONCEPT_RE.test(String(question || ''));
+      const foodFilterAggCounty = isFoodConcept
+        ? ` AND NOT (b.category_group IN ('pharmacy','health','finance','automotive','legal','real_estate'))
+            AND NOT (b.category IN ('pharmacy','bank','bank_branch','auto_repair','law_firm','real_estate'))`
+        : '';
+      const foodFilterLateralCounty = isFoodConcept
+        ? ` AND NOT (b2.category_group IN ('pharmacy','health','finance','automotive','legal','real_estate'))
+            AND NOT (b2.category IN ('pharmacy','bank','bank_branch','auto_repair','law_firm','real_estate'))`
+        : '';
+
+      // B74/B75: Pull business rollup per ZIP for this county (with tags + optional food filter)
       const bizRowsCounty = await db.query(
         `SELECT
            agg.zip,
@@ -10236,16 +10248,18 @@ router.post('/chat', async (req, res) => {
              mode() WITHIN GROUP (ORDER BY b.category) AS top_category
            FROM businesses b
            WHERE b.zip = ANY($1)
+             ${foodFilterAggCounty}
            GROUP BY b.zip
          ) agg
          LEFT JOIN LATERAL (
            SELECT json_agg(
-             json_build_object('name', t.name, 'category', t.category, 'claimed', t.claimed)
+             json_build_object('name', t.name, 'category', t.category, 'claimed', t.claimed, 'tags', t.tags)
            ) AS top_businesses
            FROM (
-             SELECT b2.name, b2.category, (b2.claimed_at IS NOT NULL) AS claimed
+             SELECT b2.name, b2.category, b2.tags, (b2.claimed_at IS NOT NULL) AS claimed
              FROM businesses b2
              WHERE b2.zip = agg.zip
+               ${foodFilterLateralCounty}
              ORDER BY
                (CASE WHEN b2.claimed_at IS NOT NULL THEN 2 ELSE 0 END) +
                (CASE WHEN b2.wallet IS NOT NULL THEN 1 ELSE 0 END) +
@@ -10385,7 +10399,10 @@ For each ZIP: state the score and the single most important data point.`;
         const bizLine = biz
           ? `\n  businesses=${biz.total_businesses} (claimed=${biz.claimed_count}, wallet=${biz.wallet_count}), top_category=${biz.top_category || 'n/a'}` +
             (Array.isArray(biz.top_businesses) && biz.top_businesses.length
-              ? `\n  top_businesses: ${biz.top_businesses.map(b => `${b.name} (${b.category || 'n/a'})${b.claimed ? ' ✓' : ''}`).join(', ')}`
+              ? `\n  top_businesses: ${biz.top_businesses.map(b => {
+                  const tagStr = b.tags && b.tags.length ? ` [${b.tags.slice(0,5).join(', ')}]` : '';
+                  return `${b.name} (${b.category || 'n/a'})${b.claimed ? ' ✓' : ''}${tagStr}`;
+                }).join(', ')}`
               : '')
           : '';
         return (
@@ -10451,6 +10468,7 @@ Rules:
 - When recommending areas, name specific ZIPs AND describe what makes them distinct in plain English.
 - Use actual business names when available.
 - Never say "I cannot answer" or "data is missing."
+- Never infer health, quality, or cuisine style from a business name alone — only use the tags and category provided.
 - For recommendations: lead with your top pick and why, then offer alternatives.
 - 3-6 sentences for recommendations. More detail only if the user asks for it.
 - Multi-turn: remember context from earlier in this conversation.
@@ -10530,6 +10548,14 @@ ${zipSummaries}`;
       });
     }
 
+    // B75: detect food/dining concept to filter out non-food categories from the top businesses list
+    const FOOD_CONCEPT_RE_ZIP = /\b(restaurant|food|eat|dining|dinner|lunch|bar|drink|healthy|cafe|coffee|cuisine|chef|menu)/i;
+    const isFoodConceptZip = FOOD_CONCEPT_RE_ZIP.test(String(question || ''));
+    const foodFilterZip = isFoodConceptZip
+      ? ` AND NOT (category_group IN ('pharmacy','health','finance','automotive','legal','real_estate'))
+          AND NOT (category IN ('pharmacy','bank','bank_branch','auto_repair','law_firm','real_estate'))`
+      : '';
+
     // C) Load deterministic context (mirrors ceo-assess parallel load)
     const safe = (p) => p.catch(() => null);
     const [sigRows, propertyRows, totalBizRows, densityRows, geoRows, topBizRows] = await Promise.all([
@@ -10548,11 +10574,12 @@ ${zipSummaries}`;
         [zip]
       )),
       safe(db.query(`SELECT county FROM fl_zip_geo WHERE zip = $1 LIMIT 1`, [zip])),
-      // B74: top businesses for this ZIP — surfaced in grounding so Claude can name them
+      // B74/B75: top businesses for this ZIP (with tags + optional food filter)
       safe(db.query(
-        `SELECT name, category, phone, website, claimed_at IS NOT NULL AS claimed, confidence_score
+        `SELECT name, category, tags, phone, website, claimed_at IS NOT NULL AS claimed, confidence_score
            FROM businesses
           WHERE zip = $1
+            ${foodFilterZip}
           ORDER BY
             (CASE WHEN claimed_at IS NOT NULL THEN 3 ELSE 0 END) +
             (CASE WHEN wallet IS NOT NULL THEN 2 ELSE 0 END) +
@@ -10624,7 +10651,8 @@ ${zipSummaries}`;
       ctxLines.push('');
       ctxLines.push(`TOP BUSINESSES IN ${zip}:`);
       for (const b of topBusinesses) {
-        ctxLines.push(`- ${b.name} (${b.category || 'n/a'})${b.claimed ? ' ✓ claimed' : ''}`);
+        const tagStr = b.tags && b.tags.length ? ` [${b.tags.slice(0,5).join(', ')}]` : '';
+        ctxLines.push(`- ${b.name} (${b.category || 'n/a'})${b.claimed ? ' ✓' : ''}${tagStr}`);
       }
     }
 
@@ -10640,6 +10668,7 @@ Rules:
 - If asked about restaurants, name them. If asked about the market, describe it in plain English.
 - When data is limited, bridge naturally: "The area leans heavily toward [X] — if you're looking for [Y] you'd want to check nearby [Z]."
 - Never say "I cannot answer", "data is missing", or "contact a government agency."
+- Never infer health, quality, or cuisine style from a business name alone — only use the tags and category provided.
 - 2-4 sentences for simple questions. Up to 8 sentences for comparisons or recommendations.
 - Multi-turn: remember what was asked earlier in this conversation and build on it.
 
