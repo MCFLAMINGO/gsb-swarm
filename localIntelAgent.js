@@ -10518,16 +10518,13 @@ For each ZIP: state the score and the single most important data point.`;
       // B78: SunBiz context (only when concept matches contractor/trades/licensing)
       // B78b: derive city names from countyZips via fl_place_index so we can ILIKE
       // sunbiz_raw.principal_city (principal_zip is null in the SunBiz feed).
-      const cityLookupRowsCounty = await db.query(
-        `SELECT primary_zip, name FROM fl_place_index
-         WHERE place_type = 'city' AND primary_zip = ANY($1)`,
+      const sunbizCityRowsCounty = await db.query(
+        `SELECT DISTINCT sunbiz_city FROM fl_place_index
+         WHERE place_type = 'city' AND primary_zip = ANY($1) AND sunbiz_city IS NOT NULL`,
         [countyZips]
       ).catch(() => []);
-      const zipCityMapCounty = {};
-      for (const r of (Array.isArray(cityLookupRowsCounty) ? cityLookupRowsCounty : [])) {
-        if (!zipCityMapCounty[r.primary_zip]) zipCityMapCounty[r.primary_zip] = r.name;
-      }
-      const sunbizCtxCounty = await fetchSunbizContext(countyZips, `${countyDisplayName} County`, Object.values(zipCityMapCounty));
+      const sunbizCitiesCounty = (Array.isArray(sunbizCityRowsCounty) ? sunbizCityRowsCounty : []).map(r => r.sunbiz_city);
+      const sunbizCtxCounty = await fetchSunbizContext(countyZips, `${countyDisplayName} County`, sunbizCitiesCounty);
 
       const groundingContextCounty = `You are LocalIntel — a knowledgeable local guide for all of ${countyDisplayName} County, Florida. You know every ZIP in the county and how they compare.
 
@@ -10730,16 +10727,13 @@ ${zipSummaries}${sunbizCtxCounty.summary ? `\n\n${sunbizCtxCounty.summary}` : ''
     // B78: surface SunBiz registrations for contractor/trades/licensing concept questions
     // B78b: derive city name from this zip via fl_place_index so we can ILIKE
     // sunbiz_raw.principal_city (principal_zip is null in the SunBiz feed).
-    const cityLookupRowsZip = await db.query(
-      `SELECT primary_zip, name FROM fl_place_index
-       WHERE place_type = 'city' AND primary_zip = ANY($1)`,
-      [[zip]]
+    const sunbizCityRowsZip = await db.query(
+      `SELECT DISTINCT sunbiz_city FROM fl_place_index
+       WHERE place_type = 'city' AND primary_zip = $1 AND sunbiz_city IS NOT NULL`,
+      [zip]
     ).catch(() => []);
-    const zipCityMapZip = {};
-    for (const r of (Array.isArray(cityLookupRowsZip) ? cityLookupRowsZip : [])) {
-      if (!zipCityMapZip[r.primary_zip]) zipCityMapZip[r.primary_zip] = r.name;
-    }
-    const sunbizCtxZip = await fetchSunbizContext([zip], `ZIP ${zip}`, Object.values(zipCityMapZip));
+    const sunbizCitiesZip = (Array.isArray(sunbizCityRowsZip) ? sunbizCityRowsZip : []).map(r => r.sunbiz_city);
+    const sunbizCtxZip = await fetchSunbizContext([zip], `ZIP ${zip}`, sunbizCitiesZip);
     if (sunbizCtxZip.summary) {
       ctxLines.push('');
       ctxLines.push(sunbizCtxZip.summary);
