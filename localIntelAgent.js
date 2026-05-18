@@ -10218,6 +10218,48 @@ router.post('/chat', async (req, res) => {
       ).catch(() => []);
       const rows = Array.isArray(sigRowsCounty) ? sigRowsCounty : [];
 
+      // B74: Pull business rollup per ZIP for this county
+      const bizRowsCounty = await db.query(
+        `SELECT
+           agg.zip,
+           agg.total_businesses,
+           agg.claimed_count,
+           agg.wallet_count,
+           agg.top_category,
+           COALESCE(top5.top_businesses, '[]'::json) AS top_businesses
+         FROM (
+           SELECT
+             b.zip,
+             COUNT(*)::int AS total_businesses,
+             COUNT(CASE WHEN b.claimed_at IS NOT NULL THEN 1 END)::int AS claimed_count,
+             COUNT(CASE WHEN b.wallet IS NOT NULL THEN 1 END)::int AS wallet_count,
+             mode() WITHIN GROUP (ORDER BY b.category) AS top_category
+           FROM businesses b
+           WHERE b.zip = ANY($1)
+           GROUP BY b.zip
+         ) agg
+         LEFT JOIN LATERAL (
+           SELECT json_agg(
+             json_build_object('name', t.name, 'category', t.category, 'claimed', t.claimed)
+           ) AS top_businesses
+           FROM (
+             SELECT b2.name, b2.category, (b2.claimed_at IS NOT NULL) AS claimed
+             FROM businesses b2
+             WHERE b2.zip = agg.zip
+             ORDER BY
+               (CASE WHEN b2.claimed_at IS NOT NULL THEN 2 ELSE 0 END) +
+               (CASE WHEN b2.wallet IS NOT NULL THEN 1 ELSE 0 END) +
+               COALESCE(b2.confidence_score, 0) DESC
+             LIMIT 5
+           ) t
+         ) top5 ON true`,
+        [countyZips]
+      ).catch(() => []);
+      const bizByZip = {};
+      for (const r of (Array.isArray(bizRowsCounty) ? bizRowsCounty : [])) {
+        bizByZip[r.zip] = r;
+      }
+
       // ── Concept detection — drives ZIP scoring weights and LLM instructions ──
       const Qc = question.toLowerCase();
       const conceptIs = (kws) => kws.some(k => Qc.includes(k));
@@ -10225,7 +10267,62 @@ router.post('/chat', async (req, res) => {
       let conceptLabel = 'this concept';
       let scoringGuide = '';
 
-      if (conceptIs(['smoothie','juice bar','qsr','fast casual','coffee','cafe','sandwich','pizza','taco','burger','fast food'])) {
+      if (conceptIs(['restaurant','restaurants','food','eat','dining','dinner','lunch','brunch','cafe','coffee','destination dining','best food','place to eat'])) {
+        conceptType  = 'casual';
+        conceptLabel = 'restaurants / casual dining';
+        scoringGuide = `Score each ZIP 0-100 for restaurant / casual dining viability:
+- HHI $75k+: +30pts
+- HHI $55-75k: +20pts
+- Growth score >60: +20pts
+- Opportunity score >60: +20pts
+- Population >15k: +15pts
+- Unemployment <5%: +10pts
+- Owner occupied pct >50%: +5pts
+For each ZIP: state the score, name 2-3 actual top businesses from the data (use the top_businesses list), and whether the market leans destination dining vs neighborhood casual.`;
+      } else if (conceptIs(['bar','bars','drinks','nightlife','happy hour'])) {
+        conceptType  = 'bar';
+        conceptLabel = 'bar / nightlife';
+        scoringGuide = `Score each ZIP 0-100 for bar / nightlife viability:
+- HHI $70k+: +25pts
+- Median age 25-45 sweet spot: +20pts
+- Growth score >60: +20pts
+- Population >15k: +15pts
+- College pct >35%: +10pts
+- Unemployment <5%: +10pts
+For each ZIP: state the score, name actual venues from top_businesses if present, and call out whether the area skews tourist/destination vs locals.`;
+      } else if (conceptIs(['shop','shopping','store','retail','boutique'])) {
+        conceptType  = 'retail';
+        conceptLabel = 'retail / shopping';
+        scoringGuide = `Score each ZIP 0-100 for retail / shopping viability:
+- HHI $90k+: +30pts
+- Growth score >65: +25pts
+- Opportunity score >65: +20pts
+- Owner occupied pct >55%: +15pts
+- Population >25k: +10pts
+For each ZIP: state the score, name actual retail names from top_businesses if present, and flag the retail gap or saturation.`;
+      } else if (conceptIs(['gym','fitness','workout','yoga','pilates'])) {
+        conceptType  = 'fitness';
+        conceptLabel = 'fitness / wellness';
+        scoringGuide = `Score each ZIP 0-100 for fitness / wellness viability:
+- HHI $80k+: +30pts
+- Median age 28-50: +20pts
+- Growth score >60: +20pts
+- College pct >40%: +15pts
+- Population >15k: +10pts
+- Unemployment <5%: +5pts
+For each ZIP: state the score, name actual fitness/wellness businesses from top_businesses if present, and note demographic fit.`;
+      } else if (conceptIs(['doctor','medical','clinic','health','dentist','healthcare'])) {
+        conceptType  = 'healthcare';
+        conceptLabel = 'healthcare / medical';
+        scoringGuide = `Score each ZIP 0-100 for healthcare / medical concept viability:
+- Population >15k: +25pts
+- Median age >40: +20pts (higher healthcare utilization)
+- HHI $70k+: +20pts
+- Owner occupied pct >55%: +15pts
+- Growth score >55: +10pts
+- Opportunity score >55: +10pts
+For each ZIP: state the score, name actual healthcare providers from top_businesses if present, and note demographic/utilization fit.`;
+      } else if (conceptIs(['smoothie','juice bar','qsr','fast casual','sandwich','pizza','taco','burger','fast food'])) {
         conceptType  = 'qsr';
         conceptLabel = 'QSR / fast-casual';
         scoringGuide = `Score each ZIP 0-100 for QSR/fast-casual viability using these weights:
@@ -10283,15 +10380,25 @@ For each ZIP: state the score and name the specific retail gap or saturation ris
 For each ZIP: state the score and the single most important data point.`;
       }
 
-      const zipSummaries = rows.map(s =>
-        `ZIP ${s.zip} (${s.sig_market_maturity || 'unknown maturity'}): ` +
-        `HHI=$${s.acs_median_hhi || '?'}, pop=${s.acs_population || '?'}, ` +
-        `growth=${s.sig_growth_score || '?'}/100, opp=${s.sig_opportunity_score || '?'}/100, ` +
-        `owner_occ=${s.acs_owner_occ_pct || '?'}%, college=${s.acs_college_pct || '?'}%, ` +
-        `median_age=${s.acs_median_age || '?'}, poverty=${s.acs_poverty_pct || '?'}%, ` +
-        `unemployment=${s.fred_unemployment_rate || '?'}%, wages=${s.qcew_avg_weekly_wages || '?'}/wk, ` +
-        `new_units_annual=${s.bps_total_units_annual || '?'}`
-      ).join('\n');
+      const zipSummaries = rows.map(s => {
+        const biz = bizByZip[s.zip];
+        const bizLine = biz
+          ? `\n  businesses=${biz.total_businesses} (claimed=${biz.claimed_count}, wallet=${biz.wallet_count}), top_category=${biz.top_category || 'n/a'}` +
+            (Array.isArray(biz.top_businesses) && biz.top_businesses.length
+              ? `\n  top_businesses: ${biz.top_businesses.map(b => `${b.name} (${b.category || 'n/a'})${b.claimed ? ' ✓' : ''}`).join(', ')}`
+              : '')
+          : '';
+        return (
+          `ZIP ${s.zip} (${s.sig_market_maturity || 'unknown maturity'}): ` +
+          `HHI=$${s.acs_median_hhi || '?'}, pop=${s.acs_population || '?'}, ` +
+          `growth=${s.sig_growth_score || '?'}/100, opp=${s.sig_opportunity_score || '?'}/100, ` +
+          `owner_occ=${s.acs_owner_occ_pct || '?'}%, college=${s.acs_college_pct || '?'}%, ` +
+          `median_age=${s.acs_median_age || '?'}, poverty=${s.acs_poverty_pct || '?'}%, ` +
+          `unemployment=${s.fred_unemployment_rate || '?'}%, wages=${s.qcew_avg_weekly_wages || '?'}/wk, ` +
+          `new_units_annual=${s.bps_total_units_annual || '?'}` +
+          bizLine
+        );
+      }).join('\n');
 
       const withData = rows.length;
       const missing = countyZips.filter(z => !rows.find(s => s.zip === z));
@@ -10333,22 +10440,30 @@ For each ZIP: state the score and the single most important data point.`;
       } catch (_) { countyConvMessages = []; }
       countyConvMessages.push({ role: 'user', content: question });
 
-      const groundingContextCounty = `You are LocalIntel, a Florida local business intelligence analyst.
-Answer ONLY using the data provided. Do not hallucinate or generalize beyond the data.
+      const countyDisplayName = placeResult.countyKey;
+      const groundingContextCounty = `You are LocalIntel — a knowledgeable local guide for all of ${countyDisplayName} County, Florida. You know every ZIP in the county and how they compare.
 
-Concept: ${conceptLabel}
-County: ${placeResult.countyKey}
-Data coverage: ${withData}/${countyZips.length} ZIPs (${data_confidence}%)
-Missing ZIPs (no data): ${missing.join(', ') || 'none'}
+Speak like a well-informed local friend who understands the market, not like a data disclaimer. Lead with what you know.
 
-ZIP DATA:
-${zipSummaries}
+Rules:
+- Answer directly and conversationally.
+- You have data for every ZIP in ${countyDisplayName} County — treat the county as a whole, not as isolated ZIPs.
+- When recommending areas, name specific ZIPs AND describe what makes them distinct in plain English.
+- Use actual business names when available.
+- Never say "I cannot answer" or "data is missing."
+- For recommendations: lead with your top pick and why, then offer alternatives.
+- 3-6 sentences for recommendations. More detail only if the user asks for it.
+- Multi-turn: remember context from earlier in this conversation.
 
-SCORING INSTRUCTIONS — apply to THIS concept specifically:
+Concept focus for this question: ${conceptLabel}
+Coverage: ${withData}/${countyZips.length} ZIPs with signals (${data_confidence}%)
+Missing ZIPs (no signals): ${missing.join(', ') || 'none'}
+
+SCORING GUIDE (use as a soft lens — all signals still matter, this just shapes emphasis):
 ${scoringGuide}
 
-If the user asks to elaborate on a specific ZIP, give a detailed breakdown of that ZIP only.
-If ranking, list top ZIPs with scores and concept-specific reasons. Be specific, not generic.`;
+${countyDisplayName} COUNTY INTELLIGENCE (${rows.length} ZIPs):
+${zipSummaries}`;
 
       const llmRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -10360,7 +10475,7 @@ If ranking, list top ZIPs with scores and concept-specific reasons. Be specific,
         },
         body: JSON.stringify({
           model: 'claude-haiku-4-5',
-          max_tokens: 600,
+          max_tokens: 900,
           // Cache the county ZIP data block — same prefix reused on follow-up county questions
           system: [{
             type:          'text',
@@ -10417,7 +10532,7 @@ If ranking, list top ZIPs with scores and concept-specific reasons. Be specific,
 
     // C) Load deterministic context (mirrors ceo-assess parallel load)
     const safe = (p) => p.catch(() => null);
-    const [sigRows, propertyRows, totalBizRows, densityRows, geoRows] = await Promise.all([
+    const [sigRows, propertyRows, totalBizRows, densityRows, geoRows, topBizRows] = await Promise.all([
       safe(db.query(`SELECT * FROM zip_signals WHERE zip = $1 LIMIT 1`, [zip])),
       safe(db.query(
         `SELECT COUNT(*)::int AS parcel_count,
@@ -10433,12 +10548,25 @@ If ranking, list top ZIPs with scores and concept-specific reasons. Be specific,
         [zip]
       )),
       safe(db.query(`SELECT county FROM fl_zip_geo WHERE zip = $1 LIMIT 1`, [zip])),
+      // B74: top businesses for this ZIP — surfaced in grounding so Claude can name them
+      safe(db.query(
+        `SELECT name, category, phone, website, claimed_at IS NOT NULL AS claimed, confidence_score
+           FROM businesses
+          WHERE zip = $1
+          ORDER BY
+            (CASE WHEN claimed_at IS NOT NULL THEN 3 ELSE 0 END) +
+            (CASE WHEN wallet IS NOT NULL THEN 2 ELSE 0 END) +
+            COALESCE(confidence_score, 0) DESC
+          LIMIT 10`,
+        [zip]
+      )),
     ]);
     const sig            = Array.isArray(sigRows) && sigRows[0] ? sigRows[0] : {};
     const pr             = Array.isArray(propertyRows) && propertyRows[0] ? propertyRows[0] : {};
     const totalBiz       = Array.isArray(totalBizRows) && totalBizRows[0] ? Number(totalBizRows[0].total || 0) : 0;
     const topCategories  = Array.isArray(densityRows) ? densityRows : [];
     const zipCounty      = (Array.isArray(geoRows) && geoRows[0]?.county) ? geoRows[0].county : null;
+    const topBusinesses  = Array.isArray(topBizRows) ? topBizRows : [];
 
     // D) Compute data_confidence
     const keySignals = [
@@ -10492,19 +10620,31 @@ If ranking, list top ZIPs with scores and concept-specific reasons. Be specific,
     if (topCategories.length) ctxLines.push(`Top business categories: ${topCategories.map(c => `${c.category} (${c.count})`).join(', ')}`);
     ctxLines.push(`Missing signals: ${missingSignals.length ? missingSignals.join(', ') : 'none'}`);
 
+    if (topBusinesses.length) {
+      ctxLines.push('');
+      ctxLines.push(`TOP BUSINESSES IN ${zip}:`);
+      for (const b of topBusinesses) {
+        ctxLines.push(`- ${b.name} (${b.category || 'n/a'})${b.claimed ? ' ✓ claimed' : ''}`);
+      }
+    }
+
     const grounding = ctxLines.join('\n');
     const countyLabel = zipCounty ? `${zipCounty} County, Florida` : 'Florida';
-    const systemText = `You are LocalIntel, a Florida local business intelligence analyst.
-You have data ONLY for ZIP ${zip} (${countyLabel}). Never reference any other county by name — you do not have data for other counties unless explicitly provided.
-Answer strictly from the data below. Do not fabricate statistics, traffic counts, road rankings, competitor locations, or real estate data that is not in the dataset.
-If the user asks about something not in the data (e.g. traffic counts, specific road rankings, competitor locations):
-1. State clearly what specific data is missing
-2. State what you CAN answer from the available data
-3. End with ONE specific offer: "I can rank ZIPs in ${countyLabel.replace(' County, Florida','')} County by [relevant signal] — would that help?"
-Do NOT recommend contacting government agencies. Do NOT say "use commercial site selection tools."
-Be concise — 3-5 sentences max unless ranking is requested.
+    const systemText = `You are LocalIntel — a knowledgeable local guide for Florida communities. You know ${zip} (${countyLabel}) deeply.
 
-LOCAL DATA FOR ZIP ${zip} (${countyLabel}):\n${grounding}`;
+Speak like a well-informed local friend who understands the market, not like a data disclaimer. Lead with what you know, not what you don't.
+
+Rules:
+- Answer directly and conversationally. No bullet-point data dumps.
+- Use the actual business names, categories, and signals from the data below.
+- If asked about restaurants, name them. If asked about the market, describe it in plain English.
+- When data is limited, bridge naturally: "The area leans heavily toward [X] — if you're looking for [Y] you'd want to check nearby [Z]."
+- Never say "I cannot answer", "data is missing", or "contact a government agency."
+- 2-4 sentences for simple questions. Up to 8 sentences for comparisons or recommendations.
+- Multi-turn: remember what was asked earlier in this conversation and build on it.
+
+LOCAL INTELLIGENCE FOR ${zip} (${countyLabel}):
+${grounding}`;
 
     // E.1) Load conversation history from chat_log (multi-turn context)
     // Reconstruct last N turns for this subscriber+ZIP session
@@ -10575,7 +10715,7 @@ LOCAL DATA FOR ZIP ${zip} (${countyLabel}):\n${grounding}`;
         },
         body: JSON.stringify({
           model,
-          max_tokens: 512,
+          max_tokens: 900,
           // System as typed content block — cache_control pins this prefix for 5 min
           // Same zip_signals context reused across all turns: ~85% input cost reduction on turn 2+
           system: [{
