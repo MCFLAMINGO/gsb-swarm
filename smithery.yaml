@@ -23,6 +23,8 @@ transport:
 
 configSchema:
   type: object
+  required:
+    - X_LOCALINTEL_KEY
   properties:
     X_LOCALINTEL_KEY:
       type: string

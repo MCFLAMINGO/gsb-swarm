@@ -1844,7 +1844,7 @@ app.get('/.well-known/mcp.json', (req, res) => {
     transport: ['streamable-http', 'http'],
     authentication: {
       required: true,
-      type: 'header',
+      type: 'apiKey',
       header: 'X-LocalIntel-Key',
       description: 'Agent key from POST /api/local-intel/register. Fund wallet to unlock paid tools.',
       register: 'https://gsb-swarm-production.up.railway.app/api/local-intel/register',
@@ -1889,7 +1889,13 @@ app.get('/.well-known/mcp/server-card.json', (req, res) => {
       version: '2.1.0',
       description: 'Florida-first agent-native local market intelligence and service dispatch. 113,000+ verified businesses across Northeast Florida (St. Johns, Duval, Clay, Flagler counties). Coverage: Florida ZIP codes only. RFQ dispatch system: post job → ranked quotes → book → complete. Businesses verified via Florida Sunbiz registry. 22 MCP tools. Agents pay $0.01–$0.05/call in pathUSD on Tempo mainnet. thelocalintel.com'
     },
-    authentication: { required: false },
+    authentication: {
+      required: true,
+      type: 'apiKey',
+      header: 'X-LocalIntel-Key',
+      description: 'Agent key from POST /api/local-intel/register. Fund wallet to unlock paid tools. Discovery calls (tools/list, initialize, ping, notifications/*) are free.',
+      register: 'https://gsb-swarm-production.up.railway.app/api/local-intel/register',
+    },
     tools: [
       { name: 'local_intel_ask',       description: 'BEST FIRST CALL. Composite NL query layer — ask any plain-English question about a ZIP and get a synthesized, sourced answer with confidence score. Routes internally to zone, oracle, search, bedrock, signal, tide, corridor, changes, and nearby. Single entry point for humans and LLMs.', inputSchema: { type: 'object', required: ['question'], properties: { question: { type: 'string', description: 'Plain English question', examples: ['What restaurant categories are missing in 32082?', 'Investment signals for 32081', 'Healthcare provider gaps near A1A'] }, zip: { type: 'string', description: 'ZIP code — optional, extracted from question if present' } } } },
       { name: 'local_intel_context',   description: 'Full spatial context block for a ZIP or lat/lon. Returns anchor business, nearby businesses in distance rings, zone intelligence, and category breakdown.', inputSchema: { type: 'object', properties: { zip: { type: 'string', description: 'ZIP code (e.g. 32081)', examples: ['32081', '32082'] }, lat: { type: 'number', description: 'Latitude for location-based lookup' }, lon: { type: 'number', description: 'Longitude for location-based lookup' } } } },
@@ -2469,8 +2475,34 @@ app.get('/mcp', async (req, res) => {
 app.post('/mcp', express.json(), async (req, res) => {
   try {
     const body = req.body || {};
-    if (body.method && body.method.startsWith('notifications/') && body.id === undefined) {
+    const method = body.method || '';
+    // Discovery / notifications — free pass-through (no auth, no billing)
+    const isDiscovery =
+      method === 'tools/list' ||
+      method === 'initialize' ||
+      method === 'ping' ||
+      method.startsWith('notifications/');
+    if (method.startsWith('notifications/') && body.id === undefined) {
       return res.status(204).end();
+    }
+    // Anything that isn't discovery requires operator auth on this route.
+    // Paying agents should use /api/local-intel/mcp (apiKeyMiddleware-gated).
+    if (!isDiscovery) {
+      const opTok = req.headers['x-operator-token']
+        || req.headers['x-gsb-token']
+        || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
+      const opOk = DASHBOARD_PASSWORD
+        ? (opTok && (opTok === DASHBOARD_PASSWORD || validTokens.has(opTok)))
+        : false;
+      if (!opOk) {
+        return res.status(401).json({
+          jsonrpc: '2.0', id: body.id ?? null,
+          error: {
+            code: -32001,
+            message: 'Authentication required — use /api/local-intel/mcp with X-LocalIntel-Key for paid tool calls, or supply an operator token on this route.',
+          },
+        });
+      }
     }
     const response = await fetch('http://localhost:3004/mcp', {
       method: 'POST',

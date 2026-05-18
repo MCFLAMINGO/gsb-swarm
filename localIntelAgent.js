@@ -4085,7 +4085,13 @@ router.get('/ingest/log', async (req, res) => {
 router.get('/.well-known/mcp/server-card.json', (req, res) => {
   res.json({
     serverInfo: { name: 'LocalIntel by MCFLAMINGO', version: '1.1.0', description: 'Agentic business intelligence for St. Johns County FL (32081 + 32082). 18 MCP tools across 5 verticals. Composite NL query via local_intel_ask. Two payment rails: $0.01–$0.05/call USDC on Base (x402) or pathUSD on Tempo mainnet.' },
-    authentication: { required: false },
+    authentication: {
+      required: true,
+      type: 'apiKey',
+      header: 'X-LocalIntel-Key',
+      description: 'Agent key from POST /api/local-intel/register. Fund wallet to unlock paid tools. Discovery calls (tools/list, initialize, ping, notifications/*) are free.',
+      register: 'https://gsb-swarm-production.up.railway.app/api/local-intel/register',
+    },
     tools: [
       { name: 'local_intel_ask',       description: 'BEST FIRST CALL. Composite NL query layer — ask any plain-English question about a ZIP and get a synthesized, sourced answer with confidence score. Routes internally to zone, oracle, search, bedrock, signal, tide, corridor, changes, and nearby. Single entry point for humans and LLMs.', inputSchema: { type: 'object', required: ['question'], properties: { question: { type: 'string', description: 'Plain English question', examples: ['What restaurant categories are missing in 32082?', 'Investment signals for 32081', 'Healthcare provider gaps near A1A'] }, zip: { type: 'string', description: 'ZIP code — optional, extracted from question if present' } } } },
       { name: 'local_intel_context',   description: 'Full spatial context block for a ZIP or lat/lon. Returns anchor business, nearby businesses in distance rings, zone intelligence, and category breakdown.', inputSchema: { type: 'object', properties: { zip: { type: 'string', description: 'ZIP code', examples: ['32081', '32082'] }, lat: { type: 'number', description: 'Latitude' }, lon: { type: 'number', description: 'Longitude' } } } },
