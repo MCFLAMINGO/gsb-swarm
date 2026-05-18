@@ -10203,6 +10203,55 @@ router.post('/chat', async (req, res) => {
     }
     const isCountyQuery = placeResult.isCounty && placeResult.countyZips;
 
+    // B78: SunBiz concept detection — trades / contractor / licensing queries.
+    // When the user is asking about contractors, roofing, HVAC, plumbing, electrical,
+    // licensing, etc. we surface registered FL entities from sunbiz_raw into the
+    // grounding context. Pure food/retail/healthcare questions do NOT trigger this.
+    const SUNBIZ_CONCEPT_RE = /\b(contractor|contractors|trades?|tradesperson|roof(?:er|ers|ing)?|licens(?:e|ed|ing|ure)|hvac|a\/c|air conditioning|plumb(?:er|ers|ing)?|electric(?:al|ian|ians)?|construction|builder|builders|handyman|remodel(?:er|ers|ing)?|carpent(?:er|ry)|paint(?:er|ers|ing)|landscap(?:er|ers|ing)|pool service|pest control|flooring|drywall|masonry|concrete|fence|fencing|septic|solar install)/i;
+    const SUNBIZ_NAME_RE = '(roof|hvac|air conditioning|plumb|electric|construction|build|contractor|remodel|carpen|paint|landscap|pool service|pest control|flooring|drywall|masonry|concrete|fence|fencing|septic|solar|mechanical|trades?)';
+    const isSunbizConcept = SUNBIZ_CONCEPT_RE.test(String(question || ''));
+
+    // B78 — query sunbiz_raw for relevant registered entities in the given ZIPs.
+    // Returns {rows, summary} where summary is a compact line for grounding.
+    async function fetchSunbizContext(zips, areaLabel) {
+      if (!isSunbizConcept || !Array.isArray(zips) || zips.length === 0) {
+        return { rows: [], summary: '' };
+      }
+      try {
+        const rows = await db.query(
+          `SELECT doc_number, entity_name, entity_type, status, principal_city,
+                  principal_zip, filed_date, last_event, last_event_date
+             FROM sunbiz_raw
+            WHERE principal_zip = ANY($1)
+              AND entity_name ~* $2
+              AND (status IS NULL OR status ILIKE 'ACTIVE%' OR status ILIKE 'A%')
+            ORDER BY (CASE WHEN status ILIKE 'ACTIVE%' OR status ILIKE 'A%' THEN 0 ELSE 1 END),
+                     filed_date DESC NULLS LAST
+            LIMIT 20`,
+          [zips, SUNBIZ_NAME_RE]
+        ).catch(() => []);
+        const list = Array.isArray(rows) ? rows : [];
+        if (!list.length) return { rows: [], summary: '' };
+        const items = list.map(r => {
+          const dt = r.filed_date ? new Date(r.filed_date).toISOString().slice(0, 10) : 'n/a';
+          const city = r.principal_city || '';
+          const status = (r.status || 'UNKNOWN').toString().trim();
+          const type = r.entity_type ? ` ${r.entity_type}` : '';
+          return `${r.entity_name} (${status}${type}, ${city} ${r.principal_zip || ''}, registered ${dt})`;
+        });
+        const summary =
+          `SUNBIZ REGISTERED CONTRACTORS / TRADES IN ${areaLabel} (${list.length} active entities, most recent first):\n` +
+          items.map(i => `- ${i}`).join('\n') +
+          `\nUse these as concrete examples of registered FL businesses in this trade. ` +
+          `These are official state registrations from sunbiz.org — they confirm legal entity status, not licensing per se. ` +
+          `For contractor licensing specifics, point users to MyFloridaLicense.com (DBPR).`;
+        return { rows: list, summary };
+      } catch (e) {
+        console.error('[chat] sunbiz fetch failed:', e.message);
+        return { rows: [], summary: '' };
+      }
+    }
+
     // B.1) County-level branch: comparison/ranking + elaboration questions over a FL county
     const isCountyRanking     = isCountyQuery && /\b(best|where|which|top|compare|recommend|highest|lowest|most|least)\b/i.test(question);
     const isCountyElaboration = isCountyQuery && /\b(tell me more|elaborate|explain|what about|drill|detail|why|how does|more on|expand)\b/i.test(question);
@@ -10458,6 +10507,10 @@ For each ZIP: state the score and the single most important data point.`;
       countyConvMessages.push({ role: 'user', content: question });
 
       const countyDisplayName = placeResult.countyKey;
+
+      // B78: SunBiz context (only when concept matches contractor/trades/licensing)
+      const sunbizCtxCounty = await fetchSunbizContext(countyZips, `${countyDisplayName} County`);
+
       const groundingContextCounty = `You are LocalIntel — a knowledgeable local guide for all of ${countyDisplayName} County, Florida. You know every ZIP in the county and how they compare.
 
 Speak like a well-informed local friend who understands the market, not like a data disclaimer. Lead with what you know.
@@ -10481,7 +10534,7 @@ SCORING GUIDE (use as a soft lens — all signals still matter, this just shapes
 ${scoringGuide}
 
 ${countyDisplayName} COUNTY INTELLIGENCE (${rows.length} ZIPs):
-${zipSummaries}`;
+${zipSummaries}${sunbizCtxCounty.summary ? `\n\n${sunbizCtxCounty.summary}` : ''}`;
 
       const llmRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -10654,6 +10707,13 @@ ${zipSummaries}`;
         const tagStr = b.tags && b.tags.length ? ` [${b.tags.slice(0,5).join(', ')}]` : '';
         ctxLines.push(`- ${b.name} (${b.category || 'n/a'})${b.claimed ? ' ✓' : ''}${tagStr}`);
       }
+    }
+
+    // B78: surface SunBiz registrations for contractor/trades/licensing concept questions
+    const sunbizCtxZip = await fetchSunbizContext([zip], `ZIP ${zip}`);
+    if (sunbizCtxZip.summary) {
+      ctxLines.push('');
+      ctxLines.push(sunbizCtxZip.summary);
     }
 
     const grounding = ctxLines.join('\n');
