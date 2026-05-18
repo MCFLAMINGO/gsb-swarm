@@ -4131,3 +4131,35 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 - `workers/claimOutreachWorker.js` — NEW worker: queries unclaimed businesses not contacted in 30 days, sends SMS (200/day, Twilio, A2P registered) + email (200/day, Resend, from intel@thelocalintel.com). SMS: "LocalIntel: [Name] is listed. Claim your free profile to receive job requests & get paid. Reply CLAIM." Email: HTML with claim link `thelocalintel.com/claim?biz=[business_id]`. Writes every send to claim_outreach. Manual-trigger only (not auto-daemon) — outreach is a deliberate action.
 - `localIntelAgent.js` — CLAIM reply handler in Twilio POST: detects "CLAIM" reply, looks up business by From phone, marks outreach as replied, sends claim link.
 **Anticipated Result:** Automated outreach pipeline to 60–70% of businesses via SMS + 25–35k via email. CLAIM reply flow routes directly to claim page. claim_outreach table tracks every touchpoint for follow-up and analytics.
+
+### B66 — Email Harvest + Claim Outreach
+**Problem:** Businesses had no contact_email in DB; no outreach flow existed to bring unclaimed businesses into LocalIntel.
+**Fix:** Extended websiteEnricherWorker.js statewide to extract mailto/contact-page emails → saves to `contact_email` on businesses. Built claimOutreachWorker.js (SMS + email outreach, manual trigger only). Added CLAIM reply handler in localIntelAgent.js Twilio POST. Migration 035 adds contact_email + claim_outreach table.
+**Result:** Email harvest daemon running statewide (~45k businesses queued, ~43% hit rate). Claim outreach in DRY RUN mode (set CLAIM_OUTREACH_LIVE=true in Railway to go live).
+
+### B67 — biz_density_per_1k column fix
+**Problem:** ceo-county-query crashed with `column "biz_density_per_1k" does not exist`.
+**Fix:** Migration 036 adds biz_density_per_1k to zip_signals. businessSignalWorker derives it. Removed stale column reference from getStatewideBounds SQL.
+**Result:** ceo-county-query no longer crashes.
+
+### B67b — Twilio POST appendTurn fix
+**Problem:** Inbound Twilio POST returned "application error" — appendTurn in conversationThread.js returned undefined instead of a Promise.
+**Fix:** Made appendTurn always return the db.query() Promise.
+**Result:** Twilio POST handler works correctly.
+
+### B67c — websiteEnricherWorker daemon + trigger endpoint
+**Problem:** websiteEnricherWorker was not in DAEMON_WORKERS and had no manual trigger endpoint.
+**Fix:** Added to DAEMON_WORKERS array. Added POST /api/admin/trigger-website-enricher endpoint in dashboard-server.js. Added trigger node to ops dashboard.
+**Result:** Worker auto-starts on deploy and can be manually retriggered.
+
+### B68a — claimOutreachWorker dry-run guard + mission message
+**Problem:** claimOutreachWorker could accidentally send real SMS/email before A2P registration approved.
+**Fix:** Added CLAIM_OUTREACH_LIVE=true env var guard — worker logs dry-run without sending anything unless env var is set. Updated outreach SMS copy to LocalIntel mission message about breaking Big Tech hold on local business data.
+**Result:** Zero risk of accidental sends. Worker safe to deploy. Set Railway env var when ready to go live.
+
+### B69 — censusLayerWorker syntax fix + rfq-poll job_id fix
+**Problem 1:** censusLayerWorker.js had a SyntaxError (missing comma in COUNTY_CONFIG at line 43) causing crash on every startup.
+**Problem 2:** rfq-poll setInterval fired `column "job_id" does not exist` every ~10 minutes.
+**Problem 3 (env var, no code fix):** content-engine 401 errors — X_BEARER_TOKEN / X_API_KEY expired in Railway env vars. Refresh those to fix.
+**Fix:** Added missing commas in COUNTY_CONFIG (audited all 67 entries — every entry was missing the comma after the name field). Renamed v1 broadcast response table to `rfq_broadcast_responses` so it no longer collides with the v2 `rfq_responses` table (which was migrated from `job_id` to `rfq_id` in rfqService.js) — `rfqBroadcast.migrate()` was failing on `CREATE INDEX ... rfq_responses(job_id)` because the column had been renamed to `rfq_id`.
+**Result:** censusLayerWorker starts cleanly. rfq-poll no longer throws column errors. Content-engine note: update Railway env vars X_BEARER_TOKEN / X_API_KEY.

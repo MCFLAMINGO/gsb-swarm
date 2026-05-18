@@ -34,6 +34,6 @@
 
 ## Active B-Series
 See [session-log.md](docs/session-log.md) for full history.
-Latest: B65 — businessSignalWorker — business ecosystem signals (claimed_rate/wallet_rate/task_density/closure_rate) → zip_signals → scoring engine (2026-05-15)
-Spec ready: B66 — email harvest + outbound claim flow (websiteEnricherWorker + claimOutreachWorker + CLAIM reply handler)
-Next build: B66
+Latest: B68a — claimOutreachWorker dry-run guard + LocalIntel mission outreach message (CLAIM_OUTREACH_LIVE=true to go live) (2026-05-18)
+Built & pushed: B66 (email harvest + claim outreach) · B67 (biz_density_per_1k fix) · B67b (Twilio appendTurn fix) · B67c (websiteEnricherWorker daemon + trigger) · B68a (claim outreach dry-run guard)
+Next build: B69 — censusLayerWorker syntax fix + rfq-poll job_id column fix + content-engine env var refresh
