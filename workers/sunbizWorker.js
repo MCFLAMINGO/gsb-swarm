@@ -269,23 +269,7 @@ async function upsertBatch(records) {
       registered_date    = COALESCE(EXCLUDED.registered_date, businesses.registered_date),
       last_confirmed     = NOW(),
       updated_at         = NOW()
-  `, params).catch(async (e) => {
-    console.warn('[sunbizWorker] Batch upsert failed, falling back to single:', e.message);
-    for (const r of records) {
-      await db.query(`
-        INSERT INTO businesses
-          (sunbiz_doc_number, name, status, sunbiz_status, sunbiz_entity_type,
-           registered_date, confidence_score, category, category_group,
-           sources, primary_source, last_confirmed, zip)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,ARRAY['sunbiz'],'sunbiz',NOW(),'00000')
-        ON CONFLICT (sunbiz_doc_number) DO UPDATE SET
-          sunbiz_status = $4, sunbiz_entity_type = $5,
-          last_confirmed = NOW(), updated_at = NOW()
-      `, [r.sunbiz_doc_number, r.name, r.status, r.sunbiz_status, r.sunbiz_entity_type,
-          r.registered_date, r.confidence_score, r.category, r.category_group])
-      .catch(e2 => console.warn('[sunbizWorker] Single upsert failed:', r.sunbiz_doc_number, e2.message));
-    }
-  });
+  `, params);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
