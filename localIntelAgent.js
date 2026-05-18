@@ -10213,22 +10213,29 @@ router.post('/chat', async (req, res) => {
 
     // B78 — query sunbiz_raw for relevant registered entities in the given ZIPs.
     // Returns {rows, summary} where summary is a compact line for grounding.
-    async function fetchSunbizContext(zips, areaLabel) {
-      if (!isSunbizConcept || !Array.isArray(zips) || zips.length === 0) {
-        return { rows: [], summary: '' };
-      }
+    // B78b: sunbiz_raw.principal_zip is NULL across the board (SunBiz quarterly corp file
+    // omits ZIP). Filter by principal_city ILIKE via fl_place_index instead; keep
+    // principal_zip = ANY(...) as a fallback if ZIPs are ever populated.
+    async function fetchSunbizContext(zips, areaLabel, cities = []) {
+      if (!isSunbizConcept) return { rows: [], summary: '' };
+      const haveZips   = Array.isArray(zips)   && zips.length   > 0;
+      const haveCities = Array.isArray(cities) && cities.length > 0;
+      if (!haveZips && !haveCities) return { rows: [], summary: '' };
       try {
         const rows = await db.query(
           `SELECT doc_number, entity_name, entity_type, status, principal_city,
                   principal_zip, filed_date, last_event, last_event_date
              FROM sunbiz_raw
-            WHERE principal_zip = ANY($1)
-              AND entity_name ~* $2
+            WHERE (
+                    EXISTS (SELECT 1 FROM unnest($1::text[]) AS c WHERE principal_city ILIKE c)
+                    OR principal_zip = ANY($2)
+                  )
+              AND entity_name ~* $3
               AND (status IS NULL OR status ILIKE 'ACTIVE%' OR status ILIKE 'A%')
             ORDER BY (CASE WHEN status ILIKE 'ACTIVE%' OR status ILIKE 'A%' THEN 0 ELSE 1 END),
                      filed_date DESC NULLS LAST
             LIMIT 20`,
-          [zips, SUNBIZ_NAME_RE]
+          [haveCities ? cities : [], haveZips ? zips : [], SUNBIZ_NAME_RE]
         ).catch(() => []);
         const list = Array.isArray(rows) ? rows : [];
         if (!list.length) return { rows: [], summary: '' };
@@ -10509,7 +10516,18 @@ For each ZIP: state the score and the single most important data point.`;
       const countyDisplayName = placeResult.countyKey;
 
       // B78: SunBiz context (only when concept matches contractor/trades/licensing)
-      const sunbizCtxCounty = await fetchSunbizContext(countyZips, `${countyDisplayName} County`);
+      // B78b: derive city names from countyZips via fl_place_index so we can ILIKE
+      // sunbiz_raw.principal_city (principal_zip is null in the SunBiz feed).
+      const cityLookupRowsCounty = await db.query(
+        `SELECT primary_zip, name FROM fl_place_index
+         WHERE place_type = 'city' AND primary_zip = ANY($1)`,
+        [countyZips]
+      ).catch(() => []);
+      const zipCityMapCounty = {};
+      for (const r of (Array.isArray(cityLookupRowsCounty) ? cityLookupRowsCounty : [])) {
+        if (!zipCityMapCounty[r.primary_zip]) zipCityMapCounty[r.primary_zip] = r.name;
+      }
+      const sunbizCtxCounty = await fetchSunbizContext(countyZips, `${countyDisplayName} County`, Object.values(zipCityMapCounty));
 
       const groundingContextCounty = `You are LocalIntel — a knowledgeable local guide for all of ${countyDisplayName} County, Florida. You know every ZIP in the county and how they compare.
 
@@ -10710,7 +10728,18 @@ ${zipSummaries}${sunbizCtxCounty.summary ? `\n\n${sunbizCtxCounty.summary}` : ''
     }
 
     // B78: surface SunBiz registrations for contractor/trades/licensing concept questions
-    const sunbizCtxZip = await fetchSunbizContext([zip], `ZIP ${zip}`);
+    // B78b: derive city name from this zip via fl_place_index so we can ILIKE
+    // sunbiz_raw.principal_city (principal_zip is null in the SunBiz feed).
+    const cityLookupRowsZip = await db.query(
+      `SELECT primary_zip, name FROM fl_place_index
+       WHERE place_type = 'city' AND primary_zip = ANY($1)`,
+      [[zip]]
+    ).catch(() => []);
+    const zipCityMapZip = {};
+    for (const r of (Array.isArray(cityLookupRowsZip) ? cityLookupRowsZip : [])) {
+      if (!zipCityMapZip[r.primary_zip]) zipCityMapZip[r.primary_zip] = r.name;
+    }
+    const sunbizCtxZip = await fetchSunbizContext([zip], `ZIP ${zip}`, Object.values(zipCityMapZip));
     if (sunbizCtxZip.summary) {
       ctxLines.push('');
       ctxLines.push(sunbizCtxZip.summary);
