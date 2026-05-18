@@ -536,7 +536,32 @@ app.get('/api/admin/sunbiz-status', (req, res) => {
     path: p,
   });
 });
+// GET /api/admin/sunbiz-progress — live worker progress: state, postgres count, recent events
+app.get('/api/admin/sunbiz-progress', async (req, res) => {
+  try {
+    const db = require('./lib/db');
+    const [stateRows, countRow, eventRow] = await Promise.all([
+      db.query(`SELECT key, value FROM sunbiz_import_state ORDER BY key`).catch(() => []),
+      db.query(`SELECT COUNT(*) AS total FROM businesses WHERE primary_source = 'sunbiz'`).catch(() => []),
+      db.query(`SELECT event_type, records_out, created_at FROM worker_events
+                WHERE worker_name = 'fl_sunbiz' ORDER BY created_at DESC LIMIT 5`).catch(() => []),
+    ]);
+    const state = {};
+    for (const r of (Array.isArray(stateRows) ? stateRows : [])) state[r.key] = r.value;
+    const inPostgres = (Array.isArray(countRow) ? countRow[0] : countRow)?.total || 0;
+    res.json({
+      ok: true,
+      state,
+      businesses_in_postgres: inPostgres,
+      recent_events: Array.isArray(eventRow) ? eventRow : [],
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // POST /api/admin/import-sunbiz — parses cordata.zip → sunbiz_raw + businesses
+// Also resets sunbiz_import_state so sunbizWorker re-runs fresh on next start.
 app.post('/api/admin/import-sunbiz', async (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
   if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
@@ -545,6 +570,15 @@ app.post('/api/admin/import-sunbiz', async (req, res) => {
   res.json({ status: 'started', message: 'Sunbiz import running — check Railway logs for progress' });
   setImmediate(async () => {
     try {
+      const db = require('./lib/db');
+      await db.query(`
+        INSERT INTO sunbiz_import_state (key, value) VALUES ('import_complete','false')
+        ON CONFLICT (key) DO UPDATE SET value = 'false'
+      `).catch(() => {});
+      await db.query(`
+        INSERT INTO sunbiz_import_state (key, value) VALUES ('lines_imported','0')
+        ON CONFLICT (key) DO UPDATE SET value = '0'
+      `).catch(() => {});
       const { importSunbiz } = require('./scripts/import-sunbiz');
       await importSunbiz();
       console.log('[admin] ✅ Sunbiz import complete');

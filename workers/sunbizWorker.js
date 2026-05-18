@@ -238,10 +238,11 @@ async function importSunbiz() {
 
 async function upsertBatch(records) {
   if (!records.length) return;
-  // Upsert into businesses — match on sunbiz_doc_number
-  const values = records.map((r, i) => {
-    const base = i * 9;
-    return `($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7},$${base+8},$${base+9})`;
+
+  // 9 dynamic params per record. sources/primary_source/last_confirmed/zip are SQL literals.
+  const valueClauses = records.map((r, i) => {
+    const b = i * 9;
+    return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},ARRAY['sunbiz'],'sunbiz',NOW(),'00000')`;
   }).join(',');
 
   const params = records.flatMap(r => [
@@ -260,28 +261,28 @@ async function upsertBatch(records) {
     INSERT INTO businesses
       (sunbiz_doc_number, name, status, sunbiz_status, sunbiz_entity_type,
        registered_date, confidence_score, category, category_group,
-       sources, primary_source, last_confirmed)
-    VALUES ${values}
+       sources, primary_source, last_confirmed, zip)
+    VALUES ${valueClauses}
     ON CONFLICT (sunbiz_doc_number) DO UPDATE SET
-      sunbiz_status       = EXCLUDED.sunbiz_status,
-      sunbiz_entity_type  = EXCLUDED.sunbiz_entity_type,
-      registered_date     = COALESCE(EXCLUDED.registered_date, businesses.registered_date),
-      last_confirmed      = NOW(),
-      updated_at          = NOW()
-  `.replace('sources, primary_source, last_confirmed)', 
-    'sources, primary_source, last_confirmed)').replace(
-    `$${records.length * 9 - 0})`,
-    `$${records.length * 9})`
-  ), params).catch(async (e) => {
-    // Fallback: upsert one by one if batch fails
+      sunbiz_status      = EXCLUDED.sunbiz_status,
+      sunbiz_entity_type = EXCLUDED.sunbiz_entity_type,
+      registered_date    = COALESCE(EXCLUDED.registered_date, businesses.registered_date),
+      last_confirmed     = NOW(),
+      updated_at         = NOW()
+  `, params).catch(async (e) => {
     console.warn('[sunbizWorker] Batch upsert failed, falling back to single:', e.message);
     for (const r of records) {
       await db.query(`
-        INSERT INTO businesses (sunbiz_doc_number, name, status, sunbiz_status, sunbiz_entity_type, registered_date, confidence_score, category, category_group, sources, primary_source, last_confirmed)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,ARRAY['sunbiz'],'sunbiz',NOW())
+        INSERT INTO businesses
+          (sunbiz_doc_number, name, status, sunbiz_status, sunbiz_entity_type,
+           registered_date, confidence_score, category, category_group,
+           sources, primary_source, last_confirmed, zip)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,ARRAY['sunbiz'],'sunbiz',NOW(),'00000')
         ON CONFLICT (sunbiz_doc_number) DO UPDATE SET
-          sunbiz_status = $4, sunbiz_entity_type = $5, last_confirmed = NOW(), updated_at = NOW()
-      `, [r.sunbiz_doc_number, r.name, r.status, r.sunbiz_status, r.sunbiz_entity_type, r.registered_date, r.confidence_score, r.category, r.category_group])
+          sunbiz_status = $4, sunbiz_entity_type = $5,
+          last_confirmed = NOW(), updated_at = NOW()
+      `, [r.sunbiz_doc_number, r.name, r.status, r.sunbiz_status, r.sunbiz_entity_type,
+          r.registered_date, r.confidence_score, r.category, r.category_group])
       .catch(e2 => console.warn('[sunbizWorker] Single upsert failed:', r.sunbiz_doc_number, e2.message));
     }
   });
@@ -311,8 +312,4 @@ async function run() {
   await importSunbiz();
 }
 
-// DISABLED — Sunbiz data already fully seeded to Postgres. cordata.zip is 1.6GB and fills
-// the Railway volume. Do NOT re-enable without a plan to stream directly to Postgres.
-// To re-run a one-time import use: POST /api/admin/download-sunbiz + /api/admin/import-sunbiz
-console.log('[sunbizWorker] DISABLED — data already in Postgres. Exiting.');
-process.exit(0);
+run().catch(e => console.error('[sunbizWorker] Fatal:', e.message));
