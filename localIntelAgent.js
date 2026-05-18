@@ -96,6 +96,7 @@ const { exact } = require('x402/schemes');
 
 // ── API key middleware (pathUSD + USDC, Postgres-backed) ─────────────────────
 const { createApiKeyMiddleware } = require('./lib/apiKeyMiddleware');
+const { harvestGuard } = require('./lib/harvestGuard');
 const db = require('./lib/db');
 const { resolveIntent, detectOpenIntent } = require('./lib/intentMap');
 const { resolveIntent: resolveNlIntentFromRegistry } = require('./lib/intentRegistry');
@@ -4260,7 +4261,7 @@ function detectSource(req) {
 // This is the public MCP endpoint agents call from outside Railway.
 // Full URL: https://gsb-swarm-production.up.railway.app/api/mcp
 // Payment: X-LocalIntel-Key required. pathUSD (Tempo) or USDC (Base). Free: tools/list, notifications.
-router.post('/mcp', express.json(), apiKeyMiddleware, async (req, res) => {
+router.post('/mcp', express.json(), harvestGuard, apiKeyMiddleware, async (req, res) => {
   try {
     const body = req.body || {};
     // MCP notifications have no "id" — return 204 immediately, never proxy
@@ -6218,7 +6219,7 @@ router.options('/search', (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.sendStatus(204);
 });
-router.get('/search', async (req, res) => {
+router.get('/search', harvestGuard, async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   const t0 = Date.now();
   const raw   = (req.query.q   || '').trim();

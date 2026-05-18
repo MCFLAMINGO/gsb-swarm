@@ -1843,13 +1843,14 @@ app.get('/.well-known/mcp.json', (req, res) => {
     endpoint: 'https://gsb-swarm-production.up.railway.app/api/local-intel/mcp',
     transport: ['streamable-http', 'http'],
     authentication: {
-      required: true,
+      required: false,
       type: 'apiKey',
       header: 'X-LocalIntel-Key',
-      description: 'Agent key from POST /api/local-intel/register. Fund wallet to unlock paid tools.',
+      note: 'Search and RFQ creation are free. Payment occurs on job completion via Tempo (pathUSD).',
+      description: 'Optional agent key from POST /api/local-intel/register. Only required for wallet/settlement operations.',
       register: 'https://gsb-swarm-production.up.railway.app/api/local-intel/register',
     },
-    pricing: { currency: 'pathUSD', network: 'Tempo mainnet', per_query: '$0.01–$0.05' },
+    pricing: { currency: 'pathUSD', network: 'Tempo mainnet', per_query: 'Free for search and RFQ creation. Settlement on job completion.' },
     tools_summary: [
       { name: 'local_intel_query',      description: 'BEST FIRST CALL — plain-English market question, auto-routes to right tool.' },
       { name: 'local_intel_rfq',        description: 'Post a service job (landscaping, plumbing, cleaning, etc.) — get ranked quotes from local businesses.' },

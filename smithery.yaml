@@ -23,12 +23,10 @@ transport:
 
 configSchema:
   type: object
-  required:
-    - X_LOCALINTEL_KEY
   properties:
     X_LOCALINTEL_KEY:
       type: string
-      description: Your LocalIntel agent key (from /api/local-intel/register). Required for paid tools.
+      description: Optional. Required only for wallet/settlement operations. Search and RFQ creation are free.
       x-order: 0
     MCP_ENDPOINT:
       type: string
