@@ -10135,7 +10135,7 @@ router.post('/ceo-query', express.json(), async (req, res) => {
 
 // ── B45: Subscriber LLM Chat Endpoint ─────────────────────────────────────────
 // POST /api/local-intel/chat
-// Phone-based subscriber auth (3 free trial queries, then $9.99/mo gates).
+// Phone-based subscriber auth (5 free trial queries, then $9.99/mo gates).
 // Loads zip_signals + business/property context, computes data_confidence,
 // and calls Claude Haiku via Anthropic API with grounded prompt.
 router.post('/chat', async (req, res) => {
@@ -10157,7 +10157,7 @@ router.post('/chat', async (req, res) => {
     // A) Auth / trial provisioning
     await db.query(
       `INSERT INTO subscriber_accounts (phone, tier, status, trial_queries_used, trial_queries_limit)
-         VALUES ($1, 'chat', 'trial', 0, 3)
+         VALUES ($1, 'chat', 'trial', 0, 5)
        ON CONFLICT (phone) DO NOTHING`,
       [phone]
     ).catch(() => {});
@@ -10173,7 +10173,7 @@ router.post('/chat', async (req, res) => {
     }
     const isSubscriber = sub.status === 'active';
     const trialUsed    = Number(sub.trial_queries_used || 0);
-    const trialLimit   = Number(sub.trial_queries_limit || 3);
+    const trialLimit   = Number(sub.trial_queries_limit || 5);
     const trialAllowed = sub.status === 'trial' && trialUsed < trialLimit;
     if (!isOwner && !isSubscriber && !trialAllowed) {
       return res.status(402).json({
@@ -10370,10 +10370,17 @@ If ranking, list top ZIPs with scores and concept-specific reasons. Be specific,
         }),
       });
       const llmData = await llmRes.json();
-      const answerCounty = (llmData && llmData.content && llmData.content[0] && llmData.content[0].text) || 'Unable to generate answer.';
+      const rawCountyText = (llmData && llmData.content && llmData.content[0] && llmData.content[0].text) || '';
+      const answerCounty = rawCountyText || 'Unable to generate answer.';
       const cachedCounty   = Number(llmData?.usage?.cache_read_input_tokens || 0);
       const uncachedCounty = Number(llmData?.usage?.cache_creation_input_tokens || llmData?.usage?.input_tokens || 0);
       const tokensUsedCounty = cachedCounty + uncachedCounty + Number(llmData?.usage?.output_tokens || 0);
+
+      // B73c: only count an attempt when LLM actually returned a real answer.
+      const gotRealAnswerCounty =
+        !llmData?.error &&
+        typeof rawCountyText === 'string' &&
+        rawCountyText.trim().length > 10;
 
       if (data_confidence > 0) {
         db.query(
@@ -10387,7 +10394,7 @@ If ranking, list top ZIPs with scores and concept-specific reasons. Be specific,
         ).catch(() => {});
       }
 
-      if (!isOwner && !isSubscriber && data_confidence > 0) {
+      if (!isOwner && !isSubscriber && data_confidence > 0 && gotRealAnswerCounty) {
         db.query(
           `UPDATE subscriber_accounts SET trial_queries_used = trial_queries_used + 1, updated_at = NOW() WHERE phone = $1`,
           [phone]
@@ -10401,7 +10408,7 @@ If ranking, list top ZIPs with scores and concept-specific reasons. Be specific,
         answer: answerCounty,
         data_confidence,
         missing_signals: missing,
-        trial_remaining: isOwner ? 999 : (!isSubscriber ? Math.max(0, trialLimit - trialUsed - (data_confidence > 0 ? 1 : 0)) : null),
+        trial_remaining: isOwner ? 999 : (!isSubscriber ? Math.max(0, trialLimit - trialUsed - (data_confidence > 0 && gotRealAnswerCounty ? 1 : 0)) : null),
         is_subscriber: isSubscriber,
         is_owner: isOwner,
       });
@@ -10617,9 +10624,13 @@ LOCAL DATA FOR ZIP ${zip} (${countyLabel}):\n${grounding}`;
     }
 
     // H) Increment trial usage (fire-and-forget)
-    // Don't charge trial when the LLM couldn't answer due to missing data
+    // B73c: Only count an attempt when LLM actually returned a real answer.
+    // The LLM error / fetch failure paths return early above (502), so reaching
+    // here implies no thrown error. Still verify the answer is non-empty and
+    // not a "missing data / can't answer" stub.
     const answerIsPartial = /I cannot answer|missing data|traffic.*not available|road.*data.*not|don't have.*road|do not have.*traffic|contact.*department|site selection tool/i.test(answer);
-    if (!isOwner && !isSubscriber && dataConfidence > 0 && !answerIsPartial) {
+    const gotRealAnswer = typeof answer === 'string' && answer.trim().length > 10 && !answerIsPartial;
+    if (!isOwner && !isSubscriber && dataConfidence > 0 && gotRealAnswer) {
       db.query(
         `UPDATE subscriber_accounts SET trial_queries_used = trial_queries_used + 1, updated_at = NOW() WHERE phone = $1`,
         [phone]
@@ -10634,7 +10645,7 @@ LOCAL DATA FOR ZIP ${zip} (${countyLabel}):\n${grounding}`;
       answer,
       data_confidence: dataConfidence,
       missing_signals: missingSignals,
-      trial_remaining: isOwner ? 999 : (trialRemaining != null ? Math.max(0, trialRemaining - 1) : null),
+      trial_remaining: isOwner ? 999 : (trialRemaining != null ? Math.max(0, trialRemaining - (gotRealAnswer ? 1 : 0)) : null),
       is_subscriber: isSubscriber,
       is_owner: isOwner,
     });
@@ -10964,11 +10975,11 @@ router.get('/subscriber-status', async (req, res) => {
     );
 
     if (!sub) {
-      return res.json({ status: 'none', trial_remaining: 3, is_subscriber: false });
+      return res.json({ status: 'none', trial_remaining: 5, is_subscriber: false });
     }
 
     const isActive = sub.status === 'active' && (!sub.expires_at || new Date(sub.expires_at) > new Date());
-    const trialRemaining = Math.max(0, (sub.trial_queries_limit || 3) - (sub.trial_queries_used || 0));
+    const trialRemaining = Math.max(0, (sub.trial_queries_limit || 5) - (sub.trial_queries_used || 0));
 
     return res.json({
       status: sub.status,
