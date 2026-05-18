@@ -6756,7 +6756,25 @@ app.post('/api/content/rewrite-voice', express.json(), ceHandler(contentEngine.r
 app.post('/api/content/detect-ai', express.json(), ceHandler(contentEngine.detectAiContent));
 
 // 12. Get X mentions
+// EXPLICIT TRIGGER ONLY — X/Twitter API calls must never auto-fire.
+// Requires operator token, dispatch token, or trigger header to prevent
+// unauthenticated scanners/bots from burning the X bearer token (401 storms).
+function requireExplicitXTrigger(req, res) {
+  const token = req.headers['x-gsb-token']
+    || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
+  const ok = (token && validTokens.has(token))
+    || token === 'gsb-dispatch-2026'
+    || token === process.env.DASHBOARD_PASSWORD
+    || req.headers['x-explicit-trigger'] === 'true';
+  if (!ok) {
+    res.status(401).json({ ok: false, error: 'X API requires explicit trigger — supply x-gsb-token or x-explicit-trigger: true' });
+    return false;
+  }
+  return true;
+}
+
 app.get('/api/content/x-mentions', async (req, res) => {
+  if (!requireExplicitXTrigger(req, res)) return;
   try {
     const result = await contentEngine.getXMentions({
       query: req.query.query,
@@ -6781,6 +6799,8 @@ app.get('/api/content/platforms', (req, res) => {
 app.post('/api/content/job', express.json(), async (req, res) => {
   const { job, params } = req.body;
   if (!job) return res.status(400).json({ ok: false, error: 'job is required' });
+  // X API jobs require explicit trigger — same guard as /api/content/x-mentions
+  if (job === 'get_x_mentions' && !requireExplicitXTrigger(req, res)) return;
   const jobMap = {
     'analyze_website_audience': (p) => contentEngine.analyzeWebsiteAudience(anthropic, p),
     'list_my_brands':           (p) => contentEngine.listMyBrands(p),
