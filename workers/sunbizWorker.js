@@ -181,25 +181,43 @@ async function downloadZip() {
 
     fs.mkdirSync(SUNBIZ_DIR, { recursive: true });
 
-    // Resume: if file already exists and matches remote size, skip download
+    // Resume partial download if file exists
+    let localSize = 0;
     if (fs.existsSync(ZIP_FILE)) {
-      const localSize = fs.statSync(ZIP_FILE).size;
+      localSize = fs.statSync(ZIP_FILE).size;
       if (localSize === remoteSize) {
         console.log(`[sunbizWorker] ZIP already complete (${(localSize/1024/1024).toFixed(1)} MB) — skipping download`);
+        await sftp.end();
         return remoteSize;
       }
-      console.log(`[sunbizWorker] Partial download found (${(localSize/1024/1024).toFixed(1)} MB / ${(remoteSize/1024/1024).toFixed(1)} MB) — restarting download`);
-      fs.unlinkSync(ZIP_FILE);
+      console.log(`[sunbizWorker] Resuming download from ${(localSize/1024/1024).toFixed(1)} MB / ${(remoteSize/1024/1024).toFixed(1)} MB`);
+    } else {
+      console.log(`[sunbizWorker] Starting download SFTP → ${ZIP_FILE}`);
     }
 
-    console.log(`[sunbizWorker] Downloading SFTP → ${ZIP_FILE}`);
-    await sftp.fastGet(REMOTE_PATH, ZIP_FILE);
+    // Stream from offset into append stream
+    await new Promise((resolve, reject) => {
+      const remoteStream = sftp.createReadStream(REMOTE_PATH, { start: localSize, autoClose: true });
+      const writeFlags = localSize > 0 ? 'a' : 'w';
+      const localStream = fs.createWriteStream(ZIP_FILE, { flags: writeFlags, start: localSize });
+      let downloaded = localSize;
+      remoteStream.on('data', chunk => {
+        downloaded += chunk.length;
+        if (Math.floor(downloaded / (100*1024*1024)) > Math.floor((downloaded - chunk.length) / (100*1024*1024))) {
+          console.log(`[sunbizWorker] Downloaded ${(downloaded/1024/1024).toFixed(0)} MB / ${(remoteSize/1024/1024).toFixed(0)} MB`);
+        }
+      });
+      remoteStream.on('error', reject);
+      localStream.on('error', reject);
+      localStream.on('finish', resolve);
+      remoteStream.pipe(localStream);
+    });
 
-    const localSize = fs.statSync(ZIP_FILE).size;
-    if (localSize !== remoteSize) {
-      throw new Error(`Download size mismatch: local=${localSize} remote=${remoteSize}`);
+    const finalSize = fs.statSync(ZIP_FILE).size;
+    if (finalSize !== remoteSize) {
+      throw new Error(`Download size mismatch: local=${finalSize} remote=${remoteSize}`);
     }
-    console.log(`[sunbizWorker] Download complete: ${(localSize / 1024 / 1024).toFixed(1)} MB`);
+    console.log(`[sunbizWorker] Download complete: ${(finalSize / 1024 / 1024).toFixed(1)} MB`);
 
     return remoteSize;
   } finally {
