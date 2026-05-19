@@ -4163,3 +4163,112 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 **Problem 3 (env var, no code fix):** content-engine 401 errors — X_BEARER_TOKEN / X_API_KEY expired in Railway env vars. Refresh those to fix.
 **Fix:** Added missing commas in COUNTY_CONFIG (audited all 67 entries — every entry was missing the comma after the name field). Renamed v1 broadcast response table to `rfq_broadcast_responses` so it no longer collides with the v2 `rfq_responses` table (which was migrated from `job_id` to `rfq_id` in rfqService.js) — `rfqBroadcast.migrate()` was failing on `CREATE INDEX ... rfq_responses(job_id)` because the column had been renamed to `rfq_id`.
 **Result:** censusLayerWorker starts cleanly. rfq-poll no longer throws column errors. Content-engine note: update Railway env vars X_BEARER_TOKEN / X_API_KEY.
+
+### B69 — censusLayerWorker all 67 counties + rfq-poll table rename + content-engine auth
+**Date:** 2026-05-18
+**Commit:** 0df65cb
+**Problem:** censusLayerWorker crashed on every startup — comma missing after name field in COUNTY_CONFIG. Audit revealed ALL 67 county entries had the same missing comma, not just line 43. rfq-poll fired `column "job_id" does not exist` every 10 minutes. content-engine /api/content/x-mentions and /api/content/job were unauthed, getting probed by bots.
+**Fix:** Fixed all 67 county comma entries in censusLayerWorker.js. Renamed rfq broadcast response table to rfq_broadcast_responses to stop collision with v2 rfq_responses table. Added auth guard to content-engine endpoints.
+**Result:** censusLayerWorker starts cleanly. rfq-poll silent. Content-engine endpoints require auth.
+
+### B70 — zip_signals scoring into search + voice↔SMS context unification
+**Date:** 2026-05-18
+**Commit:** 5c27e78
+**Problem:** 15 of 18 search paths had no zip_signals JOIN. Scoring engine (conceptProfiles.js) was single source of truth for ZIP scoring but not wired to business search ORDER BY. Voice and SMS sessions were keyed separately — voice callers had no shared context with their SMS thread.
+**Fix:** lib/searchRank.js NEW — buildConceptOrderBy() reads from CONCEPT_PROFILES, used by all search paths. 15 search paths now LEFT JOIN zip_signals with concept-profile ORDER BY. voiceIntake.js appendTurn(callerPhone) unifies voice↔SMS context keyed on E.164 phone. detectConcept.js gains negation stripping and atmosphere keywords.
+**Result:** Single source of truth: update conceptProfiles.js weight → both ZIP scoring and business search ORDER BY update automatically. Voice and SMS share conversation context.
+
+### B71 — auth leaks closed + apiKeyMiddleware fail-closed
+**Date:** 2026-05-18
+**Commit:** 3b26b73
+**Problem:** Three auth leaks: /mcp dashboard route unauthed, apiKeyMiddleware failed open on DB error (gave free access when DB was down), /.well-known/mcp.json inconsistent with smithery.yaml.
+**Fix:** Added auth guard to /mcp dashboard route. apiKeyMiddleware now fails closed on DB error (401 not 200). well-known endpoint updated for consistency.
+**Result:** No unauthenticated access to operator routes. Auth fails safely.
+
+### B72 — free search + RFQ + harvesting guard
+**Date:** 2026-05-18
+**Commit:** 945ab40
+**Problem:** Payment model unclear. Risk of data harvesting (someone querying 240k businesses to copy the DB).
+**Fix:** lib/harvestGuard.js NEW — requires location anchor, caps at 100 results, velocity check (>20 distinct ZIPs/60s = 429). Search and RFQ creation locked as free. Payment fires only on confirmed job completion via Tempo pathUSD.
+**Result:** Payment model locked. Harvesting impossible at scale.
+
+### B73 — trial gate + OWNER_PHONE bypass + modal fixes
+**Date:** 2026-05-18
+**Commits:** 1f34ba8, 589e846, 54586da, 38fedb6, 9ecfad5
+**Problem:** Trial gate hardcoded 917-574-1483 (was browser autofill not code). OWNER_PHONE had no bypass — owner couldn't test without consuming trial questions. Trial counted on errors not just real answers. Phone comparison failed due to formatting differences.
+**Fix:** OWNER_PHONE env var bypass added. Trial counts only on real answers. Phone normalized (strip non-digits both sides). 3→5 trial questions. Modal copy and example chips improved.
+**Result:** Owner can test freely. Trial gate works correctly.
+
+### B74 — conversational prompts + county business rollup
+**Date:** 2026-05-18
+**Commit:** 49cce09
+**Problem:** /chat responses were defensive and hedging. County-level queries returned only zip_signals aggregates with no actual businesses. Prompts were too short (300 tokens).
+**Fix:** Rewrote all grounding prompts to be conversational. County branch now queries businesses per ZIP in the county and rolls up results. Expanded to 900 tokens. Expanded concept keywords.
+**Result:** Responses conversational and useful. County queries show real businesses.
+
+### B75 — tags in grounding + food category filter + no name-inference
+**Date:** 2026-05-18
+**Commit:** d4552c1
+**Problem:** McFlamingo tags not surfaced in /chat grounding. Food queries returning CVS/pharmacies. System was inferring business names from context incorrectly.
+**Fix:** Tags injected into grounding context. Food category filter excludes pharmacies/CVS. No-name-inference rule added to prompt.
+**Result:** McFlamingo shows full tags. Food queries return actual food businesses only.
+
+### B76 — OSM cuisine/dietary tag extraction
+**Date:** 2026-05-18
+**Commit:** 6290c21
+**Problem:** overpassWorker normalisePois() discarded cuisine and diet:* tags from OSM data. upsertBusiness() overwrote existing tags on conflict.
+**Fix:** normalisePois() now extracts cuisine + diet:* tags. upsertBusiness() unions tags (array_cat + uniq) — never overwrites.
+**Result:** OSM ingestion preserves cuisine and dietary tags. Tags accumulate across sources.
+
+### B77 — QA harness + website keyword tag extraction
+**Date:** 2026-05-18
+**Commit:** d6c9733
+**Problem:** No automated way to test search quality across canonical queries. websiteEnricherWorker fetched pages but didn't extract keywords into tags.
+**Fix:** POST /api/admin/trigger-qa-suite endpoint — runs 49 canonical tests, stores results in qa_results table. websiteEnricherWorker now extracts keyword tags from business descriptions/pages.
+**Result:** 49-test QA suite available. Website enrichment adds keyword tags to businesses.
+
+### B78 — Wire sunbiz_raw into /chat grounding (attempt 1)
+**Date:** 2026-05-18
+**Commit:** 1cb9a6f
+**Problem:** /chat gave hedging answers for contractor/roofing/licensing queries — "I don't have specific licensing data." SunBiz data exists but wasn't in grounding context.
+**Fix:** Added fetchSunbizContext() to localIntelAgent.js — queries sunbiz_raw for contractor/trades concepts, injects into grounding. SUNBIZ_CONCEPT_RE gates to contractor queries only.
+**Result:** Code correct but returned no data — sunbiz_raw.principal_zip is NULL for all records (SunBiz quarterly file doesn't include ZIP). Zero rows returned.
+
+### B78b — Fix sunbiz_raw ZIP filter → city filter (attempt 2)
+**Date:** 2026-05-18
+**Commit:** 47315fd
+**Problem:** fetchSunbizContext filtered by principal_zip = ANY($1) but principal_zip is null for all records in sunbiz_raw. Query always returned 0 rows.
+**Fix:** Replaced ZIP filter with city filter using fl_place_index city names via unnest($1::text[]) ILIKE. Added city lookup before both call sites.
+**Result:** Still returned 0 rows — fl_place_index stores display names ("Downtown Jacksonville") but sunbiz_raw.principal_city stores USPS names ("JACKSONVILLE"). Name mismatch.
+
+### B78c — Add sunbiz_city to fl_place_index (attempt 3)
+**Date:** 2026-05-18
+**Commit:** 3964749
+**Problem:** City name mismatch — fl_place_index display names don't match sunbiz_raw USPS principal_city values.
+**Fix:** Migration 037 adds sunbiz_city column to fl_place_index. Maps all FL neighborhoods/display names to their USPS city string as stored in sunbiz_raw (e.g. "Downtown Jacksonville" → "JACKSONVILLE"). UPPER(name) fallback for unmapped entries. fetchSunbizContext now queries SELECT DISTINCT sunbiz_city.
+**Result:** Mapping correct architecturally — but sunbiz_raw has 0 rows. SunBiz data was never imported. All 3 B78 attempts wired correctly against an empty table.
+
+### B79 — Fix sunbizWorker so records land in Postgres
+**Date:** 2026-05-18
+**Commits:** 290b592, b7b2504
+**Problem:** sunbizWorker.js upsertBatch() had two silent failure modes since inception: (1) businesses.zip NOT NULL constraint — SunBiz quarterly file has no ZIP, every INSERT failed with null violation; (2) column/value count mismatch — sources/primary_source/last_confirmed listed in column list but no $N params. Worker was also disabled with process.exit(0) with incorrect comment "data already in Postgres." Result: 0 sunbiz records ever landed in Postgres. sunbiz_doc_number = null on all 240k businesses.
+**Fix:** Migration 038 adds DEFAULT '00000' to businesses.zip for sunbiz-only records. upsertBatch() rewritten — clean 9-param query, static columns as SQL literals, no .replace() hack, no silent fallback. DISABLED block removed, replaced with run().catch(). /api/admin/sunbiz-progress endpoint added. /api/admin/import-sunbiz resets state for fresh run.
+**Result:** upsertBatch() correct. Worker re-enabled. First real import attempt started.
+
+### B80 — Stream sunbizWorker SFTP→unzip→Postgres, zero disk writes
+**Date:** 2026-05-18
+**Commit:** 9f3ef38
+**Problem:** sunbizWorker downloaded cordata.zip (1.6GB) to Railway disk, then unzipped to another ~2GB .txt file. Total ~3.5GB disk usage → Railway gsb-swarm-volume hit 100% capacity → service degraded. POSTGRES IS KING — nothing should touch disk.
+**Fix:** Replaced entire download/extract/parse flow with single streamSunbizToPostgres() function. SFTP createReadStream → unzipper.Parse() → readline for-await → parseRecord() → upsertBatch(). Zero fs.writeFile, fs.createWriteStream, execSync, or mkdirSync calls. Added unzipper@^0.12.3 to package.json (no ZIP lib existed). Checkpoint resume via lines_imported in Postgres preserved.
+**Result:** Zero bytes written to disk. Volume usage stays near zero permanently. 1.74GB remote file size confirmed via SFTP stat.
+
+### B81 — Fix 4 live Postgres errors + clean legacy disk artifacts
+**Date:** 2026-05-18
+**Commit:** 74d6ca5
+**Problem 1:** column "detected_intent" does not exist — queried from intent_dead_ends and sms_query_log, column never added.
+**Problem 2:** column "verified" does not exist — queried from business_slang, column never migrated.
+**Problem 3:** syntax error at or near "UNIQUE" storm — dbMigrate.js splitter produced bare UNIQUE fragments as separate statements on every restart.
+**Problem 4:** numeric field overflow — sig_biz_density_per_1k and sig_job_capture_ratio defined as NUMERIC(8,3), overflow with large values from small-population ZIPs.
+**Problem 5:** gsb-swarm-volume at 100% — legacy cordata.zip + extracted .txt from pre-B80 run still on disk.
+**Fix:** Migration 040 adds detected_intent to intent_dead_ends + sms_query_log. Migration 041 adds verified + credited_to to business_slang. Migration 042 widens sig_biz_density_per_1k and sig_job_capture_ratio to NUMERIC(15,3). dbMigrate.js splitter skips short syntax error fragments. worldModelWorker.js clamps sig_* values with Math.min(999999,...). sunbizWorker.js IIFE on startup wipes data/sunbiz/ and data/sunbiz-extract/ legacy directories.
+**Result:** Error storm eliminated. Volume clears on next deploy boot. sunbizWorker can stream cleanly.
