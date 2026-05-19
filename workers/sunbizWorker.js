@@ -308,6 +308,9 @@ async function run() {
   await logWorkerEvent({ eventType: 'end' });
 }
 
-run().catch(e => console.error('[sunbizWorker] Fatal:', e.message));
+// Only auto-run when executed directly (not when require()'d by dashboard-server)
+if (require.main === module) {
+  run().catch(e => console.error('[sunbizWorker] Fatal:', e.message));
+}
 
 module.exports = { runImport };
