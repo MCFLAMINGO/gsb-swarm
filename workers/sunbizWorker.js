@@ -1,40 +1,52 @@
 'use strict';
 /**
  * workers/sunbizWorker.js
- * Railway-ready Sunbiz import worker — fully streaming, zero disk writes.
+ * Railway-ready Sunbiz import worker.
  *
  * Flow:
- *   SFTP createReadStream → unzipper.Parse() → readline → parseRecord() → upsertBatch()
+ *   SFTP download → /tmp/sunbiz/cordata.zip
+ *   execSync('unzip -o ...') → /tmp/sunbiz/extracted/  (system unzip, supports DEFLATE64)
+ *   readline → parseRecord() → upsertBatch() → Postgres
+ *   fs.rmSync('/tmp/sunbiz', { recursive: true, force: true })
  *
- * Postgres is the only persistence layer. Nothing lands on disk.
- * Safe to restart at any point — resumes from `lines_imported` checkpoint.
+ * Postgres is the only persistence layer. /tmp is process-memory and is cleared
+ * between deploys — perfect for transient download/extract.
+ *
+ * The `lines_imported` checkpoint allows resuming within a session. On restart
+ * /tmp is cleared, so re-download + re-extract happens, then import resumes
+ * from `lines_imported`. Once `import_complete = true`, the worker idles.
  */
 
 require('dotenv').config();
-const fs          = require('fs');
-const path        = require('path');
-const readline    = require('readline');
-const unzipper    = require('unzipper');
-const SftpClient  = require('ssh2-sftp-client');
-const db          = require('../lib/db');
-const hb          = require('../lib/workerHeartbeat');
+const fs           = require('fs');
+const path         = require('path');
+const readline     = require('readline');
+const { execSync } = require('child_process');
+const SftpClient   = require('ssh2-sftp-client');
+const db           = require('../lib/db');
+const hb           = require('../lib/workerHeartbeat');
 
-// One-time cleanup of pre-B80 disk artifacts. B80 streams SFTP→Postgres with zero
-// disk writes; any data/sunbiz* directories left over from older worker versions
-// can fill the Railway volume. Safe to run on every boot — no-op once cleaned.
+const SUNBIZ_DIR  = '/tmp/sunbiz';
+const ZIP_FILE    = path.join(SUNBIZ_DIR, 'cordata.zip');
+const EXTRACT_DIR = path.join(SUNBIZ_DIR, 'extracted');
+
+// One-time cleanup of legacy disk artifacts. Pre-B83 worker versions wrote to
+// the Railway persistent volume (data/sunbiz*) and filled it. Also clean any
+// stale /tmp/sunbiz from a previous run in the same process lifecycle.
 (function cleanLegacyDiskArtifacts() {
   const legacyPaths = [
     path.join(__dirname, '..', 'data', 'sunbiz'),
     path.join(__dirname, '..', 'data', 'sunbiz-extract'),
+    SUNBIZ_DIR,
   ];
   for (const p of legacyPaths) {
     try {
       if (fs.existsSync(p)) {
         fs.rmSync(p, { recursive: true, force: true });
-        console.log('[sunbizWorker] Cleaned legacy disk artifact:', p);
+        console.log('[sunbizWorker] Cleaned artifact:', p);
       }
     } catch (e) {
-      console.warn('[sunbizWorker] Could not clean legacy path:', p, e.message);
+      console.warn('[sunbizWorker] Could not clean:', p, e.message);
     }
   }
 })();
@@ -150,11 +162,9 @@ async function upsertBatch(records) {
   `, params);
 }
 
-// ── Streaming pipeline: SFTP → unzipper → readline → Postgres ─────────────────
-async function streamSunbizToPostgres() {
+// ── Download zip from SFTP to /tmp ────────────────────────────────────────────
+async function downloadZip() {
   const sftp = new SftpClient();
-  const _importStart = Date.now();
-
   try {
     await sftp.connect({ host: SFTP_HOST, port: 22, username: SFTP_USER, password: SFTP_PASS, readyTimeout: 30000 });
 
@@ -169,88 +179,93 @@ async function streamSunbizToPostgres() {
     }
     await setState('remote_size', String(remoteSize));
 
-    const resumeLine = parseInt(await getState('lines_imported') || '0');
-    console.log(`[sunbizWorker] Streaming from SFTP. Resume line: ${resumeLine}`);
+    fs.mkdirSync(SUNBIZ_DIR, { recursive: true });
+    console.log(`[sunbizWorker] Downloading SFTP → ${ZIP_FILE}`);
+    await sftp.fastGet(REMOTE_PATH, ZIP_FILE);
 
-    const sftpStream = sftp.createReadStream(REMOTE_PATH, { autoClose: true });
+    const localSize = fs.statSync(ZIP_FILE).size;
+    if (localSize !== remoteSize) {
+      throw new Error(`Download size mismatch: local=${localSize} remote=${remoteSize}`);
+    }
+    console.log(`[sunbizWorker] Download complete: ${(localSize / 1024 / 1024).toFixed(1)} MB`);
 
-    let imported = resumeLine;
-    let skipped  = 0;
-    let processedEntry = false;
+    return remoteSize;
+  } finally {
+    try { await sftp.end(); } catch (_) {}
+  }
+}
 
-    await new Promise((resolve, reject) => {
-      const zipStream = sftpStream.pipe(unzipper.Parse());
+// ── Extract zip with system unzip (DEFLATE64 support) ─────────────────────────
+function extractZip() {
+  fs.mkdirSync(EXTRACT_DIR, { recursive: true });
+  console.log(`[sunbizWorker] Extracting ${ZIP_FILE} → ${EXTRACT_DIR}`);
+  execSync(`unzip -o "${ZIP_FILE}" -d "${EXTRACT_DIR}"`, { stdio: 'inherit' });
 
-      sftpStream.on('error', reject);
-      zipStream.on('error', reject);
+  const entries = fs.readdirSync(EXTRACT_DIR);
+  const txtFile = entries.find(f => /\.txt$/i.test(f));
+  if (!txtFile) {
+    throw new Error(`No .txt file found in extracted zip. Entries: ${entries.join(', ')}`);
+  }
+  const txtPath = path.join(EXTRACT_DIR, txtFile);
+  console.log(`[sunbizWorker] Extracted: ${txtPath} (${(fs.statSync(txtPath).size / 1024 / 1024).toFixed(1)} MB)`);
+  return txtPath;
+}
 
-      zipStream.on('entry', async (entry) => {
-        const fileName = entry.path;
+// ── Stream .txt → Postgres ────────────────────────────────────────────────────
+async function importTxtToPostgres(txtPath) {
+  const resumeLine = parseInt(await getState('lines_imported') || '0');
+  console.log(`[sunbizWorker] Streaming ${txtPath} → Postgres. Resume line: ${resumeLine}`);
 
-        if (!/\.(txt|TXT)$/.test(fileName)) {
-          entry.autodrain();
-          return;
-        }
+  const rl = readline.createInterface({
+    input: fs.createReadStream(txtPath),
+    crlfDelay: Infinity,
+  });
 
-        if (processedEntry) {
-          // already processed the .txt — drain any other entries
-          entry.autodrain();
-          return;
-        }
-        processedEntry = true;
+  let imported = resumeLine;
+  let skipped  = 0;
+  let lineNum  = 0;
+  let batch    = [];
 
-        console.log(`[sunbizWorker] Streaming entry: ${fileName}`);
+  for await (const line of rl) {
+    lineNum++;
+    if (lineNum <= resumeLine) continue;
+    if (!line.trim()) continue;
 
-        try {
-          const rl = readline.createInterface({ input: entry, crlfDelay: Infinity });
+    const record = parseRecord(line);
+    if (!record) { skipped++; continue; }
 
-          let lineNum = 0;
-          let batch   = [];
+    batch.push(record);
 
-          for await (const line of rl) {
-            lineNum++;
-            if (lineNum <= resumeLine) continue;
-            if (!line.trim()) continue;
+    if (batch.length >= BATCH_SIZE) {
+      const flush = batch;
+      batch = [];
+      await upsertBatch(flush);
+      imported += flush.length;
+      await setState('lines_imported', String(imported));
+      if (imported % 10000 < BATCH_SIZE) {
+        console.log(`[sunbizWorker] ${imported.toLocaleString()} records → Postgres`);
+      }
+    }
+  }
 
-            const record = parseRecord(line);
-            if (!record) { skipped++; continue; }
+  if (batch.length) {
+    await upsertBatch(batch);
+    imported += batch.length;
+    await setState('lines_imported', String(imported));
+  }
 
-            batch.push(record);
+  await setState('import_complete', 'true');
+  console.log(`[sunbizWorker] Import complete: ${imported.toLocaleString()} records, ${skipped} skipped`);
+  return { imported, skipped };
+}
 
-            if (batch.length >= BATCH_SIZE) {
-              const flush = batch;
-              batch = [];
-              await upsertBatch(flush);
-              imported += flush.length;
-              await setState('lines_imported', String(imported));
-              if (imported % 10000 < BATCH_SIZE) {
-                console.log(`[sunbizWorker] ${imported.toLocaleString()} records → Postgres`);
-              }
-            }
-          }
-
-          if (batch.length) {
-            await upsertBatch(batch);
-            imported += batch.length;
-            await setState('lines_imported', String(imported));
-          }
-
-          await setState('import_complete', 'true');
-          console.log(`[sunbizWorker] Import complete: ${imported.toLocaleString()} records, ${skipped} skipped`);
-          resolve();
-        } catch (err) {
-          reject(err);
-        }
-      });
-
-      zipStream.on('close', () => {
-        if (!processedEntry) {
-          reject(new Error('No .txt entry found in cordata.zip'));
-        }
-      });
-    });
-
-    await sftp.end();
+// ── Orchestrator ──────────────────────────────────────────────────────────────
+async function runImport() {
+  const _importStart = Date.now();
+  try {
+    await downloadZip();
+    const txtPath = extractZip();
+    const { imported, skipped } = await importTxtToPostgres(txtPath);
 
     await logWorkerEvent({
       eventType: 'complete',
@@ -260,10 +275,16 @@ async function streamSunbizToPostgres() {
     });
     await hb.ping('sunbizWorker');
   } catch (e) {
-    console.error('[sunbizWorker] Stream error:', e.message);
-    try { await sftp.end(); } catch (_) {}
+    console.error('[sunbizWorker] Import error:', e.message);
     await logWorkerEvent({ eventType: 'error', durationMs: Date.now() - _importStart, error: e.message });
     throw e;
+  } finally {
+    try {
+      fs.rmSync(SUNBIZ_DIR, { recursive: true, force: true });
+      console.log('[sunbizWorker] Cleaned /tmp/sunbiz');
+    } catch (e) {
+      console.warn('[sunbizWorker] Cleanup failed:', e.message);
+    }
   }
 }
 
@@ -283,7 +304,7 @@ async function run() {
   }
 
   await logWorkerEvent({ eventType: 'start' });
-  await streamSunbizToPostgres();
+  await runImport();
   await logWorkerEvent({ eventType: 'end' });
 }
 

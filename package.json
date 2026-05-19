@@ -30,7 +30,6 @@
     "playwright": "^1.44.0",
     "resend": "^4.0.0",
     "ssh2-sftp-client": "^12.1.1",
-    "unzipper": "^0.12.3",
     "viem": "^2.0.0",
     "web-push": "^3.6.7",
     "ws": "^8.0.0",
