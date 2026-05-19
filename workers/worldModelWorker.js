@@ -274,9 +274,9 @@ module.exports = async function worldModelWorker(db, logEvent) {
       sig_income_tier:        tier,
       sig_peer_cohort:        cohort,
       sig_biz_density_per_1k: m.biz_density_per_1k != null
-        ? Math.round(m.biz_density_per_1k * 10) / 10 : null,
+        ? Math.min(999999, Math.round(m.biz_density_per_1k * 10) / 10) : null,
       sig_job_capture_ratio:  m.job_capture_ratio != null
-        ? Math.round(m.job_capture_ratio * 1000) / 1000 : null,
+        ? Math.min(999999, Math.round(m.job_capture_ratio * 1000) / 1000) : null,
     };
 
     try {

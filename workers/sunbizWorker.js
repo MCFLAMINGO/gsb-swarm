@@ -11,11 +11,33 @@
  */
 
 require('dotenv').config();
+const fs          = require('fs');
+const path        = require('path');
 const readline    = require('readline');
 const unzipper    = require('unzipper');
 const SftpClient  = require('ssh2-sftp-client');
 const db          = require('../lib/db');
 const hb          = require('../lib/workerHeartbeat');
+
+// One-time cleanup of pre-B80 disk artifacts. B80 streams SFTP→Postgres with zero
+// disk writes; any data/sunbiz* directories left over from older worker versions
+// can fill the Railway volume. Safe to run on every boot — no-op once cleaned.
+(function cleanLegacyDiskArtifacts() {
+  const legacyPaths = [
+    path.join(__dirname, '..', 'data', 'sunbiz'),
+    path.join(__dirname, '..', 'data', 'sunbiz-extract'),
+  ];
+  for (const p of legacyPaths) {
+    try {
+      if (fs.existsSync(p)) {
+        fs.rmSync(p, { recursive: true, force: true });
+        console.log('[sunbizWorker] Cleaned legacy disk artifact:', p);
+      }
+    } catch (e) {
+      console.warn('[sunbizWorker] Could not clean legacy path:', p, e.message);
+    }
+  }
+})();
 
 // ── worker_events logger ──────────────────────────────────────────────────────
 async function logWorkerEvent({ eventType, recordsIn, recordsOut, durationMs, error }) {
