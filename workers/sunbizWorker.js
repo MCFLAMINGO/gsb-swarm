@@ -34,10 +34,10 @@ const EXTRACT_DIR = path.join(SUNBIZ_DIR, 'extracted');
 // the Railway persistent volume (data/sunbiz*) and filled it. Also clean any
 // stale /tmp/sunbiz from a previous run in the same process lifecycle.
 (function cleanLegacyDiskArtifacts() {
+  // Only wipe legacy Railway-volume paths — NOT /tmp/sunbiz (partial downloads must survive restarts)
   const legacyPaths = [
     path.join(__dirname, '..', 'data', 'sunbiz'),
     path.join(__dirname, '..', 'data', 'sunbiz-extract'),
-    SUNBIZ_DIR,
   ];
   for (const p of legacyPaths) {
     try {
@@ -180,6 +180,18 @@ async function downloadZip() {
     await setState('remote_size', String(remoteSize));
 
     fs.mkdirSync(SUNBIZ_DIR, { recursive: true });
+
+    // Resume: if file already exists and matches remote size, skip download
+    if (fs.existsSync(ZIP_FILE)) {
+      const localSize = fs.statSync(ZIP_FILE).size;
+      if (localSize === remoteSize) {
+        console.log(`[sunbizWorker] ZIP already complete (${(localSize/1024/1024).toFixed(1)} MB) — skipping download`);
+        return remoteSize;
+      }
+      console.log(`[sunbizWorker] Partial download found (${(localSize/1024/1024).toFixed(1)} MB / ${(remoteSize/1024/1024).toFixed(1)} MB) — restarting download`);
+      fs.unlinkSync(ZIP_FILE);
+    }
+
     console.log(`[sunbizWorker] Downloading SFTP → ${ZIP_FILE}`);
     await sftp.fastGet(REMOTE_PATH, ZIP_FILE);
 
