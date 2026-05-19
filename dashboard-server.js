@@ -543,7 +543,7 @@ app.get('/api/admin/sunbiz-progress', async (req, res) => {
     const [stateRows, countRow, eventRow] = await Promise.all([
       db.query(`SELECT key, value FROM sunbiz_import_state ORDER BY key`).catch(() => []),
       db.query(`SELECT COUNT(*) AS total FROM businesses WHERE primary_source = 'sunbiz'`).catch(() => []),
-      db.query(`SELECT event_type, records_out, created_at FROM worker_events
+      db.query(`SELECT event_type, records_out, error_message, created_at FROM worker_events
                 WHERE worker_name = 'fl_sunbiz' ORDER BY created_at DESC LIMIT 5`).catch(() => []),
     ]);
     const state = {};
