@@ -309,3 +309,5 @@ async function run() {
 }
 
 run().catch(e => console.error('[sunbizWorker] Fatal:', e.message));
+
+module.exports = { runImport };

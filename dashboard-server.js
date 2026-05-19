@@ -579,8 +579,8 @@ app.post('/api/admin/import-sunbiz', async (req, res) => {
         INSERT INTO sunbiz_import_state (key, value) VALUES ('lines_imported','0')
         ON CONFLICT (key) DO UPDATE SET value = '0'
       `).catch(() => {});
-      const { importSunbiz } = require('./scripts/import-sunbiz');
-      await importSunbiz();
+      const { runImport } = require('./workers/sunbizWorker');
+      await runImport();
       console.log('[admin] ✅ Sunbiz import complete');
     } catch (e) {
       console.error('[admin] ❌ Sunbiz import failed:', e.message);
