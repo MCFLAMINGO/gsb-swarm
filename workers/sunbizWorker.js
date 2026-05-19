@@ -244,7 +244,11 @@ async function importTxtToPostgres(txtPath) {
     if (!line.trim()) continue;
 
     const record = parseRecord(line);
-    if (!record) { skipped++; continue; }
+    if (!record) {
+      skipped++;
+      if (skipped <= 3) console.warn(`[sunbizWorker] parseRecord rejected line ${lineNum} (first 120 chars): ${JSON.stringify(line.slice(0,120))}`);
+      continue;
+    }
 
     batch.push(record);
 
