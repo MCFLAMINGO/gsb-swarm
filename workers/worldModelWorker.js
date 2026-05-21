@@ -118,6 +118,12 @@ module.exports = async function worldModelWorker(db, logEvent) {
       invest_score:    n(s.investment_opportunity_score), // CES composite
       net_flow:        n(s.lodes_net_flow),               // LODES: worker net flow
       biz_density_per_1k,                                 // derived above
+      // ── Construction density (written by: countyPermitsWorker)
+      cbp_total_construction: (
+        (n(s.cbp_bldg_estab) ?? 0) +
+        (n(s.cbp_civil_estab) ?? 0) +
+        (n(s.cbp_trade_estab) ?? 0)
+      ) || null,
       // ── Risk inputs (written by: cesWorker, fredWorker, qwiWorker)
       ai_risk:         n(s.ai_displacement_risk),    // CES: AI displacement risk
       unemp_rate:      n(s.fred_unemployment_rate),  // FRED: unemployment %
@@ -164,6 +170,7 @@ module.exports = async function worldModelWorker(db, logEvent) {
   const rInvest   = rankScore('invest_score',       true);  // CES opportunity composite
   const rFlow     = rankScore('net_flow',            true);  // positive net worker flow = opportunity
   const rDensity  = rankScore('biz_density_per_1k', true);  // denser = more commercial activity
+  const rConstruction = rankScore('cbp_total_construction', true); // more construction firms = higher opportunity
 
   const rAiRisk   = rankScore('ai_risk',       true);  // higher AI risk = higher risk score
   const rUnemp    = rankScore('unemp_rate',    true);  // higher unemployment = higher risk
@@ -196,9 +203,10 @@ module.exports = async function worldModelWorker(db, logEvent) {
   ], activeZips);
 
   const opportunityScores = weightedAvg([
-    { map: rInvest,  weight: 40 },  // CES investment composite — sector-level demand
-    { map: rFlow,    weight: 35 },  // LODES net worker flow — are people moving here to work?
-    { map: rDensity, weight: 25 },  // Business density — existing commercial activity
+    { map: rInvest,       weight: 35 },  // CES investment composite
+    { map: rFlow,         weight: 30 },  // LODES net worker flow
+    { map: rDensity,      weight: 20 },  // Business density
+    { map: rConstruction, weight: 15 },  // CBP construction firm density
   ], activeZips);
 
   const riskScores = weightedAvg([

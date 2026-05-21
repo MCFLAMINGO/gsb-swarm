@@ -277,6 +277,33 @@ async function loadAcs(zip) {
   return readJson(path.join(DATA_DIR, 'acs', `${zip}.json`));
 }
 
+async function loadZipSignals(zip) {
+  const db = getDb();
+  if (!db) return null;
+  try {
+    const rows = await db.query(
+      `SELECT sig_growth_score, sig_opportunity_score, sig_risk_score,
+              sig_market_maturity, sig_income_tier, sig_peer_cohort,
+              sig_biz_density_per_1k, sig_job_capture_ratio,
+              fred_unemployment_rate, qcew_emp_yoy_pct, qcew_employment,
+              lodes_jobs_here, lodes_net_flow, lodes_high_earn_pct,
+              bea_per_capita_income,
+              cbp_bldg_estab, cbp_civil_estab, cbp_trade_estab,
+              cbp_trade_payroll_k, cbp_construction_updated_at,
+              school_count, total_enrollment,
+              sunbiz_new_12mo,
+              bps_total_units_annual, bps_res_1unit_annual,
+              ai_displacement_risk, investment_opportunity_score
+       FROM zip_signals WHERE zip = $1`,
+      [zip]
+    );
+    return (Array.isArray(rows) && rows[0]) ? rows[0] : null;
+  } catch (e) {
+    console.warn(`[oracleWorker] zip_signals load failed for ${zip}: ${e.message}`);
+    return null;
+  }
+}
+
 // Load vertical gap entries for this ZIP from census_layer.sector_gaps in Postgres.
 async function loadGapsForZip(zip) {
   try {
@@ -301,6 +328,7 @@ async function computeOracle(zip, name) {
   const ocean       = await loadOceanFloor(zip);
   const censusLayer = await loadCensusLayer(zip);
   const acs         = await loadAcs(zip);  // async: reads from Postgres, throws on DB error
+  const zipSig      = await loadZipSignals(zip);
   const verticalGaps = await loadGapsForZip(zip);
 
   // ── Data quality gate ─────────────────────────────────────────────────────
@@ -308,7 +336,8 @@ async function computeOracle(zip, name) {
   // These produce population=0 → 0% capture → false "opportunity high" signals.
   const hasZoneData  = !!zone;
   const hasOceanData = !!ocean;
-  const hasDemoData  = hasZoneData || hasOceanData;
+  const hasAcsData   = !!acs;
+  const hasDemoData  = hasZoneData || hasOceanData || hasAcsData;
   if (!hasDemoData && businesses.length < 5) {
     return { skip: true, reason: 'insufficient_data', zip, businesses: businesses.length };
   }
@@ -622,6 +651,44 @@ async function computeOracle(zip, name) {
     oracle_narrative: narrative,
 
     vertical_gaps: verticalGaps,
+
+    world_model: {
+      // WorldModel derived signals (computed by worldModelWorker from all zip_signals)
+      sig_growth_score:      zipSig?.sig_growth_score      ?? null,
+      sig_opportunity_score: zipSig?.sig_opportunity_score ?? null,
+      sig_risk_score:        zipSig?.sig_risk_score        ?? null,
+      sig_market_maturity:   zipSig?.sig_market_maturity   ?? null,
+      sig_income_tier:       zipSig?.sig_income_tier       ?? null,
+      sig_peer_cohort:       zipSig?.sig_peer_cohort       ?? null,
+      sig_biz_density_per_1k:  zipSig?.sig_biz_density_per_1k  ?? null,
+      sig_job_capture_ratio:   zipSig?.sig_job_capture_ratio   ?? null,
+      // Economic signals from feeder workers
+      fred_unemployment_rate:      zipSig?.fred_unemployment_rate      ?? null,
+      qcew_emp_yoy_pct:            zipSig?.qcew_emp_yoy_pct            ?? null,
+      qcew_employment:             zipSig?.qcew_employment             ?? null,
+      lodes_jobs_here:             zipSig?.lodes_jobs_here             ?? null,
+      lodes_net_flow:              zipSig?.lodes_net_flow              ?? null,
+      lodes_high_earn_pct:         zipSig?.lodes_high_earn_pct         ?? null,
+      bea_per_capita_income:       zipSig?.bea_per_capita_income       ?? null,
+      ai_displacement_risk:        zipSig?.ai_displacement_risk        ?? null,
+      investment_opportunity_score: zipSig?.investment_opportunity_score ?? null,
+      // Construction signals (countyPermitsWorker)
+      cbp_bldg_estab:    zipSig?.cbp_bldg_estab    ?? null,
+      cbp_civil_estab:   zipSig?.cbp_civil_estab   ?? null,
+      cbp_trade_estab:   zipSig?.cbp_trade_estab   ?? null,
+      cbp_trade_payroll_k: zipSig?.cbp_trade_payroll_k ?? null,
+      cbp_total_construction_estab: (
+        (zipSig?.cbp_bldg_estab ?? 0) +
+        (zipSig?.cbp_civil_estab ?? 0) +
+        (zipSig?.cbp_trade_estab ?? 0)
+      ) || null,
+      // Education signals (schoolEnrollmentWorker)
+      school_count:     zipSig?.school_count     ?? null,
+      total_enrollment: zipSig?.total_enrollment ?? null,
+      // Growth proxy (sunbizWorker — populated after SunBiz import completes)
+      sunbiz_new_12mo:       zipSig?.sunbiz_new_12mo       ?? null,
+      bps_total_units_annual: zipSig?.bps_total_units_annual ?? null,
+    },
 
     data_sources: {
       businesses_indexed:  totalBiz,
