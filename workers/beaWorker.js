@@ -58,7 +58,7 @@ async function fetchAllFLCounties(year) {
   const data = await fetchBea({
     TableName: 'CAINC1',
     LineCode:  '3',
-    GeoFips:   'STATE:12',   // all counties in Florida
+    GeoFips:   'COUNTY:12000',   // all counties in Florida
     Year:      String(year),
   });
   // Build map: fips5 → value
@@ -81,7 +81,7 @@ function getZipsForCounty(fips) {
 async function run() {
   if (!API_KEY) {
     console.error('[bea] ❌ BEA_API env var not set — cannot run');
-    process.exit(1);
+    return;
   }
 
   // Freshness check — skip if ran within 30 days (BEA releases annual data with ~2yr lag)
@@ -117,8 +117,13 @@ async function run() {
     try {
       currentData = await fetchAllFLCounties(latestYear - 1);
     } catch (e2) {
-      console.error('[bea] ❌ Could not fetch current year data:', e2.message);
-      process.exit(1);
+      console.warn(`[bea] ${latestYear - 1} failed (${e2.message}), trying ${latestYear - 2}`);
+      try {
+        currentData = await fetchAllFLCounties(latestYear - 2);
+      } catch (e3) {
+        console.error('[bea] ❌ Could not fetch current year data:', e3.message);
+        return;
+      }
     }
   }
 
