@@ -4328,3 +4328,35 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 **Problem:** beaWorker failing with `BEA API error: Invalid Request - Invalid Parameters` for both 2024 and 2023 data. Root cause: `GeoFips: 'STATE:12'` shorthand deprecated by BEA. Two `process.exit(1)` calls in run() — one when API key missing, one when all year fallbacks fail — killing the process instead of returning gracefully.
 **Fix:** `GeoFips: 'STATE:12'` → `'COUNTY:12000'` (current BEA documented format for all FL counties). Both `process.exit(1)` → `return`. Added third fallback year (`latestYear - 2` = 2022) before giving up, with graceful `return` on total failure.
 **Result:** BEA CAINC1 per capita income data should now fetch successfully for all 67 FL counties. Worker no longer kills the process on API failure.
+
+---
+
+## B88c — Fix gapDataFetcher fetchCountyPermits dropped column
+
+**Problem:** `gapDataFetcher.js` `fetchCountyPermits` was still querying `cbp_total_establishments` (and `cbp_total_employees`, `cbp_total_payroll_k`, `cbp_updated_at`) which were all dropped in migration 045. Every ZIP produced: `column "cbp_total_establishments" does not exist`.
+
+**Fix:** Updated SELECT in `fetchCountyPermits` to use new NAICS sector-specific columns: `cbp_bldg_estab`, `cbp_bldg_emp`, `cbp_civil_estab`, `cbp_civil_emp`, `cbp_trade_estab`, `cbp_trade_emp`, `cbp_trade_payroll_k`. Derived `active_projects` now sums all three sector estab columns; `active_road_projects` uses `cbp_civil_estab`. All four dropped column references removed.
+
+**Result:** Commit `21b0e83`. gapDataFetcher county permits lookup runs clean — no more missing column errors.
+
+---
+
+## B89 — Fix beaWorker GeoFips format
+
+**Problem:** BEA worker was sending `GeoFips: 'STATE:12'` (Census FIPS format). BEA Regional API uses postal abbreviations for state-scoped county queries, not Census FIPS. All year attempts (2024, 2023, 2022) returned `APIErrorCode 1: Invalid Parameters`.
+
+**Fix:** Changed `GeoFips: 'STATE:12'` → `GeoFips: 'FL'` in `workers/beaWorker.js`. Per BEA API docs: state post office abbreviation (e.g. `FL`) returns all counties in that state.
+
+**Result:** Commit `9ce1c65`. `Invalid Parameters` error resolved. BEA server is currently returning `APIErrorCode 21: Dataset temporarily disabled` — a server-side outage, not a code issue. Worker will retry automatically on 1800s loop.
+
+---
+
+## B90 — acsWorker hardcoded skip list for no-ZCTA ZIPs
+
+**Problem:** acsWorker was generating dozens of `fetchACS failed: HTTP 204` log lines per cycle for FL ZIPs that have no Census ZCTA coverage (PO Box / non-residential ZIPs). These will never have ACS data — permanent 204s creating log spam with zero value.
+
+**Fix:** Added `ACS_SKIP_ZIPS` constant (219 FL ZIPs, range 32004–34997) near top of `workers/acsWorker.js`. Added `if (ACS_SKIP_ZIPS.has(zip)) continue;` at the very top of the main ZIP loop before any fetch, heartbeat, or DB calls. ZIPs compiled from all 204/no-ACS-data log entries across the full session history. Hardcoded (not Postgres table) — these ZIPs have permanent no-ZCTA status and never change.
+
+**Result:** Commit `54c02eb`. ACS 204 spam: 0 in next log window. ✅
+
+---
