@@ -58,7 +58,7 @@ async function fetchAllFLCounties(year) {
   const data = await fetchBea({
     TableName: 'CAINC1',
     LineCode:  '3',
-    GeoFips:   'STATE:12',   // all counties in Florida
+    GeoFips:   'FL',   // all counties in Florida
     Year:      String(year),
   });
   // Build map: fips5 → value
