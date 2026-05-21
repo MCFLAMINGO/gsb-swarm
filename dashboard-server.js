@@ -7655,7 +7655,7 @@ app.use((req, res, next) => {
     { name: 'Hours Parse Worker',         file: 'workers/hoursParseWorker.js'      },
     // { name: 'Embedding Worker',           file: 'workers/embeddingWorker.js'       }, // disabled — Railway disk ephemeral, needs pgvector
     { name: 'ACS Demographics Worker',    file: 'workers/acsWorker.js'             },
-    // { name: 'Sunbiz Import Worker',        file: 'workers/sunbizWorker.js'          }, // disabled — cordata.zip is 7-8 GB and fills the Railway volume. Data already seeded to Postgres.
+    { name: 'Sunbiz Import Worker', file: 'workers/sunbizWorker.js' }, // B91 — 3-trip streaming, no disk
     { name: 'Search Vector Backfill',      file: 'workers/searchVectorBackfillWorker.js' },
     // { name: 'Embedding Backfill',          file: 'workers/embeddingBackfillWorker.js' }, // disabled — index recreates at 1.2GB, 0 scans, no query path uses <-> operator yet
     { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' },

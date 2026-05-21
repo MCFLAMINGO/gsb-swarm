@@ -1,55 +1,31 @@
 'use strict';
 /**
  * workers/sunbizWorker.js
- * Railway-ready Sunbiz import worker.
+ * Railway-ready Sunbiz import worker — 3-trip streaming, no disk writes.
  *
- * Flow:
- *   SFTP download → /tmp/sunbiz/cordata.zip
- *   execSync('unzip -o ...') → /tmp/sunbiz/extracted/  (system unzip, supports DEFLATE64)
- *   readline → parseRecord() → upsertBatch() → Postgres
- *   fs.rmSync('/tmp/sunbiz', { recursive: true, force: true })
+ * Flow per trip:
+ *   SFTP read stream → strip ZIP local file header → zlib.createInflateRaw()
+ *   → readline → parseRecord() → upsertBatch() → Postgres
  *
- * Postgres is the only persistence layer. /tmp is process-memory and is cleared
- * between deploys — perfect for transient download/extract.
- *
- * The `lines_imported` checkpoint allows resuming within a session. On restart
- * /tmp is cleared, so re-download + re-extract happens, then import resumes
- * from `lines_imported`. Once `import_complete = true`, the worker idles.
+ * Each Railway boot processes LINES_PER_TRIP lines starting from the
+ * `lines_imported` checkpoint, then exits cleanly. ~3 boots covers the full
+ * cordata.zip (~5-6M records). No /tmp, no disk, no unzip CLI.
  */
 
 require('dotenv').config();
-const fs           = require('fs');
-const path         = require('path');
-const readline     = require('readline');
-const { execSync } = require('child_process');
-const SftpClient   = require('ssh2-sftp-client');
-const db           = require('../lib/db');
-const hb           = require('../lib/workerHeartbeat');
+const zlib       = require('zlib');
+const readline   = require('readline');
+const SftpClient = require('ssh2-sftp-client');
+const db         = require('../lib/db');
+const hb         = require('../lib/workerHeartbeat');
 
-const SUNBIZ_DIR  = '/tmp/sunbiz';
-const ZIP_FILE    = path.join(SUNBIZ_DIR, 'cordata.zip');
-const EXTRACT_DIR = path.join(SUNBIZ_DIR, 'extracted');
+const SFTP_HOST   = 'sftp.floridados.gov';
+const SFTP_USER   = 'Public';
+const SFTP_PASS   = 'PubAccess1845!';
+const REMOTE_PATH = 'doc/quarterly/cor/cordata.zip';
 
-// One-time cleanup of legacy disk artifacts. Pre-B83 worker versions wrote to
-// the Railway persistent volume (data/sunbiz*) and filled it. Also clean any
-// stale /tmp/sunbiz from a previous run in the same process lifecycle.
-(function cleanLegacyDiskArtifacts() {
-  // Only wipe legacy Railway-volume paths — NOT /tmp/sunbiz (partial downloads must survive restarts)
-  const legacyPaths = [
-    path.join(__dirname, '..', 'data', 'sunbiz'),
-    path.join(__dirname, '..', 'data', 'sunbiz-extract'),
-  ];
-  for (const p of legacyPaths) {
-    try {
-      if (fs.existsSync(p)) {
-        fs.rmSync(p, { recursive: true, force: true });
-        console.log('[sunbizWorker] Cleaned artifact:', p);
-      }
-    } catch (e) {
-      console.warn('[sunbizWorker] Could not clean:', p, e.message);
-    }
-  }
-})();
+const BATCH_SIZE      = 500;
+const LINES_PER_TRIP  = 2_000_000;
 
 // ── worker_events logger ──────────────────────────────────────────────────────
 async function logWorkerEvent({ eventType, recordsIn, recordsOut, durationMs, error }) {
@@ -61,13 +37,6 @@ async function logWorkerEvent({ eventType, recordsIn, recordsOut, durationMs, er
     );
   } catch (e) { console.warn('[sunbizWorker] worker_events log failed:', e.message); }
 }
-
-const SFTP_HOST   = 'sftp.floridados.gov';
-const SFTP_USER   = 'Public';
-const SFTP_PASS   = 'PubAccess1845!';
-const REMOTE_PATH = 'doc/quarterly/cor/cordata.zip';
-
-const BATCH_SIZE  = 500;
 
 // ── State table ───────────────────────────────────────────────────────────────
 async function ensureStateTable() {
@@ -162,14 +131,20 @@ async function upsertBatch(records) {
   `, params);
 }
 
-// ── Download zip from SFTP to /tmp ────────────────────────────────────────────
-async function downloadZip() {
-  const sftp = new SftpClient();
-  try {
-    await sftp.connect({ host: SFTP_HOST, port: 22, username: SFTP_USER, password: SFTP_PASS, readyTimeout: 30000 });
+// ── Stream SFTP → inflate → readline (no disk) ────────────────────────────────
+// Strips the ZIP local file header from the head of the stream so the remaining
+// bytes are raw DEFLATE, then pipes through zlib.createInflateRaw() to recover
+// the plain-text cordata.txt stream. onLine is called for every line.
+// Throw a TripComplete error from onLine to abort the stream early without crashing.
+class TripComplete extends Error {}
 
+async function streamSftpToReadline(onLine) {
+  const sftp = new SftpClient();
+  await sftp.connect({ host: SFTP_HOST, port: 22, username: SFTP_USER, password: SFTP_PASS, readyTimeout: 30000 });
+
+  try {
     const remoteSize = (await sftp.stat(REMOTE_PATH)).size;
-    console.log(`[sunbizWorker] Remote: ${(remoteSize / 1024 / 1024).toFixed(1)} MB`);
+    console.log(`[sunbizWorker] Remote: ${(remoteSize/1024/1024).toFixed(1)} MB`);
 
     const lastRemoteSize = await getState('remote_size');
     if (lastRemoteSize && parseInt(lastRemoteSize) !== remoteSize) {
@@ -179,97 +154,127 @@ async function downloadZip() {
     }
     await setState('remote_size', String(remoteSize));
 
-    fs.mkdirSync(SUNBIZ_DIR, { recursive: true });
+    const remoteStream = await sftp.createReadStream(REMOTE_PATH);
 
-    // Resume partial download if file exists
-    let localSize = 0;
-    if (fs.existsSync(ZIP_FILE)) {
-      localSize = fs.statSync(ZIP_FILE).size;
-      if (localSize === remoteSize) {
-        console.log(`[sunbizWorker] ZIP already complete (${(localSize/1024/1024).toFixed(1)} MB) — skipping download`);
-        await sftp.end();
-        return remoteSize;
-      }
-      console.log(`[sunbizWorker] Resuming download from ${(localSize/1024/1024).toFixed(1)} MB / ${(remoteSize/1024/1024).toFixed(1)} MB`);
-    } else {
-      console.log(`[sunbizWorker] Starting download SFTP → ${ZIP_FILE}`);
-    }
-
-    // Stream from offset into append stream
     await new Promise((resolve, reject) => {
-      const remoteStream = sftp.createReadStream(REMOTE_PATH, { start: localSize, autoClose: true });
-      const writeFlags = localSize > 0 ? 'a' : 'w';
-      const localStream = fs.createWriteStream(ZIP_FILE, { flags: writeFlags, start: localSize });
-      let downloaded = localSize;
+      const inflate = zlib.createInflateRaw();
+      const rl = readline.createInterface({ input: inflate, crlfDelay: Infinity });
+
+      let headerSkipped = false;
+      let headerBuf = Buffer.alloc(0);
+      let aborted = false;
+
+      const cleanup = () => {
+        try { remoteStream.unpipe?.(); } catch(_) {}
+        try { remoteStream.destroy(); } catch(_) {}
+        try { inflate.destroy(); } catch(_) {}
+        try { rl.close(); } catch(_) {}
+      };
+
       remoteStream.on('data', chunk => {
-        downloaded += chunk.length;
-        if (Math.floor(downloaded / (100*1024*1024)) > Math.floor((downloaded - chunk.length) / (100*1024*1024))) {
-          console.log(`[sunbizWorker] Downloaded ${(downloaded/1024/1024).toFixed(0)} MB / ${(remoteSize/1024/1024).toFixed(0)} MB`);
+        if (aborted) return;
+        if (!headerSkipped) {
+          headerBuf = Buffer.concat([headerBuf, chunk]);
+          if (headerBuf.length >= 30) {
+            const sig = headerBuf.readUInt32LE(0);
+            if (sig !== 0x04034b50) {
+              aborted = true;
+              cleanup();
+              reject(new Error('Not a ZIP file (bad local-file-header signature)'));
+              return;
+            }
+            const fnLen    = headerBuf.readUInt16LE(26);
+            const extraLen = headerBuf.readUInt16LE(28);
+            const dataStart = 30 + fnLen + extraLen;
+            if (headerBuf.length >= dataStart) {
+              headerSkipped = true;
+              const tail = headerBuf.slice(dataStart);
+              headerBuf = null;
+              if (tail.length) inflate.write(tail);
+            }
+          }
+        } else {
+          inflate.write(chunk);
         }
       });
-      remoteStream.on('error', reject);
-      localStream.on('error', reject);
-      localStream.on('finish', resolve);
-      remoteStream.pipe(localStream);
+
+      remoteStream.on('end', () => { try { inflate.end(); } catch(_) {} });
+      remoteStream.on('error', e => { if (!aborted) { aborted = true; cleanup(); reject(e); } });
+      inflate.on('error', e => {
+        if (aborted) return;
+        // Inflate may error after we intentionally destroy the stream on TripComplete — swallow it
+        aborted = true; cleanup(); reject(e);
+      });
+
+      rl.on('line', line => {
+        if (aborted) return;
+        try {
+          onLine(line);
+        } catch (e) {
+          if (e instanceof TripComplete) {
+            aborted = true;
+            cleanup();
+            resolve();
+            return;
+          }
+          aborted = true;
+          cleanup();
+          reject(e);
+        }
+      });
+      rl.on('close', () => { if (!aborted) resolve(); });
+      rl.on('error', e => { if (!aborted) { aborted = true; cleanup(); reject(e); } });
     });
-
-    const finalSize = fs.statSync(ZIP_FILE).size;
-    if (finalSize !== remoteSize) {
-      throw new Error(`Download size mismatch: local=${finalSize} remote=${remoteSize}`);
-    }
-    console.log(`[sunbizWorker] Download complete: ${(finalSize / 1024 / 1024).toFixed(1)} MB`);
-
-    return remoteSize;
   } finally {
     try { await sftp.end(); } catch (_) {}
   }
 }
 
-// ── Extract zip with system unzip (DEFLATE64 support) ─────────────────────────
-function extractZip() {
-  fs.mkdirSync(EXTRACT_DIR, { recursive: true });
-  console.log(`[sunbizWorker] Extracting ${ZIP_FILE} → ${EXTRACT_DIR}`);
-  execSync(`unzip -o "${ZIP_FILE}" -d "${EXTRACT_DIR}"`, { stdio: 'inherit' });
-
-  const entries = fs.readdirSync(EXTRACT_DIR);
-  const txtFile = entries.find(f => /\.txt$/i.test(f));
-  if (!txtFile) {
-    throw new Error(`No .txt file found in extracted zip. Entries: ${entries.join(', ')}`);
-  }
-  const txtPath = path.join(EXTRACT_DIR, txtFile);
-  console.log(`[sunbizWorker] Extracted: ${txtPath} (${(fs.statSync(txtPath).size / 1024 / 1024).toFixed(1)} MB)`);
-  return txtPath;
-}
-
-// ── Stream .txt → Postgres ────────────────────────────────────────────────────
-async function importTxtToPostgres(txtPath) {
+// ── Single trip: process LINES_PER_TRIP lines, checkpoint, exit ───────────────
+async function runTrip() {
   const resumeLine = parseInt(await getState('lines_imported') || '0');
-  console.log(`[sunbizWorker] Streaming ${txtPath} → Postgres. Resume line: ${resumeLine}`);
+  const ceiling    = resumeLine + LINES_PER_TRIP;
+  console.log(`[sunbizWorker] Trip: lines ${resumeLine.toLocaleString()} → ${ceiling.toLocaleString()}`);
 
-  const rl = readline.createInterface({
-    input: fs.createReadStream(txtPath),
-    crlfDelay: Infinity,
-  });
+  // Collect lines for this trip into memory, then process after the stream closes.
+  // readline.onLine must be synchronous, but upsertBatch is async — collecting
+  // first is the simplest correct pattern. 2M lines ≈ ~200 MB RAM, acceptable.
+  const tripLines = [];
+  let lineNum = 0;
+  let reachedCeiling = false;
 
+  try {
+    await streamSftpToReadline((line) => {
+      lineNum++;
+      if (lineNum <= resumeLine) return;            // fast-skip previously imported
+      if (lineNum > ceiling) {
+        reachedCeiling = true;
+        throw new TripComplete();
+      }
+      if (!line) return;
+      tripLines.push(line);
+    });
+  } catch (e) {
+    if (!(e instanceof TripComplete)) throw e;
+  }
+
+  console.log(`[sunbizWorker] Stream done. Total lines seen: ${lineNum.toLocaleString()}, lines in trip: ${tripLines.length.toLocaleString()}, reachedCeiling=${reachedCeiling}`);
+
+  // Process tripLines in batches
   let imported = resumeLine;
   let skipped  = 0;
-  let lineNum  = 0;
   let batch    = [];
 
-  for await (const line of rl) {
-    lineNum++;
-    if (lineNum <= resumeLine) continue;
+  for (let i = 0; i < tripLines.length; i++) {
+    const line = tripLines[i];
     if (!line.trim()) continue;
-
     const record = parseRecord(line);
     if (!record) {
       skipped++;
-      if (skipped <= 3) console.warn(`[sunbizWorker] parseRecord rejected line ${lineNum} (first 120 chars): ${JSON.stringify(line.slice(0,120))}`);
+      if (skipped <= 3) console.warn(`[sunbizWorker] parseRecord rejected (first 120 chars): ${JSON.stringify(line.slice(0,120))}`);
       continue;
     }
-
     batch.push(record);
-
     if (batch.length >= BATCH_SIZE) {
       const flush = batch;
       batch = [];
@@ -288,19 +293,32 @@ async function importTxtToPostgres(txtPath) {
     await setState('lines_imported', String(imported));
   }
 
-  await setState('import_complete', 'true');
-  console.log(`[sunbizWorker] Import complete: ${imported.toLocaleString()} records, ${skipped} skipped`);
-  return { imported, skipped };
+  // Checkpoint reflects lineNum advance, not just records imported.
+  // resumeLine + tripLines.length = total lines seen during the productive window.
+  const newCheckpoint = resumeLine + tripLines.length;
+  await setState('lines_imported', String(newCheckpoint));
+
+  if (!reachedCeiling) {
+    // Stream ended naturally — full file consumed
+    await setState('import_complete', 'true');
+    console.log(`[sunbizWorker] Import complete: ${imported.toLocaleString()} records imported, ${skipped} skipped (cumulative)`);
+  } else {
+    console.log(`[sunbizWorker] Trip complete: checkpoint=${newCheckpoint.toLocaleString()} (${(imported - resumeLine).toLocaleString()} new records this trip, ${skipped} skipped), will resume next boot`);
+  }
+
+  return { imported, skipped, reachedCeiling };
 }
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────
 async function runImport() {
   const _importStart = Date.now();
   try {
-    await downloadZip();
-    const txtPath = extractZip();
-    const { imported, skipped } = await importTxtToPostgres(txtPath);
-
+    const complete = await getState('import_complete');
+    if (complete === 'true') {
+      console.log('[sunbizWorker] Import already complete — idling');
+      return;
+    }
+    const { imported, skipped } = await runTrip();
     await logWorkerEvent({
       eventType: 'complete',
       recordsIn: imported + skipped,
@@ -308,16 +326,8 @@ async function runImport() {
       durationMs: Date.now() - _importStart,
     });
     await hb.ping('sunbizWorker');
-    // Only clean up on success — partial downloads must survive errors for resume
-    try {
-      fs.rmSync(SUNBIZ_DIR, { recursive: true, force: true });
-      console.log('[sunbizWorker] Cleaned /tmp/sunbiz');
-    } catch (e) {
-      console.warn('[sunbizWorker] Cleanup failed:', e.message);
-    }
   } catch (e) {
     console.error('[sunbizWorker] Import error:', e.message);
-    console.log('[sunbizWorker] Leaving /tmp/sunbiz intact for resume on next trigger');
     await logWorkerEvent({ eventType: 'error', durationMs: Date.now() - _importStart, error: e.message });
     throw e;
   }
@@ -343,7 +353,6 @@ async function run() {
   await logWorkerEvent({ eventType: 'end' });
 }
 
-// Only auto-run when executed directly (not when require()'d by dashboard-server)
 if (require.main === module) {
   run().catch(e => console.error('[sunbizWorker] Fatal:', e.message));
 }
