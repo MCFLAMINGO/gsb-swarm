@@ -31,7 +31,7 @@ function fetchBea(params) {
     const qs = new URLSearchParams({
       UserID:      API_KEY,
       method:      'GetData',
-      datasetname: 'Regional',
+      datasetname: 'RegionalIncome',
       ResultFormat: 'JSON',
       ...params,
     }).toString();
@@ -58,7 +58,7 @@ async function fetchAllFLCounties(year) {
   const data = await fetchBea({
     TableName: 'CAINC1',
     LineCode:  '3',
-    GeoFips:   'COUNTY:12000',   // all counties in Florida
+    GeoFips:   'STATE:12',   // all counties in Florida
     Year:      String(year),
   });
   // Build map: fips5 → value
