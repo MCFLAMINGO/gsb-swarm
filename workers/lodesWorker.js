@@ -92,7 +92,7 @@ async function run() {
     const days = age / 86400000;
     if (days < 365) {  // LODES is annual — released each December, no point re-fetching within a year
       console.log(`[lodes] Skipping — ran ${days.toFixed(1)} days ago (LODES is annual)`);
-      process.exit(0);
+      return;
     }
   }
 
@@ -194,7 +194,7 @@ async function run() {
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.log(`[lodes] ✅ Done — ${done} ZIP upserts — ${elapsed}s`);
-  process.exit(0);
+  return;
 }
 
 run().catch(e => { console.error('[lodes] fatal:', e.message); process.exit(1); });

@@ -91,7 +91,7 @@ async function run() {
       const ageDays = (Date.now() - new Date(hb[0].last_run).getTime()) / 86400000;
       if (ageDays < 365) {  // BEA is annual data with 2yr lag — no need to re-fetch within a year
         console.log(`[bea] Data fresh (${ageDays.toFixed(1)} days old, window 365d) — skipping run`);
-        process.exit(0);
+        return;
       }
     }
   } catch (_) { /* no heartbeat yet — run */ }
@@ -188,7 +188,7 @@ async function run() {
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.log(`[bea] ✅ Done — ${countyDone} counties, ${zipsDone} ZIP upserts — ${elapsed}s`);
-  process.exit(0);
+  return;
 }
 
 run().catch(e => { console.error('[bea] fatal:', e.message); process.exit(1); });

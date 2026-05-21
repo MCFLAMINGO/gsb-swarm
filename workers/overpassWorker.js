@@ -67,15 +67,15 @@ async function logWorkerEvent({ eventType, recordsIn, recordsOut, durationMs, er
   } catch (e) { console.warn('[overpass] worker_events log failed:', e.message); }
 }
 
-// Mirror raw OSM POIs to Postgres zip_enrichment (non-blocking)
-function saveOsmEnrichment(zip, pois) {
+// Mirror raw OSM POIs to Postgres zip_enrichment
+async function saveOsmEnrichment(zip, pois) {
   if (!process.env.LOCAL_INTEL_DB_URL || !Array.isArray(pois)) return;
   const { upsertOsmEnrichment, upsertZipSignals } = require('../lib/pgStore');
-  upsertOsmEnrichment(zip, {
+  await upsertOsmEnrichment(zip, {
     osm_pois:       pois,
     osm_updated_at: new Date().toISOString(),
     poi_count:      pois.length,
-  }).catch(e => console.warn('[overpass] Postgres zip_enrichment write failed:', e.message));
+  });
 
   // World model — aggregate OSM signals into zip_signals
   const total      = pois.length || 0;
@@ -89,7 +89,7 @@ function saveOsmEnrichment(zip, pois) {
     p.category === 'place_of_worship').length;
   const education  = pois.filter(p => ['school','college','university','kindergarten'].includes(p.subtype)).length;
   const healthcare = pois.filter(p => ['hospital','clinic','dentist','pharmacy','doctors'].includes(p.subtype)).length;
-  upsertZipSignals(zip, {
+  await upsertZipSignals(zip, {
     osm_biz_count:        total || null,
     osm_with_phone_pct:   total > 0 ? Math.round((withPhone / total) * 1000) / 10 : null,
     osm_with_website_pct: total > 0 ? Math.round((withWeb   / total) * 1000) / 10 : null,
@@ -100,7 +100,7 @@ function saveOsmEnrichment(zip, pois) {
     osm_education_count:  education  || null,
     osm_healthcare_count: healthcare || null,
     osm_updated_at:       new Date(),
-  }).catch(() => {});
+  });
 }
 
 /**
@@ -436,7 +436,7 @@ async function processZip(zip, freshZipSet) {
   const siteSig = await fetchSiteAccessSignals(zip, bbox);
   if (process.env.LOCAL_INTEL_DB_URL) {
     const { upsertZipSignals } = require('../lib/pgStore');
-    upsertZipSignals(zip, {
+    await upsertZipSignals(zip, {
       osm_fast_food_count: siteSig.osm_fast_food_count,
       osm_road_class:      siteSig.osm_road_class,
       osm_access_score:    siteSig.osm_access_score,
@@ -445,7 +445,7 @@ async function processZip(zip, freshZipSet) {
       osm_worship_count:   siteSig.osm_worship_count,
       osm_fitness_count:   siteSig.osm_fitness_count,
       osm_updated_at:      new Date(),
-    }).catch(e => console.warn(`[overpass] ${zip} site signals write failed: ${e.message}`));
+    });
   }
 
   console.log(`[overpass] ${zip} → ${pois.length} named POIs, fast_food=${siteSig.osm_fast_food_count}, road=${siteSig.osm_road_class}, access=${siteSig.osm_access_score}, golf=${siteSig.osm_golf_count}, arts=${siteSig.osm_arts_count}, worship=${siteSig.osm_worship_count}, fitness=${siteSig.osm_fitness_count}`);
