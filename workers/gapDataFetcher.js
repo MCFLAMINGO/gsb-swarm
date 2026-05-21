@@ -272,28 +272,44 @@ async function fetchSchoolEnrollment(zip) {
 async function fetchCountyPermits(zip) {
   try {
     const rows = await db.query(
-      `SELECT cbp_total_establishments, cbp_total_employees, cbp_total_payroll_k
+      `SELECT cbp_bldg_estab, cbp_bldg_emp,
+              cbp_civil_estab, cbp_civil_emp,
+              cbp_trade_estab, cbp_trade_emp, cbp_trade_payroll_k,
+              cbp_construction_updated_at
        FROM zip_signals WHERE zip = $1`,
       [zip]
     );
     if (!Array.isArray(rows) || rows.length === 0) return null;
     const r = rows[0];
-    const estab   = r.cbp_total_establishments;
-    const emp     = r.cbp_total_employees;
-    const payroll = r.cbp_total_payroll_k;
-    if (estab == null && emp == null && payroll == null) return null;
+    const bldgEstab  = r.cbp_bldg_estab;
+    const bldgEmp    = r.cbp_bldg_emp;
+    const civilEstab = r.cbp_civil_estab;
+    const civilEmp   = r.cbp_civil_emp;
+    const tradeEstab = r.cbp_trade_estab;
+    const tradeEmp   = r.cbp_trade_emp;
+    const tradePay   = r.cbp_trade_payroll_k;
+    if (bldgEstab == null && civilEstab == null && tradeEstab == null
+        && bldgEmp == null && civilEmp == null && tradeEmp == null) return null;
+    const totalEstab = (bldgEstab == null ? 0 : Number(bldgEstab))
+                     + (civilEstab == null ? 0 : Number(civilEstab))
+                     + (tradeEstab == null ? 0 : Number(tradeEstab));
     return {
       zip,
       fetched_at:               new Date().toISOString(),
       source:                   'zip_signals_county_permits',
-      cbp_total_establishments: estab   == null ? 0 : Number(estab),
-      cbp_total_employees:      emp     == null ? 0 : Number(emp),
-      cbp_total_payroll_k:      payroll == null ? 0 : Number(payroll),
-      // Push into bedrock as a momentum proxy (establishments as activity signal)
-      active_projects:          estab   == null ? 0 : Number(estab),
-      active_road_projects:     0,
-      infrastructure_momentum_score: estab != null
-        ? Math.min(100, Math.round(Number(estab) / 50))
+      cbp_bldg_estab:           bldgEstab  == null ? 0 : Number(bldgEstab),
+      cbp_bldg_emp:             bldgEmp    == null ? 0 : Number(bldgEmp),
+      cbp_civil_estab:          civilEstab == null ? 0 : Number(civilEstab),
+      cbp_civil_emp:            civilEmp   == null ? 0 : Number(civilEmp),
+      cbp_trade_estab:          tradeEstab == null ? 0 : Number(tradeEstab),
+      cbp_trade_emp:            tradeEmp   == null ? 0 : Number(tradeEmp),
+      cbp_trade_payroll_k:      tradePay   == null ? 0 : Number(tradePay),
+      cbp_construction_updated_at: r.cbp_construction_updated_at || null,
+      // Push into bedrock as a momentum proxy (total construction establishments as activity signal)
+      active_projects:          totalEstab,
+      active_road_projects:     civilEstab == null ? 0 : Number(civilEstab),
+      infrastructure_momentum_score: totalEstab > 0
+        ? Math.min(100, Math.round(totalEstab / 50))
         : 0,
     };
   } catch (err) {
@@ -593,7 +609,7 @@ async function fetchGap({ zip, name, county, gap, source }) {
         const data = await fetchCountyPermits(zip);
         if (data) {
           mergeIntoBedrock(zip, data);
-          appendGapLog({ zip, gap, source, status: 'filled', estab: data.cbp_total_establishments });
+          appendGapLog({ zip, gap, source, status: 'filled', estab: data.active_projects });
           filled = true;
         }
         break;
