@@ -4272,3 +4272,45 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 **Problem 5:** gsb-swarm-volume at 100% — legacy cordata.zip + extracted .txt from pre-B80 run still on disk.
 **Fix:** Migration 040 adds detected_intent to intent_dead_ends + sms_query_log. Migration 041 adds verified + credited_to to business_slang. Migration 042 widens sig_biz_density_per_1k and sig_job_capture_ratio to NUMERIC(15,3). dbMigrate.js splitter skips short syntax error fragments. worldModelWorker.js clamps sig_* values with Math.min(999999,...). sunbizWorker.js IIFE on startup wipes data/sunbiz/ and data/sunbiz-extract/ legacy directories.
 **Result:** Error storm eliminated. Volume clears on next deploy boot. sunbizWorker can stream cleanly.
+
+### B82 — Expose error_message in sunbiz-progress endpoint
+**Date:** 2026-05-19
+**Commit:** 59ce231
+**Problem:** `GET /api/admin/sunbiz-progress` returned state + event counts but never surfaced the actual error message when an import failed, making it impossible to diagnose root cause without digging through Railway logs.
+**Fix:** `recent_events` array in the response now includes `error_message` from `worker_events` table alongside `event_type`, `records_out`, and `created_at`.
+**Result:** `sunbiz-progress` endpoint shows the exact error string (e.g. "Download size mismatch: local=1723793408 remote=1744668408") directly — no log digging required.
+
+### B83 — Switch sunbizWorker to /tmp + system unzip (DEFLATE64 support)
+**Date:** 2026-05-19
+**Commit:** e7d818e
+**Problem:** FL DOS cordata.zip uses DEFLATE64 compression (ZIP method 9). The `unzipper` npm package does not support DEFLATE64 — extraction failed with a decompression error on every attempt. Also, previous approach wrote to Railway volume, violating POSTGRES IS KING.
+**Fix:** Removed `unzipper` dependency. Worker now downloads to `/tmp/sunbiz/cordata.zip` and extracts using the system `unzip` binary via `execSync` — Linux system `unzip` supports DEFLATE64 natively. `/tmp` is ephemeral process memory, not the Railway volume.
+**Result:** DEFLATE64 extraction works. No volume writes. `/tmp` is cleaned on successful import completion.
+
+### B84 — Wire import endpoint to sunbizWorker.runImport
+**Date:** 2026-05-19
+**Commits:** 4dc5396, 4ba7add, 21b8370, 7725e9e
+**Problem:** Four compounding issues: (1) `POST /api/admin/import-sunbiz` was not calling `runImport()` from sunbizWorker — the endpoint existed but did nothing. (2) `sunbizWorker.js` had a top-level `run()` call that fired on `require()`, crashing dashboard-server.js on startup. (3) The startup IIFE was deleting `/tmp/sunbiz` on every restart, wiping partial downloads. (4) `parseRecord` rejections were silent — no visibility into actual file format.
+**Fix:** (B84) Wired endpoint to `runImport()` via `require('./workers/sunbizWorker')`. (B84b) Added `require.main === module` guard so `run()` only fires when executed directly. (B84c) Changed startup IIFE to only clean legacy volume paths (`data/sunbiz/`, `data/sunbiz-extract/`) — never `/tmp/sunbiz`. (B84d) Added diagnostic logging: first 3 `parseRecord` rejections log the raw line content.
+**Result:** Endpoint correctly triggers import. Dashboard-server startup no longer crashes. Partial downloads survive restarts. Parse failures are visible in logs.
+
+### B84e — Resume SFTP download from offset
+**Date:** 2026-05-19
+**Commit:** 7de9074
+**Problem:** FL DOS SFTP drops the connection at ~99% (1.72GB of 1.74GB) on every attempt. Each failure triggered a full restart from 0 bytes. `localSize` variable declared twice causing syntax error.
+**Fix:** Replaced `fastGet` with `createReadStream(path, { start: offset })` piped to an append-mode `createWriteStream`. On restart, checks existing file size and resumes from that byte offset. Fixed duplicate `localSize` declaration — second one renamed to `finalSize`. `ssh2-sftp-client@^12.1.1` supports `start` offset on `createReadStream`.
+**Result:** Downloads resume from where they left off. A 1.72GB partial survives restart and only needs the final 20MB to complete.
+
+### B85 — sunbizWorker cleanup only on success + gapDataFetcher stubs
+**Date:** 2026-05-20
+**Commit:** 39de949
+**Problem:** Three issues: (1) `runImport()` had a `finally` block that deleted `/tmp/sunbiz` unconditionally — even on error. Every failed download attempt wiped the partial file, making resume impossible. (2) `gapDataFetcher` logged `Unknown source: bbb_directory` and `Unknown source: county_permits` on every call — no case in the switch. (3) `fetchRaw` redirect handler passed relative `Location` headers directly to `http.get`, throwing `Invalid URL` for NCES school enrollment fetches.
+**Fix:** (1) Moved `/tmp/sunbiz` cleanup out of `finally` into the success path only. Error path logs "Leaving /tmp/sunbiz intact for resume on next trigger". (2) Added named stub cases for `bbb_directory` and `county_permits` — log "not implemented" and break cleanly. (3) Relative redirect URLs now resolved against origin host before following.
+**Result:** Partial downloads survive errors. gapDataFetcher no longer logs unknown-source warnings for known-unimplemented sources. School enrollment Invalid URL errors eliminated.
+
+### B86 — Fix await + process.exit in data workers — all FL ZIPs had NULL signals
+**Date:** 2026-05-20
+**Commit:** 6db4c04
+**Problem:** BEA, LODES, OSM (overpass), and ZBP/CBP (censusLayer) signals were NULL across all FL ZIPs statewide despite workers showing heartbeats. Root cause: two compounding bugs present since B61 wired these workers in. (1) `upsertZipSignals()` calls in `overpassWorker` and `censusLayerWorker` were missing `await` — fire-and-forget, the DB write promises were never resolved before the process exited. (2) `beaWorker`, `lodesWorker`, `overpassWorker`, and `censusLayerWorker` all called `process.exit(0)` which hard-kills the Node process immediately, dropping all in-flight async DB writes before the event loop could drain. Workers set their heartbeat (confirming they "ran") but zero ZIP upserts landed. BEA and LODES freshness windows are 365 days — once the heartbeat was set, they would not retry for a year. (3) `censusLayerWorker` tracked ZBP/CBP freshness via `writeSchedule()` to an ephemeral disk JSON file — reset on every Railway restart, causing unnecessary re-runs that also wrote nothing.
+**Fix:** (1) Added `await` to every `upsertZipSignals()` call in `overpassWorker` and `censusLayerWorker`. (2) Replaced all `process.exit(0)` calls with `return` in all four workers — async functions now exit naturally after the event loop drains, flushing all pending DB writes. `process.exit(1)` error exits left intact. (3) Replaced `writeSchedule()` freshness tracking in `censusLayerWorker` with Postgres heartbeat writes (`worker_heartbeat` table, worker names `censusLayerWorker_zbp` and `censusLayerWorker_cbp`) so freshness survives Railway restarts. (4) Migration 043 deletes stale `beaWorker` and `lodesWorker` heartbeat rows so both workers re-run immediately on next deploy instead of waiting 358 days.
+**Result:** On next Railway deploy: BEA per-capita income + growth data writes to all FL ZIPs via county→ZIP fan-out. LODES jobs/workers data writes to all 1,013 FL ZIPs. OSM business signals (biz_count, food_count, phone_pct, hours_pct) write per-ZIP as overpass cycles. ZBP/CBP establishment counts write and freshness is tracked correctly across restarts. All four node cards transition from 0/N to populated once workers complete their first post-fix run.
