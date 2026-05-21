@@ -7668,6 +7668,8 @@ app.use((req, res, next) => {
     { name: 'QWI Workforce Worker',          file: 'workers/qwiWorker.js'           },  // 14-day freshness check
     { name: 'CES Employment Worker',         file: 'workers/cesWorker.js'           },  // 2-day freshness check (built-in)
     { name: 'QCEW Wages Worker',             file: 'workers/qcewWorker.js'          },  // 30-day freshness check (built-in)
+    { name: 'School Enrollment Worker',      file: 'workers/schoolEnrollmentWorker.js' }, // B87 — 90-day freshness (Urban Institute CCD)
+    { name: 'County Permits Worker',         file: 'workers/countyPermitsWorker.js'    }, // B87 — 30-day freshness (Census BPS + CBP NAICS 236)
     // ── World model derived signals (runs after input workers) ──
     // { name: 'FCC Broadband Worker',        file: 'workers/fccBroadbandWorker.js'  }, // disabled — not consumed by any query path
     // { name: 'IRS Migration Worker',        file: 'workers/irsMigrationWorker.js'  }, // disabled — not consumed by any query path

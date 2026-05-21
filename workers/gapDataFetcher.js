@@ -26,6 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const https = require('https');
 const http  = require('http');
+const db   = require('../lib/db');
 
 const DATA_DIR    = path.join(__dirname, '..', 'data');
 const OCEAN_DIR   = path.join(DATA_DIR, 'ocean_floor');
@@ -232,39 +233,71 @@ async function fetchCountyAppraiser(zip, county) {
   }
 }
 
-// ── SOURCE: FL Dept of Education — school enrollment by district/zip ──────────
-// FLDOE publishes school-level enrollment as a CSV annually
-// We use the school search API to find schools by zip and extract enrollment
+// ── SOURCE: zip_signals (populated by schoolEnrollmentWorker) ─────────────────
+// Reads pre-computed school signals from Postgres. No HTTP calls.
+// Returns null if schoolEnrollmentWorker hasn't populated the ZIP yet.
 
 async function fetchSchoolEnrollment(zip) {
-  // NCES school search — public, no key
-  const url = `https://nces.ed.gov/ccd/schoolsearch/school_list.asp?Search=1&zipcode=${zip}&miles=3&NumOfStudentsRange=more&Level=&SchoolType=1&SpecificSchlTypes=all&IncGrade=-1&LoGrade=-1&HiGrade=-1`;
-
   try {
-    const html = await fetchRaw(url, 15000);
-    // Parse school names and enrollment from NCES HTML table
-    const schoolMatches = [...html.matchAll(/schoolsearch\/school_detail\.asp[^"]*"[^>]*>([^<]+)<\/a>/g)];
-    const enrollMatches = [...html.matchAll(/(\d{1,5})\s*students/gi)];
-
-    const schools    = schoolMatches.map(m => m[1].trim()).filter(Boolean);
-    const enrollments = enrollMatches.map(m => parseInt(m[1], 10)).filter(n => n > 0);
-    const totalEnrollment = enrollments.reduce((a, b) => a + b, 0);
-
-    if (schools.length === 0) return null;
-
+    const rows = await db.query(
+      `SELECT school_count, total_enrollment, school_pop_proxy
+       FROM zip_signals WHERE zip = $1`,
+      [zip]
+    );
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const r = rows[0];
+    const schoolCount     = r.school_count;
+    const totalEnrollment = r.total_enrollment;
+    const popProxy        = r.school_pop_proxy;
+    if (schoolCount == null && totalEnrollment == null && popProxy == null) return null;
     return {
       zip,
-      fetched_at:        new Date().toISOString(),
-      source:            'nces_school_search',
-      school_count:      schools.length,
-      school_names:      schools.slice(0, 10),
-      total_enrollment:  totalEnrollment,
-      // School-age pop proxy: enrollment / 0.18 (avg 18% of pop is K-12)
-      estimated_school_age_pop: totalEnrollment,
-      population_proxy:  totalEnrollment > 0 ? Math.round(totalEnrollment / 0.18) : 0,
+      fetched_at:       new Date().toISOString(),
+      source:           'zip_signals_school_enrollment',
+      school_count:     schoolCount == null ? 0 : Number(schoolCount),
+      total_enrollment: totalEnrollment == null ? 0 : Number(totalEnrollment),
+      population_proxy: popProxy == null ? 0 : Number(popProxy),
+      estimated_school_age_pop: totalEnrollment == null ? 0 : Number(totalEnrollment),
     };
   } catch (err) {
-    console.warn(`[gapDataFetcher] School enrollment fetch failed for ${zip}:`, err.message);
+    console.warn(`[gapDataFetcher] School enrollment lookup failed for ${zip}:`, err.message);
+    return null;
+  }
+}
+
+// ── SOURCE: zip_signals (populated by countyPermitsWorker) ────────────────────
+// Reads pre-computed county permits + construction signals from Postgres.
+// Returns null if countyPermitsWorker hasn't populated the ZIP yet.
+
+async function fetchCountyPermits(zip) {
+  try {
+    const rows = await db.query(
+      `SELECT permits_new_units, construction_estab_count, construction_emp
+       FROM zip_signals WHERE zip = $1`,
+      [zip]
+    );
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const r = rows[0];
+    const permits = r.permits_new_units;
+    const estab   = r.construction_estab_count;
+    const emp     = r.construction_emp;
+    if (permits == null && estab == null && emp == null) return null;
+    return {
+      zip,
+      fetched_at:               new Date().toISOString(),
+      source:                   'zip_signals_county_permits',
+      permits_new_units:        permits == null ? 0 : Number(permits),
+      construction_estab_count: estab   == null ? 0 : Number(estab),
+      construction_emp:         emp     == null ? 0 : Number(emp),
+      // Push into bedrock as a momentum proxy
+      active_projects:          permits == null ? 0 : Number(permits),
+      active_road_projects:     0,
+      infrastructure_momentum_score: permits != null
+        ? Math.min(100, Math.round(Number(permits) / 50))
+        : 0,
+    };
+  } catch (err) {
+    console.warn(`[gapDataFetcher] County permits lookup failed for ${zip}:`, err.message);
     return null;
   }
 }
@@ -553,14 +586,16 @@ async function fetchGap({ zip, name, county, gap, source }) {
       }
 
       case 'bbb_directory': {
-        // BBB directory scraping not implemented — skip silently
-        console.log(`[gapDataFetcher] bbb_directory not implemented for ${zip} — skipping`);
-        break;
+        return;
       }
 
       case 'county_permits': {
-        // County permit feed not implemented — skip silently
-        console.log(`[gapDataFetcher] county_permits not implemented for ${zip} — skipping`);
+        const data = await fetchCountyPermits(zip);
+        if (data) {
+          mergeIntoBedrock(zip, data);
+          appendGapLog({ zip, gap, source, status: 'filled', permits: data.permits_new_units });
+          filled = true;
+        }
         break;
       }
 
@@ -582,6 +617,7 @@ module.exports = {
   fetchCensusACS,
   fetchCountyAppraiser,
   fetchSchoolEnrollment,
+  fetchCountyPermits,
   fetchLibraryProxy,
   fetchFDOTProjects,
   fetchPublicEventSignal,
