@@ -272,28 +272,28 @@ async function fetchSchoolEnrollment(zip) {
 async function fetchCountyPermits(zip) {
   try {
     const rows = await db.query(
-      `SELECT permits_new_units, construction_estab_count, construction_emp
+      `SELECT cbp_total_establishments, cbp_total_employees, cbp_total_payroll_k
        FROM zip_signals WHERE zip = $1`,
       [zip]
     );
     if (!Array.isArray(rows) || rows.length === 0) return null;
     const r = rows[0];
-    const permits = r.permits_new_units;
-    const estab   = r.construction_estab_count;
-    const emp     = r.construction_emp;
-    if (permits == null && estab == null && emp == null) return null;
+    const estab   = r.cbp_total_establishments;
+    const emp     = r.cbp_total_employees;
+    const payroll = r.cbp_total_payroll_k;
+    if (estab == null && emp == null && payroll == null) return null;
     return {
       zip,
       fetched_at:               new Date().toISOString(),
       source:                   'zip_signals_county_permits',
-      permits_new_units:        permits == null ? 0 : Number(permits),
-      construction_estab_count: estab   == null ? 0 : Number(estab),
-      construction_emp:         emp     == null ? 0 : Number(emp),
-      // Push into bedrock as a momentum proxy
-      active_projects:          permits == null ? 0 : Number(permits),
+      cbp_total_establishments: estab   == null ? 0 : Number(estab),
+      cbp_total_employees:      emp     == null ? 0 : Number(emp),
+      cbp_total_payroll_k:      payroll == null ? 0 : Number(payroll),
+      // Push into bedrock as a momentum proxy (establishments as activity signal)
+      active_projects:          estab   == null ? 0 : Number(estab),
       active_road_projects:     0,
-      infrastructure_momentum_score: permits != null
-        ? Math.min(100, Math.round(Number(permits) / 50))
+      infrastructure_momentum_score: estab != null
+        ? Math.min(100, Math.round(Number(estab) / 50))
         : 0,
     };
   } catch (err) {
@@ -593,7 +593,7 @@ async function fetchGap({ zip, name, county, gap, source }) {
         const data = await fetchCountyPermits(zip);
         if (data) {
           mergeIntoBedrock(zip, data);
-          appendGapLog({ zip, gap, source, status: 'filled', permits: data.permits_new_units });
+          appendGapLog({ zip, gap, source, status: 'filled', estab: data.cbp_total_establishments });
           filled = true;
         }
         break;

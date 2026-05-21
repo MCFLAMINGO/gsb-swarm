@@ -121,6 +121,7 @@ async function run() {
         school_count:       agg.school_count,
         total_enrollment:   agg.total_enrollment,
         school_pop_proxy:   schoolPopProxy,
+        school_updated_at:  new Date().toISOString(),
       });
       done++;
       if (done % 100 === 0) {

@@ -1,16 +1,13 @@
--- Migration 044: school enrollment + county permits signals
--- New signal keys written by schoolEnrollmentWorker and countyPermitsWorker:
---   school_count, total_enrollment, school_pop_proxy (from Urban Institute CCD 2022)
---   permits_new_units (from Census BPS 2023)
---   construction_estab_count, construction_emp (from Census CBP 2022 NAICS 236)
--- zip_signals table already exists (migration 017). Columns added here as a
--- belt-and-suspenders safety net so upsertZipSignals does not fail on first run.
+-- Migration 044: school enrollment signals
+-- New signal keys written by schoolEnrollmentWorker:
+--   school_count, total_enrollment, school_pop_proxy, school_updated_at
+-- CBP columns (cbp_total_establishments, cbp_total_employees, cbp_total_payroll_k,
+-- cbp_updated_at) already exist in zip_signals via migration 017.
+-- Safe to re-run.
 
-ALTER TABLE zip_signals ADD COLUMN IF NOT EXISTS school_count             integer;
-ALTER TABLE zip_signals ADD COLUMN IF NOT EXISTS total_enrollment         integer;
-ALTER TABLE zip_signals ADD COLUMN IF NOT EXISTS school_pop_proxy         integer;
-ALTER TABLE zip_signals ADD COLUMN IF NOT EXISTS permits_new_units        integer;
-ALTER TABLE zip_signals ADD COLUMN IF NOT EXISTS construction_estab_count integer;
-ALTER TABLE zip_signals ADD COLUMN IF NOT EXISTS construction_emp         integer;
+ALTER TABLE zip_signals ADD COLUMN IF NOT EXISTS school_count       INT;
+ALTER TABLE zip_signals ADD COLUMN IF NOT EXISTS total_enrollment   INT;
+ALTER TABLE zip_signals ADD COLUMN IF NOT EXISTS school_pop_proxy   INT;
+ALTER TABLE zip_signals ADD COLUMN IF NOT EXISTS school_updated_at  TIMESTAMPTZ;
 
 SELECT 1; -- idempotent

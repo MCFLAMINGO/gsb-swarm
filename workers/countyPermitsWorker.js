@@ -2,19 +2,18 @@
 /**
  * countyPermitsWorker.js
  * ─────────────────────────────────────────────────────────────────────────────
- * County-level construction + permits data, fanned out to ZIPs.
+ * County-level construction establishment data (CBP NAICS 236),
+ * fanned out to ZIPs.
  *
- * Layer A — Census BPS (Building Permits Survey):
- *   permits_new_units — annual new residential units authorized (1-unit bldgs)
- *   Endpoint: timeseries/eits/bps, requires Census_Data_API key
- *
- * Layer B — Census CBP NAICS 236 (Construction of Buildings):
- *   construction_estab_count — establishments
- *   construction_emp         — employment
- *   Endpoint: 2022 cbp, no key required
+ * Census CBP NAICS 236 (Construction of Buildings):
+ *   cbp_total_establishments  — establishments
+ *   cbp_total_employees       — employment
+ *   cbp_total_payroll_k       — annual payroll ($000s)
+ *   cbp_updated_at            — fetch timestamp
+ *   Endpoint: 2023 cbp, requires Census API key.
  *
  * Worker contract:
- *   START → check heartbeat (skip if <30d) → per county fetch BPS + CBP →
+ *   START → check heartbeat (skip if <30d) → per county fetch CBP →
  *           fan out to ZIPs via fl_zip_geo.county_fips → upsert → END
  * ─────────────────────────────────────────────────────────────────────────────
  */
@@ -65,42 +64,18 @@ function parseCensus(raw) {
   });
 }
 
-// Layer A — fetch building permits (new units authorized, 1-unit buildings)
-// category_code=1 = 1-unit buildings; cell_value = units authorized
-async function fetchBPS(countyFips3) {
-  if (!CENSUS_API_KEY) return null;
-  const url = `https://api.census.gov/data/timeseries/eits/bps?get=cell_value,time_slot_id,category_code&for=county:${countyFips3}&in=state:${STATE_FIPS}&YEAR=2023&MONTH=12&key=${CENSUS_API_KEY}`;
-  try {
-    const raw = await fetchJson(url);
-    const rows = parseCensus(raw);
-    // Sum cell_value across rows with category_code=1 (1-unit buildings)
-    let total = 0;
-    let matched = 0;
-    for (const r of rows) {
-      if (String(r.category_code) === '1') {
-        total += toN(r.cell_value);
-        matched++;
-      }
-    }
-    if (matched === 0) return null;
-    return total;
-  } catch (e) {
-    console.warn(`[countyPermits] BPS fetch failed for county ${countyFips3}: ${e.message}`);
-    return null;
-  }
-}
-
-// Layer B — fetch CBP NAICS 236 (Construction of Buildings)
+// Fetch CBP NAICS 236 (Construction of Buildings) for a county
 async function fetchCBP236(countyFips3) {
-  const url = `https://api.census.gov/data/2022/cbp?get=NAICS2017_LABEL,ESTAB,EMP,PAYANN&for=county:${countyFips3}&in=state:${STATE_FIPS}&NAICS2017=236`;
+  const url = `https://api.census.gov/data/2023/cbp?get=ESTAB,EMP,PAYANN,NAICS2017&for=county:${countyFips3}&in=state:${STATE_FIPS}&NAICS2017=236&key=${CENSUS_API_KEY}`;
   try {
     const raw = await fetchJson(url);
     const rows = parseCensus(raw);
     const row = rows[0];
     if (!row) return null;
     return {
-      construction_estab_count: toN(row.ESTAB) || null,
-      construction_emp:         toN(row.EMP)   || null,
+      cbp_total_establishments: toN(row.ESTAB)  || null,
+      cbp_total_employees:      toN(row.EMP)    || null,
+      cbp_total_payroll_k:      toN(row.PAYANN) || null,
     };
   } catch (e) {
     console.warn(`[countyPermits] CBP fetch failed for county ${countyFips3}: ${e.message}`);
@@ -109,7 +84,7 @@ async function fetchCBP236(countyFips3) {
 }
 
 async function run() {
-  console.log('[countyPermits] Starting countyPermitsWorker — Census BPS + CBP NAICS 236');
+  console.log('[countyPermits] Starting countyPermitsWorker — Census CBP NAICS 236');
   const start = Date.now();
 
   // Freshness check
@@ -126,7 +101,8 @@ async function run() {
   } catch (_) { /* run */ }
 
   if (!CENSUS_API_KEY) {
-    console.log('[countyPermits] No Census_Data_API key — BPS layer will be skipped, CBP layer will still run');
+    console.warn('[countyPermits] No Census_Data_API / CENSUS_API_KEY env var — cannot fetch CBP, aborting');
+    return;
   }
 
   // All distinct FL counties
@@ -163,24 +139,22 @@ async function run() {
     }
     if (zipsForCounty.length === 0) continue;
 
-    // Layer A: BPS
-    const permits = await fetchBPS(fips3);
-
-    // Layer B: CBP NAICS 236
+    // CBP NAICS 236
     const cbp = await fetchCBP236(fips3);
 
     // Build signals object
     const signals = {};
-    if (permits != null) signals.permits_new_units = permits;
-    if (cbp?.construction_estab_count != null) signals.construction_estab_count = cbp.construction_estab_count;
-    if (cbp?.construction_emp != null) signals.construction_emp = cbp.construction_emp;
+    if (cbp?.cbp_total_establishments != null) signals.cbp_total_establishments = cbp.cbp_total_establishments;
+    if (cbp?.cbp_total_employees      != null) signals.cbp_total_employees      = cbp.cbp_total_employees;
+    if (cbp?.cbp_total_payroll_k      != null) signals.cbp_total_payroll_k      = cbp.cbp_total_payroll_k;
+    if (Object.keys(signals).length > 0) signals.cbp_updated_at = new Date().toISOString();
 
     if (Object.keys(signals).length === 0) {
       console.log(`[countyPermits] county ${fips5} — no data, skipping`);
       continue;
     }
 
-    console.log(`[countyPermits] county ${fips5}: permits=${permits ?? 'n/a'}, estab=${cbp?.construction_estab_count ?? 'n/a'}, emp=${cbp?.construction_emp ?? 'n/a'} → ${zipsForCounty.length} ZIPs`);
+    console.log(`[countyPermits] county ${fips5}: estab=${cbp?.cbp_total_establishments ?? 'n/a'}, emp=${cbp?.cbp_total_employees ?? 'n/a'}, payroll=${cbp?.cbp_total_payroll_k ?? 'n/a'} → ${zipsForCounty.length} ZIPs`);
 
     for (const zip of zipsForCounty) {
       try {
