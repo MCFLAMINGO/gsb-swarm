@@ -308,17 +308,18 @@ async function runImport() {
       durationMs: Date.now() - _importStart,
     });
     await hb.ping('sunbizWorker');
-  } catch (e) {
-    console.error('[sunbizWorker] Import error:', e.message);
-    await logWorkerEvent({ eventType: 'error', durationMs: Date.now() - _importStart, error: e.message });
-    throw e;
-  } finally {
+    // Only clean up on success — partial downloads must survive errors for resume
     try {
       fs.rmSync(SUNBIZ_DIR, { recursive: true, force: true });
       console.log('[sunbizWorker] Cleaned /tmp/sunbiz');
     } catch (e) {
       console.warn('[sunbizWorker] Cleanup failed:', e.message);
     }
+  } catch (e) {
+    console.error('[sunbizWorker] Import error:', e.message);
+    console.log('[sunbizWorker] Leaving /tmp/sunbiz intact for resume on next trigger');
+    await logWorkerEvent({ eventType: 'error', durationMs: Date.now() - _importStart, error: e.message });
+    throw e;
   }
 }
 

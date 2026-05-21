@@ -55,7 +55,12 @@ function fetchRaw(url, timeoutMs = 20000) {
       },
     }, res => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return fetchRaw(res.headers.location, timeoutMs).then(resolve).catch(reject);
+        let redirectUrl = res.headers.location;
+        if (redirectUrl.startsWith('/')) {
+          const parsed = new URL(url);
+          redirectUrl = `${parsed.protocol}//${parsed.host}${redirectUrl}`;
+        }
+        return fetchRaw(redirectUrl, timeoutMs).then(resolve).catch(reject);
       }
       if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode} — ${url}`));
       let body = '';
@@ -544,6 +549,18 @@ async function fetchGap({ zip, name, county, gap, source }) {
         } catch (err) {
           console.warn(`[gapDataFetcher] YP scraper unavailable for ${zip}:`, err.message);
         }
+        break;
+      }
+
+      case 'bbb_directory': {
+        // BBB directory scraping not implemented — skip silently
+        console.log(`[gapDataFetcher] bbb_directory not implemented for ${zip} — skipping`);
+        break;
+      }
+
+      case 'county_permits': {
+        // County permit feed not implemented — skip silently
+        console.log(`[gapDataFetcher] county_permits not implemented for ${zip} — skipping`);
         break;
       }
 
