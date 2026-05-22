@@ -184,6 +184,13 @@ async function streamSftpToReadline(onLine) {
     const remoteStream = await sftp.createReadStream(REMOTE_PATH);
 
     await new Promise((resolve, reject) => {
+      let settled = false;
+      const done = (err) => {
+        if (settled) return;
+        settled = true;
+        if (err) reject(err); else resolve();
+      };
+
       const inflate = zlib.createInflateRaw();
       const rl = readline.createInterface({ input: inflate, crlfDelay: Infinity });
 
@@ -207,7 +214,7 @@ async function streamSftpToReadline(onLine) {
             if (sig !== 0x04034b50) {
               aborted = true;
               cleanup();
-              reject(new Error('Not a ZIP file (bad local-file-header signature)'));
+              done(new Error('Not a ZIP file (bad local-file-header signature)'));
               return;
             }
             const fnLen    = headerBuf.readUInt16LE(26);
@@ -226,11 +233,10 @@ async function streamSftpToReadline(onLine) {
       });
 
       remoteStream.on('end', () => { try { inflate.end(); } catch(_) {} });
-      remoteStream.on('error', e => { if (!aborted) { aborted = true; cleanup(); reject(e); } });
+      remoteStream.on('error', e => { cleanup(); done(e); });
       inflate.on('error', e => {
-        if (aborted) return;
-        // Inflate may error after we intentionally destroy the stream on TripComplete — swallow it
-        aborted = true; cleanup(); reject(e);
+        // After TripComplete or intentional destroy, inflate will error — ignore it
+        cleanup(); done(aborted ? null : e);
       });
 
       rl.on('line', line => {
@@ -241,16 +247,16 @@ async function streamSftpToReadline(onLine) {
           if (e instanceof TripComplete) {
             aborted = true;
             cleanup();
-            resolve();
+            done(null);
             return;
           }
           aborted = true;
           cleanup();
-          reject(e);
+          done(e);
         }
       });
-      rl.on('close', () => { if (!aborted) resolve(); });
-      rl.on('error', e => { if (!aborted) { aborted = true; cleanup(); reject(e); } });
+      rl.on('close', () => done(null));
+      rl.on('error', e => done(e));
     });
   } finally {
     try { await sftp.end(); } catch (_) {}
@@ -271,6 +277,7 @@ async function runTrip() {
   let reachedCeiling = false;
 
   try {
+    console.log('[sunbizWorker] Connecting to SFTP...');
     await streamSftpToReadline((line) => {
       lineNum++;
       if (lineNum <= resumeLine) return;            // fast-skip previously imported
@@ -365,6 +372,13 @@ async function runImport() {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function run() {
+  process.on('unhandledRejection', (reason) => {
+    console.error('[sunbizWorker] Unhandled rejection:', reason?.message || reason);
+    // Don't crash — log and continue
+  });
+
+  console.log('[sunbizWorker] Starting — checking import state...');
+
   if (!process.env.LOCAL_INTEL_DB_URL) {
     console.error('[sunbizWorker] LOCAL_INTEL_DB_URL not set — exiting');
     return;
@@ -384,7 +398,15 @@ async function run() {
 }
 
 if (require.main === module) {
-  run().catch(e => console.error('[sunbizWorker] Fatal:', e.message));
+  run()
+    .then(() => {
+      console.log('[sunbizWorker] Run complete — process exiting cleanly');
+      process.exit(0);
+    })
+    .catch(e => {
+      console.error('[sunbizWorker] Fatal error:', e.message, e.stack);
+      process.exit(1);
+    });
 }
 
 module.exports = { runImport };
