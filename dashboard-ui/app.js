@@ -1821,14 +1821,17 @@ async function triggerWorker(workerKey, opts = {}) {
       if (res) { res.textContent = data.error; res.style.color = '#EF4444'; }
     } else {
       btn.textContent = 'Running ✓';
-      if (res) res.textContent = data.message || 'Worker started';
+      btn.disabled = false;
+      if (res) res.textContent = data.message || 'Worker started — check Railway logs';
       // Reload all status panels after worker starts (data will populate gradually)
       setTimeout(() => {
         loadFredBeaStatus();
         loadLodesQwiStatus();
         loadQcewStatus();
         loadWorkerStatus();
-      }, 5000);
+        if (res) res.textContent = '';
+        btn.textContent = workerKey === 'sunbiz' ? 'TRIGGER SUNBIZ WORKER' : 'Trigger ' + workerKey.toUpperCase();
+      }, 10000);
     }
   } catch (e) {
     btn.disabled = false;
