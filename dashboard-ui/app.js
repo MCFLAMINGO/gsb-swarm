@@ -1752,18 +1752,20 @@ async function loadAnomalies() {
 
 // ── FRED + BEA worker trigger + status ───────────────────────────────────────
 
-// Generic worker trigger — used by FRED, BEA (and future workers)
-async function triggerWorker(workerKey) {
+// Generic worker trigger — used by FRED, BEA, LODES (and future workers)
+// opts.force=true appends ?force=true (used by LODES Force Run button to bypass heartbeat skip)
+async function triggerWorker(workerKey, opts = {}) {
   const btn = document.getElementById(`li-${workerKey}-trigger-btn`);
   const res = document.getElementById(`li-${workerKey}-trigger-result`);
   if (!btn) return;
 
   btn.disabled = true;
-  btn.textContent = 'Triggering…';
+  btn.textContent = opts.force ? 'Force triggering…' : 'Triggering…';
   if (res) res.textContent = '';
 
   try {
-    const r = await fetch(`${API_BASE}/api/admin/trigger-${workerKey}`, {
+    const qs = opts.force ? '?force=true' : '';
+    const r = await fetch(`${API_BASE}/api/admin/trigger-${workerKey}${qs}`, {
       method: 'POST',
       headers: { 'x-operator-token': LI_ADMIN_TOKEN },
     });

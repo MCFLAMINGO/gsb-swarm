@@ -83,18 +83,20 @@ async function run() {
   console.log('[lodes] Starting LODES worker — FL WAC + RAC block aggregation');
   const start = Date.now();
 
-  // Skip if run recently (LODES is annual data)
+  // Skip if run recently (LODES is annual data) — LODES_FORCE=true bypasses
+  const forceRun = process.env.LODES_FORCE === 'true';
   const hb = await db.query(
     `SELECT last_run FROM worker_heartbeat WHERE worker_name = 'lodesWorker'`
   ).catch(() => []);
-  if (Array.isArray(hb) && hb.length) {
+  if (!forceRun && Array.isArray(hb) && hb.length) {
     const age = Date.now() - new Date(hb[0].last_run).getTime();
     const days = age / 86400000;
     if (days < 365) {  // LODES is annual — released each December, no point re-fetching within a year
-      console.log(`[lodes] Skipping — ran ${days.toFixed(1)} days ago (LODES is annual)`);
+      console.log(`[lodes] Skipping — ran ${days.toFixed(1)} days ago (annual data). Use LODES_FORCE=true to override.`);
       return;
     }
   }
+  if (forceRun) console.log('[lodes] LODES_FORCE=true — bypassing 365-day heartbeat skip');
 
   // ── 1. Download crosswalk ──────────────────────────────────────────────────
   console.log('[lodes] Downloading crosswalk...');

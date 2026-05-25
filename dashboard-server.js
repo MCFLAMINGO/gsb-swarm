@@ -1167,21 +1167,29 @@ app.post('/api/admin/trigger-bea', (req, res) => {
 });
 
 // POST /api/admin/trigger-lodes — runs LODES worker (FL WAC + RAC bulk download)
+// Pass ?force=true to bypass the 365-day heartbeat skip (sets LODES_FORCE=true)
 app.post('/api/admin/trigger-lodes', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
   if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
     return res.status(401).json({ error: 'unauthorized' });
   }
-  res.json({ status: 'started', message: 'LODES worker triggered — FL WAC + RAC block aggregation to ZIP (LODES8 2022, ~120s runtime)' });
+  const force = req.query.force === 'true';
+  res.json({
+    status: 'started',
+    message: 'LODES worker triggered — FL WAC + RAC block aggregation to ZIP (LODES8 2022, ~120s runtime)' + (force ? ' [FORCE]' : ''),
+    force,
+  });
   setImmediate(async () => {
     try {
       const { spawn } = require('child_process');
       const child = spawn(process.execPath, ['workers/lodesWorker.js'], {
-        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+        cwd: __dirname,
+        env: { ...process.env, LODES_FORCE: force ? 'true' : 'false' },
+        stdio: ['ignore','pipe','pipe'],
       });
       child.stdout.on('data', d => process.stdout.write('[lodes-trigger] ' + d));
       child.stderr.on('data', d => process.stderr.write('[lodes-trigger] ' + d));
-      child.on('close', code => console.log('[admin] LODES worker done (exit ' + code + ')'));
+      child.on('close', code => console.log('[admin] LODES worker done (exit ' + code + ', force=' + force + ')'));
     } catch (e) { console.error('[admin] LODES trigger failed:', e.message); }
   });
 });

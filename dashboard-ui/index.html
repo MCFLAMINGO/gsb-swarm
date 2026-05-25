@@ -807,6 +807,11 @@
           style="background:#6d28d9;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;">
           TRIGGER LODES WORKER
         </button>
+        <button onclick="triggerWorker('lodes', { force: true })" id="li-lodes-force-btn"
+          style="background:#b91c1c;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;margin-left:8px;"
+          title="Bypasses the 365-day heartbeat skip — use when LODES has never landed">
+          FORCE RUN
+        </button>
         <span id="li-lodes-trigger-result" style="font-size:12px;margin-left:12px;color:#a78bfa;"></span>
       </div>
     </div>
