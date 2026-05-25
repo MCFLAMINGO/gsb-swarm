@@ -24,7 +24,8 @@ const workers = [
   { name: 'ACP Broadcaster',    file: 'workers/acpBroadcaster.js' },
   // ── LocalIntel learning loop workers ─────────────────────────────────────────────
   { name: 'ACS Worker',           file: 'workers/acsWorker.js' },
-  { name: 'MCP Probe',            file: 'workers/mcpProbeWorker.js' },
+  // mcpProbeWorker disabled — re-enable after SunBiz import + brief-validator >90% pass rate
+  // { name: 'MCP Probe',            file: 'workers/mcpProbeWorker.js' },
   { name: 'Router Learning',      file: 'workers/routerLearningWorker.js' },
   { name: 'Vertical Agents',      file: 'workers/verticalAgentWorker.js' },
   { name: 'Chamber Scraper',      file: 'workers/chamberScraper.js' },
