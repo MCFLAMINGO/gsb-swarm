@@ -199,11 +199,16 @@ async function fetchCensusACS(zip) {
 // Residential parcels × avg household size ≈ population proxy
 
 async function fetchCountyAppraiser(zip, county) {
-  // St. Johns County open data portal — parcel query by zip
-  // https://maps.sjcfl.us/arcgis/rest/services/ (public ArcGIS REST)
+  // St. Johns is handled by sjcArcGisWorker (WATS_Project_Point + PUD_Development_Activity
+  // on services1.arcgis.com/t2yugAJW83eUIFui). The legacy maps.sjcfl.us host is dead —
+  // skip here to avoid DNS/HTTP errors.
+  if (county === 'St. Johns') {
+    console.log(`[gapDataFetcher] county_appraiser skip for SJC ${zip} — handled by sjcArcGisWorker`);
+    return null;
+  }
+
   const APPRAISER_URLS = {
-    'St. Johns': `https://maps.sjcfl.us/arcgis/rest/services/Property/MapServer/0/query?where=ZIP_CD='${zip}'&returnCountOnly=true&f=json`,
-    'Duval':     `https://maps.coj.net/arcgis/rest/services/Property_Appraiser/Parcels/MapServer/0/query?where=ZIPCD='${zip}'&returnCountOnly=true&f=json`,
+    'Duval': `https://maps.coj.net/arcgis/rest/services/Property_Appraiser/Parcels/MapServer/0/query?where=ZIPCD='${zip}'&returnCountOnly=true&f=json`,
   };
 
   const url = APPRAISER_URLS[county];
