@@ -1754,6 +1754,24 @@ async function loadAnomalies() {
 
 // Generic worker trigger — used by FRED, BEA, LODES (and future workers)
 // opts.force=true appends ?force=true (used by LODES Force Run button to bypass heartbeat skip)
+async function resetSunbizState() {
+  const btn = document.getElementById('li-sunbiz-reset-btn');
+  const res = document.getElementById('li-sunbiz-trigger-result');
+  if (btn) { btn.disabled = true; btn.textContent = 'Resetting…'; }
+  try {
+    const r = await fetch(`${API_BASE}/api/admin/reset-sunbiz`, {
+      method: 'POST',
+      headers: { 'x-operator-token': LI_ADMIN_TOKEN },
+    });
+    const data = await r.json();
+    if (btn) { btn.disabled = false; btn.textContent = 'RESET STATE'; }
+    if (res) { res.textContent = data.message || data.error || 'Done'; res.style.color = data.error ? '#EF4444' : '#34d399'; }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'RESET STATE'; }
+    if (res) { res.textContent = 'Error: ' + e.message; res.style.color = '#EF4444'; }
+  }
+}
+
 async function triggerWorker(workerKey, opts = {}) {
   const btn = document.getElementById(`li-${workerKey}-trigger-btn`);
   const res = document.getElementById(`li-${workerKey}-trigger-result`);

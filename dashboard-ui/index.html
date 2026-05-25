@@ -927,6 +927,37 @@
       <div id="li-ces-test-output" style="font-size:11px;color:#aaa;margin-top:8px;padding:8px;background:#111;border-radius:4px;display:none;max-height:200px;overflow:auto;"></div>
     </div>
 
+    <!-- SunBiz -->
+    <div class="li-card" style="margin-top:12px;">
+      <div class="li-card-head">
+        <span class="li-card-icon">📋</span>
+        <span class="li-card-title">SunBiz Entity Registry</span>
+        <span class="badge" id="li-sunbiz-badge" style="margin-left:8px;">PENDING</span>
+      </div>
+      <div class="li-card-body">
+        <div class="li-stats-row">
+          <div class="li-stat"><span class="li-stat-val" id="li-sunbiz-active">—</span><span class="li-stat-label">Active Entities</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-sunbiz-new12">—</span><span class="li-stat-label">New (12mo)</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-sunbiz-dissolved">—</span><span class="li-stat-label">Dissolved (12mo)</span></div>
+          <div class="li-stat"><span class="li-stat-val" id="li-sunbiz-net">—</span><span class="li-stat-label">Net Formation</span></div>
+        </div>
+        <div id="li-sunbiz-import-state" style="font-size:11px;color:#888;margin-top:6px;"></div>
+      </div>
+      <div class="li-card-footer">
+        <p style="font-size:11px;color:#555;margin:0 0 8px;">Florida DOS quarterly data — 10-file split (cordata0-9.zip) — DEFLATE64 via 7z — manual trigger only (SFTP download).</p>
+        <button onclick="triggerWorker('sunbiz')" id="li-sunbiz-trigger-btn"
+          style="background:#4c1d95;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;">
+          TRIGGER SUNBIZ WORKER
+        </button>
+        <button onclick="resetSunbizState()" id="li-sunbiz-reset-btn"
+          style="background:#92400e;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;margin-left:8px;"
+          title="Clears files_completed and import_complete — use before re-triggering">
+          RESET STATE
+        </button>
+        <span id="li-sunbiz-trigger-result" style="font-size:12px;margin-left:12px;color:#a78bfa;"></span>
+      </div>
+    </div>
+
     <!-- Open anomalies -->
     <div class="li-card" style="margin-top:12px;">
       <div class="li-card-head">
