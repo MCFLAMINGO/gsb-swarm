@@ -392,6 +392,13 @@ async function runImport() {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function run() {
+  // Safety guard — this worker must be triggered manually, not on auto-start.
+  // If not explicitly triggered, exit immediately.
+  if (process.env.SUNBIZ_MANUAL_TRIGGER !== 'true') {
+    console.log('[sunbizWorker] Skipping auto-run — manual trigger required (set SUNBIZ_MANUAL_TRIGGER=true)');
+    return;
+  }
+
   console.log('[sunbizWorker] Starting — 10-file split (cordata0-9.zip)');
 
   if (!process.env.LOCAL_INTEL_DB_URL) {

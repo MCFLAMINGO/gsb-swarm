@@ -37,7 +37,8 @@ const workers = [
   // ── LocalIntel source workers (data ingestion + reconciliation) ───────────
   { name: 'OSM Overpass',         file: 'workers/overpassWorker.js' },
   { name: 'Yellow Pages',         file: 'workers/yellowPagesScraper.js' },
-  { name: 'FL SunBiz',            file: 'workers/sunbizWorker.js' },
+  // { name: 'FL SunBiz',            file: 'workers/sunbizWorker.js' },
+  // MANUAL TRIGGER ONLY — SFTP download, do not auto-start. Trigger from admin panel.
   { name: 'Business Merge',       file: 'workers/businessMergeWorker.js' },
   // ── LocalIntel intelligence layers (ZIP-level economic data) ─────────────
   { name: 'IRS SOI',              file: 'workers/irsSoiWorker.js' },

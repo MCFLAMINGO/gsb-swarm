@@ -1356,7 +1356,7 @@ app.post('/api/admin/trigger-sunbiz', (req, res) => {
     try {
       const { spawn } = require('child_process');
       const child = spawn(process.execPath, ['workers/sunbizWorker.js'], {
-        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+        cwd: __dirname, env: { ...process.env, SUNBIZ_MANUAL_TRIGGER: 'true' }, stdio: ['ignore','pipe','pipe'],
       });
       child.stdout.on('data', d => process.stdout.write('[sunbiz-trigger] ' + d));
       child.stderr.on('data', d => process.stderr.write('[sunbiz-trigger] ' + d));
