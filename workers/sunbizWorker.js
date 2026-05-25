@@ -194,25 +194,41 @@ async function upsertBatch(records) {
 
 // ── Aggregate sunbiz_new_12mo into zip_signals ────────────────────────────────
 async function aggregateSunbizSignals() {
-  console.log('[sunbizWorker] Aggregating sunbiz_new_12mo into zip_signals...');
+  console.log('[sunbizWorker] Aggregating all 4 sunbiz signals into zip_signals...');
   await db.query(`
-    INSERT INTO zip_signals (zip, sunbiz_new_12mo, last_updated_at)
+    INSERT INTO zip_signals (
+      zip,
+      sunbiz_active_entities,
+      sunbiz_new_12mo,
+      sunbiz_dissolved_12mo,
+      sunbiz_net_12mo,
+      last_updated_at
+    )
     SELECT
       zip,
-      COUNT(*)::int AS sunbiz_new_12mo,
+      COUNT(*) FILTER (WHERE status = 'active')::int                                          AS sunbiz_active_entities,
+      COUNT(*) FILTER (WHERE registered_date >= NOW() - INTERVAL '12 months')::int            AS sunbiz_new_12mo,
+      COUNT(*) FILTER (WHERE status != 'active'
+                         AND updated_at >= NOW() - INTERVAL '12 months')::int                 AS sunbiz_dissolved_12mo,
+      (
+        COUNT(*) FILTER (WHERE registered_date >= NOW() - INTERVAL '12 months')
+        - COUNT(*) FILTER (WHERE status != 'active' AND updated_at >= NOW() - INTERVAL '12 months')
+      )::int                                                                                   AS sunbiz_net_12mo,
       NOW()
     FROM businesses
     WHERE primary_source = 'sunbiz'
-      AND registered_date >= NOW() - INTERVAL '12 months'
       AND zip IS NOT NULL
       AND zip != '00000'
       AND zip ~ '^[0-9]{5}$'
     GROUP BY zip
     ON CONFLICT (zip) DO UPDATE SET
-      sunbiz_new_12mo = EXCLUDED.sunbiz_new_12mo,
-      last_updated_at = NOW()
+      sunbiz_active_entities = EXCLUDED.sunbiz_active_entities,
+      sunbiz_new_12mo        = EXCLUDED.sunbiz_new_12mo,
+      sunbiz_dissolved_12mo  = EXCLUDED.sunbiz_dissolved_12mo,
+      sunbiz_net_12mo        = EXCLUDED.sunbiz_net_12mo,
+      last_updated_at        = NOW()
   `);
-  console.log('[sunbizWorker] sunbiz_new_12mo aggregation complete');
+  console.log('[sunbizWorker] All 4 sunbiz signals aggregated (active, new_12mo, dissolved_12mo, net_12mo)');
 }
 
 // ── SFTP download with exponential backoff ────────────────────────────────────
