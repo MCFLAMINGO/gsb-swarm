@@ -4416,3 +4416,87 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 **Result:** SJC permit + PUD data flowing. Foundation for FL-wide countyArcGisWorker documented.
 
 ---
+
+---
+
+## B99 — oceanFloorWorker FL-wide via flZipRegistry
+**Problem:** oceanFloorWorker had hardcoded SJC ZIP list.
+**Fix:** Replaced hardcoded ZIPs with `flZipRegistry.getAllZips()` — now covers all 1013 FL ZCTAs.
+**Result:** Commit `f548026`. Ocean floor coverage FL-wide. ✅
+
+---
+
+## B100 — pgStore safeInt clamp + ACS ZIP skips + mcpProbeWorker disabled
+**Problem:** pgStore throwing numeric overflow on ZIPs 33530/33550 (population values out of INT4 range). ACS returning 204 for 11 Hillsborough/Pasco ZIPs. mcpProbeWorker generating noise with no value.
+**Fix:** safeInt() clamp added to pgStore (caps at ±2,147,483,647). 11 ACS ZIP skips committed. mcpProbeWorker disabled (re-enable after SunBiz + brief-validator >90%).
+**Result:** Commit `dbec721`. No more overflow crashes. ACS 204 spam eliminated. ✅
+
+---
+
+## B101 — SunBiz 10-file split architecture
+**Problem:** Florida DOS SFTP exposes 10 files (cordata0.zip–cordata9.zip, ~175MB each) not one 1.74GB file. Previous worker built for single-file download.
+**Fix:** Rewrote sunbizWorker for sequential 10-file download with per-file checkpoint (files_completed[] array in KV table). Each file decompressed via 7z, processed, then deleted before next download.
+**Result:** Commit `d384557`. Correct architecture. SFTP IP block prevented live test. ✅
+
+---
+
+## B102 — LODES force-run bypass
+**Problem:** LODES showing 0/4 signals for ZIP 32082. 365-day heartbeat skip preventing data from being written on new deployments.
+**Fix:** Added `LODES_FORCE=true` env var bypass + `?force=true` admin trigger param to skip heartbeat check.
+**Result:** Commit `065e089`. LODES force-run working. ✅
+
+---
+
+## B103 — Force-run bypass for all remaining workers
+**Problem:** Same 365-day skip issue found in BEA, QWI, QCEW, FRED, CES, ACS — all showing 0/4 signals.
+**Fix:** Added `{WORKER}_FORCE=true` env var bypass to all 6 workers (BEA/QWI/QCEW/FRED/CES/ACS) + `?force=true` admin trigger support.
+**Result:** Commit `81605dd`. All workers can be force-triggered. ✅
+
+---
+
+## B104 — ACS flZipRegistry intersection guard (permanent fix)
+**Problem:** ACS fetching ZIPs not in the Census ACS dataset, returning 204 errors for ZIPs like 33682, 33685. Skip list is a band-aid — real fix is intersection with known-valid ZIPs.
+**Fix:** Added flZipRegistry intersection guard: ACS only fetches ZIPs present in both flZipRegistry and the Census ACS known-valid set. Future bad ZIPs auto-skipped.
+**Result:** Commit `b04b4aa`. No future 204 spam regardless of new ZIPs added. ✅
+
+---
+
+## B105 — /api/admin/reset-sunbiz endpoint
+**Problem:** Resetting SunBiz import state required manual SQL in Railway shell.
+**Fix:** Added `POST /api/admin/reset-sunbiz` endpoint — clears import_complete flag and files_completed[] array via admin token. Button added to dashboard UI in B107.
+**Result:** Commits `ba52ad7` + `994add0`. No-SQL reset from admin panel. ✅
+
+---
+
+## B106 — aggregateSunbizSignals writes all 4 signals
+**Problem:** aggregateSunbizSignals() only writing sunbiz_new_12mo. Three other signals (active_entities, dissolved_12mo, net_12mo) never populated — showing 0/4 in dashboard.
+**Fix:** Expanded aggregateSunbizSignals() to compute and write all 4: sunbiz_active_entities, sunbiz_new_12mo, sunbiz_dissolved_12mo, sunbiz_net_12mo.
+**Result:** Commit `b40f4aa`. All 4 signals will populate after successful SunBiz import. ✅
+
+---
+
+## B107 — SunBiz admin card in dashboard UI
+**Problem:** SunBiz had no UI controls — trigger and reset required curl commands.
+**Fix:** Added SunBiz admin card to dashboard with Trigger and Reset State buttons wired to /api/admin/trigger-sunbiz and /api/admin/reset-sunbiz.
+**Result:** Commit `d42fc93`. Full SunBiz lifecycle manageable from dashboard. ✅
+
+---
+
+## B108 — stateZipRegistry + all hardcoded workers FL-wide
+**Problem:** Six workers (bedrockWorker, businessMergeWorker, descriptionTemplateWorker, enrichmentFillWorker, taskSeedWorker, zipAgent) had hardcoded SJC/Duval ZIP arrays. verticalAgentWorker had hardcoded defaultZips. TARGET_STATE pattern missing.
+**Fix:** Created workers/stateZipRegistry.js as multi-state gateway (FL=1013 ZIPs, GA/TX stub). All 6 hardcoded workers switched to `getZipsByState(process.env.TARGET_STATE || 'FL')`. TARGET_STATE env var controls scope for future state expansion.
+**Result:** Commit `5616b88`. All workers FL-wide. One env var change expands to any future state. ✅
+
+---
+
+## B109 — FL-wide county chamber directory
+**Problem:** chamberDirectory.js only had 5 counties (SJC, Duval, Clay, Flagler, Volusia). User wants FL-wide chamber data for marketing email list — every county has a Chamber with business emails.
+**Fix:** wide_research on 33 FL county chambers. Added 25 new counties: GrowthZone (Nassau, Lake, Citrus, Sarasota, Pasco, Brevard), ChamberMaster (Seminole, Manatee, Martin), Custom (Leon, Columbia, Escambia, Santa Rosa, Okaloosa, Orange, Osceola, Marion, Alachua, Polk, Hernando, Hillsborough, Pinellas, Charlotte, Lee, St. Lucie, Indian River, Putnam), Unknown/needs-extractor (Bay, Collier, Miami-Dade, Broward, Palm Beach). Bad research data corrected: Osceola returned Iowa chamber, Columbia returned GA ZIPs, Santa Rosa returned CA chamber — all fixed with correct FL data.
+**Result:** Commit `d295060`. 30 counties in directory. Unknown-parser entries have correct ZIPs, need custom extractors before email harvest. ✅
+
+---
+
+## B110 — Demo node stop button
+**Problem:** Demo ▶ button on LocalIntel nodes had no way to cancel an in-flight fetch — button stayed "Demo ▶" during load with no stop affordance.
+**Fix:** Added AbortController per nodeId (_demoAborts map). Button gets id="li-node-demo-btn-{id}" so it can be targeted. During fetch: button changes to "Stop ■" + demo-running class. Clicking again aborts the fetch and hides the result panel. Finally block always restores "Demo ▶".
+**Result:** Commit `B110`. Stop button works. Abort cleans up silently (no error shown). ✅

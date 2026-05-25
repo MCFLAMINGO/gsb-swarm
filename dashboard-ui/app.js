@@ -1581,7 +1581,7 @@ function renderLiNodes(signals) {
         </div>
         <div class="li-node-questions">${questions}</div>
         <div class="li-node-sigs">${sigChips}</div>
-        <button class="li-node-demo-btn" onclick="demoNode('${node.id}','${node.demoZip}')">Demo ▶</button>
+        <button class="li-node-demo-btn" id="li-node-demo-btn-${node.id}" onclick="demoNode('${node.id}','${node.demoZip}')">Demo ▶</button>
         <div class="li-node-demo-result" id="li-node-demo-${node.id}" style="display:none"></div>
       </div>
     `;
@@ -1591,13 +1591,33 @@ function renderLiNodes(signals) {
   if (countEl) countEl.textContent = liveCount + ' / ' + LI_NODES.length + ' live';
 }
 
+// Track in-flight demo AbortControllers keyed by nodeId
+const _demoAborts = {};
+
 async function demoNode(nodeId, zip) {
   const out = document.getElementById('li-node-demo-' + nodeId);
+  const btn = document.getElementById('li-node-demo-btn-' + nodeId);
   if (!out) return;
+
+  // If already running — abort and stop
+  if (_demoAborts[nodeId]) {
+    _demoAborts[nodeId].abort();
+    delete _demoAborts[nodeId];
+    out.style.display = 'none';
+    if (btn) { btn.textContent = 'Demo ▶'; btn.classList.remove('demo-running'); }
+    return;
+  }
+
+  // If result showing but not running — toggle off
   const showing = out.style.display !== 'none' && out.style.display !== '';
-  if (showing) { out.style.display = 'none'; return; }
+  if (showing) { out.style.display = 'none'; if (btn) btn.textContent = 'Demo ▶'; return; }
+
+  // Start fetch
+  const ac = new AbortController();
+  _demoAborts[nodeId] = ac;
   out.style.display = 'block';
   out.textContent = 'Loading...';
+  if (btn) { btn.textContent = 'Stop ■'; btn.classList.add('demo-running'); }
 
   try {
     let url, headers = { 'x-admin-token': LI_ADMIN_TOKEN };
@@ -1606,7 +1626,7 @@ async function demoNode(nodeId, zip) {
     } else {
       url = `${LI_BASE}/zip-signals/${zip}`;
     }
-    const r = await fetch(url, { headers });
+    const r = await fetch(url, { headers, signal: ac.signal });
     const data = await r.json();
 
     // For zip-signals, filter to just this node's signals
@@ -1620,7 +1640,14 @@ async function demoNode(nodeId, zip) {
 
     out.textContent = JSON.stringify(display, null, 2);
   } catch(e) {
-    out.textContent = 'Error: ' + e.message;
+    if (e.name === 'AbortError') {
+      out.style.display = 'none';
+    } else {
+      out.textContent = 'Error: ' + e.message;
+    }
+  } finally {
+    delete _demoAborts[nodeId];
+    if (btn) { btn.textContent = 'Demo ▶'; btn.classList.remove('demo-running'); }
   }
 }
 
