@@ -13,7 +13,6 @@
  */
 
 require('dotenv').config();
-const zlib       = require('zlib');
 const readline   = require('readline');
 const SftpClient = require('ssh2-sftp-client');
 const db         = require('../lib/db');
@@ -158,21 +157,31 @@ async function upsertBatch(records) {
   `, params);
 }
 
-// ── Stream SFTP → inflate → readline (no disk) ────────────────────────────────
-// Strips the ZIP local file header from the head of the stream so the remaining
-// bytes are raw DEFLATE, then pipes through zlib.createInflateRaw() to recover
-// the plain-text cordata.txt stream. onLine is called for every line.
+// ── Stream SFTP → unzipper → readline (no disk) ───────────────────────────────
+// Pipes the SFTP stream through `unzipper.Parse()` which handles ZIP entry
+// headers and raw DEFLATE decompression internally, then reads the entry as
+// lines via readline. onLine is called for every line.
 // Throw a TripComplete error from onLine to abort the stream early without crashing.
 class TripComplete extends Error {}
 
 async function streamSftpToReadline(onLine) {
   const sftp = new SftpClient();
-  await sftp.connect({ host: SFTP_HOST, port: 22, username: SFTP_USER, password: SFTP_PASS, readyTimeout: 30000 });
+  await sftp.connect({
+    host: SFTP_HOST,
+    port: 22,
+    username: SFTP_USER,
+    password: SFTP_PASS,
+    readyTimeout: 30000,
+  });
+
+  const tmpZip = '/tmp/cordata_sunbiz.zip';
 
   try {
-    const remoteSize = (await sftp.stat(REMOTE_PATH)).size;
-    console.log(`[sunbizWorker] Remote: ${(remoteSize/1024/1024).toFixed(1)} MB`);
+    const stat = await sftp.stat(REMOTE_PATH);
+    const remoteSize = stat.size;
+    console.log(`[sunbizWorker] Remote: ${(remoteSize / 1024 / 1024).toFixed(1)} MB`);
 
+    // Detect new quarterly file by size change
     const lastRemoteSize = await getState('remote_size');
     if (lastRemoteSize && parseInt(lastRemoteSize) !== remoteSize) {
       console.log('[sunbizWorker] New quarterly file detected — resetting checkpoint');
@@ -181,85 +190,71 @@ async function streamSftpToReadline(onLine) {
     }
     await setState('remote_size', String(remoteSize));
 
-    const remoteStream = await sftp.createReadStream(REMOTE_PATH);
+    // Download ZIP to /tmp (1.6GB compressed — tolerable, deleted immediately after)
+    console.log('[sunbizWorker] Downloading cordata.zip to /tmp...');
+    await sftp.fastGet(REMOTE_PATH, tmpZip);
+    console.log('[sunbizWorker] Download complete — starting 7z decompress...');
+
+    // Use 7z to pipe decompressed output (handles DEFLATE64 / method 21)
+    // 7z e <file> -so pipes the first entry to stdout
+    const { spawn } = require('child_process');
+    const sevenZ = spawn('7z', ['e', tmpZip, '-so', '-y'], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+    sevenZ.stderr.on('data', d => {
+      const msg = d.toString().trim();
+      if (msg) console.log(`[sunbizWorker] 7z: ${msg}`);
+    });
 
     await new Promise((resolve, reject) => {
       let settled = false;
+      let aborted = false;
       const done = (err) => {
         if (settled) return;
         settled = true;
         if (err) reject(err); else resolve();
       };
 
-      const inflate = zlib.createInflate();
-      const rl = readline.createInterface({ input: inflate, crlfDelay: Infinity });
+      const rl = require('readline').createInterface({ input: sevenZ.stdout, crlfDelay: Infinity });
 
-      let headerSkipped = false;
-      let headerBuf = Buffer.alloc(0);
-      let aborted = false;
-
-      const cleanup = () => {
-        try { remoteStream.unpipe?.(); } catch(_) {}
-        try { remoteStream.destroy(); } catch(_) {}
-        try { inflate.destroy(); } catch(_) {}
-        try { rl.close(); } catch(_) {}
-      };
-
-      remoteStream.on('data', chunk => {
-        if (aborted) return;
-        if (!headerSkipped) {
-          headerBuf = Buffer.concat([headerBuf, chunk]);
-          if (headerBuf.length >= 30) {
-            const sig = headerBuf.readUInt32LE(0);
-            if (sig !== 0x04034b50) {
-              aborted = true;
-              cleanup();
-              done(new Error('Not a ZIP file (bad local-file-header signature)'));
-              return;
-            }
-            const fnLen    = headerBuf.readUInt16LE(26);
-            const extraLen = headerBuf.readUInt16LE(28);
-            const dataStart = 30 + fnLen + extraLen;
-            if (headerBuf.length >= dataStart) {
-              headerSkipped = true;
-              const tail = headerBuf.slice(dataStart);
-              headerBuf = null;
-              if (tail.length) inflate.write(tail);
-            }
-          }
-        } else {
-          inflate.write(chunk);
-        }
-      });
-
-      remoteStream.on('end', () => { try { inflate.end(); } catch(_) {} });
-      remoteStream.on('error', e => { cleanup(); done(e); });
-      inflate.on('error', e => {
-        // After TripComplete or intentional destroy, inflate will error — ignore it
-        cleanup(); done(aborted ? null : e);
-      });
-
-      rl.on('line', line => {
+      rl.on('line', (line) => {
         if (aborted) return;
         try {
           onLine(line);
         } catch (e) {
           if (e instanceof TripComplete) {
             aborted = true;
-            cleanup();
+            rl.close();
+            sevenZ.kill();
             done(null);
             return;
           }
           aborted = true;
-          cleanup();
+          rl.close();
+          sevenZ.kill();
           done(e);
         }
       });
+
       rl.on('close', () => done(null));
       rl.on('error', e => done(e));
+      sevenZ.on('error', e => done(new Error(`7z spawn failed: ${e.message} — is p7zip-full installed?`)));
+      sevenZ.on('close', (code) => {
+        if (!aborted && code !== 0 && code !== null) {
+          done(new Error(`7z exited with code ${code}`));
+        }
+      });
     });
+
   } finally {
     try { await sftp.end(); } catch (_) {}
+    // Always clean up the ZIP immediately — never leave it on disk
+    try {
+      const fs = require('fs');
+      if (fs.existsSync(tmpZip)) {
+        fs.unlinkSync(tmpZip);
+        console.log('[sunbizWorker] /tmp/cordata_sunbiz.zip cleaned up');
+      }
+    } catch (_) {}
   }
 }
 
