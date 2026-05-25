@@ -28,15 +28,16 @@ const BEDROCK_DIR = path.join(DATA_DIR, 'bedrock');
 const ERRORS_FILE = path.join(BEDROCK_DIR, '_errors.json');
 const INDEX_FILE  = path.join(BEDROCK_DIR, '_index.json');
 
-// ── ZIP registry ─────────────────────────────────────────────────────────────
-const SJC_ZIPS = [
-  { zip: '32082', lat: 30.1893, lon: -81.3815, name: 'Ponte Vedra Beach' },
-  { zip: '32081', lat: 30.1100, lon: -81.4175, name: 'Nocatee'           },
-  { zip: '32092', lat: 30.1200, lon: -81.4800, name: 'World Golf Village' },
-  { zip: '32084', lat: 29.8900, lon: -81.3150, name: 'St. Augustine'      },
-  { zip: '32086', lat: 29.8100, lon: -81.3000, name: 'St. Augustine South' },
-  { zip: '32080', lat: 29.8600, lon: -81.2700, name: 'St. Augustine Beach' },
-];
+// ── ZIP registry — FL-wide lat/lon index from flZipRegistry ─────────────────
+const { getAllZips: flGetAllZips } = require('./flZipRegistry');
+const FL_ZIP_INDEX = Object.fromEntries(
+  flGetAllZips().map(z => [z.zip, {
+    zip:  z.zip,
+    lat:  z.centroid?.lat  || z.lat  || 0,
+    lon:  z.centroid?.lon  || z.lon  || 0,
+    name: z.label || z.zip,
+  }])
+);
 
 // ── Known flood zone percentages (FEMA NFHL fallback) ─────────────────────────
 // Values: estimated % of ZIP land area in high-risk zones (A/AE/VE).
@@ -284,25 +285,21 @@ async function runBedrock(mode = 'incremental') {
   if (process.env.LOCAL_INTEL_DB_URL) {
     try {
       const { getDistinctZips } = require('../lib/pgStore');
-      const { getAllZips: flGetAll } = require('./flZipRegistry');
       const pgZips = await getDistinctZips();
       if (pgZips.length > 0) {
-        const flIndex = Object.fromEntries(flGetAll().map(z => [z.zip, z]));
-        // SJC_ZIPS index for lat/lon on known ZIPs
-        const sjcIndex = Object.fromEntries(SJC_ZIPS.map(z => [z.zip, z]));
         targetZips = pgZips.map(zip => {
-          const known = sjcIndex[zip] || flIndex[zip];
+          const known = FL_ZIP_INDEX[zip];
           return {
             zip,
-            lat:  known?.lat  || known?.centroid?.lat  || 0,
-            lon:  known?.lon  || known?.centroid?.lon  || 0,
-            name: known?.name || known?.label          || zip,
+            lat:  known?.lat  || 0,
+            lon:  known?.lon  || 0,
+            name: known?.name || zip,
           };
         }).filter(z => z.lat !== 0 || z.lon !== 0); // skip ZIPs with no centroid data
         console.log(`[bedrockWorker] ZIP discovery: ${targetZips.length} ZIPs from Postgres`);
       }
     } catch (e) {
-      console.warn('[bedrockWorker] Postgres ZIP discovery failed, using SJC_ZIPS:', e.message);
+      console.warn('[bedrockWorker] Postgres ZIP discovery failed, falling back to stateZipRegistry:', e.message);
     }
   }
 
