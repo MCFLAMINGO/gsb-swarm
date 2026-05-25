@@ -23,6 +23,7 @@ const fs      = require('fs');
 const path    = require('path');
 const https   = require('https');
 const pgStore = require('../lib/pgStore');
+const { getZipsByPriority } = require('./flZipRegistry');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const ACS_DIR  = path.join(DATA_DIR, 'acs');
@@ -54,7 +55,7 @@ const ACS_SKIP_ZIPS = new Set([
   '34769', '34771', '34786', '34787', '34788', '34946', '34956', '34979', '34982', '34984',
   '34985', '34986', '34987', '34988', '34991', '34992', '34995', '34996', '34997',
   '33499', '33508', '33509', '33524', '33526', '33537', '33539', '33564', '33568', '33571',
-  '33575',
+  '33575', '33682', '33685',
 ]);
 
 // All ZIPs we cover — fl_zip_geo is the authoritative FL ZIP registry (POSTGRES IS KING)
@@ -356,10 +357,12 @@ async function processZip(zip) {
 // ── Main run ─────────────────────────────────────────────────────────────────
 async function run() {
   const zips = await getAllZips();
-  console.log(`[acsWorker] Starting ACS pull for ${zips.length} ZIPs`);
+  const registryZips = new Set(getZipsByPriority().map(z => String(z.zip || z)));
+  console.log(`[acsWorker] Starting ACS pull for ${zips.length} ZIPs (registry has ${registryZips.size} valid FL ZCTAs)`);
   let ok = 0, fail = 0;
 
   for (const zip of zips) {
+    if (!registryZips.has(zip)) continue; // not a valid ZCTA — skip
     if (ACS_SKIP_ZIPS.has(zip)) continue;
     try {
       const r = await processZip(zip);
