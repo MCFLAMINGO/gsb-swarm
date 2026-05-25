@@ -1,30 +1,42 @@
 'use strict';
 /**
  * workers/sunbizWorker.js
- * Railway-ready Sunbiz import worker — 3-trip streaming, no disk writes.
+ * Florida DOS SunBiz quarterly corporate import — 10-file split architecture (B101).
  *
- * Flow per trip:
- *   SFTP read stream → strip ZIP local file header → zlib.createInflateRaw()
- *   → readline → parseRecord() → upsertBatch() → Postgres
+ * The quarterly cordata is published as 10 files at
+ *   doc/quarterly/cor/cordata{0..9}.zip
+ * each containing records whose document number ends in the matching digit.
+ * Each file is ~175 MB compressed (DEFLATE64 / ZIP method 21 — needs 7z binary).
  *
- * Each Railway boot processes LINES_PER_TRIP lines starting from the
- * `lines_imported` checkpoint, then exits cleanly. ~3 boots covers the full
- * cordata.zip (~5-6M records). No /tmp, no disk, no unzip CLI.
+ * Flow per Railway boot:
+ *   - Read sunbiz_import_state (files_completed JSON array, import_complete bool)
+ *   - For each digit N in 0..9 not yet in files_completed:
+ *       SFTP fastGet cordata{N}.zip (3 attempts, 30/60/120s backoff on ECONNRESET)
+ *       7z extract to /tmp/sunbiz{N}/
+ *       Stream-parse the fixed-width .txt, upsert active FL records into businesses
+ *       Append N to files_completed checkpoint
+ *       Delete /tmp/cordata{N}.zip and /tmp/sunbiz{N}/
+ *   - After all 10 done: aggregateSunbizSignals() + set import_complete=true
  */
 
 require('dotenv').config();
+const fs         = require('fs');
+const path       = require('path');
 const readline   = require('readline');
+const { spawn }  = require('child_process');
 const SftpClient = require('ssh2-sftp-client');
 const db         = require('../lib/db');
 const hb         = require('../lib/workerHeartbeat');
 
 const SFTP_HOST   = 'sftp.floridados.gov';
+const SFTP_PORT   = 22;
 const SFTP_USER   = 'Public';
 const SFTP_PASS   = 'PubAccess1845!';
-const REMOTE_PATH = 'doc/quarterly/cor/cordata.zip';
+const REMOTE_DIR  = 'doc/quarterly/cor';
 
-const BATCH_SIZE      = 500;
-const LINES_PER_TRIP  = 2_000_000;
+const BATCH_SIZE  = 500;
+const SFTP_ATTEMPTS = 3;
+const BACKOFF_MS  = [30_000, 60_000, 120_000];
 
 // ── worker_events logger ──────────────────────────────────────────────────────
 async function logWorkerEvent({ eventType, recordsIn, recordsOut, durationMs, error }) {
@@ -37,7 +49,7 @@ async function logWorkerEvent({ eventType, recordsIn, recordsOut, durationMs, er
   } catch (e) { console.warn('[sunbizWorker] worker_events log failed:', e.message); }
 }
 
-// ── State table ───────────────────────────────────────────────────────────────
+// ── State table (KV) ──────────────────────────────────────────────────────────
 async function ensureStateTable() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS sunbiz_import_state (
@@ -60,65 +72,86 @@ async function setState(key, value) {
   );
 }
 
-// ── Parse record ──────────────────────────────────────────────────────────────
+async function getFilesCompleted() {
+  const raw = await getState('files_completed');
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.map(Number).filter(n => n >= 0 && n <= 9) : [];
+  } catch { return []; }
+}
+
+async function setFilesCompleted(arr) {
+  await setState('files_completed', JSON.stringify(arr));
+}
+
+// ── Fixed-width record parsing ────────────────────────────────────────────────
+// SunBiz cordata fixed-width layout (per FL DOS spec):
+//   doc_number   cols 1-12   (offset 0,   len 12)
+//   corp_name    cols 13-172 (offset 12,  len 160)
+//   status       cols 173-182 (offset 172, len 10)
+//   filing_date  cols 183-191 (offset 182, len 9, MMDDYYYY-ish — try multiple)
+//   state        cols 192-193 (offset 191, len 2)
+//   zip          cols 224-233 (offset 223, len 10)
+// Column numbers in the spec are 1-based; offsets here are 0-based.
+function slice(s, off, len) {
+  return s.length > off ? s.substr(off, len).trim() : '';
+}
+
+function parseFilingDate(raw) {
+  if (!raw) return null;
+  const clean = raw.replace(/[^0-9]/g, '');
+  if (clean.length < 8) return null;
+  // Try YYYYMMDD first, then MMDDYYYY
+  let y, m, d;
+  if (clean.length === 8) {
+    // YYYYMMDD or MMDDYYYY — disambiguate by leading digits
+    const first4 = clean.slice(0, 4);
+    if (first4 >= '1800' && first4 <= '2099') {
+      y = clean.slice(0, 4); m = clean.slice(4, 6); d = clean.slice(6, 8);
+    } else {
+      m = clean.slice(0, 2); d = clean.slice(2, 4); y = clean.slice(4, 8);
+    }
+  } else {
+    return null;
+  }
+  const dt = new Date(`${y}-${m}-${d}T00:00:00Z`);
+  if (isNaN(dt.getTime())) return null;
+  return dt.toISOString().split('T')[0];
+}
+
+function parseZip(raw) {
+  if (!raw) return null;
+  const m = raw.match(/(\d{5})/);
+  return m ? m[1] : null;
+}
+
 function parseRecord(line) {
-  const fields = line.split('|');
-  if (fields.length < 5) return null;
-  const [docNumber, corpName, status, filedDate, stateOfFormation, feiEin] = fields;
+  if (!line || line.length < 20) return null;
+  const docNumber  = slice(line, 0, 12);
+  const corpName   = slice(line, 12, 160);
+  const status     = slice(line, 172, 10);
+  const filingDate = slice(line, 182, 9);
+  const state      = slice(line, 191, 2);
+  const zip        = parseZip(slice(line, 223, 10));
+
   if (!docNumber || !corpName) return null;
-  const name = corpName.trim();
-  if (!name) return null;
+  // Active FL only
+  if (!status.toUpperCase().includes('ACT')) return null;
+  if (state.toUpperCase() !== 'FL') return null;
 
   return {
-    sunbiz_doc_number:   docNumber.trim(),
-    name,
-    sunbiz_status:       status?.trim() || 'UNKNOWN',
-    sunbiz_entity_type:  stateOfFormation?.trim() === 'FL' ? 'FL_CORP' : 'FOREIGN',
-    fei_ein:             feiEin?.trim() || null,
-    registered_date:     parseDate(filedDate?.trim()),
-    status:              (status?.trim() === 'ACTIVE') ? 'active' : 'inactive',
-    category:            'business',
-    category_group:      'general',
-    confidence_score:    0.5,
-    source_id:           'sunbiz',
-    source_weight:       0.9,
+    sunbiz_doc_number: docNumber,
+    name: corpName,
+    sunbiz_status: status,
+    sunbiz_entity_type: 'FL_CORP',
+    registered_date: parseFilingDate(filingDate),
+    status: 'active',
+    category: 'business',
+    category_group: 'general',
+    confidence_score: 0.5,
+    zip: zip || '00000',
   };
-}
-
-function parseDate(raw) {
-  if (!raw || raw.length < 8) return null;
-  try {
-    const y = raw.slice(0,4), m = raw.slice(4,6), d = raw.slice(6,8);
-    const dt = new Date(`${y}-${m}-${d}`);
-    return isNaN(dt.getTime()) ? null : dt.toISOString().split('T')[0];
-  } catch { return null; }
-}
-
-// ── Aggregate sunbiz_new_12mo into zip_signals ────────────────────────────────
-async function aggregateSunbizSignals() {
-  console.log('[sunbizWorker] Aggregating sunbiz_new_12mo into zip_signals...');
-  try {
-    await db.query(`
-      INSERT INTO zip_signals (zip, sunbiz_new_12mo, last_updated_at)
-      SELECT
-        zip,
-        COUNT(*)::int AS sunbiz_new_12mo,
-        NOW()
-      FROM businesses
-      WHERE primary_source = 'sunbiz'
-        AND registered_date >= NOW() - INTERVAL '12 months'
-        AND zip IS NOT NULL
-        AND zip != '00000'
-        AND zip ~ '^[0-9]{5}$'
-      GROUP BY zip
-      ON CONFLICT (zip) DO UPDATE SET
-        sunbiz_new_12mo = EXCLUDED.sunbiz_new_12mo,
-        last_updated_at = NOW()
-    `);
-    console.log('[sunbizWorker] sunbiz_new_12mo aggregation complete');
-  } catch (e) {
-    console.error('[sunbizWorker] sunbiz_new_12mo aggregation failed:', e.message);
-  }
 }
 
 // ── Upsert ────────────────────────────────────────────────────────────────────
@@ -126,8 +159,8 @@ async function upsertBatch(records) {
   if (!records.length) return;
 
   const valueClauses = records.map((r, i) => {
-    const b = i * 9;
-    return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},ARRAY['sunbiz'],'sunbiz',NOW(),'00000')`;
+    const b = i * 10;
+    return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},ARRAY['sunbiz'],'sunbiz',NOW())`;
   }).join(',');
 
   const params = records.flatMap(r => [
@@ -140,239 +173,226 @@ async function upsertBatch(records) {
     r.confidence_score,
     r.category,
     r.category_group,
+    r.zip,
   ]);
 
   await db.query(`
     INSERT INTO businesses
       (sunbiz_doc_number, name, status, sunbiz_status, sunbiz_entity_type,
-       registered_date, confidence_score, category, category_group,
-       sources, primary_source, last_confirmed, zip)
+       registered_date, confidence_score, category, category_group, zip,
+       sources, primary_source, last_confirmed)
     VALUES ${valueClauses}
     ON CONFLICT (sunbiz_doc_number) DO UPDATE SET
       sunbiz_status      = EXCLUDED.sunbiz_status,
       sunbiz_entity_type = EXCLUDED.sunbiz_entity_type,
       registered_date    = COALESCE(EXCLUDED.registered_date, businesses.registered_date),
+      zip                = COALESCE(NULLIF(EXCLUDED.zip, '00000'), businesses.zip),
       last_confirmed     = NOW(),
       updated_at         = NOW()
   `, params);
 }
 
-// ── Stream SFTP → unzipper → readline (no disk) ───────────────────────────────
-// Pipes the SFTP stream through `unzipper.Parse()` which handles ZIP entry
-// headers and raw DEFLATE decompression internally, then reads the entry as
-// lines via readline. onLine is called for every line.
-// Throw a TripComplete error from onLine to abort the stream early without crashing.
-class TripComplete extends Error {}
+// ── Aggregate sunbiz_new_12mo into zip_signals ────────────────────────────────
+async function aggregateSunbizSignals() {
+  console.log('[sunbizWorker] Aggregating sunbiz_new_12mo into zip_signals...');
+  await db.query(`
+    INSERT INTO zip_signals (zip, sunbiz_new_12mo, last_updated_at)
+    SELECT
+      zip,
+      COUNT(*)::int AS sunbiz_new_12mo,
+      NOW()
+    FROM businesses
+    WHERE primary_source = 'sunbiz'
+      AND registered_date >= NOW() - INTERVAL '12 months'
+      AND zip IS NOT NULL
+      AND zip != '00000'
+      AND zip ~ '^[0-9]{5}$'
+    GROUP BY zip
+    ON CONFLICT (zip) DO UPDATE SET
+      sunbiz_new_12mo = EXCLUDED.sunbiz_new_12mo,
+      last_updated_at = NOW()
+  `);
+  console.log('[sunbizWorker] sunbiz_new_12mo aggregation complete');
+}
 
-async function streamSftpToReadline(onLine) {
-  const sftp = new SftpClient();
-  await sftp.connect({
-    host: SFTP_HOST,
-    port: 22,
-    username: SFTP_USER,
-    password: SFTP_PASS,
-    readyTimeout: 30000,
-  });
+// ── SFTP download with exponential backoff ────────────────────────────────────
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-  const tmpZip = '/tmp/cordata_sunbiz.zip';
+async function downloadFile(digit, localPath) {
+  const remotePath = `${REMOTE_DIR}/cordata${digit}.zip`;
+  let lastErr = null;
 
-  try {
-    const stat = await sftp.stat(REMOTE_PATH);
-    const remoteSize = stat.size;
-    console.log(`[sunbizWorker] Remote: ${(remoteSize / 1024 / 1024).toFixed(1)} MB`);
-
-    // Detect new quarterly file by size change
-    const lastRemoteSize = await getState('remote_size');
-    if (lastRemoteSize && parseInt(lastRemoteSize) !== remoteSize) {
-      console.log('[sunbizWorker] New quarterly file detected — resetting checkpoint');
-      await setState('lines_imported', '0');
-      await setState('import_complete', 'false');
-    }
-    await setState('remote_size', String(remoteSize));
-
-    // Download ZIP to /tmp (1.6GB compressed — tolerable, deleted immediately after)
-    console.log('[sunbizWorker] Downloading cordata.zip to /tmp...');
-    await sftp.fastGet(REMOTE_PATH, tmpZip);
-    console.log('[sunbizWorker] Download complete — starting 7z decompress...');
-
-    // Use 7z to pipe decompressed output (handles DEFLATE64 / method 21)
-    // 7z e <file> -so pipes the first entry to stdout
-    const { spawn } = require('child_process');
-    const sevenZ = spawn('7z', ['e', tmpZip, '-so', '-y'], { stdio: ['ignore', 'pipe', 'pipe'] });
-
-    sevenZ.stderr.on('data', d => {
-      const msg = d.toString().trim();
-      if (msg) console.log(`[sunbizWorker] 7z: ${msg}`);
-    });
-
-    await new Promise((resolve, reject) => {
-      let settled = false;
-      let aborted = false;
-      const done = (err) => {
-        if (settled) return;
-        settled = true;
-        if (err) reject(err); else resolve();
-      };
-
-      const rl = require('readline').createInterface({ input: sevenZ.stdout, crlfDelay: Infinity });
-
-      rl.on('line', (line) => {
-        if (aborted) return;
-        try {
-          onLine(line);
-        } catch (e) {
-          if (e instanceof TripComplete) {
-            aborted = true;
-            rl.close();
-            sevenZ.kill();
-            done(null);
-            return;
-          }
-          aborted = true;
-          rl.close();
-          sevenZ.kill();
-          done(e);
-        }
-      });
-
-      rl.on('close', () => done(null));
-      rl.on('error', e => done(e));
-      sevenZ.on('error', e => done(new Error(`7z spawn failed: ${e.message} — is p7zip-full installed?`)));
-      sevenZ.on('close', (code) => {
-        if (!aborted && code !== 0 && code !== null) {
-          done(new Error(`7z exited with code ${code}`));
-        }
-      });
-    });
-
-  } finally {
-    try { await sftp.end(); } catch (_) {}
-    // Always clean up the ZIP immediately — never leave it on disk
+  for (let attempt = 0; attempt < SFTP_ATTEMPTS; attempt++) {
+    let sftp = new SftpClient();
     try {
-      const fs = require('fs');
-      if (fs.existsSync(tmpZip)) {
-        fs.unlinkSync(tmpZip);
-        console.log('[sunbizWorker] /tmp/cordata_sunbiz.zip cleaned up');
+      console.log(`[sunbizWorker] SFTP connect attempt ${attempt + 1}/${SFTP_ATTEMPTS} for ${remotePath}`);
+      await sftp.connect({
+        host: SFTP_HOST,
+        port: SFTP_PORT,
+        username: SFTP_USER,
+        password: SFTP_PASS,
+        readyTimeout: 30000,
+      });
+      const stat = await sftp.stat(remotePath);
+      console.log(`[sunbizWorker] Remote ${remotePath}: ${(stat.size / 1024 / 1024).toFixed(1)} MB — downloading to ${localPath}`);
+      await sftp.fastGet(remotePath, localPath);
+      await sftp.end().catch(() => {});
+      console.log(`[sunbizWorker] Download complete: cordata${digit}.zip`);
+      return;
+    } catch (e) {
+      lastErr = e;
+      console.error(`[sunbizWorker] SFTP attempt ${attempt + 1} failed for cordata${digit}.zip: ${e.message}`);
+      await sftp.end().catch(() => {});
+      sftp = null;
+      // Clean partial download
+      try { if (fs.existsSync(localPath)) fs.unlinkSync(localPath); } catch (_) {}
+      if (attempt < SFTP_ATTEMPTS - 1) {
+        const wait = BACKOFF_MS[attempt];
+        console.log(`[sunbizWorker] Backing off ${wait / 1000}s before retry...`);
+        await sleep(wait);
       }
-    } catch (_) {}
+    }
+  }
+
+  console.error(`[sunbizWorker] All ${SFTP_ATTEMPTS} SFTP attempts failed for cordata${digit}.zip — exiting`);
+  throw new Error(`SFTP download failed after ${SFTP_ATTEMPTS} attempts: ${lastErr?.message || 'unknown'}`);
+}
+
+// ── 7z extract zip to a directory ─────────────────────────────────────────────
+function extractZip(zipPath, outDir) {
+  return new Promise((resolve, reject) => {
+    fs.mkdirSync(outDir, { recursive: true });
+    const proc = spawn('7z', ['x', zipPath, `-o${outDir}`, '-y'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+    proc.stderr.on('data', d => { stderr += d.toString(); });
+    proc.stdout.on('data', () => {}); // drain
+    proc.on('error', e => reject(new Error(`7z spawn failed: ${e.message}`)));
+    proc.on('close', code => {
+      if (code === 0) resolve();
+      else reject(new Error(`7z exit code ${code}: ${stderr.slice(0, 500)}`));
+    });
+  });
+}
+
+function findExtractedTxt(dir) {
+  const entries = fs.readdirSync(dir);
+  for (const f of entries) {
+    const full = path.join(dir, f);
+    const stat = fs.statSync(full);
+    if (stat.isFile()) return full;
+    if (stat.isDirectory()) {
+      const sub = findExtractedTxt(full);
+      if (sub) return sub;
+    }
+  }
+  return null;
+}
+
+function rmrf(p) {
+  try {
+    if (!fs.existsSync(p)) return;
+    fs.rmSync(p, { recursive: true, force: true });
+  } catch (e) {
+    console.warn(`[sunbizWorker] rmrf ${p} failed: ${e.message}`);
   }
 }
 
-// ── Single trip: process LINES_PER_TRIP lines, checkpoint, exit ───────────────
-async function runTrip() {
-  const resumeLine = parseInt(await getState('lines_imported') || '0');
-  const ceiling    = resumeLine + LINES_PER_TRIP;
-  console.log(`[sunbizWorker] Trip: lines ${resumeLine.toLocaleString()} → ${ceiling.toLocaleString()}`);
+// ── Process one cordata{N}.zip ────────────────────────────────────────────────
+async function processFile(digit) {
+  const zipPath = `/tmp/cordata${digit}.zip`;
+  const extractDir = `/tmp/sunbiz${digit}`;
 
-  // Collect lines for this trip into memory, then process after the stream closes.
-  // readline.onLine must be synchronous, but upsertBatch is async — collecting
-  // first is the simplest correct pattern. 2M lines ≈ ~200 MB RAM, acceptable.
-  const tripLines = [];
-  let lineNum = 0;
-  let reachedCeiling = false;
+  // Always clean stale state first
+  rmrf(zipPath);
+  rmrf(extractDir);
 
-  try {
-    console.log('[sunbizWorker] Connecting to SFTP...');
-    await streamSftpToReadline((line) => {
-      lineNum++;
-      if (lineNum <= resumeLine) return;            // fast-skip previously imported
-      if (lineNum > ceiling) {
-        reachedCeiling = true;
-        throw new TripComplete();
-      }
-      if (!line) return;
-      tripLines.push(line);
-    });
-  } catch (e) {
-    if (!(e instanceof TripComplete)) throw e;
-  }
+  await downloadFile(digit, zipPath);
 
-  console.log(`[sunbizWorker] Stream done. Total lines seen: ${lineNum.toLocaleString()}, lines in trip: ${tripLines.length.toLocaleString()}, reachedCeiling=${reachedCeiling}`);
+  console.log(`[sunbizWorker] Extracting cordata${digit}.zip with 7z...`);
+  await extractZip(zipPath, extractDir);
 
-  // Process tripLines in batches
-  let imported = resumeLine;
-  let skipped  = 0;
-  let batch    = [];
+  const txtPath = findExtractedTxt(extractDir);
+  if (!txtPath) throw new Error(`No extracted file found in ${extractDir}`);
+  console.log(`[sunbizWorker] Extracted to ${txtPath} — streaming parse...`);
 
-  for (let i = 0; i < tripLines.length; i++) {
-    const line = tripLines[i];
-    if (!line.trim()) continue;
-    const record = parseRecord(line);
-    if (!record) {
-      skipped++;
-      if (skipped <= 3) console.warn(`[sunbizWorker] parseRecord rejected (first 120 chars): ${JSON.stringify(line.slice(0,120))}`);
-      continue;
-    }
-    batch.push(record);
+  let batch = [];
+  let imported = 0;
+  let totalLines = 0;
+  let skipped = 0;
+
+  const stream = fs.createReadStream(txtPath);
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+  for await (const line of rl) {
+    totalLines++;
+    const rec = parseRecord(line);
+    if (!rec) { skipped++; continue; }
+    batch.push(rec);
     if (batch.length >= BATCH_SIZE) {
       const flush = batch;
       batch = [];
       await upsertBatch(flush);
       imported += flush.length;
-      await setState('lines_imported', String(imported));
       if (imported % 10000 < BATCH_SIZE) {
-        console.log(`[sunbizWorker] ${imported.toLocaleString()} records → Postgres`);
+        console.log(`[sunbizWorker] File ${digit}: ${imported.toLocaleString()} FL active records → Postgres`);
       }
     }
   }
-
   if (batch.length) {
     await upsertBatch(batch);
     imported += batch.length;
-    await setState('lines_imported', String(imported));
   }
 
-  // Checkpoint reflects lineNum advance, not just records imported.
-  // resumeLine + tripLines.length = total lines seen during the productive window.
-  const newCheckpoint = resumeLine + tripLines.length;
-  await setState('lines_imported', String(newCheckpoint));
+  console.log(`[sunbizWorker] File ${digit} complete — ${imported.toLocaleString()} FL active records parsed (from ${totalLines.toLocaleString()} total lines, ${skipped.toLocaleString()} skipped)`);
 
-  // Aggregate sunbiz_new_12mo into zip_signals after every trip (incremental)
-  await aggregateSunbizSignals();
+  // Cleanup tmp files
+  rmrf(zipPath);
+  rmrf(extractDir);
 
-  if (!reachedCeiling) {
-    // Stream ended naturally — full file consumed
-    await setState('import_complete', 'true');
-    console.log(`[sunbizWorker] Import complete: ${imported.toLocaleString()} records imported, ${skipped} skipped (cumulative)`);
-  } else {
-    console.log(`[sunbizWorker] Trip complete: checkpoint=${newCheckpoint.toLocaleString()} (${(imported - resumeLine).toLocaleString()} new records this trip, ${skipped} skipped), will resume next boot`);
-  }
-
-  return { imported, skipped, reachedCeiling };
+  return { imported, totalLines, skipped };
 }
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────
 async function runImport() {
-  const _importStart = Date.now();
-  try {
-    const complete = await getState('import_complete');
-    if (complete === 'true') {
-      console.log('[sunbizWorker] Import already complete — idling');
-      return;
-    }
-    const { imported, skipped } = await runTrip();
-    await logWorkerEvent({
-      eventType: 'complete',
-      recordsIn: imported + skipped,
-      recordsOut: imported,
-      durationMs: Date.now() - _importStart,
-    });
-    await hb.ping('sunbizWorker');
-  } catch (e) {
-    console.error('[sunbizWorker] Import error:', e.message);
-    await logWorkerEvent({ eventType: 'error', durationMs: Date.now() - _importStart, error: e.message });
-    throw e;
+  const start = Date.now();
+
+  const complete = await getState('import_complete');
+  if (complete === 'true') {
+    console.log('[sunbizWorker] Import already complete — idling');
+    return;
   }
+
+  const filesCompleted = await getFilesCompleted();
+  console.log(`[sunbizWorker] Files already completed: [${filesCompleted.join(',') || 'none'}]`);
+
+  let totalImported = 0;
+
+  for (let digit = 0; digit <= 9; digit++) {
+    if (filesCompleted.includes(digit)) {
+      console.log(`[sunbizWorker] Skipping file ${digit} (already complete)`);
+      continue;
+    }
+    const { imported } = await processFile(digit);
+    totalImported += imported;
+    filesCompleted.push(digit);
+    await setFilesCompleted(filesCompleted);
+    console.log(`[sunbizWorker] Checkpoint saved: files_completed=[${filesCompleted.join(',')}]`);
+  }
+
+  await aggregateSunbizSignals();
+  await setState('import_complete', 'true');
+  console.log(`[sunbizWorker] Import complete — aggregation done. Total imported this run: ${totalImported.toLocaleString()}`);
+
+  await logWorkerEvent({
+    eventType: 'complete',
+    recordsOut: totalImported,
+    durationMs: Date.now() - start,
+  });
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function run() {
-  process.on('unhandledRejection', (reason) => {
-    console.error('[sunbizWorker] Unhandled rejection:', reason?.message || reason);
-    // Don't crash — log and continue
-  });
-
-  console.log('[sunbizWorker] Starting — checking import state...');
+  console.log('[sunbizWorker] Starting — 10-file split (cordata0-9.zip)');
 
   if (!process.env.LOCAL_INTEL_DB_URL) {
     console.error('[sunbizWorker] LOCAL_INTEL_DB_URL not set — exiting');
@@ -380,41 +400,23 @@ async function run() {
   }
 
   await ensureStateTable();
-
-  const complete = await getState('import_complete');
-  if (complete === 'true') {
-    console.log('[sunbizWorker] Import already complete, idling.');
-    return;
-  }
-
   await logWorkerEvent({ eventType: 'start' });
   await runImport();
+  await hb.ping('sunbizWorker');
   await logWorkerEvent({ eventType: 'end' });
 }
 
 if (require.main === module) {
   run()
     .then(() => {
-      console.log('[sunbizWorker] Run complete — process exiting cleanly');
+      console.log('[sunbizWorker] Run complete — exiting cleanly');
       process.exit(0);
     })
     .catch(e => {
       console.error('[sunbizWorker] Fatal error:', e.message, e.stack);
-      // On SFTP connection errors, wait 10 minutes before exiting so Railway
-      // backoff doesn't hammer the SFTP server with rapid retries
-      const isSftpError = e.message && (
-        e.message.includes('ECONNRESET') ||
-        e.message.includes('ECONNREFUSED') ||
-        e.message.includes('ETIMEDOUT') ||
-        e.message.includes('Connection lost') ||
-        e.message.includes('getConnection')
-      );
-      if (isSftpError) {
-        console.log('[sunbizWorker] SFTP error — waiting 10 min before exit to avoid rate-limit hammering...');
-        setTimeout(() => process.exit(1), 10 * 60 * 1000);
-      } else {
-        process.exit(1);
-      }
+      logWorkerEvent({ eventType: 'error', error: e.message }).catch(() => {});
+      // SFTP exhaustion or other fatal — exit with code 1, Railway will backoff
+      process.exit(1);
     });
 }
 
