@@ -334,6 +334,21 @@ async function processZip(zip) {
   pgStore.upsertAcsDemographics(zip, result).catch(() => {});
 
   // World model — write acs_* signals into zip_signals
+  // Compute partial psycho_index from ACS signals alone.
+  // OSM signals (golf/arts/worship/fitness) are omitted here — overpassWorker
+  // will overwrite with a fuller score once POI data is available.
+  // Formula mirrors lib/scoringEngine.js computePsychoIndex().
+  const _edu  = Math.min(1, (result.acs_pct_bachelors_plus  || 0) / 60);
+  const _stem = Math.min(1, (result.acs_pct_stem_occupations || 0) / 30);
+  const _age  = result.median_age
+    ? Math.exp(-0.5 * Math.pow((Number(result.median_age) - 42) / 12, 2))
+    : 0;
+  // Weights for ACS-only components (arts 0.30 + golf 0.25 = 0.55 missing — rescale remaining)
+  // edu=0.20 stem=0.10 age=0.02 → total available = 0.32 out of 0.67 non-worship/fitness
+  const psycho_index_acs = Math.round(Math.min(100, Math.max(0,
+    (_edu * 0.20 + _stem * 0.10 + _age * 0.02) * 100
+  )));
+
   pgStore.upsertZipSignals(zip, {
     acs_population:       result.population || null,
     acs_households:       result.total_households || null,
@@ -350,6 +365,7 @@ async function processZip(zip) {
     acs_pct_stem_occupations: result.acs_pct_stem_occupations,
     acs_vintage:             '2022 5-year',
     acs_updated_at:          new Date(),
+    psycho_index:            psycho_index_acs || null,
   }).catch(() => {});
 
   return result;

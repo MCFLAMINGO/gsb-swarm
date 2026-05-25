@@ -151,14 +151,15 @@ async function promoteOsmToBusinesses(zip, pois) {
 // Check Postgres for freshness before re-fetching from Overpass.
 // Returns the set of ZIPs already covered by recent overpass data so the
 // hot loop can skip them up-front (the contract: ASK Postgres first).
+const OSM_FRESH_DAYS = 90; // re-fetch OSM POIs every 90 days
 async function getFreshZipSetFromBusinesses() {
   if (!process.env.LOCAL_INTEL_DB_URL) return new Set();
   try {
-    // Any ZIP that already has an overpass-sourced active business is "covered".
+    // Fresh = osm_updated_at exists and is < 90 days old
     const rows = await db.query(
-      `SELECT DISTINCT zip FROM businesses
-        WHERE 'osm' = ANY(sources)
-          AND status != 'inactive'
+      `SELECT zip FROM zip_signals
+        WHERE osm_updated_at IS NOT NULL
+          AND osm_updated_at > NOW() - INTERVAL '${OSM_FRESH_DAYS} days'
           AND zip IS NOT NULL`
     );
     return new Set(rows.map(r => r.zip));

@@ -44,6 +44,7 @@ const workers = [
   { name: 'IRS SOI',              file: 'workers/irsSoiWorker.js' },
   { name: 'Census Layer',         file: 'workers/censusLayerWorker.js' },
   { name: 'SJC ArcGIS',          file: 'workers/sjcArcGisWorker.js' },
+  { name: 'FCC Broadband',        file: 'workers/fccBroadbandWorker.js' },
 ];
 
 console.log(`
