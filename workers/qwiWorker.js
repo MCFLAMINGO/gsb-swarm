@@ -110,17 +110,19 @@ async function run() {
     process.exit(1);
   }
 
-  // Freshness check — skip if ran within 14 days (QWI is quarterly, lags ~6 months)
+  // Freshness check — skip if ran within 90 days (QWI is quarterly, lags ~9 months) — QWI_FORCE=true bypasses
+  const forceRun = process.env.QWI_FORCE === 'true';
   try {
     const hb = await db.query(`SELECT last_run FROM worker_heartbeat WHERE worker_name = 'qwiWorker'`);
-    if (Array.isArray(hb) && hb[0]?.last_run) {
+    if (!forceRun && Array.isArray(hb) && hb[0]?.last_run) {
       const ageDays = (Date.now() - new Date(hb[0].last_run).getTime()) / 86400000;
       if (ageDays < 90) {  // QWI is quarterly, ~9mo lag — re-run every 90 days
-        console.log(`[qwi] Data fresh (${ageDays.toFixed(1)} days old, window 90d) — skipping run`);
+        console.log(`[qwi] Data fresh (${ageDays.toFixed(1)} days old, window 90d) — skipping. Use QWI_FORCE=true to override.`);
         process.exit(0);
       }
     }
   } catch (_) { /* no heartbeat yet — run */ }
+  if (forceRun) console.log('[qwi] QWI_FORCE=true — bypassing 90-day heartbeat skip');
 
   console.log('[qwi] Starting QWI worker — FL county workforce indicators');
   const start = Date.now();

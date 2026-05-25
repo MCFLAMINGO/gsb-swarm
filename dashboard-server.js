@@ -696,12 +696,18 @@ app.post('/api/admin/trigger-oracle', (req, res) => {
 });
 
 // POST /api/admin/trigger-acs — clears heartbeat + runs ACS worker immediately
+// Pass ?force=true to also pass ACS_FORCE=true (bypasses the 6h startup-skip heartbeat check)
 app.post('/api/admin/trigger-acs', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
   if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
     return res.status(401).json({ error: 'unauthorized' });
   }
-  res.json({ status: 'started', message: 'ACS worker triggered — fetches Census demographics for all Postgres ZIPs' });
+  const force = req.query.force === 'true';
+  res.json({
+    status: 'started',
+    message: 'ACS worker triggered — fetches Census demographics for all Postgres ZIPs' + (force ? ' [FORCE]' : ''),
+    force,
+  });
   setImmediate(async () => {
     try {
       if (process.env.LOCAL_INTEL_DB_URL) {
@@ -711,11 +717,13 @@ app.post('/api/admin/trigger-acs', (req, res) => {
       }
       const { spawn } = require('child_process');
       const child = spawn(process.execPath, ['workers/acsWorker.js'], {
-        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+        cwd: __dirname,
+        env: { ...process.env, ACS_FORCE: force ? 'true' : 'false' },
+        stdio: ['ignore','pipe','pipe'],
       });
       child.stdout.on('data', d => process.stdout.write('[acs-trigger] ' + d));
       child.stderr.on('data', d => process.stderr.write('[acs-trigger] ' + d));
-      child.on('close', code => console.log(`[admin] ✅ ACS worker done (exit ${code})`));
+      child.on('close', code => console.log(`[admin] ✅ ACS worker done (exit ${code}, force=${force})`));
     } catch (e) {
       console.error('[admin] ❌ ACS trigger failed:', e.message);
     }
@@ -1125,43 +1133,59 @@ app.post('/api/admin/trigger-claim-outreach', (req, res) => {
 });
 
 // POST /api/admin/trigger-fred — runs FRED LAUS county unemployment worker
+// Pass ?force=true to bypass the 30-day heartbeat skip (sets FRED_FORCE=true)
 app.post('/api/admin/trigger-fred', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
   if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
     return res.status(401).json({ error: 'unauthorized' });
   }
   if (!process.env.FRED_API) return res.status(500).json({ error: 'FRED_API env var not set' });
-  res.json({ status: 'started', message: 'FRED worker triggered — BLS LAUS unemployment rates for all 67 FL counties' });
+  const force = req.query.force === 'true';
+  res.json({
+    status: 'started',
+    message: 'FRED worker triggered — BLS LAUS unemployment rates for all 67 FL counties' + (force ? ' [FORCE]' : ''),
+    force,
+  });
   setImmediate(async () => {
     try {
       const { spawn } = require('child_process');
       const child = spawn(process.execPath, ['workers/fredWorker.js'], {
-        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+        cwd: __dirname,
+        env: { ...process.env, FRED_FORCE: force ? 'true' : 'false' },
+        stdio: ['ignore','pipe','pipe'],
       });
       child.stdout.on('data', d => process.stdout.write('[fred-trigger] ' + d));
       child.stderr.on('data', d => process.stderr.write('[fred-trigger] ' + d));
-      child.on('close', code => console.log('[admin] FRED worker done (exit ' + code + ')'));
+      child.on('close', code => console.log('[admin] FRED worker done (exit ' + code + ', force=' + force + ')'));
     } catch (e) { console.error('[admin] FRED trigger failed:', e.message); }
   });
 });
 
 // POST /api/admin/trigger-bea — runs BEA CAINC1 per capita income worker
+// Pass ?force=true to bypass the 365-day heartbeat skip (sets BEA_FORCE=true)
 app.post('/api/admin/trigger-bea', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
   if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
     return res.status(401).json({ error: 'unauthorized' });
   }
   if (!process.env.BEA_API) return res.status(500).json({ error: 'BEA_API env var not set' });
-  res.json({ status: 'started', message: 'BEA worker triggered — per capita personal income for all 67 FL counties' });
+  const force = req.query.force === 'true';
+  res.json({
+    status: 'started',
+    message: 'BEA worker triggered — per capita personal income for all 67 FL counties' + (force ? ' [FORCE]' : ''),
+    force,
+  });
   setImmediate(async () => {
     try {
       const { spawn } = require('child_process');
       const child = spawn(process.execPath, ['workers/beaWorker.js'], {
-        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+        cwd: __dirname,
+        env: { ...process.env, BEA_FORCE: force ? 'true' : 'false' },
+        stdio: ['ignore','pipe','pipe'],
       });
       child.stdout.on('data', d => process.stdout.write('[bea-trigger] ' + d));
       child.stderr.on('data', d => process.stderr.write('[bea-trigger] ' + d));
-      child.on('close', code => console.log('[admin] BEA worker done (exit ' + code + ')'));
+      child.on('close', code => console.log('[admin] BEA worker done (exit ' + code + ', force=' + force + ')'));
     } catch (e) { console.error('[admin] BEA trigger failed:', e.message); }
   });
 });
@@ -1195,64 +1219,88 @@ app.post('/api/admin/trigger-lodes', (req, res) => {
 });
 
 // POST /api/admin/trigger-qwi — runs QWI worker (Census QWI API, county employment)
+// Pass ?force=true to bypass the 90-day heartbeat skip (sets QWI_FORCE=true)
 app.post('/api/admin/trigger-qwi', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
   if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
     return res.status(401).json({ error: 'unauthorized' });
   }
   if (!process.env.Census_Data_API) return res.status(500).json({ error: 'Census_Data_API env var not set' });
-  res.json({ status: 'started', message: 'QWI worker triggered — county employment, earnings, hires, separations for all 67 FL counties' });
+  const force = req.query.force === 'true';
+  res.json({
+    status: 'started',
+    message: 'QWI worker triggered — county employment, earnings, hires, separations for all 67 FL counties' + (force ? ' [FORCE]' : ''),
+    force,
+  });
   setImmediate(async () => {
     try {
       const { spawn } = require('child_process');
       const child = spawn(process.execPath, ['workers/qwiWorker.js'], {
-        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+        cwd: __dirname,
+        env: { ...process.env, QWI_FORCE: force ? 'true' : 'false' },
+        stdio: ['ignore','pipe','pipe'],
       });
       child.stdout.on('data', d => process.stdout.write('[qwi-trigger] ' + d));
       child.stderr.on('data', d => process.stderr.write('[qwi-trigger] ' + d));
-      child.on('close', code => console.log('[admin] QWI worker done (exit ' + code + ')'));
+      child.on('close', code => console.log('[admin] QWI worker done (exit ' + code + ', force=' + force + ')'));
     } catch (e) { console.error('[admin] QWI trigger failed:', e.message); }
   });
 });
 
 // POST /api/admin/trigger-ces — runs BLS CES worker (monthly sector employment, 21 FL MSAs)
+// Pass ?force=true to bypass the 30-day heartbeat skip (sets CES_FORCE=true)
 app.post('/api/admin/trigger-ces', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
   if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
     return res.status(401).json({ error: 'unauthorized' });
   }
   if (!process.env.BUREAU_OF_LABOR_STATISTICS_API) return res.status(500).json({ error: 'BUREAU_OF_LABOR_STATISTICS_API env var not set' });
-  res.json({ status: 'started', message: 'CES worker triggered — BLS monthly sector employment + AI displacement risk + investment scores for 21 FL MSAs (~15s runtime)' });
+  const force = req.query.force === 'true';
+  res.json({
+    status: 'started',
+    message: 'CES worker triggered — BLS monthly sector employment + AI displacement risk + investment scores for 21 FL MSAs (~15s runtime)' + (force ? ' [FORCE]' : ''),
+    force,
+  });
   setImmediate(async () => {
     try {
       const { spawn } = require('child_process');
       const child = spawn(process.execPath, ['workers/cesWorker.js'], {
-        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+        cwd: __dirname,
+        env: { ...process.env, CES_FORCE: force ? 'true' : 'false' },
+        stdio: ['ignore','pipe','pipe'],
       });
       child.stdout.on('data', d => process.stdout.write('[ces-trigger] ' + d));
       child.stderr.on('data', d => process.stderr.write('[ces-trigger] ' + d));
-      child.on('close', code => console.log('[admin] CES worker done (exit ' + code + ')'));
+      child.on('close', code => console.log('[admin] CES worker done (exit ' + code + ', force=' + force + ')'));
     } catch (e) { console.error('[admin] CES trigger failed:', e.message); }
   });
 });
 
 // POST /api/admin/trigger-qcew — runs BLS QCEW worker (quarterly employment/wages, 67 FL counties)
+// Pass ?force=true to bypass the 90-day heartbeat skip (sets QCEW_FORCE=true)
 app.post('/api/admin/trigger-qcew', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
   if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
     return res.status(401).json({ error: 'unauthorized' });
   }
   if (!process.env.BUREAU_OF_LABOR_STATISTICS_API) return res.status(500).json({ error: 'BUREAU_OF_LABOR_STATISTICS_API env var not set' });
-  res.json({ status: 'started', message: 'QCEW worker triggered — BLS quarterly employment, wages, establishments for all 67 FL counties (~10s runtime)' });
+  const force = req.query.force === 'true';
+  res.json({
+    status: 'started',
+    message: 'QCEW worker triggered — BLS quarterly employment, wages, establishments for all 67 FL counties (~10s runtime)' + (force ? ' [FORCE]' : ''),
+    force,
+  });
   setImmediate(async () => {
     try {
       const { spawn } = require('child_process');
       const child = spawn(process.execPath, ['workers/qcewWorker.js'], {
-        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+        cwd: __dirname,
+        env: { ...process.env, QCEW_FORCE: force ? 'true' : 'false' },
+        stdio: ['ignore','pipe','pipe'],
       });
       child.stdout.on('data', d => process.stdout.write('[qcew-trigger] ' + d));
       child.stderr.on('data', d => process.stderr.write('[qcew-trigger] ' + d));
-      child.on('close', code => console.log('[admin] QCEW worker done (exit ' + code + ')'));
+      child.on('close', code => console.log('[admin] QCEW worker done (exit ' + code + ', force=' + force + ')'));
     } catch (e) { console.error('[admin] QCEW trigger failed:', e.message); }
   });
 });

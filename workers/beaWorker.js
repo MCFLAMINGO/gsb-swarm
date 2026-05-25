@@ -84,17 +84,19 @@ async function run() {
     return;
   }
 
-  // Freshness check — skip if ran within 30 days (BEA releases annual data with ~2yr lag)
+  // Freshness check — skip if ran within 365 days (BEA releases annual data with ~2yr lag) — BEA_FORCE=true bypasses
+  const forceRun = process.env.BEA_FORCE === 'true';
   try {
     const hb = await db.query(`SELECT last_run FROM worker_heartbeat WHERE worker_name = 'beaWorker'`);
-    if (Array.isArray(hb) && hb[0]?.last_run) {
+    if (!forceRun && Array.isArray(hb) && hb[0]?.last_run) {
       const ageDays = (Date.now() - new Date(hb[0].last_run).getTime()) / 86400000;
       if (ageDays < 365) {  // BEA is annual data with 2yr lag — no need to re-fetch within a year
-        console.log(`[bea] Data fresh (${ageDays.toFixed(1)} days old, window 365d) — skipping run`);
+        console.log(`[bea] Data fresh (${ageDays.toFixed(1)} days old, window 365d) — skipping. Use BEA_FORCE=true to override.`);
         return;
       }
     }
   } catch (_) { /* no heartbeat yet — run */ }
+  if (forceRun) console.log('[bea] BEA_FORCE=true — bypassing 365-day heartbeat skip');
 
   console.log('[bea] Starting BEA CAINC1 worker — fetching FL county per capita income');
   const start = Date.now();

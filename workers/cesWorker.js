@@ -291,11 +291,13 @@ async function run() {
     process.exit(1);
   }
 
+  const forceRun = process.env.CES_FORCE === 'true';
   const fresh = await isFresh();
-  if (fresh) {
-    console.log('[ces] ⏭ Data is fresh (< 2 days) — skipping. Delete heartbeat to force re-run.');
+  if (!forceRun && fresh) {
+    console.log('[ces] ⏭ Data is fresh (< 30 days) — skipping. Use CES_FORCE=true to override.');
     process.exit(0);
   }
+  if (forceRun) console.log('[ces] CES_FORCE=true — bypassing 30-day heartbeat skip');
 
   console.log(`[ces] Starting CES worker — ${FL_MSAS.length} FL MSAs × ${SUPERSECTORS.length} supersectors`);
   const start = Date.now();

@@ -755,6 +755,11 @@
           style="background:#1d4ed8;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;">
           TRIGGER FRED WORKER
         </button>
+        <button onclick="triggerWorker('fred', { force: true })" id="li-fred-force-btn"
+          style="background:#b91c1c;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;margin-left:8px;"
+          title="Bypasses the 30-day heartbeat skip">
+          FORCE RUN
+        </button>
         <span id="li-fred-trigger-result" style="font-size:12px;margin-left:12px;color:#60a5fa;"></span>
       </div>
     </div>
@@ -780,6 +785,11 @@
         <button onclick="triggerWorker('bea')" id="li-bea-trigger-btn"
           style="background:#15803d;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;">
           TRIGGER BEA WORKER
+        </button>
+        <button onclick="triggerWorker('bea', { force: true })" id="li-bea-force-btn"
+          style="background:#b91c1c;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;margin-left:8px;"
+          title="Bypasses the 365-day heartbeat skip">
+          FORCE RUN
         </button>
         <span id="li-bea-trigger-result" style="font-size:12px;margin-left:12px;color:#4ade80;"></span>
       </div>
@@ -837,6 +847,11 @@
           style="background:#0369a1;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;">
           TRIGGER QWI WORKER
         </button>
+        <button onclick="triggerWorker('qwi', { force: true })" id="li-qwi-force-btn"
+          style="background:#b91c1c;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;margin-left:8px;"
+          title="Bypasses the 90-day heartbeat skip">
+          FORCE RUN
+        </button>
         <span id="li-qwi-trigger-result" style="font-size:12px;margin-left:12px;color:#38bdf8;"></span>
       </div>
     </div>
@@ -861,6 +876,11 @@
         <button onclick="triggerWorker('qcew')" id="li-qcew-trigger-btn"
           style="background:#166534;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;">
           TRIGGER QCEW WORKER
+        </button>
+        <button onclick="triggerWorker('qcew', { force: true })" id="li-qcew-force-btn"
+          style="background:#b91c1c;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;margin-left:8px;"
+          title="Bypasses the 90-day heartbeat skip">
+          FORCE RUN
         </button>
         <span id="li-qcew-trigger-result" style="font-size:12px;margin-left:12px;color:#86efac;"></span>
       </div>
@@ -892,6 +912,11 @@
         <button onclick="triggerWorker('ces')" id="li-ces-trigger-btn"
           style="background:#4c1d95;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;">
           TRIGGER CES WORKER
+        </button>
+        <button onclick="triggerWorker('ces', { force: true })" id="li-ces-force-btn"
+          style="background:#b91c1c;border:none;border-radius:6px;padding:8px 16px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;margin-left:8px;"
+          title="Bypasses the 30-day heartbeat skip">
+          FORCE RUN
         </button>
         <button onclick="testLaborMarket()" id="li-ces-test-btn"
           style="background:transparent;border:1px solid #7c3aed;border-radius:6px;padding:8px 16px;color:#a78bfa;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.05em;margin-left:8px;">

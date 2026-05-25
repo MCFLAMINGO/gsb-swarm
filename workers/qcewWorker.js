@@ -214,11 +214,13 @@ async function run() {
     process.exit(1);
   }
 
+  const forceRun = process.env.QCEW_FORCE === 'true';
   const fresh = await isFresh();
-  if (fresh) {
-    console.log('[qcew] ⏭ Data is fresh (< 30 days old) — skipping. Delete heartbeat to force re-run.');
+  if (!forceRun && fresh) {
+    console.log('[qcew] ⏭ Data is fresh (< 90 days old) — skipping. Use QCEW_FORCE=true to override.');
     process.exit(0);
   }
+  if (forceRun) console.log('[qcew] QCEW_FORCE=true — bypassing 90-day heartbeat skip');
 
   console.log(`[qcew] Starting QCEW worker — ${FL_COUNTIES.length} FL counties, 3 series each`);
   const start = Date.now();
