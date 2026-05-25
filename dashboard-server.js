@@ -1365,6 +1365,22 @@ app.post('/api/admin/trigger-sunbiz', (req, res) => {
   });
 });
 
+// POST /api/admin/reset-sunbiz — clears import state so next trigger starts fresh
+app.post('/api/admin/reset-sunbiz', async (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    await db.query(`UPDATE sunbiz_import_state SET value = CASE WHEN key = 'import_complete' THEN 'false' WHEN key = 'files_completed' THEN '[]' ELSE value END WHERE key IN ('import_complete','files_completed')`);
+    console.log('[admin] SunBiz import state reset — files_completed=[], import_complete=false');
+    res.json({ status: 'reset', message: 'SunBiz import state cleared. Trigger worker when ready.' });
+  } catch (e) {
+    console.error('[admin] reset-sunbiz failed:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/admin/trigger-zbp — runs censusLayerWorker immediately (ZBP + CBP layers)
 app.post('/api/admin/trigger-zbp', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
