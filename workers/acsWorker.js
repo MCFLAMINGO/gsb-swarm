@@ -147,7 +147,8 @@ async function fetchACS(zip, variables) {
   }
 }
 
-function toN(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
+// Census API returns -666666666 (and other negatives) for suppressed/missing values — treat as 0
+function toN(v) { const n = parseFloat(v); return (isNaN(n) || n < 0) ? 0 : n; }
 
 // ── Process one ZIP ──────────────────────────────────────────────────────────
 async function processZip(zip) {
