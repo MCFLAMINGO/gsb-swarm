@@ -21,6 +21,7 @@
 const path    = require('path');
 const fs      = require('fs');
 const pgStore = require('../lib/pgStore');
+const { getZipsByState } = require('./stateZipRegistry');
 
 const DATA_DIR    = process.env.RAILWAY_ENVIRONMENT ? '/tmp' : path.join(__dirname, '..', 'data');
 const BEDROCK_DIR = path.join(DATA_DIR, 'bedrock');
@@ -277,9 +278,9 @@ async function runBedrock(mode = 'incremental') {
   ensureDirs();
 
   // ZIP discovery: Postgres first (all ZIPs we have businesses for),
-  // fall back to hardcoded SJC_ZIPS so bedrock always runs something.
+  // fall back to stateZipRegistry so bedrock always runs something.
   // processZip needs {zip, lat, lon, name} — we pull lat/lon from flZipRegistry.
-  let targetZips = SJC_ZIPS;
+  let targetZips = getZipsByState(process.env.TARGET_STATE || 'FL').map(zip => ({ zip, lat: null, lon: null }));
   if (process.env.LOCAL_INTEL_DB_URL) {
     try {
       const { getDistinctZips } = require('../lib/pgStore');

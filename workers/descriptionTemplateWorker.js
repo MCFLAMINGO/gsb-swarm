@@ -17,12 +17,9 @@
 
 const db = require('../lib/db');
 const { CATEGORY_LABELS } = require('./reclassifyWorker');
+const { getZipsByState } = require('./stateZipRegistry');
 
-const TARGET_ZIPS = [
-  '32082','32081','32250','32266','32233','32259',
-  '32034','32092','32080','32084','32205','32207',
-  '32210','32216','32224','32225','32256',
-];
+const TARGET_ZIPS = getZipsByState(process.env.TARGET_STATE || 'FL');
 
 // Normalize raw OSM/YP hour strings into human-readable
 function formatHours(raw) {

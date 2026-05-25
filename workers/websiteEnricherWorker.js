@@ -21,11 +21,7 @@ const http  = require('http');
 const db    = require('../lib/db');
 const { RULES, CATEGORY_LABELS } = require('./reclassifyWorker');
 
-const TARGET_ZIPS = [
-  '32082','32081','32250','32266','32233','32259',
-  '32034','32092','32080','32084','32205','32207',
-  '32210','32216','32224','32225','32256',
-];
+// FL-wide: no ZIP filter — query covers all FL businesses with websites
 
 const SKIP_DOMAINS = [
   'yellowpages.com','yelp.com','facebook.com','google.com','instagram.com',

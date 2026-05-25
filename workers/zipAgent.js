@@ -231,9 +231,10 @@ if (!ZIP || isNaN(LAT) || isNaN(LON)) {
 
 const DATA_DIR   = path.join(__dirname, '../data');
 const pgStoreLib = require('../lib/pgStore');
+const { getZipsByState } = require('./stateZipRegistry');
 
-// SJC zip codes — only these get ArcGIS Hub queries
-const SJC_ZIPS = new Set(['32004','32033','32068','32080','32081','32082','32084','32086','32092','32095','32259']);
+// FL ZIP scope — state-registry driven. Chamber discovery runs for every FL ZIP.
+const SJC_ZIPS = new Set(getZipsByState(process.env.TARGET_STATE || 'FL'));
 
 // ── Logging ───────────────────────────────────────────────────────────────────
 

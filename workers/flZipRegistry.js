@@ -1,4 +1,7 @@
 'use strict';
+// FL ZIP Registry — Florida only.
+// For multi-state expansion, use stateZipRegistry.js which wraps this.
+// Set TARGET_STATE env var to switch states when stateZipRegistry supports them.
 /**
  * flZipRegistry.js
  * ─────────────────────────────────────────────────────────────────────────────

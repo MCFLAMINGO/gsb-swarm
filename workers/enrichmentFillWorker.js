@@ -22,8 +22,9 @@
 
 const db = require('../lib/db');
 const { logWorker } = require('../lib/telemetry');
+const { getZipsByState } = require('./stateZipRegistry');
 
-const TARGET_ZIPS = ['32082', '32081', '32250', '32266', '32233', '32259', '32034'];
+const TARGET_ZIPS = getZipsByState(process.env.TARGET_STATE || 'FL');
 const FULL_REFRESH = process.env.FULL_REFRESH === 'true';
 const CYCLE_MS = 24 * 60 * 60 * 1000;
 const STAGGER_MS = 60 * 1000;

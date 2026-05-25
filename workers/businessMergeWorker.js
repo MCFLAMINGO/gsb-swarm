@@ -28,6 +28,7 @@
  */
 
 const db = require('../lib/db');
+const { getZipsByState } = require('./stateZipRegistry');
 
 const LOOP_SLEEP_H  = 12;
 const MIN_RUN_GAP_H = 6;   // don't re-run if last run was < 6h ago (unless FULL_REFRESH)
@@ -266,19 +267,17 @@ async function runMerge() {
   const t0 = Date.now();
 
   // Fetch all businesses that have at least one field for clustering
-  // (phone, or name+address). Only FL ZIPs to keep it scoped.
-  // Scoped to 7 target ZIPs — fast index hit, no full FL scan
-  const TARGET_ZIPS = ['32082','32081','32250','32266','32233','32259','32034'];
-  const zipPlaceholders = TARGET_ZIPS.map((_, i) => `$${i + 1}`).join(',');
+  // (phone, or name+address). Scoped by state-registry — FL-wide by default.
+  const TARGET_ZIPS = getZipsByState(process.env.TARGET_STATE || 'FL');
   const rows = await db.query(
     `SELECT business_id, name, phone, address, city, zip,
             website, hours_json, description, services_text,
             category, lat, lon, confidence_score,
             claimed_at, wallet, source_id
      FROM businesses
-     WHERE zip IN (${zipPlaceholders})
+     WHERE zip = ANY($1)
        AND (phone IS NOT NULL OR address IS NOT NULL)`,
-    TARGET_ZIPS
+    [TARGET_ZIPS]
   );
 
   console.log(`[businessMerge] Loaded ${rows.length} rows for cluster analysis`);
