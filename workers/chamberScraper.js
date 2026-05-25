@@ -23,8 +23,12 @@ const fs     = require('fs');
 
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const { computeConfidence } = require('../lib/computeConfidence');
+const { CHAMBER_DIRECTORY, getChambersForZip } = require('./chamberDirectory');
 const BASE_URL   = 'https://business.sjcchamber.com';
 const DELAY_MS   = 1200; // polite crawl delay
+
+// Only scrape chambers with working parsers — unknown needs custom extractors
+const SCRAPEABLE_PARSERS = new Set(['growthzone', 'chambermaster']);
 
 // Postgres direct write (non-fatal if DB unavailable)
 let _db = null;
@@ -340,6 +344,103 @@ router.get('/status', (req, res) => {
   res.json({ source: 'sjc_chamber', url: BASE_URL + '/member-directory', status: 'active' });
 });
 
+// ── Scrape a single chamber using its directory URL ─────────────────────────
+async function scrapeChamber(chamber) {
+  const { name, url, parser, zips } = chamber;
+  console.log(`[ChamberScraper] Scraping ${name} (${parser}) — ${zips.length} ZIPs`);
+
+  const { status, body } = await fetchRaw(url);
+  if (status !== 200) {
+    console.log(`[ChamberScraper] HTTP ${status} on ${url} — skipping`);
+    return { added: 0, enriched: 0, skipped: 0 };
+  }
+
+  const members = parseListingCard(body);
+  console.log(`[ChamberScraper] ${name}: parsed ${members.length} members`);
+
+  let added = 0, enriched = 0, skipped = 0;
+  for (const m of members) {
+    // Infer ZIP from address — fallback to first ZIP in chamber's coverage
+    let zip = null;
+    if (m.address) {
+      const zipMatch = m.address.match(/\b(\d{5})\b/);
+      if (zipMatch && zips.includes(zipMatch[1])) zip = zipMatch[1];
+    }
+    if (!zip) zip = zips[0]; // fallback to primary ZIP
+    if (!zip) { skipped++; continue; }
+
+    const result = await upsertToPostgres(zip, { ...m, source: `chamber_${chamber.county.toLowerCase().replace(/\s+/g,'_')}` });
+    if      (result === 'added')    added++;
+    else if (result === 'enriched') enriched++;
+    else                            skipped++;
+    await sleep(300);
+  }
+
+  console.log(`[ChamberScraper] ${name} done — added:${added} enriched:${enriched} skipped:${skipped}`);
+  return { added, enriched, skipped };
+}
+
+// ── Mark a chamber as scraped in Postgres KV ─────────────────────────────────
+async function markChamberDone(chamberKey) {
+  const db = getDb();
+  if (!db) return;
+  try {
+    await db.query(
+      `INSERT INTO chamber_scraper_state (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [`chamber_scraped_${chamberKey}`, JSON.stringify({ ts: new Date().toISOString() })]
+    );
+  } catch (_) {}
+}
+
+async function isChamberDone(chamberKey) {
+  const db = getDb();
+  if (!db) return false;
+  try {
+    const rows = await db.query(
+      `SELECT value FROM chamber_scraper_state WHERE key = $1`, [`chamber_scraped_${chamberKey}`]
+    );
+    if (!rows.length) return false;
+    const { ts } = JSON.parse(rows[0].value);
+    // Re-scrape after 30 days
+    return (Date.now() - new Date(ts).getTime()) < 30 * 24 * 60 * 60 * 1000;
+  } catch (_) { return false; }
+}
+
+// ── Worker loop — iterates all scrapeable chambers, then sleeps 24h ───────────
+async function workerLoop() {
+  console.log('[ChamberScraper] Worker started — FL-wide chamber directory mode');
+  const scrapeable = CHAMBER_DIRECTORY.filter(c => SCRAPEABLE_PARSERS.has(c.parser));
+  console.log(`[ChamberScraper] ${scrapeable.length} scrapeable chambers (growthzone/chambermaster), ${CHAMBER_DIRECTORY.length - scrapeable.length} skipped (unknown/custom)`);
+
+  while (true) {
+    let didWork = false;
+    for (const chamber of scrapeable) {
+      const key = `${chamber.state}_${chamber.county}`.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      const done = await isChamberDone(key);
+      if (done) {
+        console.log(`[ChamberScraper] Skip ${chamber.name} (scraped within 30 days)`);
+        continue;
+      }
+      try {
+        await scrapeChamber(chamber);
+        await markChamberDone(key);
+        didWork = true;
+      } catch (e) {
+        console.error(`[ChamberScraper] Error scraping ${chamber.name}:`, e.message);
+      }
+      await sleep(DELAY_MS * 2); // polite gap between chambers
+    }
+
+    if (!didWork) {
+      console.log('[ChamberScraper] All chambers up to date — sleeping 24h');
+    } else {
+      console.log('[ChamberScraper] Pass complete — sleeping 24h');
+    }
+    await sleep(24 * 60 * 60 * 1000); // 24 hours
+  }
+}
+
 // ── CLI: node chamberScraper.js --bulk ───────────────────────────────────────
 if (require.main === module) {
   if (process.argv.includes('--bulk')) {
@@ -348,6 +449,12 @@ if (require.main === module) {
       process.exit(0);
     }).catch(err => {
       console.error(err);
+      process.exit(1);
+    });
+  } else {
+    // Forked as worker by index.js — run the loop
+    workerLoop().catch(err => {
+      console.error('[ChamberScraper] Fatal:', err.message);
       process.exit(1);
     });
   }
