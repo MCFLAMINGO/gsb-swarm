@@ -400,7 +400,21 @@ if (require.main === module) {
     })
     .catch(e => {
       console.error('[sunbizWorker] Fatal error:', e.message, e.stack);
-      process.exit(1);
+      // On SFTP connection errors, wait 10 minutes before exiting so Railway
+      // backoff doesn't hammer the SFTP server with rapid retries
+      const isSftpError = e.message && (
+        e.message.includes('ECONNRESET') ||
+        e.message.includes('ECONNREFUSED') ||
+        e.message.includes('ETIMEDOUT') ||
+        e.message.includes('Connection lost') ||
+        e.message.includes('getConnection')
+      );
+      if (isSftpError) {
+        console.log('[sunbizWorker] SFTP error — waiting 10 min before exit to avoid rate-limit hammering...');
+        setTimeout(() => process.exit(1), 10 * 60 * 1000);
+      } else {
+        process.exit(1);
+      }
     });
 }
 
