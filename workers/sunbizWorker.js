@@ -191,7 +191,7 @@ async function streamSftpToReadline(onLine) {
         if (err) reject(err); else resolve();
       };
 
-      const inflate = zlib.createInflateRaw();
+      const inflate = zlib.createInflate();
       const rl = readline.createInterface({ input: inflate, crlfDelay: Infinity });
 
       let headerSkipped = false;
