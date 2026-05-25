@@ -3,12 +3,12 @@
  * oceanFloorWorker.js
  *
  * Layer 1 — OCEAN FLOOR
- * Weekly Census ACS + CBP pull for SJC ZIPs.
+ * Weekly Census ACS + CBP pull for ALL FL ZIPs.
  *
  * Fetches:
  *  - Census ACS 5-year: S1501 (education), S1201 (marital status),
- *    S2501/B25003 (occupancy), S1901 (income)
- *  - Census CBP 2021: St. Johns County FIPS 12109 (NAICS by estab + emp)
+ *    S2501/B25003 (occupancy), S1901 (income) — per-ZIP, FL-wide
+ *  - Census CBP 2021: state:12 (FL) — NAICS by estab + emp, state-level baseline
  *
  * Computes per-ZIP:
  *  - carrying_capacity_score (0-100)
@@ -16,21 +16,12 @@
  *  - market_saturation_index
  *  - missing_sectors
  *
- * Writes data/ocean_floor/{zip}.json + data/ocean_floor/_index.json
+ * Writes ocean_floor table via pgStore.upsertOceanFloor
  * Schedule: immediate on start, then weekly (~7 days)
  */
 
 const pgStore = require('../lib/pgStore');
-
-// ── ZIP registry ─────────────────────────────────────────────────────────────
-const SJC_ZIPS = [
-  { zip: '32082', name: 'Ponte Vedra Beach'  },
-  { zip: '32081', name: 'Nocatee'            },
-  { zip: '32092', name: 'World Golf Village' },
-  { zip: '32084', name: 'St. Augustine'      },
-  { zip: '32086', name: 'St. Augustine South' },
-  { zip: '32080', name: 'St. Augustine Beach' },
-];
+const { getZipsByPriority } = require('./flZipRegistry');
 
 // ── NAICS sector reference (top-level 2-digit) ────────────────────────────────
 const NAICS_SECTORS = {
@@ -236,42 +227,39 @@ async function fetchIncome(zip) {
 // ── CBP fetcher ───────────────────────────────────────────────────────────────
 
 /**
- * County Business Patterns — St. Johns County FIPS 12109
+ * County Business Patterns — FL state-level (state:12)
+ * NOTE: CBP is reported at county granularity. We pull the state-wide rollup as
+ * a baseline reference for all FL ZIPs. County-level breakdowns require a
+ * per-county source registry (see countyArcGisWorker stub).
  * Returns { total_establishments, total_employees, by_naics2 }
  */
 async function fetchCBP() {
   const url =
     `https://api.census.gov/data/2021/cbp` +
     `?get=NAICS2017,ESTAB,EMP` +
-    `&for=county:109&in=state:12`;
-  try {
-    const raw = await safeFetch(url);
-    const rows = parseCensusTable(raw);
-    console.log(`[oceanFloorWorker] CBP rows: ${rows.length}`);
+    `&for=state:12`;
+  const raw = await safeFetch(url);
+  const rows = parseCensusTable(raw);
+  console.log(`[oceanFloorWorker] CBP rows: ${rows.length}`);
 
-    let total_establishments = 0;
-    let total_employees      = 0;
-    const by_naics2 = {};
+  let total_establishments = 0;
+  let total_employees      = 0;
+  const by_naics2 = {};
 
-    for (const r of rows) {
-      const naics = (r['NAICS2017'] || '').trim();
-      if (!naics || naics === '00' || naics.includes('-')) continue; // skip totals / ranges
-      const estab = toNum(r['ESTAB']);
-      const emp   = toNum(r['EMP']);
-      const sector = naics.substring(0, 2);
-      if (!by_naics2[sector]) by_naics2[sector] = { establishments: 0, employees: 0 };
-      by_naics2[sector].establishments += estab;
-      by_naics2[sector].employees      += emp;
-      total_establishments += estab;
-      total_employees      += emp;
-    }
-
-    return { total_establishments, total_employees, by_naics2 };
-  } catch (err) {
-    logError('cbp', err);
-    console.log('[oceanFloorWorker] CBP unavailable — using empty data');
-    return { total_establishments: 0, total_employees: 0, by_naics2: {} };
+  for (const r of rows) {
+    const naics = (r['NAICS2017'] || '').trim();
+    if (!naics || naics === '00' || naics.includes('-')) continue; // skip totals / ranges
+    const estab = toNum(r['ESTAB']);
+    const emp   = toNum(r['EMP']);
+    const sector = naics.substring(0, 2);
+    if (!by_naics2[sector]) by_naics2[sector] = { establishments: 0, employees: 0 };
+    by_naics2[sector].establishments += estab;
+    by_naics2[sector].employees      += emp;
+    total_establishments += estab;
+    total_employees      += emp;
   }
+
+  return { total_establishments, total_employees, by_naics2 };
 }
 
 // ── Scoring & profiling ───────────────────────────────────────────────────────
@@ -338,8 +326,8 @@ function computeMissingSectors(by_naics2, carrying_capacity_score) {
 // ── Per-ZIP process ───────────────────────────────────────────────────────────
 
 async function processZip(zipEntry, cbpData) {
-  const { zip, name } = zipEntry;
-  console.log(`[oceanFloorWorker] Processing ${zip} (${name})`);
+  const { zip, population } = zipEntry;
+  console.log(`[oceanFloorWorker] Processing ${zip} (pop: ${population || 'n/a'})`);
 
   // Fetch all ACS tables in parallel
   const [education, marital, occupancy, income] = await Promise.all([
@@ -364,16 +352,16 @@ async function processZip(zipEntry, cbpData) {
     pct_never_married:       marital.pct_never_married,
   });
 
-  // Estimate population from CBP: use total_employees as a loose proxy if no other data
-  // We don't have per-ZIP pop from CBP; use median income to scale a rough estimate
-  // Better: use ACS B01003_001E if available; for now we note it as null for saturation
-  const market_saturation_index = null; // Requires population figure not in scope here
+  // Population sourced from flZipRegistry (ACS 2022). CBP is state-wide, so per-ZIP
+  // saturation comparison divides the state-wide estab count by ZIP pop — coarse
+  // but consistent across all FL ZIPs as a relative signal.
+  const market_saturation_index = computeMarketSaturation(cbpData.total_establishments, population);
 
   const missing_sectors = computeMissingSectors(cbpData.by_naics2, carrying_capacity_score);
 
   const result = {
     zip,
-    name,
+    population: population || null,
     updated_at: new Date().toISOString(),
     census: {
       education,
@@ -402,11 +390,14 @@ async function processZip(zipEntry, cbpData) {
 async function runOceanFloor() {
   console.log(`[oceanFloorWorker] Starting run at ${new Date().toISOString()}`);
 
-  // Fetch CBP once for the county (shared across all ZIPs)
+  // Fetch FL-wide CBP once (shared across all ZIPs as state baseline)
   const cbpData = await fetchCBP();
 
+  const zips = getZipsByPriority(); // all FL ZIPs, sorted by population desc
+  console.log(`[oceanFloorWorker] Processing ${zips.length} FL ZIPs`);
+
   let processed = 0;
-  for (const zipEntry of SJC_ZIPS) {
+  for (const zipEntry of zips) {
     try {
       await processZip(zipEntry, cbpData);
       processed++;
@@ -416,7 +407,7 @@ async function runOceanFloor() {
     }
   }
 
-  console.log(`[oceanFloorWorker] Run complete. ${processed}/${SJC_ZIPS.length} ZIPs upserted to ocean_floor`);
+  console.log(`[oceanFloorWorker] Run complete. ${processed}/${zips.length} FL ZIPs upserted to ocean_floor`);
 }
 
 // ── Scheduling ────────────────────────────────────────────────────────────────

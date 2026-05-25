@@ -4360,3 +4360,59 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 **Result:** Commit `54c02eb`. ACS 204 spam: 0 in next log window. ✅
 
 ---
+
+## B91 — SunBiz 3-Trip Streaming Architecture
+**Problem:** SunBiz cordata.zip (1.74GB DEFLATE64) caused ECONNRESET and OOM crashes on single-pass import.
+**Fix:** Rewrote sunbizWorker with 3-trip streaming (LINES_PER_TRIP=2_000_000), checkpoint table `sunbiz_import_state`, post-trip `aggregateSunbizSignals()` writes `sunbiz_new_12mo` to zip_signals.
+**Result:** Architecture in place. SFTP rate-limited after rapid retry loop — waiting for limit to clear.
+
+---
+
+## B92 — Oracle zip_signals read + worldModel CBP wiring
+**Problem:** Oracle never read zip_signals; worldModel running on null sunbiz_new_12mo; hasDemoData missing ACS check.
+**Fix:** Added `loadZipSignals()` to oracle, `world_model` block in oracle response, `hasDemoData` now includes ACS. worldModel CBP opportunity score now includes `cbp_total_construction` (sum of 236+237+238 estabs, weight 15%).
+**Result:** Oracle returns full signal block. worldModel construction pressure wired.
+
+---
+
+## B93 — SunBiz promise settle guard + crash visibility
+**Problem:** Unhandled promise rejections crashing sunbizWorker silently.
+**Fix:** Added promise settle guard and explicit error logging for all async operations.
+**Result:** Crashes now visible in Railway logs.
+
+---
+
+## B94 — SunBiz decompressor attempt (wrong)
+**Problem:** Tried createInflate for DEFLATE64 — incorrect.
+**Fix:** Switched to createInflateRaw.
+**Result:** Still failed — DEFLATE64 (ZIP method 21) requires 7z binary, not Node.js zlib.
+
+---
+
+## B95 — Add unzipper dependency
+**Problem:** Attempted unzipper npm package for DEFLATE64.
+**Fix:** Added unzipper to package.json.
+**Result:** unzipper does not support DEFLATE64 (method 21) — wrong tool.
+
+---
+
+## B96 — p7zip nixpacks + 7z decompress
+**Problem:** DEFLATE64 requires system 7z binary (p7zip-full), not any Node.js library.
+**Fix:** Added nixpacks.toml to install p7zip-full at build time. Rewrote sunbizWorker to shell out to `7z x` for decompression.
+**Result:** Correct approach. Deployed. SFTP rate-limiting preventing download test.
+
+---
+
+## B97 — SunBiz SFTP 10-min backoff
+**Problem:** Rapid restart loop after SFTP errors was hammering Florida DOS SFTP server, triggering rate-limit ban.
+**Fix:** Added 10-minute wait (`setTimeout 600000`) on SFTP error before process exit — stops hammering.
+**Result:** Rate-limit expected to clear in 30-60 min. Trigger manually from admin page.
+
+---
+
+## B98 — SJC ArcGIS dead URL fix + countyArcGisWorker stub
+**Problem:** sjcArcGisWorker using dead `maps.sjcfl.us` URL. gapDataFetcher county_appraiser also hitting dead SJC URL. No FL-wide county ArcGIS coverage.
+**Fix:** Rewrote sjcArcGisWorker to use live `services1.arcgis.com/t2yugAJW83eUIFui` endpoints (WATS_Project_Point + PUD_Development_Activity). Migration 046 adds sjc_wats_permit_count, sjc_pud_count, sjc_arcgis_updated_at. gapDataFetcher SJC county_appraiser early-returns (deferred to sjcArcGisWorker). Added countyArcGisWorker registry stub comment for future FL-wide expansion (10 priority counties).
+**Result:** SJC permit + PUD data flowing. Foundation for FL-wide countyArcGisWorker documented.
+
+---
