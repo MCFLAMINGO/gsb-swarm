@@ -1675,24 +1675,34 @@ function stripMeta(layer) {
 // Vintage 2018 — pulled once on startup, never re-fetched (data doesn't change)
 
 async function ingestZBP(targetZips = FL_ZIP_SEED) {
-  // Skip only if ZBP is present for MOST ZIPs — not just the first one
+  // Skip per-ZIP: only fetch ZIPs that don't already have ZBP data in zip_signals.
+  // (Previous logic checked census_layer with a global 80% threshold, which caused
+  // premature skip when census_layer had data from other workers but zip_signals
+  // didn't have zbp_total_establishments populated.)
+  let pendingZips = targetZips;
   if (!FULL_REFRESH) {
     try {
       const db = require('../lib/db');
+      const zipList = targetZips.map(z => z.zip);
       const rows = await db.query(
-        `SELECT COUNT(*) as cnt FROM census_layer WHERE layer_json ? 'zbp'`
+        `SELECT zip FROM zip_signals WHERE zbp_total_establishments IS NOT NULL AND zip = ANY($1::text[])`,
+        [zipList]
       );
-      const zbpCount = parseInt(rows[0]?.cnt || '0');
-      if (zbpCount >= targetZips.length * 0.8) {
-        console.log(`[censusLayer] ZBP already ingested (${zbpCount}/${targetZips.length} ZIPs have zbp) — skipping`);
+      const haveZbp = new Set(rows.map(r => r.zip));
+      pendingZips = targetZips.filter(z => !haveZbp.has(z.zip));
+      if (pendingZips.length === 0) {
+        console.log(`[censusLayer] ZBP already ingested for all ${targetZips.length} ZIPs (zip_signals.zbp_total_establishments populated) — skipping`);
         return;
       }
-      console.log(`[censusLayer] ZBP: ${zbpCount}/${targetZips.length} ZIPs have zbp — running ingestion`);
-    } catch (_) { /* fall through */ }
+      console.log(`[censusLayer] ZBP: ${haveZbp.size}/${targetZips.length} ZIPs have zbp in zip_signals — fetching remaining ${pendingZips.length}`);
+    } catch (e) {
+      console.warn('[censusLayer] ZBP skip-check failed, fetching all:', e.message);
+      pendingZips = targetZips;
+    }
   }
 
-  console.log('[censusLayer] ZBP: fetching 2018 ZIP Business Patterns for all ZIPs...');
-  const ZIP_LIST = targetZips.map(z => z.zip).join(',');
+  console.log(`[censusLayer] ZBP: fetching 2018 ZIP Business Patterns for ${pendingZips.length} ZIPs...`);
+  const ZIP_LIST = pendingZips.map(z => z.zip).join(',');
 
   // Fetch all sectors for all ZIPs in one call
   const raw = await fetchJson(

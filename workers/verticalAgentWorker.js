@@ -25,6 +25,11 @@
 
 const http = require('http');
 const pgStore = require('../lib/pgStore');
+const { getZipsByState } = require('./stateZipRegistry');
+
+// FL-wide ZIPs (1013) — used as the default ZIP pool across all verticals.
+// TARGET_STATE env var lets future state rollouts switch scope.
+const FL_ZIPS = getZipsByState(process.env.TARGET_STATE || 'FL');
 
 const MCP_ENDPOINT        = process.env.MCP_ENDPOINT || 'http://localhost:3001/api/local-intel/mcp';
 const ENRICHMENT_ENDPOINT = process.env.ENRICHMENT_ENDPOINT || 'http://localhost:3007/run';
@@ -81,7 +86,7 @@ const VERTICALS = {
 
   realtor: {
     name: 'Real Estate',
-    defaultZips: ['32082', '32081', '32084', '32086', '32092', '32080'],
+    defaultZips: FL_ZIPS,
     // Maps keyword patterns → MCP tool + param extraction
     toolRoutes: [
       // Oracle first for all demographic/market questions — has income, HHI, growth state, saturation
@@ -123,7 +128,7 @@ const VERTICALS = {
 
   healthcare: {
     name: 'Healthcare',
-    defaultZips: ['32082', '32081', '32084', '32086', '32092', '32080'],
+    defaultZips: FL_ZIPS,
     toolRoutes: [
       // Zone/demographic questions FIRST — must not fall through to search
       // Oracle for all demographic/population signals — zone (spendingZones.json) is empty
@@ -170,7 +175,7 @@ const VERTICALS = {
 
   retail: {
     name: 'Retail & Grocery',
-    defaultZips: ['32082', '32081', '32084', '32086'],
+    defaultZips: FL_ZIPS,
     toolRoutes: [
       { pattern: /store|shop|retail|grocery|supermarket|convenience|specialty|boutique|clothing|apparel|outdoor|sporting|pet|hardware/i, tool: 'local_intel_search',   params: (zip, q) => ({ query: extractCategory(q, 'retail'), zip }) },
       { pattern: /corridor|street|plaza|center|mall/i,                                                                                tool: 'local_intel_corridor', params: (zip, q) => ({ street: extractStreet(q), zip }) },
@@ -202,7 +207,7 @@ const VERTICALS = {
 
   construction: {
     name: 'Construction & Home Services',
-    defaultZips: ['32082', '32081', '32084', '32086', '32092'],
+    defaultZips: FL_ZIPS,
     toolRoutes: [
       { pattern: /contractor|plumber|electrician|landscap|remodel|builder|roofing|hvac|pool|pest|flooring|painting|window|door|inspection|mason|masonry|concrete|foundation|framing|drywall|tile|gutter|fence|fencing|irrigation|sprinkler|solar|generator|pavers|paving|stucco|siding|insulation|waterproof|pressure.wash|power.wash|septic|drain|excavat|demolit|junk.removal|garage|carport|deck|patio|pergola|screen.room|sunroom|kitchen.remodel|bath.remodel|cabinet|countertop|handyman/i, tool: 'local_intel_search',  params: (zip, q) => ({ query: extractCategory(q, 'construction'), zip }) },
       { pattern: /permit|construction|development|project|active.*build|pipeline/i,                                                          tool: 'local_intel_bedrock', params: (zip) => ({ zip }) },
@@ -248,7 +253,7 @@ const VERTICALS = {
 
   restaurant: {
     name: 'Food Services & Restaurants',
-    defaultZips: ['32082', '32081', '32084', '32086', '32080'],
+    defaultZips: FL_ZIPS,
     toolRoutes: [
       { pattern: /restaurant|cafe|bar|dining|food|pizza|sushi|burger|breakfast|lunch|dinner|ramen|cuisine|franchise|fast.casual|dine.in|delivery/i, tool: 'local_intel_search',   params: (zip, q) => ({ query: extractCategory(q, 'food'), zip }) },
       { pattern: /corridor|A1A|street/i,                                                                                                         tool: 'local_intel_corridor', params: (zip, q) => ({ street: extractStreet(q), zip }) },

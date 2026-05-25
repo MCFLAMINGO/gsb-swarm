@@ -4500,3 +4500,38 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 **Problem:** Demo ▶ button on LocalIntel nodes had no way to cancel an in-flight fetch — button stayed "Demo ▶" during load with no stop affordance.
 **Fix:** Added AbortController per nodeId (_demoAborts map). Button gets id="li-node-demo-btn-{id}" so it can be targeted. During fetch: button changes to "Stop ■" + demo-running class. Clicking again aborts the fetch and hides the result panel. Finally block always restores "Demo ▶".
 **Result:** Commit `B110`. Stop button works. Abort cleans up silently (no error shown). ✅
+
+---
+
+## B111 — acsWorker toN() suppression fix
+**Problem:** Census API returns -666666666 for suppressed values; toN() was not catching these, causing NUMERIC overflow on ZIP 32512 and others.
+**Fix:** acsWorker toN() now treats any value < 0 as 0 before writing to zip_signals.
+**Result:** ACS runs complete without overflow errors on suppressed ZIPs. ✅
+
+---
+
+## B112 — triggerWorker button re-enable
+**Problem:** After triggering a worker via the demo UI, the trigger button stayed disabled permanently.
+**Fix:** triggerWorker POST handler re-enables the button on both success and error responses.
+**Result:** Button resets after each trigger so workers can be re-fired without page reload. ✅
+
+---
+
+## B113 — chamberScraper crash-loop fix
+**Problem:** chamberScraper.js used `require.main === module` guard which is false when forked by index.js — file exported and exited immediately with code 0, causing crash-loop restart.
+**Fix:** Added workerLoop() that iterates all GrowthZone/ChamberMaster chambers, checkpoints in chamber_scraper_state table (30-day TTL), sleeps 24h when done; migration 048 adds chamber_scraper_state table.
+**Result:** chamberScraper runs FL-wide, stays alive between cycles, no more crash-loop. ✅
+
+---
+
+## B114 — bedrockWorker FL-wide
+**Problem:** bedrockWorker used hardcoded SJC_ZIPS (6-entry array), silently filtering 1007 of 1013 FL ZIPs.
+**Fix:** Replaced SJC_ZIPS with FL_ZIP_INDEX from flZipRegistry (1013 FL ZIPs).
+**Result:** bedrockWorker now processes all FL ZIPs. ✅
+
+---
+
+## B115 — FCC spawned, OSM skip fixed, psycho_index written, fcc_vintage_date migration
+**Problem:** fccBroadbandWorker was implemented but not spawned; overpassWorker skip logic used wrong field; psycho_index was computed but never written to zip_signals; no fcc_vintage_date column existed.
+**Fix:** Added fccBroadbandWorker to index.js spawn list; fixed overpassWorker skip to use zip_signals.osm_updated_at (90-day TTL); acsWorker now writes psycho_index after ACS run; migration 049 adds fcc_vintage_date DATE column.
+**Result:** FCC worker active (needs Railway env vars FCC_BDC_USERNAME + FCC_BDC_API_KEY); OSM skips correctly; psycho_index populates on next ACS cycle. ✅

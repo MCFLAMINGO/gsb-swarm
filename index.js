@@ -45,6 +45,7 @@ const workers = [
   { name: 'Census Layer',         file: 'workers/censusLayerWorker.js' },
   { name: 'SJC ArcGIS',          file: 'workers/sjcArcGisWorker.js' },
   { name: 'FCC Broadband',        file: 'workers/fccBroadbandWorker.js' },
+  { name: 'Permit Worker',        file: 'workers/permitWorker.js' },
 ];
 
 console.log(`
