@@ -1377,6 +1377,10 @@ app.post('/api/admin/trigger-sunbiz', (req, res) => {
   res.json({ status: 'started', message: 'Sunbiz worker triggered — FL DOS entity registry, active formations, dissolusions' });
   setImmediate(async () => {
     try {
+      if (req.body?.force === true) {
+        await db.query(`DELETE FROM sunbiz_import_state WHERE key IN ('import_complete','files_completed')`);
+        console.log('[admin] SunBiz force flag set — deleted stale checkpoint rows (import_complete, files_completed)');
+      }
       const { spawn } = require('child_process');
       const extraEnv = {};
       if (req.body?.filesPath) extraEnv.SUNBIZ_FILES_PATH = req.body.filesPath;
