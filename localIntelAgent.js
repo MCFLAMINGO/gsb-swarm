@@ -107,6 +107,7 @@ const { classifyIntent } = require('./workers/intentRouter');
 const { dispatchTask } = require('./lib/taskDispatch');
 const { resolveBusinessAlias } = require('./lib/aliasResolver');
 const { injectShowcase } = require('./lib/showcaseBiz');
+const { getDiscoveryManifest, handleMcpRequest, probeEndpoint } = require('./lib/businessMcp');
 // B53: resolvePlace — FL place name → ZIP, fully from Postgres (migration 028)
 // Priority: explicit ZIP → county_alias → county → city → default 32082
 async function resolvePlace(question) {
@@ -9031,6 +9032,57 @@ router.post('/admin/seed-business', express.json(), async (req, res) => {
   } catch (err) {
     console.error('[admin/seed-business]', err.message);
     return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Tier 3 per-business MCP proxy ──────────────────────────────────────────
+// GET  /.well-known/mcp/:business_id  → discovery manifest (no auth)
+// POST /mcp/:business_id              → JSON-RPC (proxy or hosted mode, no auth)
+// POST /mcp-probe                     → test an arbitrary mcp_endpoint
+// Implementation in lib/businessMcp.js.
+
+router.get('/.well-known/mcp/:business_id', async (req, res) => {
+  try {
+    const baseUrl = req.protocol + '://' + req.get('host');
+    const manifest = await getDiscoveryManifest(req.params.business_id, baseUrl);
+    return res.json(manifest);
+  } catch (err) {
+    console.error('[well-known/mcp/:business_id]', err.message);
+    return res.status(404).json({ error: err.message });
+  }
+});
+
+router.post('/mcp/:business_id', express.json(), async (req, res) => {
+  try {
+    const sessionId = req.headers['mcp-session-id'] || null;
+    await handleMcpRequest(req.params.business_id, req.body, res, { sessionId });
+  } catch (err) {
+    console.error('[mcp/:business_id]', err.message);
+    if (!res.headersSent) return res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/mcp-probe', express.json(), async (req, res) => {
+  const adminToken = req.headers['x-admin-token'];
+  const dispatchToken = req.headers['x-dispatch-token'];
+  let authed = adminToken === 'localintel-migrate-2026';
+  if (!authed && dispatchToken) {
+    const row = await db.queryOne(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 LIMIT 1`,
+      [dispatchToken]
+    );
+    authed = Boolean(row);
+  }
+  if (!authed) return res.status(401).json({ error: 'unauthorized' });
+
+  const { mcp_endpoint } = req.body || {};
+  if (!mcp_endpoint) return res.status(400).json({ error: 'mcp_endpoint required' });
+
+  try {
+    const result = await probeEndpoint(mcp_endpoint);
+    return res.json(result);
+  } catch (err) {
+    return res.json({ error: 'Could not reach endpoint', detail: err.message });
   }
 });
 
