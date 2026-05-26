@@ -10681,8 +10681,11 @@ ${scoringGuide}
 ${countyDisplayName} COUNTY INTELLIGENCE (${rows.length} ZIPs):
 ${zipSummaries}${sunbizCtxCounty.summary ? `\n\n${sunbizCtxCounty.summary}` : ''}`;
 
+      const _llmAbort1 = new AbortController();
+      const _llmTimer1 = setTimeout(() => _llmAbort1.abort(), 25000);
       const llmRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
+        signal: _llmAbort1.signal,
         headers: {
           'x-api-key':         process.env.ANTHROPIC_API_KEY,
           'anthropic-version': '2023-06-01',
@@ -10701,6 +10704,7 @@ ${zipSummaries}${sunbizCtxCounty.summary ? `\n\n${sunbizCtxCounty.summary}` : ''
           messages: countyConvMessages,
         }),
       });
+      clearTimeout(_llmTimer1);
       const llmData = await llmRes.json();
       const rawCountyText = (llmData && llmData.content && llmData.content[0] && llmData.content[0].text) || '';
       const answerCounty = rawCountyText || 'Unable to generate answer.';
@@ -10947,8 +10951,11 @@ ${grounding}`;
     let uncachedTokens = 0;
     const model = 'claude-haiku-4-5';
     try {
+      const _llmAbort2 = new AbortController();
+      const _llmTimer2 = setTimeout(() => _llmAbort2.abort(), 25000);
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
+        signal: _llmAbort2.signal,
         headers: {
           'content-type':    'application/json',
           'x-api-key':       apiKey,
@@ -10968,6 +10975,7 @@ ${grounding}`;
           messages: conversationMessages,
         }),
       });
+      clearTimeout(_llmTimer2);
       const j = await r.json();
       if (j && Array.isArray(j.content) && j.content[0] && j.content[0].text) {
         answer = j.content[0].text;
