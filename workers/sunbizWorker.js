@@ -315,24 +315,14 @@ function rmrf(p) {
 
 // ── Process one cordata{N}.zip ────────────────────────────────────────────────
 async function processFile(digit) {
-  const filesPath = process.env.SUNBIZ_FILES_PATH;
-  const zipPath = filesPath
-    ? `${filesPath}/cordata${digit}.zip`
-    : `/tmp/cordata${digit}.zip`;
+  const zipPath = `/tmp/cordata${digit}.zip`;
   const extractDir = `/tmp/sunbiz${digit}`;
 
   // Always clean stale extraction dir
   rmrf(extractDir);
 
-  if (filesPath) {
-    if (!fs.existsSync(zipPath)) {
-      throw new Error(`SUNBIZ_FILES_PATH mode: ${zipPath} not found`);
-    }
-    console.log(`[sunbizWorker] FILE-PATH MODE — using ${zipPath} (skipping SFTP)`);
-  } else {
-    rmrf(zipPath);
-    await downloadFile(digit, zipPath);
-  }
+  rmrf(zipPath);
+  await downloadFile(digit, zipPath);
 
   console.log(`[sunbizWorker] Extracting cordata${digit}.zip with 7z...`);
   await extractZip(zipPath, extractDir);
@@ -378,6 +368,61 @@ async function processFile(digit) {
   return { imported, totalLines, skipped };
 }
 
+// ── Process a single-file zip from SUNBIZ_FILES_PATH ─────────────────────────
+// FL DOS SFTP actually serves a single cordata.zip (1.6 GB) and corevent.zip (179 MB),
+// not the cordata0..9 split. When SUNBIZ_FILES_PATH is set we read those single files.
+async function processSingleFile(zipPath, tag) {
+  const extractDir = `/tmp/sunbiz_${tag}`;
+
+  rmrf(extractDir);
+
+  if (!fs.existsSync(zipPath)) {
+    throw new Error(`SUNBIZ_FILES_PATH mode: ${zipPath} not found`);
+  }
+  console.log(`[sunbizWorker] FILE-PATH MODE — using ${zipPath} (skipping SFTP)`);
+
+  console.log(`[sunbizWorker] Extracting ${path.basename(zipPath)} with 7z...`);
+  await extractZip(zipPath, extractDir);
+
+  const txtPath = findExtractedTxt(extractDir);
+  if (!txtPath) throw new Error(`No extracted file found in ${extractDir}`);
+  console.log(`[sunbizWorker] Extracted to ${txtPath} — streaming parse...`);
+
+  let batch = [];
+  let imported = 0;
+  let totalLines = 0;
+  let skipped = 0;
+
+  const stream = fs.createReadStream(txtPath);
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+  for await (const line of rl) {
+    totalLines++;
+    const rec = parseRecord(line);
+    if (!rec) { skipped++; continue; }
+    batch.push(rec);
+    if (batch.length >= BATCH_SIZE) {
+      const flush = batch;
+      batch = [];
+      await upsertBatch(flush);
+      imported += flush.length;
+      if (imported % 10000 < BATCH_SIZE) {
+        console.log(`[sunbizWorker] ${tag}: ${imported.toLocaleString()} FL active records → Postgres`);
+      }
+    }
+  }
+  if (batch.length) {
+    await upsertBatch(batch);
+    imported += batch.length;
+  }
+
+  console.log(`[sunbizWorker] ${tag} complete — ${imported.toLocaleString()} FL active records parsed (from ${totalLines.toLocaleString()} total lines, ${skipped.toLocaleString()} skipped)`);
+
+  rmrf(extractDir);
+
+  return { imported, totalLines, skipped };
+}
+
 // ── Orchestrator ──────────────────────────────────────────────────────────────
 async function runImport() {
   const start = Date.now();
@@ -388,21 +433,44 @@ async function runImport() {
     return;
   }
 
-  const filesCompleted = await getFilesCompleted();
-  console.log(`[sunbizWorker] Files already completed: [${filesCompleted.join(',') || 'none'}]`);
-
+  const filesPath = process.env.SUNBIZ_FILES_PATH;
   let totalImported = 0;
 
-  for (let digit = 0; digit <= 9; digit++) {
-    if (filesCompleted.includes(digit)) {
-      console.log(`[sunbizWorker] Skipping file ${digit} (already complete)`);
-      continue;
+  if (filesPath) {
+    // FILE-PATH MODE: process single-file cordata.zip (+ corevent.zip if present)
+    const cordataZip = path.join(filesPath, 'cordata.zip');
+    const { imported: cordataImported } = await processSingleFile(cordataZip, 'cordata');
+    totalImported += cordataImported;
+
+    const coreventZip = path.join(filesPath, 'corevent.zip');
+    if (fs.existsSync(coreventZip)) {
+      try {
+        const { imported: coreventImported } = await processSingleFile(coreventZip, 'corevent');
+        totalImported += coreventImported;
+      } catch (e) {
+        // corevent has a different layout than cordata; if parsing yields 0 records
+        // that's fine, but a hard failure (extract error) we surface.
+        console.error(`[sunbizWorker] corevent.zip processing failed: ${e.message} — continuing`);
+      }
+    } else {
+      console.log(`[sunbizWorker] ${coreventZip} not found — skipping corevent`);
     }
-    const { imported } = await processFile(digit);
-    totalImported += imported;
-    filesCompleted.push(digit);
-    await setFilesCompleted(filesCompleted);
-    console.log(`[sunbizWorker] Checkpoint saved: files_completed=[${filesCompleted.join(',')}]`);
+  } else {
+    // SFTP MODE: 10-file split cordata0.zip..cordata9.zip
+    const filesCompleted = await getFilesCompleted();
+    console.log(`[sunbizWorker] Files already completed: [${filesCompleted.join(',') || 'none'}]`);
+
+    for (let digit = 0; digit <= 9; digit++) {
+      if (filesCompleted.includes(digit)) {
+        console.log(`[sunbizWorker] Skipping file ${digit} (already complete)`);
+        continue;
+      }
+      const { imported } = await processFile(digit);
+      totalImported += imported;
+      filesCompleted.push(digit);
+      await setFilesCompleted(filesCompleted);
+      console.log(`[sunbizWorker] Checkpoint saved: files_completed=[${filesCompleted.join(',')}]`);
+    }
   }
 
   await aggregateSunbizSignals();
@@ -429,7 +497,11 @@ async function run() {
     console.log(`[sunbizWorker] FILE-PATH MODE — reading from ${process.env.SUNBIZ_FILES_PATH}`);
   }
 
-  console.log('[sunbizWorker] Starting — 10-file split (cordata0-9.zip)');
+  if (process.env.SUNBIZ_FILES_PATH) {
+    console.log('[sunbizWorker] Starting — file-path mode (cordata.zip + corevent.zip)');
+  } else {
+    console.log('[sunbizWorker] Starting — SFTP 10-file split (cordata0-9.zip)');
+  }
 
   if (!process.env.LOCAL_INTEL_DB_URL) {
     console.error('[sunbizWorker] LOCAL_INTEL_DB_URL not set — exiting');
