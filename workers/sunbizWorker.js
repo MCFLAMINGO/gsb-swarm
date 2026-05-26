@@ -86,18 +86,17 @@ async function setFilesCompleted(arr) {
 }
 
 // ── Fixed-width record parsing ────────────────────────────────────────────────
-// SunBiz cordata fixed-width layout (per FL DOS Corporate Data spec):
+// SunBiz cordata fixed-width layout (per FL DOS Corporate Data Dictionary):
 //   COR_NUMBER       cols 1-12    (offset 0,   len 12)
-//   COR_NAME         cols 13-204  (offset 12,  len 192)
-//   COR_STATUS       col  205     (offset 204, len 1)  — 'A' active, 'I' inactive
-//   COR_FILING_TYPE  cols 206-213 (offset 205, len 8)
-//   COR_PRINC_ADD_1  cols 214-255 (offset 213, len 42)
-//   COR_PRINC_ADD_2  cols 256-297 (offset 255, len 42)
-//   COR_PRINC_CITY   cols 298-325 (offset 297, len 28)
-//   COR_PRINC_STATE  cols 326-327 (offset 325, len 2)
-//   COR_PRINC_ZIP5   cols 328-332 (offset 327, len 5)
-//   COR_FILE_DATE    cols 464-471 (offset 463, len 8, MMDDYYYY)
+//   COR_NAME         cols 13-132  (offset 12,  len 120) — name is 120 chars, not 192
+//   COR_STATUS       col  133     (offset 132, len 1)   — 'A' active, 'I' inactive, 'D' dissolved
+//   COR_STATE        cols 134-135 (offset 133, len 2)   — state of incorporation (most FL corps = 'FL')
+//   (downstream fields shifted -72 from previous mis-spec; principal-state/zip offsets approximated)
+//   COR_PRINC_STATE  cols ~254-255 (offset ~253, len 2)
+//   COR_PRINC_ZIP5   cols ~256-260 (offset ~255, len 5)
+//   COR_FILE_DATE    cols ~392-399 (offset ~391, len 8, MMDDYYYY)
 // Column numbers in the spec are 1-based; offsets here are 0-based.
+// Filter uses COR_STATE (incorporation state) = 'FL' since most FL businesses incorporate in FL.
 function slice(s, off, len) {
   return s.length > off ? s.substr(off, len).trim() : '';
 }
@@ -133,11 +132,11 @@ function parseZip(raw) {
 function parseRecord(line) {
   if (!line || line.length < 20) return null;
   const docNumber  = slice(line, 0, 12);
-  const corpName   = slice(line, 12, 192);
-  const status     = slice(line, 204, 1);
-  const filingDate = slice(line, 463, 8);
-  const state      = slice(line, 325, 2);
-  const zip        = parseZip(slice(line, 327, 9));
+  const corpName   = slice(line, 12, 120);
+  const status     = slice(line, 132, 1);
+  const state      = slice(line, 133, 2);
+  const filingDate = slice(line, 391, 8);
+  const zip        = parseZip(slice(line, 255, 9));
 
   if (!docNumber || !corpName) return null;
   // Active FL only — COR_STATUS is single char: 'A' = active, 'I' = inactive
@@ -345,6 +344,9 @@ async function processFile(digit) {
 
   for await (const line of rl) {
     totalLines++;
+    if (totalLines <= 5) {
+      console.log(`[sunbizWorker] SAMPLE LINE ${totalLines}:`, line.substring(0, 200));
+    }
     const rec = parseRecord(line);
     if (!rec) { skipped++; continue; }
     batch.push(rec);
@@ -402,6 +404,9 @@ async function processSingleFile(zipPath, tag) {
 
   for await (const line of rl) {
     totalLines++;
+    if (totalLines <= 5) {
+      console.log(`[sunbizWorker] SAMPLE LINE ${totalLines}:`, line.substring(0, 200));
+    }
     const rec = parseRecord(line);
     if (!rec) { skipped++; continue; }
     batch.push(rec);
