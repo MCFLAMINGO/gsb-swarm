@@ -8965,6 +8965,75 @@ router.post('/backfill-sjc-cama', express.json(), async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/admin/seed-business ──────────────────────────────
+// Insert or update a single business record and set its mcp_endpoint.
+// Returns dispatch_token so you can immediately use the inbox.
+// Token gate: x-admin-token: localintel-migrate-2026
+router.post('/admin/seed-business', express.json(), async (req, res) => {
+  const token = req.headers['x-admin-token'] || req.query.admin_token;
+  if (token !== 'localintel-migrate-2026') return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const {
+      name, zip, address, city, phone, website, category = 'legal',
+      category_group = 'professional_services', description,
+      mcp_endpoint, tags = [],
+    } = req.body;
+    if (!name || !zip) return res.status(400).json({ error: 'name and zip required' });
+
+    // Check existing
+    const [existing] = await db.query(
+      `SELECT business_id, dispatch_token FROM businesses WHERE name = $1 AND zip = $2 LIMIT 1`,
+      [name, zip]
+    );
+
+    let business_id, dispatch_token;
+
+    if (existing) {
+      business_id    = existing.business_id;
+      dispatch_token = existing.dispatch_token;
+      await db.query(
+        `UPDATE businesses SET
+           address      = COALESCE($2, address),
+           city         = COALESCE($3, city),
+           phone        = COALESCE($4, phone),
+           website      = COALESCE($5, website),
+           category     = $6,
+           category_group = $7,
+           description  = COALESCE($8, description),
+           tags         = $9,
+           status       = 'active',
+           updated_at   = NOW()
+         WHERE business_id = $1`,
+        [business_id, address||null, city||null, phone||null, website||null,
+         category, category_group, description||null, tags]
+      );
+    } else {
+      dispatch_token = require('crypto').randomBytes(32).toString('hex');
+      const [ins] = await db.query(
+        `INSERT INTO businesses
+           (name, zip, address, city, phone, website, category, category_group,
+            description, tags, status, claimed, confidence_score, dispatch_token, primary_source)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',true,90,$11,'manual')
+         RETURNING business_id`,
+        [name, zip, address||null, city||null, phone||null, website||null,
+         category, category_group, description||null, tags, dispatch_token]
+      );
+      business_id = ins.business_id;
+    }
+
+    // Set mcp_endpoint on agent profile if provided
+    if (mcp_endpoint) {
+      const agentProfiles = require('./lib/agentProfiles');
+      await agentProfiles.upsertProfile(business_id, { mcp_endpoint });
+    }
+
+    return res.json({ ok: true, business_id, dispatch_token, created: !existing });
+  } catch (err) {
+    console.error('[admin/seed-business]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/local-intel/admin/reseed-stjohns ─────────────────────────────
 // On-demand trigger for the St. Johns quarterly property reseed.
 // Downloads CAMAData.zip + CAMADataSup.zip from sftp.sjcpa.us, runs mdb-export,
