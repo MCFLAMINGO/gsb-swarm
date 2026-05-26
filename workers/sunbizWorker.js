@@ -86,13 +86,17 @@ async function setFilesCompleted(arr) {
 }
 
 // ── Fixed-width record parsing ────────────────────────────────────────────────
-// SunBiz cordata fixed-width layout (per FL DOS spec):
-//   doc_number   cols 1-12   (offset 0,   len 12)
-//   corp_name    cols 13-172 (offset 12,  len 160)
-//   status       cols 173-182 (offset 172, len 10)
-//   filing_date  cols 183-191 (offset 182, len 9, MMDDYYYY-ish — try multiple)
-//   state        cols 192-193 (offset 191, len 2)
-//   zip          cols 224-233 (offset 223, len 10)
+// SunBiz cordata fixed-width layout (per FL DOS Corporate Data spec):
+//   COR_NUMBER       cols 1-12    (offset 0,   len 12)
+//   COR_NAME         cols 13-204  (offset 12,  len 192)
+//   COR_STATUS       col  205     (offset 204, len 1)  — 'A' active, 'I' inactive
+//   COR_FILING_TYPE  cols 206-213 (offset 205, len 8)
+//   COR_PRINC_ADD_1  cols 214-255 (offset 213, len 42)
+//   COR_PRINC_ADD_2  cols 256-297 (offset 255, len 42)
+//   COR_PRINC_CITY   cols 298-325 (offset 297, len 28)
+//   COR_PRINC_STATE  cols 326-327 (offset 325, len 2)
+//   COR_PRINC_ZIP5   cols 328-332 (offset 327, len 5)
+//   COR_FILE_DATE    cols 464-471 (offset 463, len 8, MMDDYYYY)
 // Column numbers in the spec are 1-based; offsets here are 0-based.
 function slice(s, off, len) {
   return s.length > off ? s.substr(off, len).trim() : '';
@@ -129,15 +133,15 @@ function parseZip(raw) {
 function parseRecord(line) {
   if (!line || line.length < 20) return null;
   const docNumber  = slice(line, 0, 12);
-  const corpName   = slice(line, 12, 160);
-  const status     = slice(line, 172, 10);
-  const filingDate = slice(line, 182, 9);
-  const state      = slice(line, 191, 2);
-  const zip        = parseZip(slice(line, 223, 10));
+  const corpName   = slice(line, 12, 192);
+  const status     = slice(line, 204, 1);
+  const filingDate = slice(line, 463, 8);
+  const state      = slice(line, 325, 2);
+  const zip        = parseZip(slice(line, 327, 9));
 
   if (!docNumber || !corpName) return null;
-  // Active FL only
-  if (!status.toUpperCase().includes('ACT')) return null;
+  // Active FL only — COR_STATUS is single char: 'A' = active, 'I' = inactive
+  if (status.toUpperCase() !== 'A') return null;
   if (state.toUpperCase() !== 'FL') return null;
 
   return {
