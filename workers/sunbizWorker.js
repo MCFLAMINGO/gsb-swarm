@@ -190,8 +190,8 @@ async function upsertBatch(records) {
   if (!records.length) return;
 
   const valueClauses = records.map((r, i) => {
-    const b = i * 10;
-    return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},ARRAY['sunbiz'],'sunbiz',NOW())`;
+    const b = i * 12;
+    return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12},ARRAY['sunbiz'],'sunbiz',NOW())`;
   }).join(',');
 
   const params = records.flatMap(r => [
@@ -205,12 +205,15 @@ async function upsertBatch(records) {
     r.category,
     r.category_group,
     r.zip,
+    r.registered_agent || null,
+    r.agent_address    || null,
   ]);
 
   await db.query(`
     INSERT INTO businesses
       (sunbiz_doc_number, name, status, sunbiz_status, sunbiz_entity_type,
        registered_date, confidence_score, category, category_group, zip,
+       sunbiz_agent_name, sunbiz_agent_addr,
        sources, primary_source, last_confirmed)
     VALUES ${valueClauses}
     ON CONFLICT (sunbiz_doc_number) DO UPDATE SET
@@ -218,6 +221,8 @@ async function upsertBatch(records) {
       sunbiz_entity_type = EXCLUDED.sunbiz_entity_type,
       registered_date    = COALESCE(EXCLUDED.registered_date, businesses.registered_date),
       zip                = COALESCE(NULLIF(EXCLUDED.zip, '00000'), businesses.zip),
+      sunbiz_agent_name  = COALESCE(EXCLUDED.sunbiz_agent_name, businesses.sunbiz_agent_name),
+      sunbiz_agent_addr  = COALESCE(EXCLUDED.sunbiz_agent_addr, businesses.sunbiz_agent_addr),
       last_confirmed     = NOW(),
       updated_at         = NOW()
   `, params);

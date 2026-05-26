@@ -1,22 +1,23 @@
 'use strict';
 /**
- * workers/sunbizMatchWorker.js — B120
+ * workers/sunbizMatchWorker.js — B121
  *
- * Match rows in sunbiz_raw to rows in businesses, then:
- *   1. Upsert agent + state-registry evidence into source_evidence (source_id='fl_sunbiz').
- *   2. When the business has a website, derive probable owner emails
- *      (firstname.lastname@domain, firstnamelastname@domain, firstname@domain)
- *      from the registered_agent name and store them in source_evidence
+ * Enrichment pass over businesses that were imported from FL DOS SunBiz.
+ * sunbizWorker now writes sunbiz_agent_name + sunbiz_agent_addr directly onto
+ * the businesses row, so no cross-table fuzzy match is needed.
+ *
+ * This worker:
+ *   1. Scans businesses WHERE sunbiz_doc_number IS NOT NULL (state-registered).
+ *   2. Upserts fl_sunbiz evidence into source_evidence.
+ *   3. When the business has a website + a real person agent name, derives
+ *      probable owner emails (firstname.lastname@domain etc.) into source_evidence
  *      under source_id='fl_sunbiz_probable_email' with confidence 0.4.
- *   3. Mark the business as state-verified by including 'state_verified' in tags.
+ *   4. Tags the business state_verified + sets owner_verified = TRUE.
  *
- * Match rules:
- *   - normalize(corp_name) ≈ normalize(business_name)  (strip LLC, INC, CORP, CO, LP)
- *   - zip first 5 chars match
- *   - Use pg_trgm similarity ≥ 0.55 for fuzzy comparison, gated by exact-zip equality
- *
+ * Idempotency gate: source_evidence ON CONFLICT DO UPDATE — safe to re-run.
+ * Uses owner_verified = FALSE as the "not yet processed" signal.
  * Worker contract: read Postgres → skip already processed → work new → upsert → exit clean.
- * Idempotent — safe to re-run. Process in batches of 500. Manual trigger only.
+ * Process in batches of 500. Manual trigger only.
  */
 
 require('dotenv').config();
@@ -116,49 +117,24 @@ async function ensureExtensions() {
   await db.query(`CREATE EXTENSION IF NOT EXISTS "pg_trgm"`);
 }
 
-// ── Already-processed set ─────────────────────────────────────────────────────
-// We treat a sunbiz_raw row as processed when `resolved = TRUE`.
-// The schema already provides sunbiz_raw.resolved and sunbiz_raw.resolved_business_id.
+// ── Fetch businesses needing enrichment ──────────────────────────────────────
+// Gate: sunbiz_doc_number set (imported from FL DOS) + not yet owner_verified.
+// Idempotent — re-running after owner_verified=TRUE skips already-done rows.
 
-async function fetchUnresolvedBatch(offset) {
+async function fetchUnprocessedBatch(offset) {
   return db.query(
-    `SELECT id, doc_number, entity_name, status, principal_zip,
-            registered_agent, agent_address, filed_date
-       FROM sunbiz_raw
-      WHERE resolved = FALSE
-        AND entity_name IS NOT NULL
-        AND principal_zip IS NOT NULL
-      ORDER BY id
+    `SELECT business_id, sunbiz_doc_number AS doc_number, name AS entity_name,
+            status, zip AS principal_zip, registered_date AS filed_date,
+            sunbiz_agent_name AS registered_agent,
+            sunbiz_agent_addr AS agent_address,
+            website
+       FROM businesses
+      WHERE sunbiz_doc_number IS NOT NULL
+        AND owner_verified = FALSE
+      ORDER BY business_id
       LIMIT $1 OFFSET $2`,
     [BATCH_SIZE, offset]
   );
-}
-
-async function findBusinessMatch(rawRow) {
-  const normCorp = normalizeName(rawRow.entity_name);
-  if (!normCorp) return null;
-  const zip5 = String(rawRow.principal_zip || '').trim().substring(0, 5);
-  if (!/^\d{5}$/.test(zip5)) return null;
-
-  // Same zip + similarity on the normalized names.
-  // Use translate/regexp_replace inline for businesses.name normalization to mirror normalizeName.
-  const rows = await db.query(
-    `SELECT business_id, name, website, zip
-       FROM businesses
-      WHERE zip = $1
-        AND name IS NOT NULL
-        AND similarity(
-              regexp_replace(upper(name), '\\m(LLC|INC|INCORPORATED|CORP|CORPORATION|CO|COMPANY|LP|LLP|PA|PLLC|PC|LTD)\\M', '', 'g'),
-              $2
-            ) >= $3
-      ORDER BY similarity(
-                 regexp_replace(upper(name), '\\m(LLC|INC|INCORPORATED|CORP|CORPORATION|CO|COMPANY|LP|LLP|PA|PLLC|PC|LTD)\\M', '', 'g'),
-                 $2
-               ) DESC
-      LIMIT 1`,
-    [zip5, normCorp, SIMILARITY_THRESHOLD]
-  );
-  return rows && rows.length ? rows[0] : null;
 }
 
 async function upsertEvidence(businessId, sourceId, sourceRecordId, data, weight) {
@@ -187,36 +163,23 @@ async function tagStateVerified(businessId) {
   );
 }
 
-async function markRawResolved(rawId, businessId) {
-  await db.query(
-    `UPDATE sunbiz_raw
-        SET resolved = TRUE,
-            resolved_business_id = $2
-      WHERE id = $1`,
-    [rawId, businessId]
-  );
-}
+// markRawResolved removed — sunbiz_raw is no longer the source of truth.
+// businesses.owner_verified = TRUE is the idempotency gate.
 
-async function processOne(raw) {
-  const biz = await findBusinessMatch(raw);
-  if (!biz) {
-    // No match — leave resolved=FALSE so future runs (with more businesses) can retry.
-    return { matched: false, emails: 0 };
-  }
-
-  // 1. Officer / agent evidence
+async function processOne(biz) {
+  // 1. State-registry evidence
   await upsertEvidence(
     biz.business_id,
     'fl_sunbiz',
-    raw.doc_number,
+    biz.doc_number,
     {
-      corp_num: raw.doc_number,
-      corp_name: raw.entity_name,
-      status: raw.status,
-      file_date: raw.filed_date,
-      principal_zip: raw.principal_zip,
-      registered_agent_name: raw.registered_agent || null,
-      registered_agent_address: raw.agent_address || null,
+      corp_num: biz.doc_number,
+      corp_name: biz.entity_name,
+      status: biz.status,
+      file_date: biz.filed_date,
+      principal_zip: biz.principal_zip,
+      registered_agent_name: biz.registered_agent || null,
+      registered_agent_address: biz.agent_address || null,
     },
     0.9
   );
@@ -224,17 +187,17 @@ async function processOne(raw) {
   // 2. Probable email derivation when website + real person agent name exist
   let emailsCount = 0;
   const domain = extractDomain(biz.website);
-  const person = parsePersonName(raw.registered_agent);
+  const person = parsePersonName(biz.registered_agent);
   if (domain && person) {
     const emails = deriveEmails(person, domain);
     if (emails.length) {
       await upsertEvidence(
         biz.business_id,
         'fl_sunbiz_probable_email',
-        raw.doc_number,
+        biz.doc_number,
         {
-          corp_num: raw.doc_number,
-          agent_name: raw.registered_agent,
+          corp_num: biz.doc_number,
+          agent_name: biz.registered_agent,
           domain,
           probable_emails: emails,
           confidence: PROBABLE_EMAIL_CONFIDENCE,
@@ -246,13 +209,10 @@ async function processOne(raw) {
     }
   }
 
-  // 3. Tag business state-verified
+  // 3. Tag business state-verified + flip owner_verified so we skip on re-run
   await tagStateVerified(biz.business_id);
 
-  // 4. Mark raw row resolved
-  await markRawResolved(raw.id, biz.business_id);
-
-  return { matched: true, emails: emailsCount };
+  return { emails: emailsCount };
 }
 
 async function runMatch() {
@@ -266,39 +226,32 @@ async function runMatch() {
   const t0 = Date.now();
   await logWorkerEvent({ eventType: 'start' });
 
-  const totalRaw = await db.query(`SELECT COUNT(*)::int AS c FROM sunbiz_raw`);
-  const unresolvedCount = await db.query(`SELECT COUNT(*)::int AS c FROM sunbiz_raw WHERE resolved = FALSE`);
-  console.log(`[sunbizMatchWorker] sunbiz_raw total=${totalRaw[0]?.c || 0}, unresolved=${unresolvedCount[0]?.c || 0}`);
+  const pendingCount = await db.query(
+    `SELECT COUNT(*)::int AS c FROM businesses WHERE sunbiz_doc_number IS NOT NULL AND owner_verified = FALSE`
+  );
+  console.log(`[sunbizMatchWorker] businesses pending enrichment=${pendingCount[0]?.c || 0}`);
 
   let totalSeen = 0;
-  let totalMatched = 0;
   let totalEmails = 0;
   let offset = 0;
-  let nextProgressMark = 1000;
+  let nextProgressMark = 5000;
 
   for (;;) {
-    const batch = await fetchUnresolvedBatch(offset);
+    const batch = await fetchUnprocessedBatch(offset);
     if (!batch || batch.length === 0) break;
 
-    let matchedInBatch = 0;
-    for (const raw of batch) {
+    for (const biz of batch) {
       totalSeen++;
-      const { matched, emails } = await processOne(raw);
-      if (matched) {
-        totalMatched++;
-        matchedInBatch++;
-        totalEmails += emails;
-      }
-      if (totalMatched >= nextProgressMark) {
-        console.log(`[sunbizMatchWorker] progress — scanned=${totalSeen} matched=${totalMatched} emails=${totalEmails}`);
-        nextProgressMark += 1000;
+      const { emails } = await processOne(biz);
+      totalEmails += emails;
+      if (totalSeen >= nextProgressMark) {
+        console.log(`[sunbizMatchWorker] progress — enriched=${totalSeen} probable_emails=${totalEmails}`);
+        nextProgressMark += 5000;
       }
     }
 
-    // Matched rows flipped to resolved=TRUE and dropped out of the WHERE clause —
-    // they no longer occupy positions in subsequent fetches.
-    // Unmatched rows remain at resolved=FALSE; advance offset past them to make progress.
-    offset += (batch.length - matchedInBatch);
+    // owner_verified flipped to TRUE — those rows drop out of the next fetch.
+    // offset stays at 0; window shrinks naturally.
     if (batch.length < BATCH_SIZE) break;
   }
 
@@ -306,11 +259,11 @@ async function runMatch() {
   await logWorkerEvent({
     eventType: 'end',
     recordsIn: totalSeen,
-    recordsOut: totalMatched,
+    recordsOut: totalEmails,
     durationMs,
   });
-  console.log(`[sunbizMatchWorker] DONE — scanned=${totalSeen} matched=${totalMatched} probable_emails=${totalEmails} duration_ms=${durationMs}`);
-  return { scanned: totalSeen, matched: totalMatched, probable_emails: totalEmails, duration_ms: durationMs };
+  console.log(`[sunbizMatchWorker] DONE — enriched=${totalSeen} probable_emails=${totalEmails} duration_ms=${durationMs}`);
+  return { enriched: totalSeen, probable_emails: totalEmails, duration_ms: durationMs };
 }
 
 if (require.main === module) {
