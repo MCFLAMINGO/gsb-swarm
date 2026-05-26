@@ -315,14 +315,24 @@ function rmrf(p) {
 
 // ── Process one cordata{N}.zip ────────────────────────────────────────────────
 async function processFile(digit) {
-  const zipPath = `/tmp/cordata${digit}.zip`;
+  const filesPath = process.env.SUNBIZ_FILES_PATH;
+  const zipPath = filesPath
+    ? `${filesPath}/cordata${digit}.zip`
+    : `/tmp/cordata${digit}.zip`;
   const extractDir = `/tmp/sunbiz${digit}`;
 
-  // Always clean stale state first
-  rmrf(zipPath);
+  // Always clean stale extraction dir
   rmrf(extractDir);
 
-  await downloadFile(digit, zipPath);
+  if (filesPath) {
+    if (!fs.existsSync(zipPath)) {
+      throw new Error(`SUNBIZ_FILES_PATH mode: ${zipPath} not found`);
+    }
+    console.log(`[sunbizWorker] FILE-PATH MODE — using ${zipPath} (skipping SFTP)`);
+  } else {
+    rmrf(zipPath);
+    await downloadFile(digit, zipPath);
+  }
 
   console.log(`[sunbizWorker] Extracting cordata${digit}.zip with 7z...`);
   await extractZip(zipPath, extractDir);
@@ -413,6 +423,10 @@ async function run() {
   if (process.env.SUNBIZ_MANUAL_TRIGGER !== 'true') {
     console.log('[sunbizWorker] Skipping auto-run — manual trigger required (set SUNBIZ_MANUAL_TRIGGER=true)');
     return;
+  }
+
+  if (process.env.SUNBIZ_FILES_PATH) {
+    console.log(`[sunbizWorker] FILE-PATH MODE — reading from ${process.env.SUNBIZ_FILES_PATH}`);
   }
 
   console.log('[sunbizWorker] Starting — 10-file split (cordata0-9.zip)');

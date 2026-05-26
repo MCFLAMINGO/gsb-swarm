@@ -1,0 +1,62 @@
+name: SunBiz SFTP Download
+
+on:
+  schedule:
+    # 1st of every month at 2am UTC
+    - cron: '0 2 1 * *'
+  workflow_dispatch:
+    # Allow manual trigger from GitHub UI
+
+jobs:
+  download-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get install -y sshpass
+
+      - name: Download cordata zips from FL DOS SFTP
+        run: |
+          mkdir -p /tmp/sunbiz
+          for i in 0 1 2 3 4 5 6 7 8 9; do
+            echo "Downloading cordata${i}.zip..."
+            sshpass -p 'PubAccess1845!' sftp -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=30 \
+              Public@sftp.floridados.gov:/doc/quarterly/cor/cordata${i}.zip \
+              /tmp/sunbiz/cordata${i}.zip
+            echo "cordata${i}.zip: $(du -sh /tmp/sunbiz/cordata${i}.zip | cut -f1)"
+          done
+
+      - name: Upload zips to Railway
+        run: |
+          for i in 0 1 2 3 4 5 6 7 8 9; do
+            echo "Uploading cordata${i}.zip to Railway..."
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -X POST \
+              -H "x-operator-token: ${{ secrets.SUNBIZ_OPERATOR_TOKEN }}" \
+              -F "file=@/tmp/sunbiz/cordata${i}.zip" \
+              https://gsb-swarm-production.up.railway.app/api/admin/sunbiz-upload)
+            if [ "$HTTP_STATUS" != "200" ]; then
+              echo "ERROR: Upload of cordata${i}.zip failed with HTTP $HTTP_STATUS"
+              exit 1
+            fi
+            echo "cordata${i}.zip uploaded OK (HTTP $HTTP_STATUS)"
+          done
+
+      - name: Set SUNBIZ_FILES_PATH and trigger worker
+        run: |
+          # Set the env var on Railway so sunbizWorker knows to use /tmp/sunbiz
+          # Then trigger the worker
+          HTTP_STATUS=$(curl -s -o /tmp/trigger_response.txt -w "%{http_code}" \
+            -X POST \
+            -H "x-operator-token: ${{ secrets.SUNBIZ_OPERATOR_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"filesPath": "/tmp/sunbiz"}' \
+            https://gsb-swarm-production.up.railway.app/api/admin/trigger-sunbiz)
+          cat /tmp/trigger_response.txt
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "ERROR: Trigger failed with HTTP $HTTP_STATUS"
+            exit 1
+          fi
+          echo "SunBiz worker triggered successfully"

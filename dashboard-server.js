@@ -1345,6 +1345,29 @@ app.post('/api/admin/trigger-irs-income', (req, res) => {
   });
 });
 
+// POST /api/admin/sunbiz-upload — receive cordata{N}.zip from GitHub Actions (SFTP bypass)
+const _sunbizUploadDir = '/tmp/sunbiz';
+const _sunbizUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      try { fs.mkdirSync(_sunbizUploadDir, { recursive: true }); } catch (_) {}
+      cb(null, _sunbizUploadDir);
+    },
+    filename: (req, file, cb) => cb(null, file.originalname),
+  }),
+});
+app.post('/api/admin/sunbiz-upload', (req, res, next) => {
+  const tok = req.headers['x-operator-token'];
+  if (tok !== (process.env.OPERATOR_TOKEN || 'localintel-migrate-2026')) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  _sunbizUpload.single('file')(req, res, err => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: 'no file' });
+    res.json({ status: 'saved', filename: req.file.filename, size: req.file.size });
+  });
+});
+
 // POST /api/admin/trigger-sunbiz — runs sunbizWorker immediately
 app.post('/api/admin/trigger-sunbiz', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
@@ -1355,8 +1378,10 @@ app.post('/api/admin/trigger-sunbiz', (req, res) => {
   setImmediate(async () => {
     try {
       const { spawn } = require('child_process');
+      const extraEnv = {};
+      if (req.body?.filesPath) extraEnv.SUNBIZ_FILES_PATH = req.body.filesPath;
       const child = spawn(process.execPath, ['workers/sunbizWorker.js'], {
-        cwd: __dirname, env: { ...process.env, SUNBIZ_MANUAL_TRIGGER: 'true' }, stdio: ['ignore','pipe','pipe'],
+        cwd: __dirname, env: { ...process.env, SUNBIZ_MANUAL_TRIGGER: 'true', ...extraEnv }, stdio: ['ignore','pipe','pipe'],
       });
       child.stdout.on('data', d => process.stdout.write('[sunbiz-trigger] ' + d));
       child.stderr.on('data', d => process.stderr.write('[sunbiz-trigger] ' + d));
