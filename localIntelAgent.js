@@ -8481,7 +8481,16 @@ router.get('/zip-signals/:zip', async (req, res) => {
   try {
     const row = await db.queryOne(`SELECT * FROM zip_signals WHERE zip = $1`, [req.params.zip]);
     if (!row) return res.status(404).json({ error: 'no signals for this ZIP yet' });
-    return res.json(row);
+    // Augment with contact_email counts from businesses table
+    // (websiteEnricherWorker writes to businesses, not zip_signals)
+    const emailStats = await db.queryOne(
+      `SELECT
+         COUNT(*) FILTER (WHERE contact_email IS NOT NULL)::int AS contact_email,
+         COUNT(*) FILTER (WHERE contact_email_source IS NOT NULL)::int AS contact_email_source
+       FROM businesses WHERE zip = $1`,
+      [req.params.zip]
+    );
+    return res.json({ ...row, ...emailStats });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
