@@ -86,17 +86,19 @@ async function setFilesCompleted(arr) {
 }
 
 // ── Fixed-width record parsing ────────────────────────────────────────────────
-// SunBiz cordata fixed-width layout (per FL DOS Corporate Data Dictionary):
-//   COR_NUMBER       cols 1-12    (offset 0,   len 12)
-//   COR_NAME         cols 13-132  (offset 12,  len 120) — name is 120 chars, not 192
-//   COR_STATUS       col  133     (offset 132, len 1)   — 'A' active, 'I' inactive, 'D' dissolved
-//   COR_STATE        cols 134-135 (offset 133, len 2)   — state of incorporation (most FL corps = 'FL')
-//   (downstream fields shifted -72 from previous mis-spec; principal-state/zip offsets approximated)
-//   COR_PRINC_STATE  cols ~254-255 (offset ~253, len 2)
-//   COR_PRINC_ZIP5   cols ~256-260 (offset ~255, len 5)
-//   COR_FILE_DATE    cols ~392-399 (offset ~391, len 8, MMDDYYYY)
+// SunBiz cordata fixed-width layout per OFFICIAL FL DOS schema
+// (dos.sunbiz.org/data-definitions/cor.html). Record length 1440 chars.
 // Column numbers in the spec are 1-based; offsets here are 0-based.
-// Filter uses COR_STATE (incorporation state) = 'FL' since most FL businesses incorporate in FL.
+//   COR_NUMBER       cols 1-12     (offset 0,   len 12)
+//   COR_NAME         cols 13-204   (offset 12,  len 192)
+//   COR_STATUS       col  205      (offset 204, len 1)   — 'A' active, 'I' inactive
+//   COR_FILING_TYPE  cols 206-220  (offset 205, len 15)
+//   COR_ADDR1        cols 221-262  (offset 220, len 42)
+//   COR_ADDR2        cols 263-304  (offset 262, len 42)
+//   COR_CITY         cols 305-332  (offset 304, len 28)
+//   COR_STATE        cols 333-334  (offset 332, len 2)   — principal state, filter === 'FL'
+//   COR_ZIP          cols 335-344  (offset 334, len 10)  — take first 5 chars after trim
+//   COR_FILE_DATE    cols 473-480  (offset 472, len 8)
 function slice(s, off, len) {
   return s.length > off ? s.substr(off, len).trim() : '';
 }
@@ -132,11 +134,11 @@ function parseZip(raw) {
 function parseRecord(line) {
   if (!line || line.length < 20) return null;
   const docNumber  = slice(line, 0, 12);
-  const corpName   = slice(line, 12, 120);
-  const status     = slice(line, 132, 1);
-  const state      = slice(line, 133, 2);
-  const filingDate = slice(line, 391, 8);
-  const zip        = parseZip(slice(line, 255, 9));
+  const corpName   = slice(line, 12, 192);
+  const status     = slice(line, 204, 1);
+  const state      = slice(line, 332, 2);
+  const filingDate = slice(line, 472, 8);
+  const zip        = parseZip(slice(line, 334, 10));
 
   if (!docNumber || !corpName) return null;
   // Active FL only — COR_STATUS is single char: 'A' = active, 'I' = inactive
@@ -346,7 +348,7 @@ async function processFile(digit) {
     totalLines++;
     if (totalLines <= 5) {
       console.log(`[sunbizWorker] SAMPLE LINE ${totalLines}:`, line.substring(0, 400));
-      console.log(`[sunbizWorker] OFFSET TEST: pos132="${line.substring(132,133)}" pos133="${line.substring(133,135)}" pos204="${line.substring(204,205)}" pos325="${line.substring(325,327)}"`);
+      console.log(`[sunbizWorker] OFFICIAL OFFSETS: status@204="${line.substring(204,205)}" state@332="${line.substring(332,334)}" zip@334="${line.substring(334,344)}" fileDate@472="${line.substring(472,480)}"`);
     }
     const rec = parseRecord(line);
     if (!rec) { skipped++; continue; }
@@ -407,7 +409,7 @@ async function processSingleFile(zipPath, tag) {
     totalLines++;
     if (totalLines <= 5) {
       console.log(`[sunbizWorker] SAMPLE LINE ${totalLines}:`, line.substring(0, 400));
-      console.log(`[sunbizWorker] OFFSET TEST: pos132="${line.substring(132,133)}" pos133="${line.substring(133,135)}" pos204="${line.substring(204,205)}" pos325="${line.substring(325,327)}"`);
+      console.log(`[sunbizWorker] OFFICIAL OFFSETS: status@204="${line.substring(204,205)}" state@332="${line.substring(332,334)}" zip@334="${line.substring(334,344)}" fileDate@472="${line.substring(472,480)}"`);
     }
     const rec = parseRecord(line);
     if (!rec) { skipped++; continue; }
