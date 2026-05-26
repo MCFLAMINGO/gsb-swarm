@@ -10265,9 +10265,79 @@ router.post('/ceo-query', express.json(), async (req, res) => {
 
 // ── B45: Subscriber LLM Chat Endpoint ─────────────────────────────────────────
 // POST /api/local-intel/chat
+// callLLMWithFallback — tries Anthropic Haiku first (15s), falls back to OpenAI gpt-4.1-mini.
+// systemText: string. messages: [{role,content}]. Returns { answer, model, tokensUsed }.
+async function callLLMWithFallback(systemText, messages) {
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const openaiKey    = process.env.OPENAI_API_KEY;
+
+  // ── Anthropic attempt ────────────────────────────────────────────────────
+  if (anthropicKey) {
+    try {
+      const ac = new AbortController();
+      const t  = setTimeout(() => ac.abort(), 15000);
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        signal: ac.signal,
+        headers: {
+          'x-api-key':         anthropicKey,
+          'anthropic-version': '2023-06-01',
+          'content-type':      'application/json',
+        },
+        body: JSON.stringify({
+          model:      'claude-haiku-4-5',
+          max_tokens: 900,
+          system:     systemText,
+          messages,
+        }),
+      });
+      clearTimeout(t);
+      const j = await res.json();
+      const text = j?.content?.[0]?.text || '';
+      if (text.trim().length > 10) {
+        const cached   = Number(j?.usage?.cache_read_input_tokens || 0);
+        const uncached = Number(j?.usage?.cache_creation_input_tokens || j?.usage?.input_tokens || 0);
+        return { answer: text, model: 'claude-haiku-4-5', tokensUsed: cached + uncached + Number(j?.usage?.output_tokens || 0) };
+      }
+      console.warn('[chat] Anthropic returned empty/error — falling back to OpenAI:', j?.error?.message || 'empty content');
+    } catch (e) {
+      console.warn('[chat] Anthropic fetch failed — falling back to OpenAI:', e.message);
+    }
+  }
+
+  // ── OpenAI fallback ───────────────────────────────────────────────────────
+  if (openaiKey) {
+    const ac = new AbortController();
+    const t  = setTimeout(() => ac.abort(), 20000);
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      signal: ac.signal,
+      headers: {
+        'Authorization': `Bearer ${openaiKey}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({
+        model:      'gpt-4.1-mini',
+        max_tokens: 900,
+        messages:   [{ role: 'system', content: systemText }, ...messages],
+      }),
+    });
+    clearTimeout(t);
+    const j = await res.json();
+    const text = j?.choices?.[0]?.message?.content || '';
+    if (text.trim().length > 10) {
+      const usage = j?.usage || {};
+      return { answer: text, model: 'gpt-4.1-mini', tokensUsed: (usage.prompt_tokens || 0) + (usage.completion_tokens || 0) };
+    }
+    throw new Error(`OpenAI error: ${j?.error?.message || 'empty response'}`);
+  }
+
+  throw new Error('No LLM configured — set ANTHROPIC_API_KEY or OPENAI_API_KEY');
+}
+
 // Phone-based subscriber auth (5 free trial queries, then $9.99/mo gates).
 // Loads zip_signals + business/property context, computes data_confidence,
-// and calls Claude Haiku via Anthropic API with grounded prompt.
+// and calls LLM (Anthropic Haiku → OpenAI gpt-4.1-mini fallback) with grounded prompt.
 router.post('/chat', async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   try {
@@ -10622,10 +10692,6 @@ For each ZIP: state the score and the single most important data point.`;
         });
       }
 
-      if (!process.env.ANTHROPIC_API_KEY) {
-        return res.json({ ok: false, error: 'LLM service not configured', data_confidence, missing_signals: missing });
-      }
-
       // Load conversation history for this subscriber+county (enables elaboration follow-ups)
       let countyConvMessages = [];
       try {
@@ -10681,42 +10747,13 @@ ${scoringGuide}
 ${countyDisplayName} COUNTY INTELLIGENCE (${rows.length} ZIPs):
 ${zipSummaries}${sunbizCtxCounty.summary ? `\n\n${sunbizCtxCounty.summary}` : ''}`;
 
-      const _llmAbort1 = new AbortController();
-      const _llmTimer1 = setTimeout(() => _llmAbort1.abort(), 25000);
-      const llmRes = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        signal: _llmAbort1.signal,
-        headers: {
-          'x-api-key':         process.env.ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-beta':    'prompt-caching-2024-07-31',
-          'content-type':      'application/json',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5',
-          max_tokens: 900,
-          // Cache the county ZIP data block — same prefix reused on follow-up county questions
-          system: [{
-            type:          'text',
-            text:          groundingContextCounty,
-            cache_control: { type: 'ephemeral' },
-          }],
-          messages: countyConvMessages,
-        }),
-      });
-      clearTimeout(_llmTimer1);
-      const llmData = await llmRes.json();
-      const rawCountyText = (llmData && llmData.content && llmData.content[0] && llmData.content[0].text) || '';
-      const answerCounty = rawCountyText || 'Unable to generate answer.';
-      const cachedCounty   = Number(llmData?.usage?.cache_read_input_tokens || 0);
-      const uncachedCounty = Number(llmData?.usage?.cache_creation_input_tokens || llmData?.usage?.input_tokens || 0);
-      const tokensUsedCounty = cachedCounty + uncachedCounty + Number(llmData?.usage?.output_tokens || 0);
+      const { answer: answerCounty, model: usedModelCounty, tokensUsed: tokensUsedCounty } =
+        await callLLMWithFallback(groundingContextCounty, countyConvMessages);
+      const rawCountyText = answerCounty;
+      const cachedCounty = 0, uncachedCounty = tokensUsedCounty;
 
       // B73c: only count an attempt when LLM actually returned a real answer.
-      const gotRealAnswerCounty =
-        !llmData?.error &&
-        typeof rawCountyText === 'string' &&
-        rawCountyText.trim().length > 10;
+      const gotRealAnswerCounty = typeof rawCountyText === 'string' && rawCountyText.trim().length > 10;
 
       if (data_confidence > 0) {
         db.query(
@@ -10724,7 +10761,7 @@ ${zipSummaries}${sunbizCtxCounty.summary ? `\n\n${sunbizCtxCounty.summary}` : ''
              (caller_id, question, zip, data_confidence, missing_signals, llm_model,
               tokens_used, cached_tokens, uncached_tokens, answer_preview, answer)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-          [phone, String(question), placeResult.countyKey, data_confidence, missing, 'claude-haiku-4-5',
+          [phone, String(question), placeResult.countyKey, data_confidence, missing, usedModelCounty || 'llm',
            tokensUsedCounty, cachedCounty, uncachedCounty,
            String(answerCounty).slice(0, 500), String(answerCounty)]
         ).catch(() => {});
@@ -10935,67 +10972,20 @@ ${grounding}`;
     conversationMessages.push({ role: 'user', content: String(question) });
 
     // F) LLM call — prompt caching on system block (Anthropic beta)
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return res.json({
-        ok: false,
-        error: 'LLM service not configured',
-        data_confidence: dataConfidence,
-        missing_signals: missingSignals,
-      });
-    }
-
     let answer = '';
     let tokensUsed = 0;
     let cachedTokens = 0;
     let uncachedTokens = 0;
-    const model = 'claude-haiku-4-5';
+    let usedModel = 'unknown';
     try {
-      const _llmAbort2 = new AbortController();
-      const _llmTimer2 = setTimeout(() => _llmAbort2.abort(), 25000);
-      const r = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        signal: _llmAbort2.signal,
-        headers: {
-          'content-type':    'application/json',
-          'x-api-key':       apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-beta':  'prompt-caching-2024-07-31',  // enables cache_control blocks
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 900,
-          // System as typed content block — cache_control pins this prefix for 5 min
-          // Same zip_signals context reused across all turns: ~85% input cost reduction on turn 2+
-          system: [{
-            type:          'text',
-            text:          systemText,
-            cache_control: { type: 'ephemeral' },
-          }],
-          messages: conversationMessages,
-        }),
-      });
-      clearTimeout(_llmTimer2);
-      const j = await r.json();
-      if (j && Array.isArray(j.content) && j.content[0] && j.content[0].text) {
-        answer = j.content[0].text;
-      } else if (j && j.error) {
-        return res.status(502).json({
-          ok: false,
-          error: `LLM error: ${j.error.message || 'unknown'}`,
-          data_confidence: dataConfidence,
-          missing_signals: missingSignals,
-        });
-      }
-      if (j && j.usage) {
-        cachedTokens   = Number(j.usage.cache_read_input_tokens  || 0);
-        uncachedTokens = Number(j.usage.cache_creation_input_tokens || j.usage.input_tokens || 0);
-        tokensUsed     = cachedTokens + uncachedTokens + Number(j.usage.output_tokens || 0);
-      }
+      const llmResult = await callLLMWithFallback(systemText, conversationMessages);
+      answer     = llmResult.answer;
+      tokensUsed = llmResult.tokensUsed;
+      usedModel  = llmResult.model;
     } catch (e) {
       return res.status(502).json({
         ok: false,
-        error: `LLM fetch failed: ${e.message}`,
+        error: `LLM unavailable: ${e.message}`,
         data_confidence: dataConfidence,
         missing_signals: missingSignals,
       });
@@ -11008,7 +10998,7 @@ ${grounding}`;
           (caller_id, question, zip, data_confidence, missing_signals, llm_model,
            tokens_used, cached_tokens, uncached_tokens, answer_preview, answer)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [phone, String(question), zip, dataConfidence, missingSignals, model,
+        [phone, String(question), zip, dataConfidence, missingSignals, usedModel,
          tokensUsed, cachedTokens, uncachedTokens,
          String(answer).slice(0, 500), String(answer)]
       ).catch(() => {});
