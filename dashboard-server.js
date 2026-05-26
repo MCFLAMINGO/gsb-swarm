@@ -1378,6 +1378,7 @@ app.post('/api/admin/trigger-sunbiz', (req, res) => {
   setImmediate(async () => {
     try {
       if (req.body?.force === true) {
+        const db = require('./lib/db');
         await db.query(`DELETE FROM sunbiz_import_state WHERE key IN ('import_complete','files_completed')`);
         console.log('[admin] SunBiz force flag set — deleted stale checkpoint rows (import_complete, files_completed)');
       }
