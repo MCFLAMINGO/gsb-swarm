@@ -133,17 +133,29 @@ function parseZip(raw) {
 
 function parseRecord(line) {
   if (!line || line.length < 20) return null;
-  const docNumber  = slice(line, 0, 12);
-  const corpName   = slice(line, 12, 192);
-  const status     = slice(line, 204, 1);
-  const state      = slice(line, 332, 2);
-  const filingDate = slice(line, 472, 8);
-  const zip        = parseZip(slice(line, 334, 10));
+  const docNumber        = slice(line, 0, 12);
+  const corpName         = slice(line, 12, 192);
+  const status           = slice(line, 204, 1);
+  const filingType       = slice(line, 205, 15);
+  const principalAddr    = slice(line, 220, 42);
+  const principalCity    = slice(line, 304, 28);
+  const principalState   = slice(line, 332, 2);
+  const principalZipRaw  = slice(line, 334, 10);
+  const mailingAddr      = slice(line, 346, 42);
+  const mailingCity      = slice(line, 430, 28);
+  const mailingState     = slice(line, 458, 2);
+  const mailingZip       = parseZip(slice(line, 460, 10));
+  const filingDate       = slice(line, 472, 8);
+  const lastEventDate    = slice(line, 495, 8);
+  const registeredAgent  = slice(line, 544, 42);
+  const agentAddress     = slice(line, 587, 42);
+  const agentCity        = slice(line, 629, 28);
+  const zip              = parseZip(principalZipRaw);
 
   if (!docNumber || !corpName) return null;
   // Active FL only — COR_STATUS is single char: 'A' = active, 'I' = inactive
   if (status.toUpperCase() !== 'A') return null;
-  if (state.toUpperCase() !== 'FL') return null;
+  if (principalState.toUpperCase() !== 'FL') return null;
 
   return {
     sunbiz_doc_number: docNumber,
@@ -156,6 +168,20 @@ function parseRecord(line) {
     category_group: 'general',
     confidence_score: 0.5,
     zip: zip || '00000',
+    // raw fields for sunbiz_raw
+    filing_type:      filingType   || null,
+    principal_address: principalAddr || null,
+    principal_city:   principalCity || null,
+    principal_state:  principalState || null,
+    principal_zip:    zip           || null,
+    mailing_address:  mailingAddr   || null,
+    mailing_city:     mailingCity   || null,
+    mailing_state:    mailingState  || null,
+    mailing_zip:      mailingZip    || null,
+    last_event_date:  parseFilingDate(lastEventDate) || null,
+    registered_agent: registeredAgent || null,
+    agent_address:    agentAddress ? `${agentAddress}${agentCity ? ', ' + agentCity : ''}` : null,
+    filed_date:       parseFilingDate(filingDate) || null,
   };
 }
 
@@ -195,6 +221,48 @@ async function upsertBatch(records) {
       last_confirmed     = NOW(),
       updated_at         = NOW()
   `, params);
+
+  // Also upsert into sunbiz_raw so sunbizMatchWorker has state-registry fields to work with
+  const rawClauses = records.map((r, i) => {
+    const b = i * 16;
+    return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12},$${b+13},$${b+14},$${b+15},$${b+16},NOW())`;
+  }).join(',');
+  const rawParams = records.flatMap(r => [
+    r.sunbiz_doc_number,
+    r.name,
+    r.filing_type,
+    r.status,
+    r.principal_address,
+    r.principal_city,
+    r.principal_state,
+    r.principal_zip,
+    r.mailing_address,
+    r.mailing_city,
+    r.mailing_state,
+    r.mailing_zip,
+    r.registered_agent,
+    r.agent_address,
+    r.filed_date,
+    r.last_event_date,
+  ]);
+  await db.query(`
+    INSERT INTO sunbiz_raw
+      (doc_number, entity_name, entity_type, status,
+       principal_address, principal_city, principal_state, principal_zip,
+       mailing_address, mailing_city, mailing_state, mailing_zip,
+       registered_agent, agent_address, filed_date, last_event_date, imported_at)
+    VALUES ${rawClauses}
+    ON CONFLICT (doc_number) DO UPDATE SET
+      entity_name       = EXCLUDED.entity_name,
+      registered_agent  = EXCLUDED.registered_agent,
+      agent_address     = EXCLUDED.agent_address,
+      principal_zip     = EXCLUDED.principal_zip,
+      principal_city    = EXCLUDED.principal_city,
+      status            = EXCLUDED.status,
+      filed_date        = COALESCE(EXCLUDED.filed_date, sunbiz_raw.filed_date),
+      last_event_date   = COALESCE(EXCLUDED.last_event_date, sunbiz_raw.last_event_date),
+      imported_at       = NOW()
+  `, rawParams);
 }
 
 // ── Aggregate sunbiz_new_12mo into zip_signals ────────────────────────────────
