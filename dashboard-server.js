@@ -1092,17 +1092,20 @@ app.post('/api/admin/trigger-fcc', (req, res) => {
 });
 
 // POST /api/admin/trigger-world-model — runs worldModelWorker.runPass() immediately
+// Sets WORLD_MODEL_FORCE=true so the worker re-runs even if a heartbeat says it ran recently.
 app.post('/api/admin/trigger-world-model', (req, res) => {
   const tok = req.headers['x-operator-token'] || req.body?.token;
   if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
     return res.status(401).json({ error: 'unauthorized' });
   }
-  res.json({ status: 'started', message: 'World model worker triggered — peer cohorts, growth scores, forecasts, anomaly detection' });
+  res.json({ status: 'started', message: 'World model worker triggered (forced) — peer cohorts, growth scores, forecasts, anomaly detection' });
   setImmediate(async () => {
     try {
       const { spawn } = require('child_process');
       const child = spawn(process.execPath, ['workers/worldModelWorker.js'], {
-        cwd: __dirname, env: { ...process.env }, stdio: ['ignore','pipe','pipe'],
+        cwd: __dirname,
+        env: { ...process.env, WORLD_MODEL_FORCE: 'true' },
+        stdio: ['ignore','pipe','pipe'],
       });
       child.stdout.on('data', d => process.stdout.write('[world-model-trigger] ' + d));
       child.stderr.on('data', d => process.stderr.write('[world-model-trigger] ' + d));
@@ -1392,6 +1395,29 @@ app.post('/api/admin/trigger-sunbiz', (req, res) => {
       child.stderr.on('data', d => process.stderr.write('[sunbiz-trigger] ' + d));
       child.on('close', code => console.log('[admin] Sunbiz worker done (exit ' + code + ')'));
     } catch (e) { console.error('[admin] sunbiz trigger failed:', e.message); }
+  });
+});
+
+// POST /api/admin/trigger-sunbiz-match — B120 — matches sunbiz_raw to businesses
+// and enriches with officer/agent data + probable email derivation.
+app.post('/api/admin/trigger-sunbiz-match', (req, res) => {
+  const tok = req.headers['x-operator-token'] || req.body?.token;
+  if (tok !== process.env.OPERATOR_TOKEN && tok !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ status: 'started', message: 'SunBiz match worker triggered — sunbiz_raw → businesses, officer/agent enrichment, probable email derivation' });
+  setImmediate(async () => {
+    try {
+      const { spawn } = require('child_process');
+      const child = spawn(process.execPath, ['workers/sunbizMatchWorker.js'], {
+        cwd: __dirname,
+        env: { ...process.env, SUNBIZ_MATCH_MANUAL_TRIGGER: 'true' },
+        stdio: ['ignore','pipe','pipe'],
+      });
+      child.stdout.on('data', d => process.stdout.write('[sunbiz-match-trigger] ' + d));
+      child.stderr.on('data', d => process.stderr.write('[sunbiz-match-trigger] ' + d));
+      child.on('close', code => console.log('[admin] sunbiz-match worker done (exit ' + code + ')'));
+    } catch (e) { console.error('[admin] sunbiz-match trigger failed:', e.message); }
   });
 });
 

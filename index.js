@@ -39,6 +39,8 @@ const workers = [
   { name: 'Yellow Pages',         file: 'workers/yellowPagesScraper.js' },
   // { name: 'FL SunBiz',            file: 'workers/sunbizWorker.js' },
   // MANUAL TRIGGER ONLY — SFTP download, do not auto-start. Trigger from admin panel.
+  // { name: 'SunBiz Match',         file: 'workers/sunbizMatchWorker.js' },
+  // MANUAL TRIGGER ONLY (B120) — gated on SUNBIZ_MATCH_MANUAL_TRIGGER=true; trigger via POST /api/admin/trigger-sunbiz-match.
   { name: 'Business Merge',       file: 'workers/businessMergeWorker.js' },
   // ── LocalIntel intelligence layers (ZIP-level economic data) ─────────────
   { name: 'IRS SOI',              file: 'workers/irsSoiWorker.js' },
