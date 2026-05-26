@@ -4535,3 +4535,30 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 **Problem:** fccBroadbandWorker was implemented but not spawned; overpassWorker skip logic used wrong field; psycho_index was computed but never written to zip_signals; no fcc_vintage_date column existed.
 **Fix:** Added fccBroadbandWorker to index.js spawn list; fixed overpassWorker skip to use zip_signals.osm_updated_at (90-day TTL); acsWorker now writes psycho_index after ACS run; migration 049 adds fcc_vintage_date DATE column.
 **Result:** FCC worker active (needs Railway env vars FCC_BDC_USERNAME + FCC_BDC_API_KEY); OSM skips correctly; psycho_index populates on next ACS cycle. ✅
+
+---
+## B119 — SunBiz GitHub Actions SFTP bypass
+**Date:** 2026-05-25/26
+**Commits:** 73763fd, 323e4ed, e083077, 211d4c8, e2e5ed8, 8dce835, 46001e4, e8595a1
+
+**Problem:** FL DOS SFTP (sftp.floridados.gov) blocks all cloud/datacenter IPs via Cloudflare WAF. GitHub Actions (Azure westcentralus) and Railway static IP (162.220.234.15) both get "Connection reset by peer". Browser portal at https://sftp.floridados.gov works fine.
+
+**Fix:**
+- Added POST /api/admin/sunbiz-upload endpoint (multer, saves to /tmp/sunbiz/, auth-gated with x-operator-token)
+- Modified sunbizWorker.js to read from SUNBIZ_FILES_PATH when set, bypassing SFTP entirely
+- Added POST /api/admin/trigger-sunbiz force flag — clears stale checkpoint from sunbiz_import_state before re-running
+- Fixed sunbizWorker.js to handle single cordata.zip + corevent.zip (not split cordata0-9.zip)
+- Fixed cordata parsing offsets using official FL DOS schema (dos.sunbiz.org/data-definitions/cor.html): status@204, state@332, zip@334, fileDate@472, name 12-204
+- Manual upload flow: user downloads from browser portal, uploads via curl to Railway endpoint
+
+**Result:** 367,762 FL active corporation records parsed and upserted to sunbiz_raw in Postgres. cordata complete from 1,260,599 total lines (892,837 inactive/non-FL skipped). corevent processing also running.
+
+**Also this session:**
+- B117: localintel-landing canonical tags, og:url fix (https → https://www.thelocalintel.com/), 301 redirects
+- B118: robots.txt block merchant/admin/inbox/login (clean paths + .html)
+- BEA API error 21: server-side temporary disable during annual revision — no action needed
+- FCC BDC worker: Railway creds (FCC_BDC_USERNAME, FCC_BDC_API_KEY) confirmed set
+- deposit-listener: base.llamarpc.com SSL 525 error — needs BASE_RPC_URL env var update
+- LODES_FORCE=true set in Railway env
+
+**Note:** SunBiz updates quarterly (Jan, Apr, Jul, Oct). Future runs: download cordata.zip + corevent.zip from https://sftp.floridados.gov/doc/quarterly/cor/, upload via curl, trigger with force=true.
