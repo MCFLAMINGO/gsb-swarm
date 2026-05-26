@@ -345,7 +345,8 @@ async function processFile(digit) {
   for await (const line of rl) {
     totalLines++;
     if (totalLines <= 5) {
-      console.log(`[sunbizWorker] SAMPLE LINE ${totalLines}:`, line.substring(0, 200));
+      console.log(`[sunbizWorker] SAMPLE LINE ${totalLines}:`, line.substring(0, 400));
+      console.log(`[sunbizWorker] OFFSET TEST: pos132="${line.substring(132,133)}" pos133="${line.substring(133,135)}" pos204="${line.substring(204,205)}" pos325="${line.substring(325,327)}"`);
     }
     const rec = parseRecord(line);
     if (!rec) { skipped++; continue; }
@@ -405,7 +406,8 @@ async function processSingleFile(zipPath, tag) {
   for await (const line of rl) {
     totalLines++;
     if (totalLines <= 5) {
-      console.log(`[sunbizWorker] SAMPLE LINE ${totalLines}:`, line.substring(0, 200));
+      console.log(`[sunbizWorker] SAMPLE LINE ${totalLines}:`, line.substring(0, 400));
+      console.log(`[sunbizWorker] OFFSET TEST: pos132="${line.substring(132,133)}" pos133="${line.substring(133,135)}" pos204="${line.substring(204,205)}" pos325="${line.substring(325,327)}"`);
     }
     const rec = parseRecord(line);
     if (!rec) { skipped++; continue; }
