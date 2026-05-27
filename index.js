@@ -65,7 +65,7 @@ function spawnWorker({ name, file }) {
   const workerPath = path.join(__dirname, file);
   // Workers are background jobs — give each forked process a pool of 2.
   // Main server (dashboard-server) keeps its own pool at DB_POOL_MAX default (10).
-  const workerEnv = { ...process.env, DB_POOL_MAX: '2' };
+  const workerEnv = { ...process.env, DB_POOL_MAX: '1' };
   const child = fork(workerPath, [], { silent: false, env: workerEnv });
 
   child.on('error', (err) => console.error(`[${name}] ERROR: ${err.message}`));

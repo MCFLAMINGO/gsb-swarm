@@ -14,8 +14,8 @@ const pool = new Pool({
 const db = { query: (sql, params) => pool.query(sql, params) };
 
 // Retry wrapper — pre-deploy runs while old container is still draining connections.
-// 20 retries × 5s = 100s window for old container connections to fully drain.
-async function withRetry(fn, label, retries = 20, delayMs = 5000) {
+// 30 retries × 5s = 150s window for old container connections to fully drain.
+async function withRetry(fn, label, retries = 30, delayMs = 5000) {
   for (let i = 1; i <= retries; i++) {
     try {
       return await fn();
