@@ -31,7 +31,7 @@ const LOG_PATH  = path.join(BASE_DIR, 'data', 'mcp_probe_log.json'); // fallback
 const ZIPS_PATH = path.join(__dirname, 'flZipData.json');
 const pgStore   = require('../lib/pgStore');
 
-const CYCLE_MS      = 20 * 60 * 1000;  // 20 min
+const CYCLE_MS      = 24 * 60 * 60 * 1000;  // 24h — MCP endpoints don’t change hourly
 const STAGGER_MS    =  2 * 60 * 1000;  // 2 min startup delay
 const MAX_LOG       = 500;
 const MCP_URL       = 'http://localhost:8080/api/local-intel/mcp';

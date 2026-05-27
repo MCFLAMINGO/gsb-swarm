@@ -504,7 +504,7 @@ app.get('/budget-status', (req, res) => {
 
 // ── Auto-start loop ───────────────────────────────────────────────────────────
 
-const CYCLE_INTERVAL_MS = 60 * 60 * 1000; // Every 1 hour (slowed from 2min — data not changing rapidly)
+const CYCLE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h — ZIP coordination stable day-to-day
 
 app.listen(PORT, async () => {
   console.log(`[ZipCoordinator] Running on port ${PORT}`);

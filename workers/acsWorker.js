@@ -409,7 +409,7 @@ async function run() {
 }
 
 // ── Schedule ──────────────────────────────────────────────────────────────────
-const CYCLE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CYCLE_MS = 30 * 24 * 60 * 60 * 1000; // 30d — ACS census data is annual, monthly refresh is plenty
 const SKIP_FRESH_MS = 6 * 60 * 60 * 1000;
 (async () => {
   const forceRun = process.env.ACS_FORCE === 'true';

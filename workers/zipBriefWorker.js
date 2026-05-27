@@ -20,7 +20,7 @@
 const db = require('../lib/db');
 const { validateAll } = require('./briefValidator');
 
-const CYCLE_MS   = 4 * 60 * 60 * 1000; // 4 hours
+const CYCLE_MS   = 24 * 60 * 60 * 1000; // 24h — ZIP briefs don’t need rebuilding every 4h
 const STAGGER_MS = 3 * 60 * 1000;       // 3 min after startup
 const FRESH_INTERVAL = '7 days';
 const FULL_REFRESH = process.env.FULL_REFRESH === 'true';

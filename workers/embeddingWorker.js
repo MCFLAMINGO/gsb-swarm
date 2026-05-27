@@ -36,7 +36,7 @@ const SIDECAR     = path.join(__dirname, 'embed_server.py');
 
 const EMBED_PORT  = 8765;
 const BATCH_SIZE  = 64;
-const CYCLE_MS    = 6 * 60 * 60 * 1000;
+const CYCLE_MS    = 7 * 24 * 60 * 60 * 1000; // 7d — embeddings only need refresh weekly
 const STAGGER_MS  = 8 * 60 * 1000; // wait 8 min — let briefs build first
 
 let sidecarProc   = null;

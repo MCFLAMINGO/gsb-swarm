@@ -27,7 +27,7 @@ const db                                   = require('../lib/db');
 // ── Config ────────────────────────────────────────────────────────────────────
 const BASE_DIR       = path.join(__dirname, '..');
 const ZONES_PATH     = path.join(BASE_DIR, 'data', 'spendingZones.json');  // static seed
-const CYCLE_INTERVAL = 30 * 60 * 1000;  // 30 min
+const CYCLE_INTERVAL = 24 * 60 * 60 * 1000;  // 24h — ZIP signals stable day-to-day
 const ZIPS_PER_CYCLE = 5;
 const BRIEF_TTL_H    = 48;
 const FULL_REFRESH   = process.env.FULL_REFRESH === 'true';

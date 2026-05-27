@@ -22,7 +22,7 @@
 const pgStore = require('../lib/pgStore');
 const db      = require('../lib/db');
 
-const CYCLE_MS   = 30 * 60 * 1000; // 30 min
+const CYCLE_MS   = 24 * 60 * 60 * 1000; // 24h — routing patterns stable day-to-day
 const STAGGER_MS =  5 * 60 * 1000; // wait 5 min after startup
 
 const LOW_SCORE_THRESHOLD = 50;

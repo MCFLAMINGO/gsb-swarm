@@ -2231,7 +2231,7 @@ async function runCensusLayer() {
 // The schedule file controls whether each sub-layer actually re-fetches —
 // daily check is cheap, actual Census fetches only happen on their cadence.
 
-const CENSUS_INTERVAL = 24 * 60 * 60 * 1000;
+const CENSUS_INTERVAL = 30 * 24 * 60 * 60 * 1000; // 30d — census data is annual
 (async () => {
   const hb = require('../lib/workerHeartbeat');
   if (await hb.isFresh('censusLayerWorker', CENSUS_INTERVAL)) {
