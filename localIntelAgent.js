@@ -9035,6 +9035,24 @@ router.post('/admin/seed-business', express.json(), async (req, res) => {
   }
 });
 
+// ── GET /api/local-intel/admin/dispatch-token/:business_id ──────────────────
+// Returns dispatch_token for any business — admin testing bypass, no email needed.
+router.get('/admin/dispatch-token/:business_id', async (req, res) => {
+  if (req.headers['x-admin-token'] !== 'localintel-migrate-2026')
+    return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const row = await db.queryOne(
+      `SELECT business_id, name, zip, dispatch_token FROM businesses WHERE business_id = $1 LIMIT 1`,
+      [req.params.business_id]
+    );
+    if (!row) return res.status(404).json({ error: 'business not found' });
+    return res.json({ ok: true, business_id: row.business_id, name: row.name, zip: row.zip, dispatch_token: row.dispatch_token });
+  } catch (err) {
+    console.error('[admin/dispatch-token]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Tier 3 per-business MCP proxy ──────────────────────────────────────────
 // GET  /.well-known/mcp/:business_id  → discovery manifest (no auth)
 // POST /mcp/:business_id              → JSON-RPC (proxy or hosted mode, no auth)
