@@ -63,13 +63,16 @@ const STAGGER_DELAY_MS = 2000; // 2s between each worker to avoid RPC rate limit
 
 function spawnWorker({ name, file }) {
   const workerPath = path.join(__dirname, file);
-  const child = fork(workerPath, [], { silent: false, env: process.env });
+  // Workers are background jobs — give each forked process a pool of 2.
+  // Main server (dashboard-server) keeps its own pool at DB_POOL_MAX default (10).
+  const workerEnv = { ...process.env, DB_POOL_MAX: '2' };
+  const child = fork(workerPath, [], { silent: false, env: workerEnv });
 
   child.on('error', (err) => console.error(`[${name}] ERROR: ${err.message}`));
   child.on('exit', (code) => {
     console.log(`[${name}] exited with code ${code}. Restarting in 5s...`);
     setTimeout(() => {
-      const newChild = fork(workerPath, [], { silent: false, env: process.env });
+      const newChild = fork(workerPath, [], { silent: false, env: workerEnv });
       processes.push(newChild);
     }, 5000);
   });
