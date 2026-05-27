@@ -279,11 +279,17 @@ async function runPass() {
 
 // ── Daemon loop ───────────────────────────────────────────────────────────────
 (async function main() {
+  const hb = require('../lib/workerHeartbeat');
+  const FRESH_MS = LOOP_SLEEP_H * 60 * 60 * 1000;
   console.log('[irs-soi] Worker started');
   while (true) {
-    try { await runPass(); }
-    catch (err) { console.error('[irs-soi] Pass crashed:', err.message); }
+    if (await hb.isFresh('irsSoiWorker', FRESH_MS)) {
+      console.log('[irs-soi] Fresh — skipping pass');
+    } else {
+      try { await runPass(); await hb.ping('irsSoiWorker'); }
+      catch (err) { console.error('[irs-soi] Pass crashed:', err.message); }
+    }
     console.log(`[irs-soi] Sleeping ${LOOP_SLEEP_H}h`);
-    await sleep(LOOP_SLEEP_H * 60 * 60 * 1000);
+    await sleep(FRESH_MS);
   }
 })();

@@ -149,15 +149,21 @@ async function runPass() {
 }
 
 (async function main() {
+  const hb = require('../lib/workerHeartbeat');
+  const FRESH_MS = LOOP_H * 60 * 60 * 1000;
   console.log('[sjcArcGis] Worker started');
   while (true) {
-    try { await runPass(); }
-    catch (err) {
-      console.error('[sjcArcGis] Pass crashed:', err.message);
-      await logWorkerEvent({ eventType: 'error', error: err.message });
+    if (await hb.isFresh('sjcArcGisWorker', FRESH_MS)) {
+      console.log('[sjcArcGis] Fresh — skipping pass');
+    } else {
+      try { await runPass(); await hb.ping('sjcArcGisWorker'); }
+      catch (err) {
+        console.error('[sjcArcGis] Pass crashed:', err.message);
+        await logWorkerEvent({ eventType: 'error', error: err.message });
+      }
     }
     console.log(`[sjcArcGis] Sleeping ${LOOP_H}h`);
-    await sleep(LOOP_H * 60 * 60 * 1000);
+    await sleep(FRESH_MS);
   }
 })();
 

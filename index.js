@@ -16,9 +16,9 @@ const workers = [
   { name: 'Wallet Profiler',    file: 'walletProfiler.js' },
   { name: 'Alpha Scanner',      file: 'alphaScanner.js' },
   { name: 'Thread Writer',      file: 'threadWriter.js' },
-  { name: 'Local Intel',        file: 'localIntelWorker.js' },
+  // localIntelWorker.js — REMOVED: pre-Postgres legacy, wrote to data/localIntel.json flat file, 2-ZIP scope
+  // dataIngestWorker.js   — REMOVED: pre-Postgres legacy, wrote to data/localIntel.json flat file, SJC-only ZIP filter
   { name: 'Local Intel MCP',    file: 'localIntelMCP.js' },
-  { name: 'Data Ingest',        file: 'dataIngestWorker.js' },
   { name: 'Zip Coordinator',    file: 'workers/zipCoordinatorWorker.js' },
   { name: 'Enrichment Agent',   file: 'workers/enrichmentAgent.js' },
   { name: 'ACP Broadcaster',    file: 'workers/acpBroadcaster.js' },

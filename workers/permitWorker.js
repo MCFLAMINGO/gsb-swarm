@@ -447,12 +447,18 @@ async function materializeBpsSignals() {
 
 // ── Daemon ────────────────────────────────────────────────────────────────────
 (async function main() {
+  const hb = require('../lib/workerHeartbeat');
+  const FRESH_MS = LOOP_H * 60 * 60 * 1000;
   console.log('[permitWorker] Worker started');
   while (true) {
-    try { await runPass(); }
-    catch (err) { console.error('[permitWorker] Pass crashed:', err.message); }
+    if (await hb.isFresh('permitWorker', FRESH_MS)) {
+      console.log('[permitWorker] Fresh — skipping pass');
+    } else {
+      try { await runPass(); await hb.ping('permitWorker'); }
+      catch (err) { console.error('[permitWorker] Pass crashed:', err.message); }
+    }
     console.log(`[permitWorker] Sleeping ${LOOP_H}h`);
-    await sleep(LOOP_H * 60 * 60 * 1000);
+    await sleep(FRESH_MS);
   }
 })();
 

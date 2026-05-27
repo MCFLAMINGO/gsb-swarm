@@ -489,11 +489,17 @@ async function runPass() {
 }
 
 (async function main() {
+  const hb = require('../lib/workerHeartbeat');
+  const FRESH_MS = LOOP_SLEEP_H * 60 * 60 * 1000;
   console.log('[overpass] Worker started');
   while (true) {
-    try { await runPass(); }
-    catch (err) { console.error('[overpass] Pass crashed:', err.message); }
+    if (await hb.isFresh('overpassWorker', FRESH_MS)) {
+      console.log('[overpass] Fresh — skipping pass');
+    } else {
+      try { await runPass(); await hb.ping('overpassWorker'); }
+      catch (err) { console.error('[overpass] Pass crashed:', err.message); }
+    }
     console.log(`[overpass] Sleeping ${LOOP_SLEEP_H}h until next pass`);
-    await sleep(LOOP_SLEEP_H * 60 * 60 * 1000);
+    await sleep(FRESH_MS);
   }
 })();

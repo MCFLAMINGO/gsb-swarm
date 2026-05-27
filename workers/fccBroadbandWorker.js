@@ -306,13 +306,19 @@ async function runPass() {
 
 // ── Daemon loop ───────────────────────────────────────────────────────────────
 (async function main() {
+  const hb = require('../lib/workerHeartbeat');
+  const FRESH_MS = CYCLE_H * 3600 * 1000;
   await sleep(45 * 1000); // stagger startup
   console.log('[fccBroadband] Worker started — FCC BDC Tier-1, weekly county pulse');
   while (true) {
-    try { await runPass(); }
-    catch (e) { console.error('[fccBroadband] Pass crashed:', e.message, e.stack); }
+    if (await hb.isFresh('fccBroadbandWorker', FRESH_MS)) {
+      console.log('[fccBroadband] Fresh — skipping pass');
+    } else {
+      try { await runPass(); await hb.ping('fccBroadbandWorker'); }
+      catch (e) { console.error('[fccBroadband] Pass crashed:', e.message, e.stack); }
+    }
     console.log(`[fccBroadband] Sleeping ${CYCLE_H}h`);
-    await sleep(CYCLE_H * 3600 * 1000);
+    await sleep(FRESH_MS);
   }
 })();
 
