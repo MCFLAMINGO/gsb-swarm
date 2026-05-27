@@ -1,10 +1,21 @@
 'use strict';
 require('dotenv').config();
-const db = require('../lib/db');
+// Pre-deploy: use a dedicated single-connection pool, not the shared lib/db pool.
+// The old container's 24+ workers hold most of the 25-connection Railway cap during
+// overlap — one connection is all we need and all we can reliably get.
+const { Pool } = require('pg');
+const pool = new Pool({
+  connectionString: process.env.LOCAL_INTEL_DB_URL,
+  ssl: { rejectUnauthorized: false },
+  max: 1,
+  connectionTimeoutMillis: 10000,
+  idleTimeoutMillis: 5000,
+});
+const db = { query: (sql, params) => pool.query(sql, params) };
 
 // Retry wrapper — pre-deploy runs while old container is still draining connections.
-// Retry up to 10 times with 3s backoff before giving up.
-async function withRetry(fn, label, retries = 10, delayMs = 3000) {
+// 20 retries × 5s = 100s window for old container connections to fully drain.
+async function withRetry(fn, label, retries = 20, delayMs = 5000) {
   for (let i = 1; i <= retries; i++) {
     try {
       return await fn();
@@ -39,7 +50,8 @@ async function main() {
       ON sms_query_log(caller_id)
   `), 'create idx_sms_log_caller');
   console.log('B16 migration complete — sms_query_log table ready');
+  await pool.end();
   process.exit(0);
 }
 
-main().catch(err => { console.error(err.message); process.exit(1); });
+main().catch(async err => { console.error(err.message); await pool.end(); process.exit(1); });
