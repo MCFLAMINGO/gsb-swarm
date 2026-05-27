@@ -59,7 +59,8 @@ console.log(`
 `);
 
 const processes = [];
-const STAGGER_DELAY_MS = 2000; // 2s between each worker to avoid RPC rate limits
+const STAGGER_DELAY_MS = 2000;  // 2s between each worker
+const BOOT_DELAY_MS    = 15000; // 15s head-start for main server pool before first worker
 
 function spawnWorker({ name, file }) {
   const workerPath = path.join(__dirname, file);
@@ -111,6 +112,10 @@ function spawnWorker({ name, file }) {
   } catch (e) {
     console.warn('[SWARM] ACS patch failed to start (non-fatal):', e.message);
   }
+
+  // Wait for main server pool to stabilize before spawning any worker
+  console.log(`[SWARM] Waiting ${BOOT_DELAY_MS / 1000}s for DB pool to settle before spawning workers…`);
+  await new Promise((r) => setTimeout(r, BOOT_DELAY_MS));
 
   for (let i = 0; i < workers.length; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, STAGGER_DELAY_MS));
