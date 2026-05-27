@@ -20,17 +20,17 @@ const workers = [
   // dataIngestWorker.js   — REMOVED: pre-Postgres legacy, wrote to data/localIntel.json flat file, SJC-only ZIP filter
   { name: 'Local Intel MCP',    file: 'localIntelMCP.js' },
   { name: 'Zip Coordinator',    file: 'workers/zipCoordinatorWorker.js' },
-  { name: 'Enrichment Agent',   file: 'workers/enrichmentAgent.js' },
+  // enrichmentAgent.js — REMOVED: reads/writes data/zips/*.json flat files (/tmp on Railway, lost on redeploy). overpassWorker + websiteEnricherWorker + businessMergeWorker cover this in Postgres.
   { name: 'ACP Broadcaster',    file: 'workers/acpBroadcaster.js' },
   // ── LocalIntel learning loop workers ─────────────────────────────────────────────
   { name: 'ACS Worker',           file: 'workers/acsWorker.js' },
   // mcpProbeWorker disabled — re-enable after SunBiz import + brief-validator >90% pass rate
   // { name: 'MCP Probe',            file: 'workers/mcpProbeWorker.js' },
   { name: 'Router Learning',      file: 'workers/routerLearningWorker.js' },
-  { name: 'Vertical Agents',      file: 'workers/verticalAgentWorker.js' },
+  // verticalAgentWorker.js — REMOVED: writes gaps to data/gaps/*.json (/tmp, lost on redeploy). Gap-closure loop broken in production — re-enable when gaps table exists in Postgres.
   { name: 'Chamber Scraper',      file: 'workers/chamberScraper.js' },
   { name: 'Prompt Evolution',     file: 'workers/promptEvolutionWorker.js' },
-  { name: 'Brief Validator',      file: 'workers/briefValidator.js' },
+  // briefValidator.js — REMOVED: QA tool, not a data worker. Run manually as needed: node workers/briefValidator.js
   ...(process.env.FINANCIAL_ANALYST_ENTITY_ID
     ? [{ name: 'Financial Analyst', file: 'financialAnalyst.js' }]
     : []),
