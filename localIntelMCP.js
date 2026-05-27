@@ -273,68 +273,78 @@ async function handleSectorGap(params) {
   const zip = (params.zip || '').replace(/\D/g, '').slice(0, 5);
   if (!zip) return JSON.stringify({ error: 'zip required' });
 
-  const layerDir   = path.join(__dirname, 'data', 'census_layer');
-  const oracleDir  = path.join(__dirname, 'data', 'oracle');
-  const zonesFile  = path.join(__dirname, 'data', 'spendingZones.json');
-  const layerFile  = path.join(layerDir, zip + '.json');
-  const fsLib      = require('fs');
-
-  if (!fsLib.existsSync(layerFile)) {
-    return JSON.stringify({
-      error: 'Census layer not yet computed for ' + zip + '. The censusLayerWorker runs on startup.',
-      zip,
-    });
-  }
-
-  const layer = JSON.parse(fsLib.readFileSync(layerFile, 'utf8'));
-  const gaps  = layer.sector_gaps || [];
-
-  if (gaps.length === 0) {
-    return JSON.stringify({
-      zip,
-      name:        layer.name || zip,
-      county:      layer.county || '',
-      message:     'No sector gaps found — all major NAICS sectors present at ZIP level, or ZBP data not yet ingested.',
-      sector_gaps: [],
-    });
-  }
-
-  let demo = {}, oracle = {};
-  // Oracle: Postgres first (durable), flat file fallback for local dev
-  if (process.env.LOCAL_INTEL_DB_URL) {
-    try {
-      const { getZipIntelligenceRow } = require('./lib/pgStore');
-      const row = await getZipIntelligenceRow(zip);
-      if (row) oracle = row;
-    } catch (_) {}
-  }
-  if (!oracle || Object.keys(oracle).length === 0) {
-    try {
-      const oracleFile = path.join(oracleDir, zip + '.json');
-      if (fsLib.existsSync(oracleFile)) oracle = JSON.parse(fsLib.readFileSync(oracleFile, 'utf8'));
-    } catch (_) {}
-  }
-  // Demographics: prefer ACS/oracle Postgres fields, fall back to spendingZones flat file
+  // ── Pull everything from Postgres zip_signals — no flat files ────────────
+  let sig = {};
   try {
-    const zones = JSON.parse(fsLib.readFileSync(zonesFile, 'utf8'));
-    demo = (zones && zones.zones && zones.zones[zip]) ? zones.zones[zip] : {};
-  } catch (_) {}
+    const rows = await db.query(
+      `SELECT * FROM zip_signals WHERE zip = $1 LIMIT 1`, [zip]
+    );
+    if (rows && rows.length > 0) sig = rows[0];
+  } catch (e) {
+    return JSON.stringify({ error: 'DB unavailable: ' + e.message, zip });
+  }
 
-  const population   = demo.population   || (oracle.demographics && oracle.demographics.population) || 0;
-  const medianHHI    = demo.median_household_income || (oracle.demographics && oracle.demographics.median_hhi) || 0;
-  const ownerOccPct  = demo.ownership_rate_pct   || 0;
-  const affluencePct = demo.affluence_pct        || 0;
-  const ultraAffPct  = demo.ultra_affluence_pct  || 0;
-  const wfhPct       = demo.wfh_pct              || 0;
-  const daytimeMult  = demo.daytime_pop_multiplier || 1.0;
-  const renovWave    = demo.renovation_wave       || null;
-  const familyHHPct  = demo.family_hh_pct        || 0;
-  const retireeIndex = demo.retiree_index         || 1.0;
-  const vacancyPct   = (demo.vacancy_rate_pct != null) ? demo.vacancy_rate_pct : null;
+  // Demographics from ACS signals
+  const population   = sig.acs_population      || 0;
+  const medianHHI    = sig.acs_median_hhi       || 0;
+  const ownerOccPct  = sig.acs_owner_occ_pct    || 0;
+  const wfhPct       = sig.acs_pct_stem_occupations || 0; // best WFH proxy available
+  const familyHHPct  = sig.acs_family_pct        || 0;
+  const vacancyPct   = sig.acs_vacancy_pct       != null ? sig.acs_vacancy_pct : null;
+  const medianAge    = sig.acs_median_age         || 0;
+  const retireeIndex = medianAge > 50 ? 1.5 : medianAge > 40 ? 1.1 : 0.8;
+  // Affluence proxies from HHI
+  const affluencePct = medianHHI >= 100000 ? 45 : medianHHI >= 75000 ? 25 : 10;
+  const ultraAffPct  = medianHHI >= 150000 ? 20 : medianHHI >= 120000 ? 10 : 3;
+  const daytimeMult  = 1.0; // no daytime pop signal yet — neutral
+  const renovWave    = medianAge > 45 && ownerOccPct > 70 ? 'HIGH'
+                     : ownerOccPct > 60 ? 'MODERATE' : null;
 
-  const confidence = layer.confidence || {};
-  const confTier   = confidence.confidence_tier       || 'ESTIMATED';
-  const confScore  = confidence.data_confidence_score || 0;
+  // County + ZIP sector data from CBP/CES signals
+  // Build gaps: NAICS sectors present at county (CBP) but underrepresented at ZIP
+  const NAICS_MAP = [
+    { naics: '23', label: 'Construction',              countyField: 'cbp_bldg_estab',   empField: 'cbp_bldg_emp',   osmField: null },
+    { naics: '44', label: 'Retail Trade',              countyField: 'cbp_trade_estab',  empField: 'cbp_trade_emp',  osmField: 'osm_retail_count' },
+    { naics: '62', label: 'Health Care & Social Asst', countyField: null,               empField: 'ces_healthcare_emp', osmField: null },
+    { naics: '72', label: 'Accommodation & Food Svcs', countyField: null,               empField: 'ces_leisure_emp',    osmField: 'osm_food_count' },
+    { naics: '52', label: 'Finance & Insurance',       countyField: null,               empField: 'ces_financial_emp',  osmField: null },
+    { naics: '54', label: 'Professional Services',     countyField: null,               empField: null,               osmField: null },
+    { naics: '61', label: 'Educational Services',      countyField: null,               empField: null,               osmField: null },
+  ];
+
+  // Vertical oracle map
+  const VERTICAL_MAP = {
+    '23': 'construction', '44': 'retail', '45': 'retail',
+    '52': null, '53': 'realtor', '54': null,
+    '61': null, '62': 'healthcare', '71': null, '72': 'restaurant',
+  };
+
+  // Determine which sectors have gaps: county has employees but ZIP OSM count is low
+  const gaps = [];
+  for (const sector of NAICS_MAP) {
+    const countyEstab   = sig[sector.countyField] || 0;
+    const countyEmp     = sig[sector.empField]    || 0;
+    const osmPresence   = sector.osmField ? (sig[sector.osmField] || 0) : null;
+    // Only flag as gap if county has meaningful employment but ZIP OSM count is low (or no OSM data)
+    const hasCountyPresence = countyEstab > 5 || countyEmp > 50;
+    const hasZipPresence    = osmPresence !== null ? osmPresence > 3 : false;
+    // No OSM field = unknown ZIP presence = always flag if county has it
+    if (hasCountyPresence && !hasZipPresence) {
+      gaps.push({
+        naics:            sector.naics,
+        label:            sector.label,
+        county_estab:     countyEstab,
+        county_emp_share: countyEmp > 0 ? Math.round((countyEmp / Math.max(population / 10, 1)) * 100) : 0,
+        oracle_vertical:  VERTICAL_MAP[sector.naics] || null,
+      });
+    }
+  }
+
+  // Determine confidence tier from how many ACS signals are populated
+  const acsFields = [population, medianHHI, ownerOccPct, sig.acs_poverty_pct, sig.acs_college_pct];
+  const acsCount  = acsFields.filter(v => v && v > 0).length;
+  const confTier  = acsCount >= 4 ? 'ESTIMATED' : acsCount >= 2 ? 'PROXY' : 'SPARSE';
+  const confScore = Math.round((acsCount / 5) * 80) + (sig.cbp_trade_estab ? 20 : 0);
 
   function sectorSignal(naics, countyEstab, countyEmpShare) {
     if (!population) return { demand_estimate: null, demand_narrative: 'Population data unavailable.', relevance_score: 0 };
@@ -483,11 +493,14 @@ async function handleSectorGap(params) {
   if (vacancyPct != null)  demoParts.push('Housing vacancy: ' + vacancyPct + '%');
   const demoBlock = demoParts.length ? demoParts.join(' | ') : 'Demographic data not yet loaded for this ZIP.';
 
+  // county name from zip_signals (populated by censusLayerWorker)
+  const countyName = sig.county || sig.ces_msa_name || '';
+
   const result = {
     zip,
-    name:     layer.name || zip,
-    county:   layer.county || '',
-    summary:  rankedGaps.length + ' sector gap' + (rankedGaps.length !== 1 ? 's' : '') + ' identified in ' + (layer.name || zip) + ' (' + zip + '). Top opportunity: ' + topGap.sector + ' (NAICS ' + topGap.naics + ') — ' + (topGap.demand_estimate || 'demand estimated from county benchmarks') + '. Data confidence: ' + confTier + ' (score ' + confScore + '/100).',
+    name:     zip,
+    county:   countyName,
+    summary:  rankedGaps.length + ' sector gap' + (rankedGaps.length !== 1 ? 's' : '') + ' identified in ZIP ' + zip + (countyName ? ' (' + countyName + ' area)' : '') + '. Top opportunity: ' + (topGap ? topGap.sector + ' (NAICS ' + topGap.naics + ') — ' + (topGap.demand_estimate || 'demand estimated from county benchmarks') : 'none identified') + '. Data confidence: ' + confTier + ' (score ' + confScore + '/100).',
     demographics: demoBlock,
     data_confidence: {
       tier:  confTier,
@@ -642,26 +655,7 @@ function loadZones() {
   try { return JSON.parse(fs.readFileSync(ZONES_PATH, 'utf8')); } catch { return {}; }
 }
 function logUsage(tool, caller, meta) {
-  // ── 1. Flat JSON ledger (dashboard source) ────────────────────────────────
-  try {
-    const ledger = (() => { try { return JSON.parse(fs.readFileSync(LEDGER_PATH, 'utf8')); } catch { return []; } })();
-    const entry = {
-      tool,
-      caller:  caller || 'unknown',
-      entry:   meta?.entry   || 'free',
-      cost:    TOOL_COSTS[tool] || 0,
-      paid:    false,
-      ts:      new Date().toISOString(),
-    };
-    if (meta?.zip)     entry.zip     = meta.zip;
-    if (meta?.intent)  entry.intent  = meta.intent;
-    if (meta?.latency) entry.latency = meta.latency;
-    ledger.push(entry);
-    if (ledger.length > 10000) ledger.splice(0, ledger.length - 10000);
-    fs.writeFileSync(LEDGER_PATH, JSON.stringify(ledger, null, 2));
-  } catch {}
-
-  // ── 2. Postgres usage_ledger (billing source) ─────────────────────────────
+  // Postgres usage_ledger — the only durable store on Railway ────────────────
   // Fire-and-forget — never block a tool response over billing
   if (process.env.LOCAL_INTEL_DB_URL) {
     try {
@@ -1914,7 +1908,7 @@ const TOOLS = {
   local_intel_bedrock:   { fn: handleBedrock,  desc: 'Infrastructure momentum — permits, road projects, flood zones. Leading indicator (12-36mo ahead).' },
   local_intel_for_agent: { fn: handleForAgent, desc: 'Premium composite entry point. Declare agent_type + intent, get pre-ranked signals for your use case.' },
   local_intel_oracle:    { fn: handleOracle,   desc: 'Pre-baked economic narrative for a ZIP: restaurant saturation, price-tier gaps, growth trajectory, and the 3 questions you should be asking with answers.' },
-  local_intel_sector_gap: { fn: handleSectorGap, desc: 'Ranked sector gap opportunities for a ZIP — NAICS sectors present at county but absent at ZIP. Returns demand estimates, demographic framing, and confidence tier. LLM-ready signal narrative per gap. Cross-references ZBP 2018 + CBP 2023 + ACS demographics.' },
+  local_intel_sector_gap: { fn: handleSectorGap, desc: 'Ranked sector gap opportunities for a ZIP — NAICS sectors present at county (CBP/CES) but underrepresented at ZIP (OSM). Returns demand estimates, demographic framing, and confidence tier. LLM-ready signal narrative per gap. Reads live from Postgres zip_signals — always current.' },
   // ── Vertical agents (trained on 100 industry prompts each) ─────────────────────────
   local_intel_realtor:      { fn: (p) => handleVerticalQuery('realtor',      p.query || 'give me a real estate market overview', p.zip), desc: 'Real estate intelligence for a ZIP: demographics, commercial gaps, flood risk, infrastructure, market signals. Trained for buyer briefs and investment analysis.' },
   local_intel_healthcare:   { fn: (p) => handleVerticalQuery('healthcare',   p.query || 'give me a healthcare market overview', p.zip), desc: 'Healthcare market intelligence: provider density, demographics, patient demand gaps, senior population signals.' },
@@ -2170,7 +2164,7 @@ const MCP_MANIFEST = {
     },
     {
       name: 'local_intel_sector_gap',
-      description: 'Ranked sector gap analysis for a ZIP. Identifies NAICS sectors present at county level but absent at ZIP \u2014 the structural whitespace in a local economy. Returns ranked opportunities with: NAICS code, sector label, county employment share, demand estimate, confidence tier, and LLM-ready signal narrative. Backed by ZBP 2018 (ZIP-level establishment counts), CBP 2023 (county-level sector health), and ACS 5-yr 2023 demographics. Example output: \"NAICS 61 Educational Services: 0 establishments in 32259 vs 47 in St. Johns County. 69,866 residents, $144k median HHI, 89% owner-occupied. Estimated demand: 8\u201312 tutoring/enrichment centers. Confidence: ESTIMATED. Signal: Strong family formation market with no educational services presence.\" Use oracle_vertical field to chain into matching vertical agents. Cost: $0.03 pathUSD. Free discovery feed at /api/sector-gap/feed.',
+      description: 'Ranked sector gap analysis for a ZIP. Identifies NAICS sectors present at county level (CBP/CES employment) but underrepresented at ZIP (OSM business counts) — the structural whitespace in a local economy. Returns ranked opportunities with: NAICS code, sector label, county employment share, demand estimate, confidence tier, and LLM-ready signal narrative. Reads live from Postgres zip_signals — always current. Example: \"NAICS 62 Health Care: Jacksonville MSA 136k healthcare employees, ZIP 32082 has no OSM healthcare listings. 28,697 residents, $121k median HHI, retiree index 1.5x. Demand: 7–10 providers.\" Chain into vertical agents via oracle_vertical. Cost: $0.03 pathUSD.',
       inputSchema: {
         type: 'object',
         required: ['zip'],

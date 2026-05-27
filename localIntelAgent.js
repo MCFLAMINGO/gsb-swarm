@@ -5048,30 +5048,17 @@ router.get('/zip-queue', (req, res) => {
 });
 
 // ── POST /api/local-intel/reset-queue ───────────────────────────────────────────────
-// Reset all completed ZIPs to pending so enrichment re-runs immediately
-router.post('/reset-queue', (req, res) => {
+// Queue lives in Postgres (zip_coverage table via zipCoordinatorWorker).
+// Reset by clearing done/failed rows so the coordinator re-queues them on next cycle.
+router.post('/reset-queue', async (req, res) => {
   try {
-    const file = path.join(DATA_DIR_AGENT, 'zipQueue.json');
-    if (!fs.existsSync(file)) return res.status(404).json({ error: 'Queue file not found' });
-    const queue = JSON.parse(fs.readFileSync(file));
-    const before = queue.filter(z => z.status === 'complete').length;
-    queue.forEach(z => {
-      if (z.status === 'complete' || z.status === 'failed') {
-        z.status = 'pending';
-        z.attempts = 0;
-        z.startedAt = null;
-      }
-    });
-    fs.writeFileSync(file, JSON.stringify(queue, null, 2));
-    // Also reset coverage lastRun so coordinator triggers immediately
-    const covFile = path.join(DATA_DIR_AGENT, 'coverage.json');
-    if (fs.existsSync(covFile)) {
-      const cov = JSON.parse(fs.readFileSync(covFile));
-      cov.lastRun = new Date(0).toISOString(); // epoch forces refresh
-      fs.writeFileSync(covFile, JSON.stringify(cov, null, 2));
-    }
-    res.json({ ok: true, reset: before, message: `${before} ZIPs reset to pending — enrichment will resume within 2 minutes` });
-  } catch(e) {
+    const result = await db.query(
+      `UPDATE zip_coverage SET status = 'pending', attempts = 0, started_at = NULL
+        WHERE status IN ('done', 'failed')`
+    );
+    const reset = result?.rowCount || 0;
+    res.json({ ok: true, reset, message: `${reset} ZIPs reset to pending in Postgres — zipCoordinatorWorker will re-queue on next cycle` });
+  } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });

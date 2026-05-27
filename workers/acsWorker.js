@@ -328,9 +328,7 @@ async function processZip(zip) {
     },
   };
 
-  fs.mkdirSync(ACS_DIR, { recursive: true });
-  fs.writeFileSync(path.join(ACS_DIR, `${zip}.json`), JSON.stringify(result, null, 2));
-  // Mirror to Postgres (fire-and-forget)
+  // Write to Postgres — the only durable store on Railway
   pgStore.upsertAcsDemographics(zip, result).catch(() => {});
 
   // World model — write acs_* signals into zip_signals
