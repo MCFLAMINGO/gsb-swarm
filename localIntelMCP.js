@@ -274,6 +274,7 @@ async function handleSectorGap(params) {
   if (!zip) return JSON.stringify({ error: 'zip required' });
 
   // ── Pull everything from Postgres zip_signals — no flat files ────────────
+  const db = require('./lib/db');
   let sig = {};
   try {
     const rows = await db.query(
