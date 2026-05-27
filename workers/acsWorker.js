@@ -425,7 +425,12 @@ const SKIP_FRESH_MS = CYCLE_MS; // skip startup run if already ran within the cy
         return;
       }
     }
-  } catch (_) {}
+  } catch (_) {
+    // DB unreachable — skip run, don't drain pool
+    console.log('[acsWorker] DB unreachable at startup — skipping run until next cycle.');
+    setInterval(() => run().catch(e => console.error('[acsWorker] Interval error:', e.message)), CYCLE_MS);
+    return;
+  }
   run().catch(e => console.error('[acsWorker] Fatal:', e.message));
   setInterval(() => run().catch(e => console.error('[acsWorker] Interval error:', e.message)), CYCLE_MS);
 })();
