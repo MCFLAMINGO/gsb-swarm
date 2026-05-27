@@ -543,7 +543,7 @@ const TOOL_COSTS = {
   local_intel_retail:       0.02,
   local_intel_construction: 0.02,
   local_intel_restaurant:   0.02,
-  local_intel_ask:          0.05,
+  local_intel_ask:          0,    // free — best entry point for all agents
   local_intel_query:        0.03,
   local_intel_stats:    0.005,
   local_intel_zip_intelligence: 0.03,
@@ -1425,34 +1425,68 @@ async function toolNearby({ lat, lon, zip, radius_miles = 5, category, group, li
  * Returns spending zone + demographic intelligence for a zip.
  */
 async function toolZone(params) {
-  const zones = loadZones();
   const zipRes = await resolveZipParam(params);
   const zip = zipRes.zip;
   if (!zip) return { error: 'zip or lat/lon required' };
-  const zoneData = zones.zones?.[zip];
-  if (!zoneData) {
-    return {
-      error: `No zone data for ${zip} yet.`,
-      resolved_from: zipRes.resolved_from,
-      zip,
-      hint: 'zip_signals has live data for this ZIP — call local_intel_zip_intelligence for demographics.',
-    };
+
+  // ── Pull from Postgres zip_signals — no flat files ─────────────────────────────
+  const _db = require('./lib/db');
+  let sig = {};
+  try {
+    const rows = await _db.query(`SELECT * FROM zip_signals WHERE zip = $1 LIMIT 1`, [zip]);
+    if (rows && rows.length > 0) sig = rows[0];
+  } catch (e) {
+    return { error: 'DB unavailable: ' + e.message, zip };
   }
-  const center = ZIP_CENTERS[zip];
+
+  const population  = sig.acs_population    || 0;
+  const medianHHI   = sig.acs_median_hhi     || sig.irs_agi_median || 0;
+  const ownerOccPct = sig.acs_owner_occ_pct  || 0;
+  const vacancyPct  = sig.acs_vacancy_pct    || 0;
+  const povertyPct  = sig.acs_poverty_pct    || 0;
+  const collegePct  = sig.acs_college_pct    || sig.acs_pct_bachelors_plus || 0;
+  const medianAge   = sig.acs_median_age     || 0;
+  const incomeTier  = sig.sig_income_tier    || (medianHHI >= 150000 ? 'High' : medianHHI >= 100000 ? 'Upper-Middle' : medianHHI >= 75000 ? 'Middle' : 'Working');
+  const cbpPayroll  = sig.cbp_trade_payroll_k ? Math.round(sig.cbp_trade_payroll_k / 1000) : null;
+  const cbpEmp      = sig.cbp_trade_emp      || 0;
+  const cbpEstab    = sig.cbp_trade_estab    || 0;
+
+  if (!population && !medianHHI) {
+    return { error: `No zone data for ${zip} yet — acsWorker will populate on next run.`, zip };
+  }
+
   const lines = [
-    `ZONE: ${zip} · ${center?.label || zip}, FL`,
-    `Population: ${(zoneData.population || 0).toLocaleString()}`,
-    `Median Household Income: $${(zoneData.median_income || 0).toLocaleString()}`,
-    `Median Home Value: $${(zoneData.median_home_value || 0).toLocaleString()}`,
-    `Median Rent: $${(zoneData.median_rent || 0).toLocaleString()}/mo`,
-    `Homeownership Rate: ${zoneData.ownership_rate || 0}%`,
-    `Zone Score: ${zoneData.zone_score || 'N/A'} · ${zoneData.zone_label || ''}`,
-    `Dominant Spending: ${zoneData.dominant_spend || 'N/A'}`,
-    `County Establishments: ${(zoneData.county_establishments || 0).toLocaleString()}`,
-    `County Employees: ${(zoneData.county_employees || 0).toLocaleString()}`,
-    `County Payroll: $${zoneData.county_payroll_millions || 0}M`,
-  ];
-  return { zip, ...zoneData, context_block: lines.join('\n') };
+    `ZONE: ${zip}`,
+    `Population: ${population.toLocaleString()}`,
+    `Median Household Income: $${medianHHI.toLocaleString()}`,
+    `Income Tier: ${incomeTier}`,
+    `Homeownership Rate: ${ownerOccPct}%`,
+    `Housing Vacancy: ${vacancyPct}%`,
+    `Poverty Rate: ${povertyPct}%`,
+    `College Educated: ${collegePct}%`,
+    `Median Age: ${medianAge}`,
+    cbpEstab  ? `Trade Establishments: ${cbpEstab.toLocaleString()}` : null,
+    cbpEmp    ? `Trade Employees: ${cbpEmp.toLocaleString()}` : null,
+    cbpPayroll ? `Trade Payroll: $${cbpPayroll}M` : null,
+  ].filter(Boolean);
+
+  return {
+    zip,
+    population,
+    median_hhi:        medianHHI,
+    income_tier:       incomeTier,
+    owner_occ_pct:     ownerOccPct,
+    vacancy_pct:       vacancyPct,
+    poverty_pct:       povertyPct,
+    college_pct:       collegePct,
+    median_age:        medianAge,
+    cbp_trade_estab:   cbpEstab,
+    cbp_trade_emp:     cbpEmp,
+    cbp_payroll_m:     cbpPayroll,
+    acs_vintage:       sig.acs_vintage || null,
+    context_block:     lines.join('\n'),
+    source:            'ACS 5-yr + CBP via zip_signals (Postgres)',
+  };
 }
 
 /**
