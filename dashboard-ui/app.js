@@ -2307,3 +2307,55 @@ async function testLaborMarket() {
     btn.textContent = 'TEST ZIP 32082';
   }
 }
+
+// ── PAUSE ALL WORKERS ──────────────────────────────────────────────────────────
+async function pauseAllWorkers() {
+  const btn    = document.getElementById('li-pause-all-btn');
+  const result = document.getElementById('li-pause-all-result');
+  if (!btn || !result) return;
+
+  const ALL_WORKERS = [
+    'acsWorker',
+    'censusLayerWorker',
+    'censusLayerWorker_cbp',
+    'censusLayerWorker_pdb',
+    'overpassWorker',
+    'irsSoiWorker',
+    'fccBroadbandWorker',
+    'permitWorker',
+    'sjcArcGisWorker',
+  ];
+
+  btn.disabled = true;
+  btn.textContent = 'Pausing…';
+  result.style.display = 'block';
+  result.style.color = '#94a3b8';
+  result.textContent = 'Sending heartbeat stamps to all workers…';
+
+  try {
+    const r = await fetch(`${LI_BASE}/admin/ping-heartbeat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-token': LI_ADMIN_TOKEN,
+      },
+      body: JSON.stringify({ workers: ALL_WORKERS }),
+    });
+
+    const data = await r.json();
+
+    if (!r.ok) {
+      result.style.color = '#f87171';
+      result.textContent = 'Error: ' + (data.error || r.statusText);
+    } else {
+      result.style.color = '#a3e635';
+      result.textContent = `✓ All ${ALL_WORKERS.length} workers stamped fresh — next runs will be skipped.`;
+    }
+  } catch (e) {
+    result.style.color = '#f87171';
+    result.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Pause All Workers';
+  }
+}

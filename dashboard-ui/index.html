@@ -600,7 +600,11 @@
     <!-- Capability Nodes -->
     <div class="li-nodes-header">
       <span>Intelligence Nodes</span>
-      <span id="li-nodes-live-count" class="li-nodes-count">— / 10 live</span>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span id="li-nodes-live-count" class="li-nodes-count">— / 10 live</span>
+        <button id="li-pause-all-btn" onclick="pauseAllWorkers()" style="font-size:11px;padding:4px 10px;background:var(--warning,#f59e0b);color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:600">Pause All Workers</button>
+        <span id="li-pause-all-result" style="font-size:11px;color:var(--muted)"></span>
+      </div>
     </div>
     <div class="li-nodes-grid" id="li-nodes-grid">
       <!-- populated by JS -->
