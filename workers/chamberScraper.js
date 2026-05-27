@@ -254,8 +254,8 @@ async function bulkImport() {
       if (geo) {
         m.lat = geo.lat;
         m.lon = geo.lon;
-        // Default to 32081 for Nocatee/PVB area
-        zip = (geo.lat >= 30.05 && geo.lat <= 30.25) ? '32081' : null;
+        // No hardcoded ZIP fallback — let the reverse geocode resolve or skip
+        zip = null;
       }
     }
 

@@ -26,8 +26,10 @@ const http = require('http');
 const pgStore = require('../lib/pgStore');
 
 // ── ZIP registry (all known ZIPs across the platform) ─────────────────────────
-// SJC_FALLBACK — used only when Postgres is unavailable (local dev)
-const SJC_FALLBACK_ZIPS = [
+// DEV_FALLBACK — used only when Postgres is unavailable (local dev without DB).
+// These are SJC ZIPs only because that's where the platform started. On Railway,
+// Postgres is always available and getDistinctZips() returns all FL ZIPs statewide.
+const DEV_FALLBACK_ZIPS = [
   { zip: '32081', name: 'Nocatee',                  county: 'St. Johns' },
   { zip: '32082', name: 'Ponte Vedra Beach',         county: 'St. Johns' },
   { zip: '32092', name: 'World Golf Village',        county: 'St. Johns' },
@@ -42,7 +44,7 @@ const SJC_FALLBACK_ZIPS = [
   { zip: '32073', name: 'Orange Park',               county: 'Clay'      },
 ];
 
-// getAuditZips — Postgres first, fallback to SJC_FALLBACK_ZIPS
+// getAuditZips — Postgres first, fallback to DEV_FALLBACK_ZIPS
 // Returns [{zip, name, county}] for every ZIP that has business data
 async function getAuditZips() {
   if (process.env.LOCAL_INTEL_DB_URL) {
@@ -56,8 +58,8 @@ async function getAuditZips() {
           'SELECT zip, name FROM zip_intelligence WHERE zip = ANY($1)', [pgZips]
         ).catch(() => []);
         const metaIndex = Object.fromEntries(metaRows.map(r => [r.zip, r.name]));
-        // Also pull from SJC_FALLBACK for known names
-        const sjcIndex  = Object.fromEntries(SJC_FALLBACK_ZIPS.map(z => [z.zip, z]));
+        // Enrich names from dev fallback list where available
+        const sjcIndex  = Object.fromEntries(DEV_FALLBACK_ZIPS.map(z => [z.zip, z]));
         const result = pgZips.map(zip => ({
           zip,
           name:   metaIndex[zip] || sjcIndex[zip]?.name   || zip,
@@ -70,7 +72,7 @@ async function getAuditZips() {
       console.warn('[promptEvolution] Postgres ZIP discovery failed, using fallback:', e.message);
     }
   }
-  return SJC_FALLBACK_ZIPS;
+  return DEV_FALLBACK_ZIPS;
 }
 
 // ── Signal quality thresholds ──────────────────────────────────────────────────

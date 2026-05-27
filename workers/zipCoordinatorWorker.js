@@ -17,8 +17,10 @@ const { ALL_SUNBELT_ZIPS, getZipsByPhase, getSummary: getSunbeltSummary } = requ
 
 const PORT = 3006;
 
-// FL priority seeds — SJC + major metro anchors only.
-// Full 1013-ZIP FL list is loaded from flZipRegistry.js at runtime.
+// FL priority seeds — initial bootstrap for the coordinator's priority queue.
+// SJC ZIPs are highest priority because they were the first market (not scope bias).
+// Full FL list (1,013 ZIPs) is loaded from fl_zip_geo at runtime.
+// Override via PRIORITY_SEED_ZIPS env var (comma-separated) to shift focus to any state/market.
 // Non-FL states live in sunbeltZipRegistry.js and are phase-gated.
 const FL_ZIPS_PRIORITY = [
   { zip: '32082', region: 'SJC', priority: 100, lat: 30.1893, lon: -81.3815, name: 'Ponte Vedra Beach' },

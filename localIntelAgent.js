@@ -5,8 +5,7 @@
  * ACP offering: local_intel_query
  * Serves hyperlocal business intelligence for any US zip code.
  *
- * Currently covers: 32081 (Nocatee) + 32082 (Ponte Vedra Beach), FL
- * Expandable: add new zip pulls to the data directory and re-register.
+ * Covers: all FL ZIPs (1,473) from fl_zip_geo. Blueprint for multi-state expansion via TARGET_STATE env var.
  *
  * Data sources:
  *   - OpenStreetMap (OSM) — named businesses, amenities, services
@@ -130,7 +129,7 @@ async function resolvePlace(question) {
       ).catch(() => []);
       const countyZips = czRows.map(r => r.zip);
       return {
-        zip: row.primary_zip || '32082',
+        zip: row.primary_zip || null,
         isCounty: true,
         countyKey: row.county_key,
         countyZips: countyZips.length ? countyZips : null,
@@ -151,7 +150,7 @@ async function resolvePlace(question) {
       ).catch(() => []);
       const countyZips = czRows.map(r => r.zip);
       return {
-        zip: row.primary_zip || '32082',
+        zip: row.primary_zip || null,
         isCounty: true,
         countyKey: row.county_key,
         countyZips: countyZips.length ? countyZips : null,
@@ -166,12 +165,12 @@ async function resolvePlace(question) {
   ).catch(() => []);
   for (const row of cityRows) {
     if (q.includes(row.name_normalized)) {
-      return { zip: row.primary_zip || '32082', isCounty: false, countyKey: null, countyZips: null };
+      return { zip: row.primary_zip || null, isCounty: false, countyKey: null, countyZips: null };
     }
   }
 
   // 5. Default
-  return { zip: '32082', isCounty: false, countyKey: null, countyZips: null };
+  return { zip: null, isCounty: false, countyKey: null, countyZips: null };
 }
 const { logDeadEnd } = require('./lib/deadEndLog');
 const { logSmsQuery } = require('./lib/smsQueryLog');
@@ -326,9 +325,9 @@ function maybeLogSms(req, { customerId, query, zip, intent, resolvedVia, respons
 }
 
 // Phase 2 — multi-ZIP fanout when caller doesn't pin a ZIP
-// Seeded from fl_zip_geo on startup (migration 029) — all FL ZIPs, not just NE FL
-// Falls back to NE FL bootstrap set if DB not ready at startup
-let TARGET_ZIPS = ['32082','32081','32250','32266','32233','32259','32034'];
+// Seeded from fl_zip_geo on startup — all FL ZIPs statewide
+// Falls back to a broad FL bootstrap set (not SJC-specific) if DB not ready at startup
+let TARGET_ZIPS = ['32202','32207','32216','32244','32256','32073','33602','33629','33647','32714','32801','32804','33179','33025','33060','32901','33401','34202','32601','32304'];
 
 (async () => {
   try {
