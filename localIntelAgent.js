@@ -3364,15 +3364,18 @@ router.get('/inbox', async (req, res) => {
       }
     }
 
-    // Fetch agent profile for mcp_endpoint + auto-probe tools
+    // Fetch agent profile for mcp_endpoint, industry_type, notify_push, auto-probe tools
     const agentProfile = await db.queryOne(
-      `SELECT mcp_endpoint FROM business_agent_profiles WHERE business_id = $1 LIMIT 1`,
+      `SELECT mcp_endpoint, industry_type, notify_push FROM business_agent_profiles WHERE business_id = $1 LIMIT 1`,
       [biz.business_id]
     ).catch(() => null);
     let mcpTools = null;
     if (agentProfile?.mcp_endpoint) {
       const { probeEndpoint } = require('./lib/businessMcp');
-      mcpTools = await probeEndpoint(agentProfile.mcp_endpoint).catch(() => null);
+      const probeResult = await probeEndpoint(agentProfile.mcp_endpoint).catch(() => null);
+      // probeEndpoint returns { tools: [...] } or [...] — normalize to array
+      if (Array.isArray(probeResult)) mcpTools = probeResult;
+      else if (probeResult?.tools && Array.isArray(probeResult.tools)) mcpTools = probeResult.tools;
     }
 
     res.json({
@@ -3380,9 +3383,10 @@ router.get('/inbox', async (req, res) => {
       zip:               biz.zip,
       category:          biz.category,
       business_id:       biz.business_id,
-      notify_push:       biz.notify_push || false,
       mcp_endpoint:      agentProfile ? (agentProfile.mcp_endpoint || null) : null,
       mcp_tools:         mcpTools,
+      industry_type:     agentProfile ? (agentProfile.industry_type || null) : null,
+      notify_push:       biz.notify_push || false,
       claimed_at:        biz.claimed_at || null,
       has_hours:         biz.has_hours  || false,
       sunbiz_id:         biz.sunbiz_id  || null,
