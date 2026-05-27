@@ -8966,6 +8966,28 @@ router.post('/backfill-sjc-cama', express.json(), async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/admin/ping-heartbeat ─────────────────────────
+// Force-stamp worker heartbeats so they skip on next deploy.
+// Body: { workers: ['acsWorker', 'censusLayerWorker', ...] }
+router.post('/admin/ping-heartbeat', express.json(), async (req, res) => {
+  if (req.headers['x-admin-token'] !== 'localintel-migrate-2026')
+    return res.status(401).json({ error: 'unauthorized' });
+  const workers = Array.isArray(req.body?.workers) ? req.body.workers : [];
+  if (!workers.length) return res.status(400).json({ error: 'workers array required' });
+  try {
+    for (const w of workers) {
+      await db.query(
+        `INSERT INTO worker_heartbeat (worker_name, last_run) VALUES ($1, NOW())
+         ON CONFLICT (worker_name) DO UPDATE SET last_run = NOW()`,
+        [w]
+      );
+    }
+    return res.json({ ok: true, stamped: workers });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/local-intel/admin/seed-business ──────────────────────────────
 // Insert or update a single business record and set its mcp_endpoint.
 // Returns dispatch_token so you can immediately use the inbox.
