@@ -410,7 +410,7 @@ async function run() {
 
 // ── Schedule ──────────────────────────────────────────────────────────────────
 const CYCLE_MS = 30 * 24 * 60 * 60 * 1000; // 30d — ACS census data is annual, monthly refresh is plenty
-const SKIP_FRESH_MS = 6 * 60 * 60 * 1000;
+const SKIP_FRESH_MS = CYCLE_MS; // skip startup run if already ran within the cycle window
 (async () => {
   const forceRun = process.env.ACS_FORCE === 'true';
   if (forceRun) console.log('[acsWorker] ACS_FORCE=true — bypassing heartbeat skip');
