@@ -8991,6 +8991,27 @@ router.post('/admin/ping-heartbeat', express.json(), async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/admin/reset-heartbeat ─────────────────────────
+// Clear worker heartbeats so they re-run on next boot/cycle.
+// Body: { workers: ['tradeSignalWorker', ...] }
+router.post('/admin/reset-heartbeat', express.json(), async (req, res) => {
+  if (req.headers['x-admin-token'] !== 'localintel-migrate-2026')
+    return res.status(401).json({ error: 'unauthorized' });
+  const workers = Array.isArray(req.body?.workers) ? req.body.workers : [];
+  if (!workers.length) return res.status(400).json({ error: 'workers array required' });
+  try {
+    for (const w of workers) {
+      await db.query(
+        `UPDATE worker_heartbeat SET last_run = '2000-01-01' WHERE worker_name = $1`,
+        [w]
+      );
+    }
+    return res.json({ ok: true, reset: workers });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/local-intel/admin/seed-business ──────────────────────────────
 // Insert or update a single business record and set its mcp_endpoint.
 // Returns dispatch_token so you can immediately use the inbox.
