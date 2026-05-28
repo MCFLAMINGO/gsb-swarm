@@ -9077,7 +9077,7 @@ router.post('/admin/run-trade-signals', async (req, res) => {
              (ticker, company, direction, confidence, thesis, signal_source, signal_value,
               data_vintage, options_note, risk_note, status, scored_at, expires_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',NOW(),$11)
-           ON CONFLICT ON CONSTRAINT idx_trade_signals_ticker_day DO UPDATE SET
+           ON CONFLICT (ticker, (scored_at::date)) DO UPDATE SET
              direction=EXCLUDED.direction, confidence=EXCLUDED.confidence,
              thesis=EXCLUDED.thesis, signal_value=EXCLUDED.signal_value,
              expires_at=EXCLUDED.expires_at`,
