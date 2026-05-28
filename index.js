@@ -45,6 +45,7 @@ const workers = [
   // ── LocalIntel intelligence layers (ZIP-level economic data) ─────────────
   { name: 'IRS SOI',              file: 'workers/irsSoiWorker.js' },
   { name: 'Census Layer',         file: 'workers/censusLayerWorker.js' },
+  { name: 'Census Macro',         file: 'workers/censusMacroWorker.js' },
   { name: 'SJC ArcGIS',          file: 'workers/sjcArcGisWorker.js' },
   { name: 'FCC Broadband',        file: 'workers/fccBroadbandWorker.js' },
   { name: 'Permit Worker',        file: 'workers/permitWorker.js' },

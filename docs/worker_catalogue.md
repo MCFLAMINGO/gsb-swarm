@@ -784,3 +784,28 @@ When the time comes, re-enable in this order:
 6. **promptEvolutionWorker** — last, once real query traffic gives it real failures.
 
 A practical gate: do not re-enable any "world-model-feeder" until there is an MCP endpoint that reads its columns. Otherwise we're burning CPU on dashboards no agent will ever ask about.
+
+---
+
+### censusMacroWorker.js
+- **Status**: active
+- **Data Sources**:
+  - Census BFS (Business Formation Statistics) — `api.census.gov/data/timeseries/bfs` — monthly, county-level
+  - Census NES (Nonemployer Statistics 2021) — `api.census.gov/data/2021/nonemp` — annual, ZCTA-level
+  - Census Economic Census 2022 — `api.census.gov/data/2022/ecnbasic` — 5-year vintage, ZIP-level
+- **Output Tables**:
+  - `macro_indicators` — time-series BFS data keyed by (source, geo_id, period). One row per county per month.
+  - `zip_macro_signals` — ZIP-level NES + ECN data. One row per ZIP.
+  - `zip_signals` — summary columns: `macro_nes_total_firms`, `macro_ecn_total_sales_k`, `macro_bfs_apps_latest`, `macro_updated_at`
+- **Run Frequency**: Daily check; BFS refreshes monthly (28d TTL), NES annually (300d TTL), ECN one-time (5-year vintage)
+- **Downstream Consumers**:
+  - Oracle: reads `zip_macro_signals` JOIN `zip_signals` by ZIP for revenue + solo-operator density
+  - JEPA: uses `macro_indicators` BFS trend (ba_highprop over time) to predict ZIP business formation probability
+  - MCP tools: `local_intel_signal` reads summary cols from `zip_signals` (no JOIN needed)
+- **Why it exists**:
+  - CBP counts employer businesses only. NES adds solo/gig operators — often 3-5x the employer count.
+  - ZBP counts establishments. Economic Census adds REVENUE — the most granular revenue/payroll by ZIP ever published.
+  - BFS tracks new business application velocity — leading indicator (6-18 month lag to actual formation).
+  - Together these three datasets complete the economic picture that CBP/ZBP alone cannot provide.
+- **Priority**: HIGH
+- **Worker contract**: START → read Postgres for what's done (skip) → WORK only new → END → upsert to Postgres → REDEPLOY SAFE

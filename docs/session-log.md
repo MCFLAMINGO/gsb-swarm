@@ -4562,3 +4562,24 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 - LODES_FORCE=true set in Railway env
 
 **Note:** SunBiz updates quarterly (Jan, Apr, Jul, Oct). Future runs: download cordata.zip + corevent.zip from https://sftp.floridados.gov/doc/quarterly/cor/, upload via curl, trigger with force=true.
+
+---
+## B122 — Census macro layer + censusLayerWorker schema fix
+**Date:** 2026-05-27
+**Commits:** 2533d30, (pending push)
+
+**Problem:** censusLayerWorker was writing `zbp_total_employees`, `zbp_sector_json`, `zbp_updated_at`, `cbp_total_establishments`, `cbp_total_employees`, `cbp_total_payroll_k`, `cbp_updated_at` — all of which either never existed in zip_signals or were dropped in migration 045. Every census data write was failing at the DB level. Also missing: `data_confidence_score`, `data_confidence_tier` from PDB layer.
+
+**Fix (migration 051 + worker update — commit 2533d30):**
+- Added all 10 missing columns to zip_signals
+- Updated censusLayerWorker CBP upsert to write BOTH county totals AND 236/237/238 sector columns
+- PDB layer now stamps `data_confidence_score` + `data_confidence_tier` into zip_signals
+- censusLayerWorker un-suspended (Census API back up)
+
+**New: censusMacroWorker (migration 052):**
+- `macro_indicators` table — time-series BFS data (county/monthly)
+- `zip_macro_signals` table — ZIP-level NES + Economic Census 2022
+- BFS (Business Formation Statistics) — leading indicator, county-level, monthly
+- NES (Nonemployer Statistics 2021) — solo/gig operators by ZIP, fills CBP blind spot
+- Economic Census 2022 — revenue/payroll by ZIP+NAICS, most granular ever published
+- All feed oracle, JEPA, and MCP signal tools via zip_signals summary columns + JOIN pattern

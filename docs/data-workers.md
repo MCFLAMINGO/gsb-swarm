@@ -321,3 +321,39 @@ Layer 2 geo-economic intelligence overlay:
 
 **Result:** Each ZIP page now contains unique, substantive static content visible to Google without JavaScript. Fixes the thin-content problem causing 1,438 pages to be discovered but not indexed.
 
+
+---
+
+## censusMacroWorker — Macro Census Layer
+**Added:** 2026-05-27
+
+### Why
+CBP/ZBP give structural snapshots (establishments, employees). They miss:
+1. Solo operators + gig workers (Nonemployer Statistics fills this)
+2. Revenue and payroll per sector (Economic Census fills this)
+3. New business formation velocity (BFS fills this as a leading indicator)
+
+### Layers
+| Layer | Source | Geo | Frequency | Table |
+|---|---|---|---|---|
+| BFS | Census timeseries/bfs | County (67 FL) | Monthly | `macro_indicators` + `zip_signals.macro_bfs_apps_latest` |
+| NES | Census 2021/nonemp | ZCTA/ZIP | Annual | `zip_macro_signals` + `zip_signals.macro_nes_total_firms` |
+| ECN | Census 2022/ecnbasic | ZIP | One-time (5yr) | `zip_macro_signals` + `zip_signals.macro_ecn_total_sales_k` |
+
+### Key Signals Written
+- `nes_total_firms` — total solo/gig operators in ZIP
+- `nes_food_firms`, `nes_retail_firms`, `nes_health_firms`, `nes_prof_firms`, `nes_construction_firms` — sector breakdown
+- `ecn_total_sales_k` — total revenue ($000s) for ZIP
+- `ecn_sales_per_employee` — productivity proxy
+- `ecn_avg_employees_per_firm` — scale indicator
+- `bfs_county_apps_highprop` — high-propensity new business apps (leading indicator)
+
+### Oracle / JEPA Access Pattern
+```sql
+SELECT zs.zip, zs.macro_nes_total_firms, zs.macro_ecn_total_sales_k,
+       zm.ecn_sales_per_employee, zm.ecn_sector_json,
+       zm.bfs_county_apps_highprop
+FROM zip_signals zs
+LEFT JOIN zip_macro_signals zm USING (zip)
+WHERE zs.zip = $1
+```
