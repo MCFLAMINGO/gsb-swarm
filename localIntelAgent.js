@@ -9067,13 +9067,12 @@ router.post('/admin/run-trade-signals', async (req, res) => {
       netMigration: parseInt(mig?.net_migration)||0,
     };
 
-    // Delete today's signals then re-insert fresh (avoids expression index complexity)
-    await db.query(`DELETE FROM trade_signals WHERE scored_at::date = CURRENT_DATE`);
-
     const results = [];
     for (const ticker of TICKERS) {
       try {
         const expiresAt = new Date(Date.now() + 90*86400*1000);
+        // Per-ticker delete then insert — safe if loop fails mid-way
+        await db.query(`DELETE FROM trade_signals WHERE ticker = $1 AND scored_at::date = CURRENT_DATE`, [ticker]);
         await db.query(
           `INSERT INTO trade_signals
              (ticker, company, direction, confidence, thesis, signal_source, signal_value,

@@ -285,25 +285,21 @@ async function runScoring() {
 
   console.log(`[tradeSignal] FL state: ${fl.zipCount} ZIPs · permits ${fl.totalPermitsMo}/mo · BFS momentum ${fl.bfsMomentum}% · migration ${fl.netMigration}`);
 
-  // Delete today's stale signals before re-scoring
-  await db.query(`DELETE FROM trade_signals WHERE scored_at::date = CURRENT_DATE`);
-
   for (const ticker of TICKERS) {
     try {
       const result = scoreSignals(ticker, fl);
       if (!result) continue;
 
       const { score, direction, thesis, signal_source, signal_value, options_note, risk_note } = result;
-
-      // Expire in 90 days
       const expiresAt = new Date(Date.now() + 90 * 86400 * 1000);
 
+      // Delete then insert atomically per-ticker — no orphan deletes if loop fails mid-way
+      await db.query(`DELETE FROM trade_signals WHERE ticker = $1 AND scored_at::date = CURRENT_DATE`, [ticker]);
       await db.query(
         `INSERT INTO trade_signals
            (ticker, company, direction, confidence, thesis, signal_source, signal_value,
             data_vintage, options_note, risk_note, status, scored_at, expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',NOW(),$11)
-         -- no ON CONFLICT needed: DELETE above clears today's rows before re-insert`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',NOW(),$11)`,
         [
           ticker,
           { DHI:'D.R. Horton', SBCF:'Seacoast Banking FL', HCA:'HCA Healthcare',
