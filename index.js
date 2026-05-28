@@ -18,7 +18,7 @@ const workers = [
   { name: 'Thread Writer',      file: 'threadWriter.js' },
   // localIntelWorker.js — REMOVED: pre-Postgres legacy, wrote to data/localIntel.json flat file, 2-ZIP scope
   // dataIngestWorker.js   — REMOVED: pre-Postgres legacy, wrote to data/localIntel.json flat file, SJC-only ZIP filter
-  { name: 'Local Intel MCP',    file: 'localIntelMCP.js' },
+  // localIntelMCP spawned separately below with DB_POOL_MAX=2 (HTTP server needs concurrency)
   { name: 'Zip Coordinator',    file: 'workers/zipCoordinatorWorker.js' },
   // enrichmentAgent.js — REMOVED: reads/writes data/zips/*.json flat files (/tmp on Railway, lost on redeploy). overpassWorker + websiteEnricherWorker + businessMergeWorker cover this in Postgres.
   { name: 'ACP Broadcaster',    file: 'workers/acpBroadcaster.js' },
@@ -130,7 +130,7 @@ function spawnWorker({ name, file }) {
 function spawnDashboard() {
   const dashPath = path.join(__dirname, 'dashboard-server.js');
   const proc = fork(dashPath, [], {
-    env: { ...process.env, PORT: '8080', DB_POOL_MAX: '5' },  // cap dashboard pool; 19 workers×1 + 5 = 24 max
+    env: { ...process.env, PORT: '8080', DB_POOL_MAX: '3' },  // cap dashboard pool; 19 workers×1 + MCP×2 + dash×3 = 24 max
     stdio: 'inherit',
   });
   proc.on('exit', (code) => {
@@ -142,6 +142,24 @@ function spawnDashboard() {
 }
 
 let dashProc = spawnDashboard();
+
+// ── LocalIntel MCP server ───────────────────────────────────────────────
+// HTTP server — needs DB_POOL_MAX=2 for concurrent MCP tool calls
+// Budget: 18 data workers×1 + MCP×2 + dashboard×3 = 23 ≤ 25 cap
+function spawnMCP() {
+  const mcpPath = path.join(__dirname, 'localIntelMCP.js');
+  const proc = fork(mcpPath, [], {
+    silent: false,
+    env: { ...process.env, DB_POOL_MAX: '2' },
+  });
+  proc.on('exit', (code) => {
+    console.error(`[MCP] Process exited with code ${code}, restarting in 3s...`);
+    setTimeout(() => spawnMCP(), 3000);
+  });
+  console.log('[SWARM] LocalIntel MCP server started');
+  return proc;
+}
+spawnMCP();
 
 // ── Internal health-check server (fixed port, not Railway's PORT) ─────────────
 const app = express();
