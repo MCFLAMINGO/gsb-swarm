@@ -1680,7 +1680,7 @@ async function ingestZBP(targetZips = FL_ZIP_SEED) {
   // premature skip when census_layer had data from other workers but zip_signals
   // didn't have zbp_total_establishments populated.)
   let pendingZips = targetZips;
-  if (!FULL_REFRESH) {
+  if (true) {  // always skip already-ingested ZIPs (FULL_REFRESH mode removed)
     try {
       const db = require('../lib/db');
       const zipList = targetZips.map(z => z.zip);
