@@ -1701,22 +1701,31 @@ async function ingestZBP(targetZips = FL_ZIP_SEED) {
     }
   }
 
-  console.log(`[censusLayer] ZBP: fetching 2018 ZIP Business Patterns for ${pendingZips.length} ZIPs...`);
-  const ZIP_LIST = pendingZips.map(z => z.zip).join(',');
+  console.log(`[censusLayer] ZBP: fetching 2018 ZIP Business Patterns for ${pendingZips.length} ZIPs in batches...`);
 
-  // Fetch all sectors for all ZIPs in one call
-  const raw = await fetchJson(
-    `https://api.census.gov/data/2018/zbp?get=ESTAB,EMP,PAYANN,NAICS2017&for=zipcode:${ZIP_LIST}`
-  );
-  const rows = parseCensus(raw);
-
-  // Group by ZIP
+  // Census API URL limit — batch ZIPs in chunks of 50
+  const BATCH_SIZE = 50;
   const byZip = {};
-  for (const row of rows) {
-    const zip = row['zip code'] || row['zipcode'] || row['ZIPCODE'];
-    if (!zip) continue;
-    if (!byZip[zip]) byZip[zip] = [];
-    byZip[zip].push(row);
+  for (let i = 0; i < pendingZips.length; i += BATCH_SIZE) {
+    const batch = pendingZips.slice(i, i + BATCH_SIZE);
+    const ZIP_LIST = batch.map(z => z.zip).join(',');
+    try {
+      const raw = await fetchJson(
+        `https://api.census.gov/data/2018/zbp?get=ESTAB,EMP,PAYANN,NAICS2017&for=zipcode:${ZIP_LIST}`,
+        15000
+      );
+      const rows = parseCensus(raw);
+      for (const row of rows) {
+        const zip = row['zip code'] || row['zipcode'] || row['ZIPCODE'];
+        if (!zip) continue;
+        if (!byZip[zip]) byZip[zip] = [];
+        byZip[zip].push(row);
+      }
+    } catch (e) {
+      console.warn(`[censusLayer] ZBP batch ${i}-${i+BATCH_SIZE} failed:`, e.message);
+    }
+    // Respect Census API rate limit
+    if (i + BATCH_SIZE < pendingZips.length) await new Promise(r => setTimeout(r, 500));
   }
 
   const zipMeta = Object.fromEntries(targetZips.map(z => [z.zip, z]));
