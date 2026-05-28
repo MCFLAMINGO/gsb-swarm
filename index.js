@@ -111,19 +111,20 @@ function spawnWorker({ name, file }) {
   const WORKER_POOL      = 1;  // DB_POOL_MAX per data worker
   const MCP_POOL         = 2;  // localIntelMCP
   const DASHBOARD_POOL   = 3;  // dashboard-server
+  const MAIN_POOL        = 2;  // localIntelAgent in main process (set via process.env before require)
   const DB_WORKERS       = workers.filter(w => {
     try {
       const src = require('fs').readFileSync(require('path').join(__dirname, w.file), 'utf8');
       return src.includes("require('../lib/db')") || src.includes('require("../lib/db")');
     } catch (_) { return true; } // assume uses DB if file unreadable
   }).length;
-  const TOTAL_CONNS = DB_WORKERS * WORKER_POOL + MCP_POOL + DASHBOARD_POOL;
+  const TOTAL_CONNS = DB_WORKERS * WORKER_POOL + MCP_POOL + DASHBOARD_POOL + MAIN_POOL;
   if (TOTAL_CONNS > RAILWAY_PG_CAP) {
-    console.error(`[SWARM] ❌ CONNECTION BUDGET EXCEEDED: ${DB_WORKERS} DB workers × ${WORKER_POOL} + MCP ${MCP_POOL} + dash ${DASHBOARD_POOL} = ${TOTAL_CONNS} > cap ${RAILWAY_PG_CAP}`);
+    console.error(`[SWARM] ❌ CONNECTION BUDGET EXCEEDED: ${DB_WORKERS} DB workers × ${WORKER_POOL} + MCP ${MCP_POOL} + dash ${DASHBOARD_POOL} + main ${MAIN_POOL} = ${TOTAL_CONNS} > cap ${RAILWAY_PG_CAP}`);
     console.error('[SWARM] Reduce DB_POOL_MAX, add workers to non-DB list, or upgrade Postgres tier.');
     process.exit(1);
   } else {
-    console.log(`[SWARM] ✅ Connection budget: ${DB_WORKERS} DB workers×${WORKER_POOL} + MCP×${MCP_POOL} + dash×${DASHBOARD_POOL} = ${TOTAL_CONNS}/${RAILWAY_PG_CAP}`);
+    console.log(`[SWARM] ✅ Connection budget: ${DB_WORKERS} DB workers×${WORKER_POOL} + MCP×${MCP_POOL} + dash×${DASHBOARD_POOL} + main×${MAIN_POOL} = ${TOTAL_CONNS}/${RAILWAY_PG_CAP}`);
   }
 
   // ── Boot: rescore all flat-file confidence scores (deterministic, <1s) ──────
@@ -211,6 +212,9 @@ const raidersRouter = require('./routes/raiders');
 app.use('/api/raiders', raidersRouter);
 
 // Local Intel agent routes
+// Cap the main-process pool to 2 — localIntelAgent handles admin/agent HTTP endpoints (low concurrency).
+// MUST be set before require() so lib/db.js picks it up at pool creation time.
+if (!process.env.DB_POOL_MAX) process.env.DB_POOL_MAX = '2';
 const localIntelRouter = require('./localIntelAgent');
 app.use('/api/local-intel', localIntelRouter);
 
