@@ -2206,7 +2206,8 @@ async function getTargetZips() {
         return result;
       }
     } catch (e) {
-      console.warn('[censusLayer] Postgres ZIP discovery failed, using hardcoded FL_ZIP_SEED:', e.message);
+      // Fallback is intentional — not an error
+      if (process.env.NODE_ENV !== 'production') console.log('[censusLayer] ZIP discovery fallback to FL_ZIP_SEED:', e.message);
     }
   }
   return FL_ZIP_SEED;
@@ -2218,9 +2219,12 @@ async function runCensusLayer() {
   const MS_MONTHLY  = 24 * 24 * 60 * 60 * 1000; // 24 days — 30d overflows 32-bit signed int (2^31-1)
   const MS_QUARTERLY = 24 * 24 * 60 * 60 * 1000; // 24 days — 90d overflows 32-bit signed int; re-arms itself
 
+  // Discover ZIPs once — reused for all layers. Short delay lets pool settle on fresh deploy.
+  await new Promise(r => setTimeout(r, 5000));
+  const targetZips = await getTargetZips();
+
   // ZBP: once only (Postgres-backed flag)
   try {
-    const targetZips = await getTargetZips();
     await ingestZBP(targetZips);
   } catch (err) {
     console.error('[censusLayer] ZBP error:', err.message);
@@ -2229,8 +2233,7 @@ async function runCensusLayer() {
   // CBP: monthly
   if (await shouldRun('censusLayerWorker_cbp', MS_MONTHLY)) {
     try {
-      const targetZips2 = await getTargetZips();
-      await ingestCBP(targetZips2);
+      await ingestCBP(targetZips);
       await pingHeartbeat('censusLayerWorker_cbp');
     } catch (err) {
       console.error('[censusLayer] CBP error:', err.message);
@@ -2242,7 +2245,7 @@ async function runCensusLayer() {
   // PDB: quarterly
   if (await shouldRun('censusLayerWorker_pdb', MS_QUARTERLY)) {
     try {
-      const targetZips3 = await getTargetZips();
+      const targetZips3 = targetZips;
       const confidenceIndex = await ingestPDB(targetZips3);
       await pingHeartbeat('censusLayerWorker_pdb');
       await stampOracleConfidence(confidenceIndex);
