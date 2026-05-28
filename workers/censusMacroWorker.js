@@ -62,7 +62,7 @@
 
 const https  = require('https');
 const db     = require('../lib/db');
-const { updateHeartbeat, isFresh } = require('../lib/workerHeartbeat');
+const { ping: updateHeartbeat, isFresh } = require('../lib/workerHeartbeat');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const WORKER_NAME     = 'censusMacroWorker';
@@ -496,7 +496,7 @@ async function main() {
   while (true) {
     try {
       // Heartbeat gate — 28 days TTL (BFS monthly, others annual/one-time gate themselves)
-      if (await isFresh(WORKER_NAME, BFS_TTL_DAYS * 24)) {
+      if (await isFresh(WORKER_NAME, BFS_TTL_DAYS * 24 * 3600 * 1000)) {
         console.log(`[censusMacro] heartbeat fresh — sleeping ${LOOP_SLEEP_H}h`);
         await sleep(LOOP_SLEEP_H * 3600 * 1000);
         continue;

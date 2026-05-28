@@ -41,7 +41,7 @@
  */
 
 const db = require('../lib/db');
-const { updateHeartbeat, isFresh } = require('../lib/workerHeartbeat');
+const { ping: updateHeartbeat, isFresh } = require('../lib/workerHeartbeat');
 
 const WORKER_NAME  = 'tradeSignalWorker';
 const TTL_DAYS     = 7;    // re-score weekly
@@ -342,7 +342,7 @@ async function main() {
 
   while (true) {
     try {
-      if (await isFresh(WORKER_NAME, TTL_DAYS * 24)) {
+      if (await isFresh(WORKER_NAME, TTL_DAYS * 24 * 3600 * 1000)) {
         console.log(`[tradeSignal] fresh — sleeping ${LOOP_SLEEP_H}h`);
         await sleep(LOOP_SLEEP_H * 3600 * 1000);
         continue;
