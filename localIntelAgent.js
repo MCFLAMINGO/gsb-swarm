@@ -11895,3 +11895,24 @@ router.get('/property-stats', async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
+// GET /api/local-intel/trade-signals
+// Returns latest scored trade signals from tradeSignalWorker
+// Dashboard: /local-intel/market-intel
+router.get('/trade-signals', async (req, res) => {
+  try {
+    const signals = await db.query(`
+      SELECT id, ticker, company, direction, confidence, thesis,
+             signal_source, signal_value, data_vintage, options_note,
+             risk_note, status, scored_at, expires_at
+      FROM trade_signals
+      WHERE status = 'active'
+        AND (expires_at IS NULL OR expires_at > NOW())
+      ORDER BY scored_at DESC, confidence DESC
+    `);
+    return res.json({ signals, count: signals.length, generated_at: new Date().toISOString() });
+  } catch (err) {
+    console.error('[trade-signals] error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
