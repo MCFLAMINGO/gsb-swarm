@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS trade_signals (
   status          TEXT DEFAULT 'active',    -- 'active' | 'closed' | 'expired'
   scored_at       TIMESTAMPTZ DEFAULT NOW(),
   expires_at      TIMESTAMPTZ,              -- when thesis is stale (default 90 days)
-  UNIQUE (ticker, scored_at::date)
+  -- note: unique constraint is expression-based, applied in migration 054
+  -- UNIQUE (ticker, scored_at::date) ← invalid syntax, use CREATE UNIQUE INDEX instead
 );
 
 CREATE INDEX IF NOT EXISTS idx_trade_signals_ticker    ON trade_signals(ticker);
