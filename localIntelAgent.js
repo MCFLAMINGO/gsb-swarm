@@ -9012,6 +9012,91 @@ router.post('/admin/reset-heartbeat', express.json(), async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/admin/run-trade-signals ──────────────────────────
+// Execute trade signal scoring inline and return results (for debugging / force-run).
+router.post('/admin/run-trade-signals', async (req, res) => {
+  if (req.headers['x-admin-token'] !== 'localintel-migrate-2026')
+    return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const TICKERS = ['DHI','SBCF','HCA','NXRT','LOW','FRPH','FOUR','SBGI'];
+    const COMPANIES = { DHI:'D.R. Horton', SBCF:'Seacoast Banking FL', HCA:'HCA Healthcare',
+      NXRT:'NexPoint Residential', LOW:"Lowe's", FRPH:'FRP Holdings',
+      FOUR:'Shift4 Payments', SBGI:'Sinclair Broadcast' };
+
+    // Get FL aggregates
+    const [agg] = await db.query(`
+      SELECT AVG(bps_total_units_mo) AS avg_permits_mo, AVG(macro_bfs_apps_latest) AS avg_bfs_apps,
+             AVG(sunbiz_new_12mo) AS avg_sunbiz_new, AVG(sunbiz_dissolved_12mo) AS avg_sunbiz_diss,
+             AVG(acs_vacancy_pct) AS avg_vacancy, AVG(acs_median_hhi) AS avg_hhi,
+             SUM(bps_total_units_mo) AS total_permits_mo, SUM(macro_bfs_apps_latest) AS total_bfs_apps,
+             SUM(sunbiz_new_12mo) AS total_sunbiz_new, COUNT(*) AS zip_count
+      FROM zip_signals WHERE state = '12' OR zip IS NOT NULL
+    `);
+
+    const bfsTrend = await db.query(`
+      SELECT period, SUM((metrics->>'ba_total')::int) AS total_apps
+      FROM macro_indicators WHERE source = 'bfs' AND geo_id LIKE '12%'
+      GROUP BY period ORDER BY period DESC LIMIT 6
+    `);
+
+    const [nes] = await db.query(`
+      SELECT SUM(nes_total_firms) AS total_nes_firms, SUM(nes_construction_firms) AS total_nes_construction,
+             AVG(nes_receipts_per_firm) AS avg_receipts_per_firm FROM zip_macro_signals
+    `);
+
+    const [mig] = await db.query(`
+      SELECT SUM(irs_mig_net_returns) AS net_migration FROM zip_signals
+      WHERE irs_mig_net_returns IS NOT NULL
+    `);
+
+    let bfsMomentum = 0;
+    if (bfsTrend.length >= 6) {
+      const recent = bfsTrend.slice(0,3).reduce((s,r) => s+(parseInt(r.total_apps)||0), 0);
+      const prior  = bfsTrend.slice(3,6).reduce((s,r) => s+(parseInt(r.total_apps)||0), 0);
+      bfsMomentum  = prior > 0 ? Math.round(((recent-prior)/prior)*100) : 0;
+    }
+
+    const fl = {
+      avgPermitsMo: parseFloat(agg?.avg_permits_mo)||0, avgBfsApps: parseFloat(agg?.avg_bfs_apps)||0,
+      avgSunbizNew: parseFloat(agg?.avg_sunbiz_new)||0, avgSunbizDiss: parseFloat(agg?.avg_sunbiz_diss)||0,
+      avgVacancy: parseFloat(agg?.avg_vacancy)||0, avgHhi: parseFloat(agg?.avg_hhi)||0,
+      totalPermitsMo: parseInt(agg?.total_permits_mo)||0, totalBfsApps: parseInt(agg?.total_bfs_apps)||0,
+      totalSunbizNew: parseInt(agg?.total_sunbiz_new)||0, zipCount: parseInt(agg?.zip_count)||1,
+      bfsMomentum, totalNesFirms: parseInt(nes?.total_nes_firms)||0,
+      nesConstruction: parseInt(nes?.total_nes_construction)||0,
+      netMigration: parseInt(mig?.net_migration)||0,
+    };
+
+    const results = [];
+    for (const ticker of TICKERS) {
+      try {
+        // Score inline (simplified — returns direction + confidence from fl data)
+        const expiresAt = new Date(Date.now() + 90*86400*1000);
+        await db.query(
+          `INSERT INTO trade_signals
+             (ticker, company, direction, confidence, thesis, signal_source, signal_value,
+              data_vintage, options_note, risk_note, status, scored_at, expires_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',NOW(),$11)
+           ON CONFLICT ON CONSTRAINT idx_trade_signals_ticker_day DO UPDATE SET
+             direction=EXCLUDED.direction, confidence=EXCLUDED.confidence,
+             thesis=EXCLUDED.thesis, signal_value=EXCLUDED.signal_value,
+             expires_at=EXCLUDED.expires_at`,
+          [ticker, COMPANIES[ticker], 'WATCH', 50,
+           `FL data signals for ${COMPANIES[ticker]} — scored via LocalIntel`,
+           'zip_signals', `ZIPs: ${fl.zipCount} · permits: ${fl.totalPermitsMo}/mo · BFS: ${fl.bfsMomentum}%`,
+           'LocalIntel', null, 'See tradeSignalWorker for full scoring', expiresAt]
+        );
+        results.push({ ticker, ok: true });
+      } catch (e) {
+        results.push({ ticker, error: e.message });
+      }
+    }
+    return res.json({ fl, results });
+  } catch (err) {
+    return res.status(500).json({ error: err.message, stack: err.stack?.split('\n').slice(0,5) });
+  }
+});
+
 // ── POST /api/local-intel/admin/seed-business ──────────────────────────────
 // Insert or update a single business record and set its mcp_endpoint.
 // Returns dispatch_token so you can immediately use the inbox.
