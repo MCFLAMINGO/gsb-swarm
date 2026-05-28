@@ -11932,6 +11932,10 @@ router.get('/trade-signals', async (req, res) => {
     return res.json({ signals, count: signals.length, generated_at: new Date().toISOString() });
   } catch (err) {
     console.error('[trade-signals] error:', err.message);
+    // Pool exhausted or table missing — return empty rather than 500
+    if (err.message.includes('too many clients') || err.message.includes('timeout')) {
+      return res.json({ signals: [], count: 0, generated_at: new Date().toISOString(), note: 'DB busy — retry shortly' });
+    }
     return res.status(500).json({ error: err.message });
   }
 });
