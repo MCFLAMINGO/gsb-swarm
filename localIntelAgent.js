@@ -9067,6 +9067,10 @@ router.post('/admin/run-trade-signals', async (req, res) => {
       netMigration: parseInt(mig?.net_migration)||0,
     };
 
+    // Ensure the expression unique index exists (migration 054 may not have run yet)
+    await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_trade_signals_ticker_day
+      ON trade_signals (ticker, (scored_at::date))`);
+
     const results = [];
     for (const ticker of TICKERS) {
       try {

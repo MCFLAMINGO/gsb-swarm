@@ -285,6 +285,10 @@ async function runScoring() {
 
   console.log(`[tradeSignal] FL state: ${fl.zipCount} ZIPs · permits ${fl.totalPermitsMo}/mo · BFS momentum ${fl.bfsMomentum}% · migration ${fl.netMigration}`);
 
+  // Self-heal: ensure expression unique index exists before inserting
+  await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_trade_signals_ticker_day
+    ON trade_signals (ticker, (scored_at::date))`);
+
   for (const ticker of TICKERS) {
     try {
       const result = scoreSignals(ticker, fl);
