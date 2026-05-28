@@ -61,7 +61,7 @@ console.log(`
 `);
 
 const processes = [];
-const STAGGER_DELAY_MS = 2000;  // 2s between each worker
+const STAGGER_DELAY_MS = 3000;  // 3s between each worker — spreads boot-burst below 25-conn Railway cap
 const BOOT_DELAY_MS    = 15000; // 15s head-start for main server pool before first worker
 
 function spawnWorker({ name, file }) {
@@ -130,7 +130,7 @@ function spawnWorker({ name, file }) {
 function spawnDashboard() {
   const dashPath = path.join(__dirname, 'dashboard-server.js');
   const proc = fork(dashPath, [], {
-    env: { ...process.env, PORT: '8080' },
+    env: { ...process.env, PORT: '8080', DB_POOL_MAX: '5' },  // cap dashboard pool; 19 workers×1 + 5 = 24 max
     stdio: 'inherit',
   });
   proc.on('exit', (code) => {
