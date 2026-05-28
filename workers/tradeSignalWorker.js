@@ -285,9 +285,8 @@ async function runScoring() {
 
   console.log(`[tradeSignal] FL state: ${fl.zipCount} ZIPs · permits ${fl.totalPermitsMo}/mo · BFS momentum ${fl.bfsMomentum}% · migration ${fl.netMigration}`);
 
-  // Self-heal: ensure expression unique index exists before inserting
-  await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_trade_signals_ticker_day
-    ON trade_signals (ticker, (scored_at::date))`);
+  // Delete today's stale signals before re-scoring
+  await db.query(`DELETE FROM trade_signals WHERE scored_at::date = CURRENT_DATE`);
 
   for (const ticker of TICKERS) {
     try {
@@ -304,16 +303,7 @@ async function runScoring() {
            (ticker, company, direction, confidence, thesis, signal_source, signal_value,
             data_vintage, options_note, risk_note, status, scored_at, expires_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',NOW(),$11)
-         ON CONFLICT (ticker, (scored_at::date)) DO UPDATE SET
-           direction     = EXCLUDED.direction,
-           confidence    = EXCLUDED.confidence,
-           thesis        = EXCLUDED.thesis,
-           signal_source = EXCLUDED.signal_source,
-           signal_value  = EXCLUDED.signal_value,
-           data_vintage  = EXCLUDED.data_vintage,
-           options_note  = EXCLUDED.options_note,
-           risk_note     = EXCLUDED.risk_note,
-           expires_at    = EXCLUDED.expires_at`,
+         -- no ON CONFLICT needed: DELETE above clears today's rows before re-insert`,
         [
           ticker,
           { DHI:'D.R. Horton', SBCF:'Seacoast Banking FL', HCA:'HCA Healthcare',

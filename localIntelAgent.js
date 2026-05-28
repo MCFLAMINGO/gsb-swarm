@@ -9067,24 +9067,18 @@ router.post('/admin/run-trade-signals', async (req, res) => {
       netMigration: parseInt(mig?.net_migration)||0,
     };
 
-    // Ensure the expression unique index exists (migration 054 may not have run yet)
-    await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_trade_signals_ticker_day
-      ON trade_signals (ticker, (scored_at::date))`);
+    // Delete today's signals then re-insert fresh (avoids expression index complexity)
+    await db.query(`DELETE FROM trade_signals WHERE scored_at::date = CURRENT_DATE`);
 
     const results = [];
     for (const ticker of TICKERS) {
       try {
-        // Score inline (simplified — returns direction + confidence from fl data)
         const expiresAt = new Date(Date.now() + 90*86400*1000);
         await db.query(
           `INSERT INTO trade_signals
              (ticker, company, direction, confidence, thesis, signal_source, signal_value,
               data_vintage, options_note, risk_note, status, scored_at, expires_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',NOW(),$11)
-           ON CONFLICT (ticker, (scored_at::date)) DO UPDATE SET
-             direction=EXCLUDED.direction, confidence=EXCLUDED.confidence,
-             thesis=EXCLUDED.thesis, signal_value=EXCLUDED.signal_value,
-             expires_at=EXCLUDED.expires_at`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',NOW(),$11)`,
           [ticker, COMPANIES[ticker], 'WATCH', 50,
            `FL data signals for ${COMPANIES[ticker]} — scored via LocalIntel`,
            'zip_signals', `ZIPs: ${fl.zipCount} · permits: ${fl.totalPermitsMo}/mo · BFS: ${fl.bfsMomentum}%`,
