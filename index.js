@@ -66,18 +66,37 @@ const BOOT_DELAY_MS    = 15000; // 15s head-start for main server pool before fi
 
 function spawnWorker({ name, file }) {
   const workerPath = path.join(__dirname, file);
-  // Workers are background jobs — give each forked process a pool of 2.
-  // Main server (dashboard-server) keeps its own pool at DB_POOL_MAX default (10).
-  const workerEnv = { ...process.env, DB_POOL_MAX: '1' };
-  const child = fork(workerPath, [], { silent: false, env: workerEnv });
+  const workerEnv  = {
+    ...process.env,
+    DB_POOL_MAX: '1',
+    // Limit each worker to 512MB — prevents one OOM worker from crashing the parent
+    NODE_OPTIONS: '--max-old-space-size=512',
+  };
 
-  child.on('error', (err) => console.error(`[${name}] ERROR: ${err.message}`));
-  child.on('exit', (code) => {
-    console.log(`[${name}] exited with code ${code}. Restarting in 5s...`);
+  const child = fork(workerPath, [], {
+    silent: false,
+    env: workerEnv,
+    // Worker crash is isolated — parent catches the exit event and restarts
+  });
+
+  child.on('error', (err) => {
+    // IPC or spawn error — log and do NOT crash parent
+    console.error(`[${name}] spawn/IPC error: ${err.message}`);
+  });
+
+  child.on('exit', (code, signal) => {
+    if (signal === 'SIGKILL') {
+      console.error(`[${name}] OOM killed (SIGKILL). Restarting in 30s with memory cap enforced.`);
+    } else {
+      console.log(`[${name}] exited (code=${code}). Restarting in 10s...`);
+    }
+    const delay = signal === 'SIGKILL' ? 30000 : 10000;
     setTimeout(() => {
       const newChild = fork(workerPath, [], { silent: false, env: workerEnv });
+      newChild.on('error', (err) => console.error(`[${name}] spawn/IPC error: ${err.message}`));
+      newChild.on('exit', (c, s) => console.log(`[${name}] restarted child exited (code=${c} signal=${s})`));
       processes.push(newChild);
-    }, 5000);
+    }, delay);
   });
 
   processes.push(child);
@@ -85,6 +104,28 @@ function spawnWorker({ name, file }) {
 }
 
 (async () => {
+  // ── Boot: connection budget enforcement ──────────────────────────────
+  // Count worker processes × DB_POOL_MAX to ensure we stay under Railway cap.
+  // If math fails, log loudly and continue — do NOT silently proceed.
+  const RAILWAY_PG_CAP   = 25;
+  const WORKER_POOL      = 1;  // DB_POOL_MAX per data worker
+  const MCP_POOL         = 2;  // localIntelMCP
+  const DASHBOARD_POOL   = 3;  // dashboard-server
+  const DB_WORKERS       = workers.filter(w => {
+    try {
+      const src = require('fs').readFileSync(require('path').join(__dirname, w.file), 'utf8');
+      return src.includes("require('../lib/db')") || src.includes('require("../lib/db")');
+    } catch (_) { return true; } // assume uses DB if file unreadable
+  }).length;
+  const TOTAL_CONNS = DB_WORKERS * WORKER_POOL + MCP_POOL + DASHBOARD_POOL;
+  if (TOTAL_CONNS > RAILWAY_PG_CAP) {
+    console.error(`[SWARM] ❌ CONNECTION BUDGET EXCEEDED: ${DB_WORKERS} DB workers × ${WORKER_POOL} + MCP ${MCP_POOL} + dash ${DASHBOARD_POOL} = ${TOTAL_CONNS} > cap ${RAILWAY_PG_CAP}`);
+    console.error('[SWARM] Reduce DB_POOL_MAX, add workers to non-DB list, or upgrade Postgres tier.');
+    process.exit(1);
+  } else {
+    console.log(`[SWARM] ✅ Connection budget: ${DB_WORKERS} DB workers×${WORKER_POOL} + MCP×${MCP_POOL} + dash×${DASHBOARD_POOL} = ${TOTAL_CONNS}/${RAILWAY_PG_CAP}`);
+  }
+
   // ── Boot: rescore all flat-file confidence scores (deterministic, <1s) ──────
   try {
     require('./scripts/enrichConfidence');

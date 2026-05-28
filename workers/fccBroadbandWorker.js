@@ -315,7 +315,7 @@ async function runPass() {
       console.log('[fccBroadband] Fresh — skipping pass');
     } else {
       try { await runPass(); await hb.ping('fccBroadbandWorker'); }
-      catch (e) { console.error('[fccBroadband] Pass crashed:', e.message, e.stack); }
+      catch (e) { console.error('[fccBroadband] Pass crashed:', e.message); await hb.pingError('fccBroadbandWorker', e.message); }
     }
     console.log(`[fccBroadband] Sleeping ${CYCLE_H}h`);
     await sleep(FRESH_MS);

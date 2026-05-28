@@ -513,10 +513,14 @@ async function main() {
       await sleep(2000);
       await ingestEcn(allZips);
 
-      await updateHeartbeat(WORKER_NAME);
+      // Count rows written as signal of real work done
+      const [countRow] = await db.query(`SELECT COUNT(*) AS n FROM macro_indicators`);
+      await updateHeartbeat(WORKER_NAME, parseInt(countRow?.n || 0));
       console.log(`[censusMacro] cycle complete — sleeping ${LOOP_SLEEP_H}h`);
     } catch (err) {
       console.error('[censusMacro] cycle error:', err.message);
+      const { pingError } = require('../lib/workerHeartbeat');
+      await pingError(WORKER_NAME, err.message).catch(() => {});
     }
 
     await sleep(LOOP_SLEEP_H * 3600 * 1000);

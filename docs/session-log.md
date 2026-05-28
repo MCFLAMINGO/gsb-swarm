@@ -4583,3 +4583,86 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 - NES (Nonemployer Statistics 2021) — solo/gig operators by ZIP, fills CBP blind spot
 - Economic Census 2022 — revenue/payroll by ZIP+NAICS, most granular ever published
 - All feed oracle, JEPA, and MCP signal tools via zip_signals summary columns + JOIN pattern
+
+---
+## B123 — Full Architecture Hardening
+**Date:** 2026-05-28
+**Commits:** (this push)
+
+### Problems addressed
+1. **OOM root cause** — `censusLayerWorker` was calling `getAllZipsFromGeo` 3× per run at boot, each with a 25s timeout on Census API down. 67 county CBP requests × 25s hanging = RAM accumulation to 4GB → OOM kill.
+2. **Heartbeat ≠ success** — all workers were pinging heartbeat on start, not on actual rows written. Log showed "alive" while data was silently failing.
+3. **No circuit breaker** — a flaky Census/BEA/FCC endpoint would keep retrying every cycle, burning connections and memory.
+4. **No data freshness on MCP responses** — agents had no way to know if signal data was 1 hour or 6 months old.
+5. **Connection budget not enforced at boot** — pool math could exceed Railway's 25-connection cap; no guard.
+6. **Child process OOM could crash parent** — SIGKILL from OOM propagated to index.js; no isolation.
+7. **Worker-level error tracking absent** — no `last_error`, `consecutive_fails`, `skip_until` fields in heartbeat.
+
+### Fixes
+
+#### `lib/workerHeartbeat.js` — REWRITTEN
+- New columns: `rows_written`, `last_error`, `consecutive_fails`, `skip_until`
+- New functions: `pingError(workerName, errMsg)` — increments `consecutive_fails`, stores `last_error`
+- New functions: `isCircuitOpen(workerName)` — returns true if `skip_until` > now
+- New functions: `tripCircuit(workerName)` — sets `skip_until = now + 6h`
+- New functions: `resetCircuit(workerName)` — clears fail counter and skip
+- New functions: `getStatus(workerName)` — full status object
+- `ping(workerName, rowsWritten)` — second arg is rows count, resets circuit on success
+
+#### `lib/fetchWithCircuit.js` — NEW FILE
+- Shared HTTP fetch wrapper: timeout enforcement, retry with backoff, circuit breaker
+- 3 consecutive failures → `tripCircuit()` → skip that source for 6h
+- Options: `{ workerName, timeoutMs, retries, retryDelayMs }`
+
+#### `index.js`
+- **Boot budget check**: computes `18 workers × 1 + MCP × 2 + dashboard × 3 = 23`; refuses start (process.exit) if > 25
+- **512MB NODE_OPTIONS** per child worker (`--max-old-space-size=512`)
+- **OOM isolation**: SIGKILL handler waits 30s then re-spawns worker (parent stays alive)
+- `spawnMCP()` with explicit `DB_POOL_MAX=2`; dashboard spawned with `DB_POOL_MAX=3`
+
+#### `localIntelMCP.js`
+- Every MCP tool response now includes `_meta.data_as_of` (ISO timestamp of newest `updated_at` in result set) and `_meta.data_vintage` (human label: "fresh / stale / very stale")
+
+#### `localIntelAgent.js`
+- Admin endpoint: `POST /api/local-intel/admin/reset-heartbeat` — clears heartbeat timestamps for a named worker
+- Admin endpoint: `POST /api/local-intel/admin/run-trade-signals` — force-runs trade signal scoring inline
+
+#### Worker fixes (all workers)
+- `pingError(workerName, err.message)` on every `catch` block
+- heartbeat `ping(workerName, rowsWritten)` with actual count, not fire-and-forget on start
+
+#### `workers/censusLayerWorker.js`
+- `getTargetZips()` called once per run (was 3×) — root cause of boot log noise (1,356 red lines)
+- 5s boot delay before ZIP discovery
+- ZIP fallback log silenced in production
+- CBP skip if data fresh within 30d
+- CBP timeout: 10s (was 25s, the OOM cause)
+- ZBP: batched 50 ZIPs per Census API request (API max), 500ms between batches
+
+#### `workers/censusMacroWorker.js`
+- Fixed heartbeat function name (`ping` not `updateHeartbeat`)
+- TTL passed in ms not hours
+- `rows_written` count tracked and passed to `ping()`
+
+#### `workers/tradeSignalWorker.js`
+- Fixed heartbeat fn name + TTL units
+- Per-ticker `DELETE + INSERT` (not bulk DELETE all then insert — prevents orphan deletes on partial run)
+- `insertCount` tracked, passed to `ping()`
+
+#### `workers/overpassWorker.js`, `irsSoiWorker.js`, `fccBroadbandWorker.js`, `permitWorker.js`
+- `pingError` on every `catch` block
+
+#### `migrations/053_trade_signals.sql`
+- Removed invalid inline `UNIQUE` constraint (not supported for expression indexes in Postgres)
+
+#### `migrations/054_trade_signals_unique_idx.sql`
+- Expression unique index: `CREATE UNIQUE INDEX IF NOT EXISTS trade_signals_ticker_date_uidx ON trade_signals (ticker, scored_at::date)`
+
+### Result
+- Log noise eliminated (ZIP discovery once per run)
+- OOM eliminated (10s CBP timeout + 512MB child cap)
+- Circuit breaker protects all workers from flapping external APIs
+- Heartbeat now reflects real data written, not just "process alive"
+- MCP agents know data freshness on every response
+- Boot refuses to start if connection math would exceed Railway cap
+- Child OOM can no longer crash the parent process

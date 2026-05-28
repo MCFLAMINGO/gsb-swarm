@@ -497,7 +497,7 @@ async function runPass() {
       console.log('[overpass] Fresh — skipping pass');
     } else {
       try { await runPass(); await hb.ping('overpassWorker'); }
-      catch (err) { console.error('[overpass] Pass crashed:', err.message); }
+      catch (err) { console.error('[overpass] Pass crashed:', err.message); await hb.pingError('overpassWorker', err.message); }
     }
     console.log(`[overpass] Sleeping ${LOOP_SLEEP_H}h until next pass`);
     await sleep(FRESH_MS);

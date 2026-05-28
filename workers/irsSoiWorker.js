@@ -287,7 +287,7 @@ async function runPass() {
       console.log('[irs-soi] Fresh — skipping pass');
     } else {
       try { await runPass(); await hb.ping('irsSoiWorker'); }
-      catch (err) { console.error('[irs-soi] Pass crashed:', err.message); }
+      catch (err) { console.error('[irs-soi] Pass crashed:', err.message); await hb.pingError('irsSoiWorker', err.message); }
     }
     console.log(`[irs-soi] Sleeping ${LOOP_SLEEP_H}h`);
     await sleep(FRESH_MS);

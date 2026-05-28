@@ -3045,6 +3045,28 @@ async function handleRPC(req, callerInfo) {
         txHash,
         paidAmt,
       });
+      // Attach data freshness to every tool response so consumers know how old the data is
+      let dataAsOf = null;
+      if (process.env.LOCAL_INTEL_DB_URL) {
+        try {
+          const db = require('./lib/db');
+          const zip = toolArgs?.zip || parsed?.zip || null;
+          if (zip) {
+            const [freshRow] = await db.query(
+              `SELECT GREATEST(zbp_updated_at, cbp_updated_at, acs_updated_at, permit_updated_at) AS freshest
+               FROM zip_signals WHERE zip = $1 LIMIT 1`, [zip]
+            );
+            dataAsOf = freshRow?.freshest || null;
+          }
+          if (!dataAsOf) {
+            const [hbRow] = await db.query(
+              `SELECT MAX(last_run) AS t FROM worker_heartbeat WHERE last_run IS NOT NULL`
+            );
+            dataAsOf = hbRow?.t || null;
+          }
+        } catch (_) {}
+      }
+
       return {
         jsonrpc: '2.0', id,
         result: {
@@ -3053,6 +3075,7 @@ async function handleRPC(req, callerInfo) {
             cost_pathusd: COST,
             latency_ms:   latency,
             tier:         callerTier,
+            data_as_of:   dataAsOf,
             ...(txHash ? { tx_hash: txHash, paid: true } : {}),
           },
         },

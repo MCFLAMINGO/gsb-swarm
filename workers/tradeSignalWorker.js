@@ -285,6 +285,7 @@ async function runScoring() {
 
   console.log(`[tradeSignal] FL state: ${fl.zipCount} ZIPs · permits ${fl.totalPermitsMo}/mo · BFS momentum ${fl.bfsMomentum}% · migration ${fl.netMigration}`);
 
+  let insertCount = 0;
   for (const ticker of TICKERS) {
     try {
       const result = scoreSignals(ticker, fl);
@@ -311,13 +312,15 @@ async function runScoring() {
         ]
       );
 
+      insertCount++;
       console.log(`[tradeSignal] ${ticker} → ${direction} (${score}) — ${thesis.slice(0, 60)}...`);
     } catch (err) {
       console.error(`[tradeSignal] failed for ${ticker}:`, err.message);
     }
   }
 
-  console.log('[tradeSignal] scoring complete');
+  console.log(`[tradeSignal] scoring complete — ${insertCount} tickers written`);
+  return insertCount;
 }
 
 async function main() {
@@ -337,10 +340,12 @@ async function main() {
         await sleep(LOOP_SLEEP_H * 3600 * 1000);
         continue;
       }
-      await runScoring();
-      await updateHeartbeat(WORKER_NAME);
+      const written = await runScoring();
+      await updateHeartbeat(WORKER_NAME, written || 0);
     } catch (err) {
       console.error('[tradeSignal] cycle error:', err.message);
+      const { pingError } = require('../lib/workerHeartbeat');
+      await pingError(WORKER_NAME, err.message).catch(() => {});
     }
     await sleep(LOOP_SLEEP_H * 3600 * 1000);
   }

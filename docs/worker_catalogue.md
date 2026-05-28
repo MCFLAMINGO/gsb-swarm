@@ -809,3 +809,59 @@ A practical gate: do not re-enable any "world-model-feeder" until there is an MC
   - Together these three datasets complete the economic picture that CBP/ZBP alone cannot provide.
 - **Priority**: HIGH
 - **Worker contract**: START → read Postgres for what's done (skip) → WORK only new → END → upsert to Postgres → REDEPLOY SAFE
+
+---
+
+## Architecture Hardening — B123 (2026-05-28)
+
+### Shared Infrastructure Upgrades
+
+#### `lib/workerHeartbeat.js` — contract change
+All workers must now call `ping(workerName, rowsWritten)` with an actual rows-written count at end of a successful run, and `pingError(workerName, errMessage)` in every `catch` block. The heartbeat table now carries:
+- `rows_written` — last successful write count
+- `last_error` — last error message string
+- `consecutive_fails` — increments on every `pingError`, resets to 0 on `ping`
+- `skip_until` — circuit trips when `consecutive_fails >= 3`; set to `now + 6h`
+
+New import pattern for all workers:
+```js
+const { ping, pingError, isFresh } = require('../lib/workerHeartbeat');
+```
+
+#### `lib/fetchWithCircuit.js` — new shared HTTP wrapper
+All external HTTP calls should go through `fetchWithCircuit(url, opts)` where opts:
+```js
+{ workerName: 'myWorker', timeoutMs: 10000, retries: 2, retryDelayMs: 500 }
+```
+- 3 consecutive failures → `tripCircuit(workerName)` → worker skips for 6h
+- Timeout is hard-enforced via `AbortController`
+- Retry with exponential backoff
+
+### Per-Worker Status After Hardening
+
+| Worker | Circuit Breaker | pingError | rows_written | Timeout |
+|--------|----------------|-----------|--------------|---------|
+| censusLayerWorker | via fetchWithCircuit | ✅ | ✅ | CBP 10s, ZBP 15s |
+| censusMacroWorker | via fetchWithCircuit | ✅ | ✅ | 15s |
+| tradeSignalWorker | Yahoo Finance fetch | ✅ | ✅ | 10s |
+| overpassWorker | native timeout | ✅ | — | 30s |
+| irsSoiWorker | native timeout | ✅ | — | 15s |
+| fccBroadbandWorker | native timeout | ✅ | — | 15s |
+| permitWorker | native timeout | ✅ | — | 15s |
+| acsWorker | fetchWithCircuit | existing | ✅ | 15s |
+
+### Connection Budget (enforced at boot)
+```
+18 data workers × DB_POOL_MAX=1 =  18
+localIntelMCP   × DB_POOL_MAX=2 =   2
+dashboard-server× DB_POOL_MAX=3 =   3
+                               TOTAL: 23 / 25 cap
+```
+`index.js` checks this math at startup and calls `process.exit(1)` if the sum would exceed 25. Adding a new worker requires updating the budget comment in `index.js`.
+
+### Child Process OOM Isolation
+`index.js` now traps `SIGKILL` / exit-code-related OOM events from child workers. On OOM:
+1. Parent logs `[OOM] workerName killed, restarting in 30s`
+2. 30s wait (lets Railway memory pressure settle)
+3. Worker re-spawned with `--max-old-space-size=512` cap
+4. Parent process continues running all other workers

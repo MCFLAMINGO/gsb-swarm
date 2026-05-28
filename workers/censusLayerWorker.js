@@ -2190,12 +2190,8 @@ async function shouldRun(workerName, intervalMs) {
   }
 }
 
-async function pingHeartbeat(workerName) {
-  await db.query(
-    `INSERT INTO worker_heartbeat (worker_name, last_run) VALUES ($1, NOW())
-     ON CONFLICT (worker_name) DO UPDATE SET last_run = NOW()`,
-    [workerName]
-  );
+async function pingHeartbeat(workerName, rowsWritten = 0) {
+  await hb.ping(workerName, rowsWritten);
 }
 
 // ── Main run ───────────────────────────────────────────────────────────────────
@@ -2278,11 +2274,17 @@ const CENSUS_INTERVAL = 30 * 24 * 60 * 60 * 1000; // 30d — census data is annu
   if (await hb.isFresh('censusLayerWorker', CENSUS_INTERVAL)) {
     console.log('[censusLayer] Fresh — skipping startup run');
   } else {
-    await runCensusLayer().catch(err => console.error('[censusLayer] Fatal on startup:', err.message));
+    await runCensusLayer().catch(err => {
+      console.error('[censusLayer] Fatal on startup:', err.message);
+      hb.pingError('censusLayerWorker', err.message);
+    });
     await hb.ping('censusLayerWorker');
   }
   setInterval(async () => {
-    await runCensusLayer().catch(err => console.error('[censusLayer] Scheduled error:', err.message));
+    await runCensusLayer().catch(err => {
+      console.error('[censusLayer] Scheduled error:', err.message);
+      hb.pingError('censusLayerWorker', err.message);
+    });
     await hb.ping('censusLayerWorker');
   }, CENSUS_INTERVAL);
 })();

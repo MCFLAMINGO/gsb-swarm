@@ -455,7 +455,7 @@ async function materializeBpsSignals() {
       console.log('[permitWorker] Fresh — skipping pass');
     } else {
       try { await runPass(); await hb.ping('permitWorker'); }
-      catch (err) { console.error('[permitWorker] Pass crashed:', err.message); }
+      catch (err) { console.error('[permitWorker] Pass crashed:', err.message); await hb.pingError('permitWorker', err.message); }
     }
     console.log(`[permitWorker] Sleeping ${LOOP_H}h`);
     await sleep(FRESH_MS);
