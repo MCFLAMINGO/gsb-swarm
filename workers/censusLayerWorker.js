@@ -1798,13 +1798,23 @@ async function ingestZBP(targetZips = FL_ZIP_SEED) {
 async function ingestCBP(targetZips = FL_ZIP_SEED) {
   console.log('[censusLayer] CBP: fetching 2023 County Business Patterns...');
 
+  // Skip if CBP data was written to zip_signals in the last 30 days
+  const [fresh] = await db.query(
+    `SELECT 1 FROM zip_signals WHERE cbp_updated_at > NOW() - INTERVAL '30 days' LIMIT 1`
+  );
+  if (fresh) {
+    console.log('[censusLayer] CBP: data fresh in zip_signals — skipping fetch');
+    return;
+  }
+
   const countySectors = {};
 
   for (const { name, state, county } of COUNTY_CONFIG) {
     try {
-      // Fetch 2-digit NAICS totals for this county
+      // Fetch 2-digit NAICS totals for this county — 10s timeout, Census API is flaky
       const raw = await fetchJson(
-        `https://api.census.gov/data/2023/cbp?get=ESTAB,EMP,PAYANN,NAICS2017&for=county:${county}&in=state:${state}`
+        `https://api.census.gov/data/2023/cbp?get=ESTAB,EMP,PAYANN,NAICS2017&for=county:${county}&in=state:${state}`,
+        10000
       );
       const rows = parseCensus(raw);
 
