@@ -1875,12 +1875,25 @@ async function ingestCBP(targetZips = FL_ZIP_SEED) {
         // World model — write cbp_* signals into zip_signals
         const cbp = countySectors[name];
         if (cbp) {
+          const s = cbp.sectors || {};
           await pgStore.upsertZipSignals(zip, {
+            // County totals
             cbp_total_establishments: cbp.total_establishments || null,
             cbp_total_employees:      cbp.total_employees      || null,
             cbp_total_payroll_k:      cbp.total_payroll_k      || null,
             cbp_dominant_sector:      existing.zbp?.dominant_sector?.code || null,
             cbp_updated_at:           new Date(),
+            // NAICS 236 — Construction of Buildings
+            cbp_bldg_estab:           s['23']  ? (s['236']?.establishments || s['23']?.establishments || null) : null,
+            cbp_bldg_emp:             s['23']  ? (s['236']?.employees      || s['23']?.employees      || null) : null,
+            // NAICS 237 — Heavy and Civil Engineering
+            cbp_civil_estab:          s['237'] ? s['237'].establishments || null : null,
+            cbp_civil_emp:            s['237'] ? s['237'].employees      || null : null,
+            // NAICS 238 — Specialty Trade Contractors
+            cbp_trade_estab:          s['238'] ? s['238'].establishments || null : null,
+            cbp_trade_emp:            s['238'] ? s['238'].employees      || null : null,
+            cbp_trade_payroll_k:      s['238'] ? s['238'].payroll_k      || null : null,
+            cbp_construction_updated_at: new Date(),
           });
         }
       }
@@ -2091,6 +2104,12 @@ async function ingestPDB(targetZips = FL_ZIP_SEED) {
     };
     await pgStore.upsertCensusLayer(zip, pdbLayerData, confidence);
     await snapshotToHistory(zip);
+
+    // World model — stamp confidence score into zip_signals for MCP tools
+    await pgStore.upsertZipSignals(zip, {
+      data_confidence_score: dataConfidenceScore,
+      data_confidence_tier:  confidenceTier,
+    });
 
     confidenceIndex[zip] = {
       score:           dataConfidenceScore,

@@ -44,7 +44,7 @@ const workers = [
   { name: 'Business Merge',       file: 'workers/businessMergeWorker.js' },
   // ── LocalIntel intelligence layers (ZIP-level economic data) ─────────────
   { name: 'IRS SOI',              file: 'workers/irsSoiWorker.js' },
-  // censusLayerWorker.js — SUSPENDED: api.census.gov is down, 25s timeout per call × 67 counties floods the log and holds DB connections. Re-enable when Census API recovers.
+  { name: 'Census Layer',         file: 'workers/censusLayerWorker.js' },
   { name: 'SJC ArcGIS',          file: 'workers/sjcArcGisWorker.js' },
   { name: 'FCC Broadband',        file: 'workers/fccBroadbandWorker.js' },
   { name: 'Permit Worker',        file: 'workers/permitWorker.js' },
