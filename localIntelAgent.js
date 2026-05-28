@@ -11901,6 +11901,25 @@ router.get('/property-stats', async (req, res) => {
 // Dashboard: /local-intel/market-intel
 router.get('/trade-signals', async (req, res) => {
   try {
+    // Self-heal: create table if migration hasn't run yet
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS trade_signals (
+        id            BIGSERIAL PRIMARY KEY,
+        ticker        TEXT NOT NULL,
+        company       TEXT NOT NULL,
+        direction     TEXT NOT NULL,
+        confidence    INT NOT NULL,
+        thesis        TEXT NOT NULL,
+        signal_source TEXT NOT NULL,
+        signal_value  TEXT,
+        data_vintage  TEXT,
+        options_note  TEXT,
+        risk_note     TEXT,
+        status        TEXT DEFAULT 'active',
+        scored_at     TIMESTAMPTZ DEFAULT NOW(),
+        expires_at    TIMESTAMPTZ
+      )
+    `);
     const signals = await db.query(`
       SELECT id, ticker, company, direction, confidence, thesis,
              signal_source, signal_value, data_vintage, options_note,
