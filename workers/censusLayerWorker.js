@@ -2016,12 +2016,24 @@ async function ingestPDB(targetZips = FL_ZIP_SEED) {
     };
   };
 
+  // Circuit breaker for PDB — same pattern as ZBP
+  const PDB_CIRCUIT_LIMIT = 3;
+  let pdbConsecFails = 0;
+
   for (const { name, state, county } of COUNTY_CONFIG) {
+    if (pdbConsecFails >= PDB_CIRCUIT_LIMIT) {
+      console.warn(`[censusLayer] PDB: Census API failed ${pdbConsecFails}x in a row — aborting PDB run. Will resume next cycle.`);
+      const hb = require('../lib/workerHeartbeat');
+      await hb.pingError('censusLayerWorker_pdb', `PDB Census API down — run aborted after ${pdbConsecFails} consecutive failures`);
+      break;
+    }
     try {
       const raw = await fetchJson(
-        `https://api.census.gov/data/2024/pdb/tract?get=Tot_Population_ACS_18_22,Low_Response_Score,pct_College_ACS_18_22,pct_Pov_Univ_ACS_18_22,pct_Vacant_Units_ACS_18_22,Diff_HU_1yr_Ago_ACS_18_22&for=tract:*&in=state:${state}%20county:${county}`
+        `https://api.census.gov/data/2024/pdb/tract?get=Tot_Population_ACS_18_22,Low_Response_Score,pct_College_ACS_18_22,pct_Pov_Univ_ACS_18_22,pct_Vacant_Units_ACS_18_22,Diff_HU_1yr_Ago_ACS_18_22&for=tract:*&in=state:${state}%20county:${county}`,
+        10000  // 10s hard timeout — was defaulting to 25s
       );
       if (!Array.isArray(raw)) throw new Error('non-array response');
+      pdbConsecFails = 0; // reset on success
 
       const [headers, ...rows] = raw;
       const hMap = {};
@@ -2063,7 +2075,8 @@ async function ingestPDB(targetZips = FL_ZIP_SEED) {
       await new Promise(r => setTimeout(r, 800));
 
     } catch (err) {
-      console.error(`[censusLayer] PDB failed for ${name}:`, err.message);
+      pdbConsecFails++;
+      if (pdbConsecFails <= 1) console.warn(`[censusLayer] PDB failed for ${name} (${pdbConsecFails}/${PDB_CIRCUIT_LIMIT}):`, err.message);
     }
   }
 
