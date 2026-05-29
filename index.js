@@ -12,10 +12,22 @@ const { registerOfferings } = require('./acpOfferings');
 const { getSkillReport, resetSkill } = require('./skillFeedback');
 
 const workers = [
-  { name: 'Token Analyst',      file: 'tokenAnalyst.js' },
-  { name: 'Wallet Profiler',    file: 'walletProfiler.js' },
-  { name: 'Alpha Scanner',      file: 'alphaScanner.js' },
-  { name: 'Thread Writer',      file: 'threadWriter.js' },
+  // ── Virtuals GSB agents — gated on their ENTITY_ID env vars ────────────────────────
+  // These report to the CEO agent and connect to the Virtuals protocol network.
+  // When ENTITY_IDs are not set (Virtuals offline), do NOT spawn — they have no
+  // fallback and will spin/crash consuming connections and restart budget.
+  ...(process.env.TOKEN_ANALYST_ENTITY_ID
+    ? [{ name: 'Token Analyst',   file: 'tokenAnalyst.js' }]
+    : []),
+  ...(process.env.WALLET_PROFILER_ENTITY_ID
+    ? [{ name: 'Wallet Profiler', file: 'walletProfiler.js' }]
+    : []),
+  ...(process.env.ALPHA_SCANNER_ENTITY_ID
+    ? [{ name: 'Alpha Scanner',   file: 'alphaScanner.js' }]
+    : []),
+  ...(process.env.THREAD_WRITER_ENTITY_ID
+    ? [{ name: 'Thread Writer',   file: 'threadWriter.js' }]
+    : []),
   // localIntelWorker.js — REMOVED: pre-Postgres legacy, wrote to data/localIntel.json flat file, 2-ZIP scope
   // dataIngestWorker.js   — REMOVED: pre-Postgres legacy, wrote to data/localIntel.json flat file, SJC-only ZIP filter
   // localIntelMCP spawned separately below with DB_POOL_MAX=2 (HTTP server needs concurrency)
