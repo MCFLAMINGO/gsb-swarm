@@ -7830,8 +7830,14 @@ app.use((req, res, next) => {
     console.log(`[local-intel-workers] Started ${w.name} (PID ${child.pid})`);
   }
 
-  LOCAL_INTEL_WORKERS.forEach(spawnLocalIntelWorker);
-  console.log(`[local-intel-workers] ${LOCAL_INTEL_WORKERS.length} LocalIntel workers launched.`);
+  // Stagger worker boot by 4s each — 34 workers × 4s = 2:16 total spread.
+  // Prevents all workers hitting DB pool simultaneously at boot (was causing
+  // 26+ concurrent connection attempts against the 25-connection cap).
+  const WORKER_BOOT_STAGGER_MS = 4000;
+  LOCAL_INTEL_WORKERS.forEach((w, i) => {
+    setTimeout(() => spawnLocalIntelWorker(w), i * WORKER_BOOT_STAGGER_MS);
+  });
+  console.log(`[local-intel-workers] ${LOCAL_INTEL_WORKERS.length} LocalIntel workers launching (staggered ${WORKER_BOOT_STAGGER_MS}ms apart).`);
 
   // Auto-trigger chamber scraper 2 minutes after startup (first-run seed)
   const CHAMBER_FLAG = path.join(__dirname, 'data', 'chamber_imported.flag');
