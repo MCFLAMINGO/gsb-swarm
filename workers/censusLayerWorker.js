@@ -2236,18 +2236,11 @@ async function stampOracleConfidence(confidenceIndex) {
 
 // ── Refresh schedule management (Postgres-backed via worker_heartbeat) ─────────
 async function shouldRun(workerName, intervalMs) {
-  try {
-    const rows = await db.query(
-      `SELECT last_run FROM worker_heartbeat WHERE worker_name = $1`,
-      [workerName]
-    );
-    if (!Array.isArray(rows) || !rows.length || !rows[0].last_run) return true;
-    return Date.now() - new Date(rows[0].last_run).getTime() >= intervalMs;
-  } catch (_) {
-    // Pool busy at boot — assume fresh (skip this run).
-    // Returning true here causes immediate CBP/PDB runs against a saturated pool.
-    return false;
-  }
+  // Delegate to workerHeartbeat.isFresh — returns true on DB error (assume fresh = skip).
+  // This is the correct default: if we can't reach the DB at boot, don't hammer
+  // a saturated pool with CBP/PDB county queries. Wait for next cycle.
+  const fresh = await hb.isFresh(workerName, intervalMs);
+  return !fresh;
 }
 
 async function pingHeartbeat(workerName, rowsWritten = 0) {

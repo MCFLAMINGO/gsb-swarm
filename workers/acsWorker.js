@@ -34,7 +34,7 @@ const ZIPS_DIR = path.join(DATA_DIR, 'zips');
 const ACS_SKIP_ZIPS = new Set([
   '32004', '32006', '32007', '32013', '32026', '32030', '32035', '32041', '32042', '32050',
   '32052', '32053', '32054', '32055', '32056', '32058', '32059', '32067', '32068', '32080',
-  '32081', '32082', '32083', '32085', '32086', '32091', '32092', '32094', '32099', '32105', '32111',
+  '32082', '32083', '32085', '32086', '32091', '32092', '32094', '32099', '32105', '32111',
   '32115', '32116', '32120', '32121', '32122', '32123', '32125', '32126', '32135', '32138',
   '32142', '32143', '32149', '32158', '32160', '32170', '32173', '32175', '32178', '32182',
   '32183', '32185', '32192', '32198', '32201', '32203', '32214', '32229', '32231', '32232',
@@ -124,26 +124,38 @@ if (CENSUS_API_KEY) {
 }
 
 // ── Fetch ACS table for a list of variables, ZCTA level ─────────────────────
+// Network errors that are transient (Census TCP resets, rate limits) — worth retrying.
+const TRANSIENT_ERRORS = ['socket hang up', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED', 'read ECONNRESET'];
+function isTransient(msg) { return TRANSIENT_ERRORS.some(e => msg.includes(e)); }
+
 async function fetchACS(zip, variables) {
   const varStr = variables.join(',');
-  // Census API: ZCTA5 level (ZIP Code Tabulation Areas)
   const keyParam = CENSUS_API_KEY ? `&key=${CENSUS_API_KEY}` : '';
   const url = `https://api.census.gov/data/2022/acs/acs5?get=NAME,${varStr}&for=zip%20code%20tabulation%20area:${zip}${keyParam}`;
-  try {
-    const data = await fetchJson(url);
-    if (!Array.isArray(data) || data.length < 2) {
-      // API returns error object instead of array on bad ZIP
-      if (data && data.error) console.warn(`[acsWorker] Census API error for ${zip} (${varStr.slice(0,20)}): ${data.error}`);
+  // Retry transient network errors up to 3x with backoff (2s, 5s, 10s).
+  // Non-transient errors (bad ZIP, suppressed data) return null immediately.
+  const retryDelays = [2000, 5000, 10000];
+  for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
+    try {
+      const data = await fetchJson(url);
+      if (!Array.isArray(data) || data.length < 2) {
+        if (data && data.error) console.warn(`[acsWorker] Census API error for ${zip} (${varStr.slice(0,20)}): ${data.error}`);
+        return null;
+      }
+      const headers = data[0];
+      const row     = data[1];
+      const result  = {};
+      headers.forEach((h, i) => { result[h] = row[i]; });
+      return result;
+    } catch(e) {
+      if (isTransient(e.message) && attempt < retryDelays.length) {
+        await sleep(retryDelays[attempt]);
+        continue;
+      }
+      // Non-transient or exhausted retries — log once and return null
+      console.warn(`[acsWorker] fetchACS failed for ${zip} vars=${varStr.slice(0,30)}: ${e.message}`);
       return null;
     }
-    const headers = data[0];
-    const row     = data[1];
-    const result  = {};
-    headers.forEach((h, i) => { result[h] = row[i]; });
-    return result;
-  } catch(e) {
-    console.warn(`[acsWorker] fetchACS failed for ${zip} vars=${varStr.slice(0,30)}: ${e.message}`);
-    return null;
   }
 }
 
