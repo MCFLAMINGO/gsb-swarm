@@ -7811,7 +7811,14 @@ app.use((req, res, next) => {
       console.warn(`[local-intel-workers] Skipping ${w.name} — file not found: ${workerPath}`);
       return;
     }
-    const child = fork(workerPath, [], { silent: false, env: process.env });
+    const child = fork(workerPath, [], {
+      silent: false,
+      env: {
+        ...process.env,
+        DB_POOL_MAX: '1',
+        NODE_OPTIONS: '--max-old-space-size=512',
+      },
+    });
     child.on('error', err => console.error(`[local-intel-workers] ${w.name} error:`, err.message));
     child.on('exit', (code, signal) => {
       // Exponential backoff: 5s, 30s, 2m, 10m, 30m — cap at 30 min

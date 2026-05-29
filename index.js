@@ -23,7 +23,7 @@ const workers = [
   // enrichmentAgent.js — REMOVED: reads/writes data/zips/*.json flat files (/tmp on Railway, lost on redeploy). overpassWorker + websiteEnricherWorker + businessMergeWorker cover this in Postgres.
   { name: 'ACP Broadcaster',    file: 'workers/acpBroadcaster.js' },
   // ── LocalIntel learning loop workers ─────────────────────────────────────────────
-  { name: 'ACS Worker',           file: 'workers/acsWorker.js' },
+  // acsWorker spawned by dashboard-server.js LOCAL_INTEL_WORKERS — do NOT double-spawn here
   // mcpProbeWorker disabled — re-enable after SunBiz import + brief-validator >90% pass rate
   // { name: 'MCP Probe',            file: 'workers/mcpProbeWorker.js' },
   { name: 'Router Learning',      file: 'workers/routerLearningWorker.js' },
