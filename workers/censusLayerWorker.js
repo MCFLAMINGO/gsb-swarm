@@ -25,7 +25,7 @@
  *   CBP  — monthly (updated annually, but we check monthly)
  *   PDB  — quarterly (updated annually)
  *
- * NO API KEY REQUIRED — all endpoints are public.
+ * API KEY: process.env.Census_Data_API (required as of May 2026 — Census made keys mandatory).
  *
  * Oracle reads from data/census_layer/{zip}.json to get:
  *   - employment_density (employees per 1000 residents)
@@ -36,6 +36,10 @@
 const https   = require('https');
 const pgStore = require('../lib/pgStore');
 const db      = require('../lib/db');
+
+// Census API key — required as of May 2026. Set in Railway as Census_Data_API.
+const CENSUS_KEY = process.env.Census_Data_API || '';
+if (!CENSUS_KEY) console.warn('[censusLayer] WARNING: Census_Data_API not set — all Census API calls will fail (key required since May 2026)');
 
 // ── County FIPS map ────────────────────────────────────────────────────────────
 // ── County FIPS map — all 67 Florida counties ─────────────────────────────────
@@ -1729,7 +1733,7 @@ async function ingestZBP(targetZips = FL_ZIP_SEED) {
     let batchRows;
     try {
       const raw = await fetchJson(
-        `https://api.census.gov/data/2018/zbp?get=ESTAB,EMP,PAYANN,NAICS2017&for=zipcode:${ZIP_LIST}`,
+        `https://api.census.gov/data/2018/zbp?get=ESTAB,EMP,PAYANN,NAICS2017&for=zipcode:${ZIP_LIST}&key=${CENSUS_KEY}`,
         15000
       );
       batchRows = parseCensus(raw);
@@ -1850,7 +1854,7 @@ async function ingestCBP(targetZips = FL_ZIP_SEED) {
     try {
       // Fetch 2-digit NAICS totals for this county — 10s timeout, Census API is flaky
       const raw = await fetchJson(
-        `https://api.census.gov/data/2023/cbp?get=ESTAB,EMP,PAYANN,NAICS2017&for=county:${county}&in=state:${state}`,
+        `https://api.census.gov/data/2023/cbp?get=ESTAB,EMP,PAYANN,NAICS2017&for=county:${county}&in=state:${state}&key=${CENSUS_KEY}`,
         10000
       );
       const rows = parseCensus(raw);
@@ -2029,7 +2033,7 @@ async function ingestPDB(targetZips = FL_ZIP_SEED) {
     }
     try {
       const raw = await fetchJson(
-        `https://api.census.gov/data/2024/pdb/tract?get=Tot_Population_ACS_18_22,Low_Response_Score,pct_College_ACS_18_22,pct_Pov_Univ_ACS_18_22,pct_Vacant_Units_ACS_18_22,Diff_HU_1yr_Ago_ACS_18_22&for=tract:*&in=state:${state}%20county:${county}`,
+        `https://api.census.gov/data/2024/pdb/tract?get=Tot_Population_ACS_18_22,Low_Response_Score,pct_College_ACS_18_22,pct_Pov_Univ_ACS_18_22,pct_Vacant_Units_ACS_18_22,Diff_HU_1yr_Ago_ACS_18_22&for=tract:*&in=state:${state}%20county:${county}&key=${CENSUS_KEY}`,
         10000  // 10s hard timeout — was defaulting to 25s
       );
       if (!Array.isArray(raw)) throw new Error('non-array response');

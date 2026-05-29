@@ -64,6 +64,10 @@ const https  = require('https');
 const db     = require('../lib/db');
 const { ping: updateHeartbeat, isFresh } = require('../lib/workerHeartbeat');
 
+// Census API key — required as of May 2026. Set in Railway as Census_Data_API.
+const CENSUS_KEY = process.env.Census_Data_API || '';
+if (!CENSUS_KEY) console.warn('[censusMacro] WARNING: Census_Data_API not set — all Census API calls will fail');
+
 // ── Config ────────────────────────────────────────────────────────────────────
 const WORKER_NAME     = 'censusMacroWorker';
 const FL_STATE_FIPS   = '12';
@@ -186,7 +190,7 @@ async function ingestBFS() {
     try {
       // BFS API: total apps, high-propensity apps, will-be-employer apps
       // Variables: BA_BA (total business apps), BA_HBA (high-propensity), BA_WBA (will-be-employer)
-      const url = `https://api.census.gov/data/timeseries/bfs?get=BA_BA,BA_HBA,BA_WBA,YEAR,MONTH&for=county:${fips}&in=state:${FL_STATE_FIPS}&time=from+2022`;
+      const url = `https://api.census.gov/data/timeseries/bfs?get=BA_BA,BA_HBA,BA_WBA,YEAR,MONTH&for=county:${fips}&in=state:${FL_STATE_FIPS}&time=from+2022&key=${CENSUS_KEY}`;
       const raw = await fetchJson(url);
 
       if (!Array.isArray(raw) || raw.length < 2) {
@@ -282,7 +286,7 @@ async function ingestNES(targetZips) {
   // NES is available at ZCTA level via the nonemp API
   // Fetch FL statewide (state:12) — all ZCTAs in one call, filter to our ZIPs
   try {
-    const url = `https://api.census.gov/data/2021/nonemp?get=NESTALL,RCPTALL,NAICS2017&for=zip+code+tabulation+area:*&in=state:${FL_STATE_FIPS}`;
+    const url = `https://api.census.gov/data/2021/nonemp?get=NESTALL,RCPTALL,NAICS2017&for=zip+code+tabulation+area:*&in=state:${FL_STATE_FIPS}&key=${CENSUS_KEY}`;
     const raw = await fetchJson(url);
 
     if (!Array.isArray(raw) || raw.length < 2) {
@@ -386,7 +390,7 @@ async function ingestEcn(targetZips) {
   // Available at ZIP level via ZIPCODE variable
   // Fetch FL all ZIPs in one call (state:12), all sectors (NAICS2017=00 for totals)
   try {
-    const url = `https://api.census.gov/data/2022/ecnbasic?get=ESTAB,PAYANN,EMP,RCPTOT,NAICS2017&for=zipcode:*&in=state:${FL_STATE_FIPS}`;
+    const url = `https://api.census.gov/data/2022/ecnbasic?get=ESTAB,PAYANN,EMP,RCPTOT,NAICS2017&for=zipcode:*&in=state:${FL_STATE_FIPS}&key=${CENSUS_KEY}`;
     const raw = await fetchJson(url);
 
     if (!Array.isArray(raw) || raw.length < 2) {
