@@ -194,7 +194,7 @@ async function ingestBFS() {
       const raw = await fetchJson(url);
 
       if (!Array.isArray(raw) || raw.length < 2) {
-        console.warn(`[censusMacro] BFS: no data for ${name}`);
+        console.warn(`[censusMacro] BFS: bad response for ${name}:`, raw?.error || raw?.message || JSON.stringify(raw)?.slice(0,80));
         continue;
       }
 
@@ -290,7 +290,7 @@ async function ingestNES(targetZips) {
     const raw = await fetchJson(url);
 
     if (!Array.isArray(raw) || raw.length < 2) {
-      console.warn('[censusMacro] NES: empty response');
+      console.warn('[censusMacro] NES: bad response:', raw?.error || raw?.message || JSON.stringify(raw)?.slice(0,80));
       return;
     }
 
@@ -394,7 +394,7 @@ async function ingestEcn(targetZips) {
     const raw = await fetchJson(url);
 
     if (!Array.isArray(raw) || raw.length < 2) {
-      console.warn('[censusMacro] ECN: empty response');
+      console.warn('[censusMacro] ECN: bad response:', raw?.error || raw?.message || JSON.stringify(raw)?.slice(0,80));
       return;
     }
 

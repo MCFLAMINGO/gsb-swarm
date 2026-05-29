@@ -1744,6 +1744,8 @@ async function ingestZBP(targetZips = FL_ZIP_SEED) {
         `https://api.census.gov/data/2018/zbp?get=ESTAB,EMP,PAYANN,NAICS2017&for=zipcode:${ZIP_LIST}&key=${CENSUS_KEY}`,
         15000
       );
+      // Census returns {"error":"..."} as HTTP 200 for bad key/rate-limit — treat as failure
+      if (!Array.isArray(raw)) throw new Error(raw?.error || raw?.message || 'non-array response');
       batchRows = parseCensus(raw);
       consecutiveFails = 0; // reset on success
     } catch (e) {
@@ -1865,6 +1867,7 @@ async function ingestCBP(targetZips = FL_ZIP_SEED) {
         `https://api.census.gov/data/2023/cbp?get=ESTAB,EMP,PAYANN,NAICS2017&for=county:${county}&in=state:${state}&key=${CENSUS_KEY}`,
         10000
       );
+      if (!Array.isArray(raw)) throw new Error(raw?.error || raw?.message || 'non-array response');
       const rows = parseCensus(raw);
 
       const sectors = {};
@@ -2043,7 +2046,7 @@ async function ingestPDB(targetZips = FL_ZIP_SEED) {
         `https://api.census.gov/data/2024/pdb/tract?get=Tot_Population_ACS_18_22,Low_Response_Score,pct_College_ACS_18_22,pct_Pov_Univ_ACS_18_22,pct_Vacant_Units_ACS_18_22,Diff_HU_1yr_Ago_ACS_18_22&for=tract:*&in=state:${state}%20county:${county}&key=${CENSUS_KEY}`,
         10000  // 10s hard timeout — was defaulting to 25s
       );
-      if (!Array.isArray(raw)) throw new Error('non-array response');
+      if (!Array.isArray(raw)) throw new Error(raw?.error || raw?.message || 'non-array response');
       pdbConsecFails = 0; // reset on success
 
       const [headers, ...rows] = raw;
