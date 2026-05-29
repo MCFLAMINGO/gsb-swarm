@@ -4698,3 +4698,23 @@ Root cause: `ingestZBP` fetched ALL 43 batches into memory first, then wrote to 
 - Not a leak. `run-trade-signals` works cleanly when idle (3/3 pass).
 - Timeouts only occur during Railway boot burst (~54s window where all 18 workers do initial DB reads simultaneously).
 - After boot settles, admin endpoints respond normally.
+
+---
+## B126 — acsWorker OOM root cause fix
+**Date:** 2026-05-29
+
+### Problem
+acsWorker PID 155 OOMed at 4074 MB despite `--max-old-space-size=512` in workerEnv.
+
+Root cause (two parts):
+1. **512MB cap doesn't limit RSS.** V8's `--max-old-space-size` caps the *old generation heap* only. Buffer allocations, string buffers, and `_raw` objects on each ZIP response still count toward RSS. acsWorker runs 15 sequential Census API calls per ZIP × ~1,013 FL ZIPs. Each call holds the raw response string in memory until JSON.parse completes; the `_raw` object stays live until the next GC pause at `await sleep()`. Total RSS balloons past the Railway/OS OOM killer threshold.
+2. **No per-ZIP restart safety.** On every restart, acsWorker re-processes ALL ~1,013 ZIPs from scratch. With ~120ms between ZIPs and 15 API calls each, a full run takes 20+ minutes. Every crash at attempt N meant all prior work was lost at the start of attempt N+1.
+
+### Fix — `workers/acsWorker.js`
+1. **Bulk freshness check**: at the top of `run()`, one query loads all ZIPs written to `acs_demographics` in the last 25 days into a Set. Any ZIP in that set is skipped immediately in the loop — no API calls, no memory. After a full successful run, nearly all ZIPs are fresh on restart.
+2. **Delete `_raw` before return**: `delete result._raw` after all computations are done. Reduces per-ZIP heap footprint; helps V8 GC collect the prior ZIP's data during `await sleep()`.
+
+### Result
+- After a partial run completes (e.g., 200 ZIPs), a restart skips those 200 and picks up at ZIP 201.
+- Heap pressure is bounded: each ZIP processes in serial, result is released after the loop iteration GC.
+- No change to the 25-day freshness window (ACS data is annual — monthly refresh is plenty).

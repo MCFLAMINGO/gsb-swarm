@@ -366,6 +366,8 @@ async function processZip(zip) {
     psycho_index:            psycho_index_acs || null,
   }).catch(() => {});
 
+  // Drop _raw before returning — reduces per-ZIP heap footprint, helps GC
+  delete result._raw;
   return result;
 }
 
@@ -374,11 +376,29 @@ async function run() {
   const zips = await getAllZips();
   const registryZips = new Set(getZipsByPriority().map(z => String(z.zip || z)));
   console.log(`[acsWorker] Starting ACS pull for ${zips.length} ZIPs (registry has ${registryZips.size} valid FL ZCTAs)`);
-  let ok = 0, fail = 0;
+  let ok = 0, fail = 0, skipped = 0;
+
+  // ── Per-ZIP freshness: bulk-load already-done ZIPs (one query) ──────────
+  // Skips ZIPs written in the last 25 days so restarts don't re-process the
+  // whole state. ACS data is annual — 25 days is safe.
+  const freshZips = new Set();
+  try {
+    if (process.env.LOCAL_INTEL_DB_URL) {
+      const db = require('../lib/db');
+      const rows = await db.query(
+        `SELECT zip FROM acs_demographics WHERE updated_at > NOW() - INTERVAL '25 days'`
+      );
+      rows.forEach(r => freshZips.add(r.zip));
+      if (freshZips.size > 0) console.log(`[acsWorker] ${freshZips.size} ZIPs already fresh — skipping`);
+    }
+  } catch (e) {
+    console.warn('[acsWorker] freshness check failed (non-fatal):', e.message);
+  }
 
   for (const zip of zips) {
     if (!registryZips.has(zip)) continue; // not a valid ZCTA — skip
     if (ACS_SKIP_ZIPS.has(zip)) continue;
+    if (freshZips.has(zip)) { skipped++; continue; } // already written this cycle
     try {
       const r = await processZip(zip);
       if (r.wfh_pct > 0 || r.affluence_pct > 0 || r.median_home_value > 0) {
@@ -396,7 +416,7 @@ async function run() {
     await sleep(CENSUS_API_KEY ? 120 : 300);
   }
 
-  console.log(`[acsWorker] Done: ${ok} populated, ${fail} empty/failed`);
+  console.log(`[acsWorker] Done: ${ok} populated, ${fail} empty/failed, ${skipped} skipped (fresh)`);
   // Write heartbeat so restarts skip if fresh
   try {
     if (process.env.LOCAL_INTEL_DB_URL) {
