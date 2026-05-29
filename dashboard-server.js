@@ -7821,10 +7821,16 @@ app.use((req, res, next) => {
     });
     child.on('error', err => console.error(`[local-intel-workers] ${w.name} error:`, err.message));
     child.on('exit', (code, signal) => {
-      // Exponential backoff: 5s, 30s, 2m, 10m, 30m — cap at 30 min
-      const delays = [5000, 30000, 120000, 600000, 1800000];
-      const delay = delays[Math.min(attempt, delays.length - 1)];
-      console.warn(`[local-intel-workers] ${w.name} exited (code=${code}, signal=${signal}) — restarting in ${delay/1000}s (attempt ${attempt + 1})`);
+      // Clean exit (code=0) = worker finished its run successfully.
+      // Data is fresh for hours/days — no point restarting for 4 hours.
+      // Crash/signal exit = exponential backoff: 5s, 30s, 2m, 10m, 30m.
+      const CLEAN_EXIT_DELAY_MS = 4 * 60 * 60 * 1000; // 4 hours
+      const crashDelays = [5000, 30000, 120000, 600000, 1800000];
+      const delay = (code === 0 && !signal)
+        ? CLEAN_EXIT_DELAY_MS
+        : crashDelays[Math.min(attempt, crashDelays.length - 1)];
+      const reason = (code === 0 && !signal) ? 'clean exit — data fresh' : `crash (code=${code}, signal=${signal})`;
+      console.warn(`[local-intel-workers] ${w.name} exited: ${reason} — restarting in ${Math.round(delay/60000)}m (attempt ${attempt + 1})`);
       setTimeout(() => spawnLocalIntelWorker(w, attempt + 1), delay);
     });
     console.log(`[local-intel-workers] Started ${w.name} (PID ${child.pid})`);
