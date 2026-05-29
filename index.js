@@ -110,8 +110,8 @@ function spawnWorker({ name, file }) {
   const RAILWAY_PG_CAP   = 25;
   const WORKER_POOL      = 1;  // DB_POOL_MAX per data worker
   const MCP_POOL         = 2;  // localIntelMCP
-  const DASHBOARD_POOL   = 3;  // dashboard-server
-  const MAIN_POOL        = 2;  // localIntelAgent in main process (set via process.env before require)
+  const DASHBOARD_POOL   = 2;  // dashboard-server — reads only, 2 is sufficient
+  const MAIN_POOL        = 3;  // localIntelAgent in main process — admin endpoints need headroom for concurrent requests
   const DB_WORKERS       = workers.filter(w => {
     try {
       const src = require('fs').readFileSync(require('path').join(__dirname, w.file), 'utf8');
@@ -172,7 +172,7 @@ function spawnWorker({ name, file }) {
 function spawnDashboard() {
   const dashPath = path.join(__dirname, 'dashboard-server.js');
   const proc = fork(dashPath, [], {
-    env: { ...process.env, PORT: '8080', DB_POOL_MAX: '3' },  // cap dashboard pool; 19 workers×1 + MCP×2 + dash×3 = 24 max
+    env: { ...process.env, PORT: '8080', DB_POOL_MAX: '2' },  // dashboard reads only; budget: 18×1 + MCP×2 + dash×2 + main×3 = 25
     stdio: 'inherit',
   });
   proc.on('exit', (code) => {
@@ -212,9 +212,10 @@ const raidersRouter = require('./routes/raiders');
 app.use('/api/raiders', raidersRouter);
 
 // Local Intel agent routes
-// Cap the main-process pool to 2 — localIntelAgent handles admin/agent HTTP endpoints (low concurrency).
+// Cap the main-process pool to 3 — admin endpoints (run-trade-signals, reset-heartbeat) do
+// multiple sequential queries; pool=2 caused timeouts under any concurrency.
 // MUST be set before require() so lib/db.js picks it up at pool creation time.
-if (!process.env.DB_POOL_MAX) process.env.DB_POOL_MAX = '2';
+if (!process.env.DB_POOL_MAX) process.env.DB_POOL_MAX = '3';
 const localIntelRouter = require('./localIntelAgent');
 app.use('/api/local-intel', localIntelRouter);
 
