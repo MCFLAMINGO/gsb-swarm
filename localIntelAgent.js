@@ -12005,14 +12005,16 @@ router.get('/property-stats', async (req, res) => {
 router.get('/trade-signals', async (req, res) => {
   try {
     // Table is created by migration 053 — no CREATE IF NOT EXISTS needed here
+    // DISTINCT ON ticker — return only the most recent signal per ticker
     const signals = await db.query(`
-      SELECT id, ticker, company, direction, confidence, thesis,
+      SELECT DISTINCT ON (ticker)
+             id, ticker, company, direction, confidence, thesis,
              signal_source, signal_value, data_vintage, options_note,
              risk_note, status, scored_at, expires_at
       FROM trade_signals
       WHERE status = 'active'
         AND (expires_at IS NULL OR expires_at > NOW())
-      ORDER BY scored_at DESC, confidence DESC
+      ORDER BY ticker, scored_at DESC, confidence DESC
     `);
     return res.json({ signals, count: signals.length, generated_at: new Date().toISOString() });
   } catch (err) {

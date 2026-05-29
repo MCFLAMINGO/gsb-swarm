@@ -4680,3 +4680,21 @@ Root cause: `ingestZBP` fetched ALL 43 batches into memory first, then wrote to 
 1. **Per-batch write**: fetch a batch → process it → write to Postgres immediately → next batch. The skip-check at the top of `ingestZBP` (`zbp_total_establishments IS NOT NULL`) already filters done ZIPs, so any restart resumes from the first unwritten batch.
 2. **Inline circuit breaker**: `consecutiveFails` counter increments on each Census API error. After 3 consecutive failures, the run aborts with a single warn log and `pingError`. The remaining ZIPs stay unwritten in Postgres — next cycle picks them up automatically. No 353x retry storms.
 3. **Log suppression**: in production, only the first failure per circuit-trip logs the full error message. Subsequent ones count silently until the circuit trips.
+
+---
+## B125 — Pool rebalance + trade-signals dedup
+**Date:** 2026-05-28
+
+### Pool rebalance (index.js)
+- Main process: DB_POOL_MAX 2 → 3 (admin endpoints do multiple sequential queries; pool=2 caused timeouts under concurrency)
+- Dashboard: DB_POOL_MAX 3 → 2 (reads only — heartbeat/signal data, 2 is sufficient)
+- Total stays at 25/25 cap
+
+### Trade-signals GET dedup (localIntelAgent.js)
+- Was returning all matching rows per ticker across dates → 16 rows for 8 tickers
+- Fixed with DISTINCT ON (ticker) ORDER BY scored_at DESC — always returns one row per ticker (most recent)
+
+### Root cause of pool timeouts
+- Not a leak. `run-trade-signals` works cleanly when idle (3/3 pass).
+- Timeouts only occur during Railway boot burst (~54s window where all 18 workers do initial DB reads simultaneously).
+- After boot settles, admin endpoints respond normally.
