@@ -36,6 +36,7 @@
 const https   = require('https');
 const pgStore = require('../lib/pgStore');
 const db      = require('../lib/db');
+const hb      = require('../lib/workerHeartbeat');
 
 // Census API key — required as of May 2026. Set in Railway as Census_Data_API.
 const CENSUS_KEY = process.env.Census_Data_API || '';
@@ -1685,23 +1686,31 @@ async function ingestZBP(targetZips = FL_ZIP_SEED) {
   // didn't have zbp_total_establishments populated.)
   let pendingZips = targetZips;
   if (true) {  // always skip already-ingested ZIPs (FULL_REFRESH mode removed)
-    try {
-      const db = require('../lib/db');
-      const zipList = targetZips.map(z => z.zip);
-      const rows = await db.query(
-        `SELECT zip FROM zip_signals WHERE zbp_total_establishments IS NOT NULL AND zip = ANY($1::text[])`,
-        [zipList]
-      );
-      const haveZbp = new Set(rows.map(r => r.zip));
-      pendingZips = targetZips.filter(z => !haveZbp.has(z.zip));
-      if (pendingZips.length === 0) {
-        console.log(`[censusLayer] ZBP already ingested for all ${targetZips.length} ZIPs (zip_signals.zbp_total_establishments populated) — skipping`);
-        return;
+    // Retry skip-check up to 3x with 10s gaps — pool may be busy during boot burst.
+    // A failed skip-check means we'd re-fetch all 2,110 ZIPs unnecessarily.
+    let skipCheckDone = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 10000));
+        const zipList = targetZips.map(z => z.zip);
+        const rows = await db.query(
+          `SELECT zip FROM zip_signals WHERE zbp_total_establishments IS NOT NULL AND zip = ANY($1::text[])`,
+          [zipList]
+        );
+        const haveZbp = new Set(rows.map(r => r.zip));
+        pendingZips = targetZips.filter(z => !haveZbp.has(z.zip));
+        if (pendingZips.length === 0) {
+          console.log(`[censusLayer] ZBP already ingested for all ${targetZips.length} ZIPs — skipping`);
+          return;
+        }
+        console.log(`[censusLayer] ZBP: ${haveZbp.size}/${targetZips.length} ZIPs done — fetching remaining ${pendingZips.length}`);
+        skipCheckDone = true;
+        break;
+      } catch (e) {
+        if (attempt === 2) {
+          console.warn(`[censusLayer] ZBP skip-check failed after 3 attempts — fetching all ${targetZips.length} ZIPs:`, e.message);
+        }
       }
-      console.log(`[censusLayer] ZBP: ${haveZbp.size}/${targetZips.length} ZIPs have zbp in zip_signals — fetching remaining ${pendingZips.length}`);
-    } catch (e) {
-      console.warn('[censusLayer] ZBP skip-check failed, fetching all:', e.message);
-      pendingZips = targetZips;
     }
   }
 
@@ -1723,7 +1732,6 @@ async function ingestZBP(targetZips = FL_ZIP_SEED) {
     // batches that haven't been written yet — no full restart needed.
     if (consecutiveFails >= CIRCUIT_LIMIT) {
       console.warn(`[censusLayer] ZBP: Census API failed ${consecutiveFails}x in a row — aborting run. Completed ${totalIngested} ZIPs. Remaining will resume next cycle.`);
-      const hb = require('../lib/workerHeartbeat');
       await hb.pingError('censusLayerWorker_zbp', `Census API down — ${pendingZips.length - i} ZIPs deferred`);
       break;
     }
@@ -2027,7 +2035,6 @@ async function ingestPDB(targetZips = FL_ZIP_SEED) {
   for (const { name, state, county } of COUNTY_CONFIG) {
     if (pdbConsecFails >= PDB_CIRCUIT_LIMIT) {
       console.warn(`[censusLayer] PDB: Census API failed ${pdbConsecFails}x in a row — aborting PDB run. Will resume next cycle.`);
-      const hb = require('../lib/workerHeartbeat');
       await hb.pingError('censusLayerWorker_pdb', `PDB Census API down — run aborted after ${pdbConsecFails} consecutive failures`);
       break;
     }
