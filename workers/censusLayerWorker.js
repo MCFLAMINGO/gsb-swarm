@@ -1708,7 +1708,10 @@ async function ingestZBP(targetZips = FL_ZIP_SEED) {
         break;
       } catch (e) {
         if (attempt === 2) {
-          console.warn(`[censusLayer] ZBP skip-check failed after 3 attempts — fetching all ${targetZips.length} ZIPs:`, e.message);
+          // Pool saturated at boot — do NOT fall through to fetching all 1,473 ZIPs.
+          // That causes OOM. Exit cleanly; dashboard-server will restart in 4h.
+          console.warn(`[censusLayer] ZBP skip-check failed after 3 attempts — pool busy, exiting cleanly to retry later:`, e.message);
+          return;
         }
       }
     }
