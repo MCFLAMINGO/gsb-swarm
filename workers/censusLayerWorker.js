@@ -2244,7 +2244,9 @@ async function shouldRun(workerName, intervalMs) {
     if (!Array.isArray(rows) || !rows.length || !rows[0].last_run) return true;
     return Date.now() - new Date(rows[0].last_run).getTime() >= intervalMs;
   } catch (_) {
-    return true;
+    // Pool busy at boot — assume fresh (skip this run).
+    // Returning true here causes immediate CBP/PDB runs against a saturated pool.
+    return false;
   }
 }
 
