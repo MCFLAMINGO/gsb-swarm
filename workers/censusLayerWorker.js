@@ -1703,101 +1703,129 @@ async function ingestZBP(targetZips = FL_ZIP_SEED) {
 
   console.log(`[censusLayer] ZBP: fetching 2018 ZIP Business Patterns for ${pendingZips.length} ZIPs in batches...`);
 
-  // Census API URL limit — batch ZIPs in chunks of 50
-  const BATCH_SIZE = 50;
-  const byZip = {};
+  // Census API URL limit — batch ZIPs in chunks of 50.
+  // RESTART-SAFE: each batch is written to Postgres immediately after fetch.
+  // On restart, the skip-check at the top of this function filters out already-written
+  // ZIPs so we resume from where we left off instead of re-running from batch 0.
+  const BATCH_SIZE    = 50;
+  const CIRCUIT_LIMIT = 3;   // consecutive Census API failures before aborting the run
+  const zipMeta       = Object.fromEntries(targetZips.map(z => [z.zip, z]));
+  let consecutiveFails = 0;
+  let totalIngested    = 0;
+
   for (let i = 0; i < pendingZips.length; i += BATCH_SIZE) {
-    const batch = pendingZips.slice(i, i + BATCH_SIZE);
+    // Circuit breaker: if Census API has failed 3 times in a row, stop the run.
+    // The skip-check at the top means the next worker cycle will only retry the
+    // batches that haven't been written yet — no full restart needed.
+    if (consecutiveFails >= CIRCUIT_LIMIT) {
+      console.warn(`[censusLayer] ZBP: Census API failed ${consecutiveFails}x in a row — aborting run. Completed ${totalIngested} ZIPs. Remaining will resume next cycle.`);
+      const hb = require('../lib/workerHeartbeat');
+      await hb.pingError('censusLayerWorker_zbp', `Census API down — ${pendingZips.length - i} ZIPs deferred`);
+      break;
+    }
+
+    const batch   = pendingZips.slice(i, i + BATCH_SIZE);
     const ZIP_LIST = batch.map(z => z.zip).join(',');
+    let batchRows;
     try {
       const raw = await fetchJson(
         `https://api.census.gov/data/2018/zbp?get=ESTAB,EMP,PAYANN,NAICS2017&for=zipcode:${ZIP_LIST}`,
         15000
       );
-      const rows = parseCensus(raw);
-      for (const row of rows) {
-        const zip = row['zip code'] || row['zipcode'] || row['ZIPCODE'];
-        if (!zip) continue;
-        if (!byZip[zip]) byZip[zip] = [];
-        byZip[zip].push(row);
-      }
+      batchRows = parseCensus(raw);
+      consecutiveFails = 0; // reset on success
     } catch (e) {
-      console.warn(`[censusLayer] ZBP batch ${i}-${i+BATCH_SIZE} failed:`, e.message);
+      consecutiveFails++;
+      if (process.env.NODE_ENV !== 'production' || consecutiveFails <= 1) {
+        console.warn(`[censusLayer] ZBP batch ${i}-${i+BATCH_SIZE} failed (${consecutiveFails}/${CIRCUIT_LIMIT}):`, e.message);
+      }
+      if (i + BATCH_SIZE < pendingZips.length) await new Promise(r => setTimeout(r, 500));
+      continue;
     }
-    // Respect Census API rate limit
+
+    // Group rows by ZIP
+    const byZip = {};
+    for (const row of batchRows) {
+      const zip = row['zip code'] || row['zipcode'] || row['ZIPCODE'];
+      if (!zip) continue;
+      if (!byZip[zip]) byZip[zip] = [];
+      byZip[zip].push(row);
+    }
+
+    // Write each ZIP in this batch to Postgres immediately — restart-safe progress
+    for (const [zip, zipRows] of Object.entries(byZip)) {
+      const total    = zipRows.find(r => r.NAICS2017 === '00') || {};
+      const existing = stripMeta(await pgStore.getCensusLayer(zip)) || {};
+
+      // Build sector breakdown (2-digit NAICS only)
+      const sectors = {};
+      for (const [code, meta] of Object.entries(NAICS_SECTORS)) {
+        const row = zipRows.find(r => r.NAICS2017 === code);
+        if (row) {
+          sectors[code] = {
+            label:           meta.label,
+            oracle_vertical: meta.oracle_vertical,
+            establishments:  toN(row.ESTAB),
+            employees:       toN(row.EMP),
+            payroll_k:       Math.round(toN(row.PAYANN) / 1000),
+            emp_withheld:    toN(row.EMP) === 0 && toN(row.ESTAB) > 0,
+          };
+        }
+      }
+
+      // Employment density — population from zip_intelligence
+      const intelRow   = await pgStore.getZipIntelligenceRow(zip).catch(() => null);
+      const population = intelRow?._population || intelRow?.population || 0;
+      const totalEmp   = toN(total.EMP);
+      const totalEstab = toN(total.ESTAB);
+      const empDensity = population > 0 && totalEmp > 0
+        ? Math.round((totalEmp / population) * 1000)
+        : 0;
+
+      // Dominant sector by establishment count
+      let dominantSector = null;
+      let maxEstab = 0;
+      for (const [code, s] of Object.entries(sectors)) {
+        if (s.establishments > maxEstab) { maxEstab = s.establishments; dominantSector = code; }
+      }
+
+      const zbpData = {
+        total_establishments: totalEstab,
+        total_employees:      totalEmp,
+        total_payroll_k:      Math.round(toN(total.PAYANN) / 1000),
+        employment_density:   empDensity,
+        dominant_sector:      dominantSector ? { code: dominantSector, label: NAICS_SECTORS[dominantSector]?.label } : null,
+        sectors,
+        zbp_vintage:          2018,
+        zbp_note:             'ZBP 2018 is the most recent ZIP-level vintage. Use as structural baseline, not current count.',
+      };
+
+      const zbpLayerData = {
+        ...existing,
+        zip,
+        name:   zipMeta[zip]?.name || zip,
+        county: zipMeta[zip]?.county || '',
+        zbp:    zbpData,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Write to Postgres immediately — this ZIP is now marked done for skip-check on restart
+      await pgStore.upsertCensusLayer(zip, zbpLayerData, existing._confidence || null);
+      await snapshotToHistory(zip);
+      await pgStore.upsertZipSignals(zip, {
+        zbp_total_establishments: zbpData.total_establishments || null,
+        zbp_total_employees:      zbpData.total_employees      || null,
+        zbp_sector_json:          Object.keys(zbpData.sectors).length ? zbpData.sectors : null,
+        zbp_updated_at:           new Date(),
+      });
+      totalIngested++;
+    }
+
+    // Respect Census API rate limit between batches
     if (i + BATCH_SIZE < pendingZips.length) await new Promise(r => setTimeout(r, 500));
   }
 
-  const zipMeta = Object.fromEntries(targetZips.map(z => [z.zip, z]));
-
-  for (const [zip, zipRows] of Object.entries(byZip)) {
-    const total    = zipRows.find(r => r.NAICS2017 === '00') || {};
-    const existing = stripMeta(await pgStore.getCensusLayer(zip)) || {};
-
-    // Build sector breakdown (2-digit NAICS only)
-    const sectors = {};
-    for (const [code, meta] of Object.entries(NAICS_SECTORS)) {
-      const row = zipRows.find(r => r.NAICS2017 === code);
-      if (row) {
-        sectors[code] = {
-          label:           meta.label,
-          oracle_vertical: meta.oracle_vertical,
-          establishments: toN(row.ESTAB),
-          employees:       toN(row.EMP),       // 0 = withheld by Census for privacy
-          payroll_k:       Math.round(toN(row.PAYANN) / 1000),
-          emp_withheld:    toN(row.EMP) === 0 && toN(row.ESTAB) > 0,
-        };
-      }
-    }
-
-    // Employment density (employees per 1000 residents) — population sourced from zip_intelligence
-    const intelRow = await pgStore.getZipIntelligenceRow(zip).catch(() => null);
-    const population = intelRow?._population || intelRow?.population || 0;
-    const totalEmp   = toN(total.EMP);
-    const totalEstab = toN(total.ESTAB);
-    const empDensity = population > 0 && totalEmp > 0
-      ? Math.round((totalEmp / population) * 1000)
-      : 0;
-
-    // Dominant sector by establishment count
-    let dominantSector = null;
-    let maxEstab = 0;
-    for (const [code, s] of Object.entries(sectors)) {
-      if (s.establishments > maxEstab) { maxEstab = s.establishments; dominantSector = code; }
-    }
-
-    const zbpData = {
-      total_establishments: totalEstab,
-      total_employees:      totalEmp,
-      total_payroll_k:      Math.round(toN(total.PAYANN) / 1000),
-      employment_density:   empDensity,
-      dominant_sector:      dominantSector ? { code: dominantSector, label: NAICS_SECTORS[dominantSector]?.label } : null,
-      sectors,
-      zbp_vintage:          2018,
-      zbp_note:             'ZBP 2018 is the most recent ZIP-level vintage. Use as structural baseline, not current count.',
-    };
-
-    const zbpLayerData = {
-      ...existing,
-      zip,
-      name:   zipMeta[zip]?.name || zip,
-      county: zipMeta[zip]?.county || '',
-      zbp:    zbpData,
-      updated_at: new Date().toISOString(),
-    };
-    await pgStore.upsertCensusLayer(zip, zbpLayerData, existing._confidence || null);
-    await snapshotToHistory(zip);
-
-    // World model — write zbp_* signals into zip_signals
-    await pgStore.upsertZipSignals(zip, {
-      zbp_total_establishments: zbpData.total_establishments || null,
-      zbp_total_employees:      zbpData.total_employees      || null,
-      zbp_sector_json:          Object.keys(zbpData.sectors).length ? zbpData.sectors : null,
-      zbp_updated_at:           new Date(),
-    });
-  }
-
-  console.log(`[censusLayer] ZBP: ingested ${Object.keys(byZip).length} ZIPs into census_layer`);
+  console.log(`[censusLayer] ZBP: ingested ${totalIngested} ZIPs into census_layer`);
 }
 
 // ── LAYER 2: CBP — County Business Patterns 2023 ──────────────────────────────

@@ -4666,3 +4666,17 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 - MCP agents know data freshness on every response
 - Boot refuses to start if connection math would exceed Railway cap
 - Child OOM can no longer crash the parent process
+
+---
+## B124 — censusLayerWorker ZBP restart-safe progress + circuit breaker
+**Date:** 2026-05-28
+
+### Problem
+930 ZBP errors in 7 seconds. Logs showed batch 900-950 retried 353x.
+
+Root cause: `ingestZBP` fetched ALL 43 batches into memory first, then wrote to Postgres at the end. When Census API failed on batches 850-1150, those ZIPs were never written to Postgres. Every worker restart re-ran all pending batches from batch 0 — so the same failing batches hammered Census API again and again.
+
+### Fix — `workers/censusLayerWorker.js`
+1. **Per-batch write**: fetch a batch → process it → write to Postgres immediately → next batch. The skip-check at the top of `ingestZBP` (`zbp_total_establishments IS NOT NULL`) already filters done ZIPs, so any restart resumes from the first unwritten batch.
+2. **Inline circuit breaker**: `consecutiveFails` counter increments on each Census API error. After 3 consecutive failures, the run aborts with a single warn log and `pingError`. The remaining ZIPs stay unwritten in Postgres — next cycle picks them up automatically. No 353x retry storms.
+3. **Log suppression**: in production, only the first failure per circuit-trip logs the full error message. Subsequent ones count silently until the circuit trips.
