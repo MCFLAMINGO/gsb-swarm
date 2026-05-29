@@ -342,6 +342,36 @@ let TARGET_ZIPS = ['32202','32207','32216','32244','32256','32073','33602','3362
   } catch (e) {
     console.warn('[localIntelAgent] TARGET_ZIPS DB load failed, using bootstrap:', e.message);
   }
+
+  // Warm the trade-signals cache on startup so the first dashboard load
+  // never sees empty even if the DB pool is busy during the boot burst.
+  // Retries every 5s for up to 60s to survive the boot burst window.
+  (async () => {
+    for (let attempt = 0; attempt < 12; attempt++) {
+      try {
+        await new Promise(r => setTimeout(r, attempt === 0 ? 2000 : 5000));
+        const rows = await db.query(`
+          SELECT DISTINCT ON (ticker)
+                 id, ticker, company, direction, confidence, thesis,
+                 signal_source, signal_value, data_vintage, options_note,
+                 risk_note, status, scored_at, expires_at
+          FROM trade_signals
+          WHERE status = 'active'
+            AND (expires_at IS NULL OR expires_at > NOW())
+          ORDER BY ticker, scored_at DESC, confidence DESC
+        `);
+        if (rows.length > 0) {
+          _signalsCache = { signals: rows, generated_at: new Date().toISOString() };
+          console.log(`[localIntelAgent] trade-signals cache warmed: ${rows.length} signals`);
+          break;
+        }
+        // Table empty — no signals yet, stop retrying
+        break;
+      } catch (_) {
+        // Pool busy during boot — retry
+      }
+    }
+  })();
 })();
 
 // Step 3 — fire-and-forget write to resolution_history. Never blocks the
@@ -12002,9 +12032,14 @@ router.get('/property-stats', async (req, res) => {
 // GET /api/local-intel/trade-signals
 // Returns latest scored trade signals from tradeSignalWorker
 // Dashboard: /local-intel/market-intel
+//
+// In-memory cache: last successful DB read is held in _signalsCache.
+// On pool exhaustion (boot burst window), serve stale cache instead of empty.
+// Cache TTL: 6h — signals are scored weekly so stale cache is always correct.
+let _signalsCache = null;  // { signals, generated_at }
+
 router.get('/trade-signals', async (req, res) => {
   try {
-    // Table is created by migration 053 — no CREATE IF NOT EXISTS needed here
     // DISTINCT ON ticker — return only the most recent signal per ticker
     const signals = await db.query(`
       SELECT DISTINCT ON (ticker)
@@ -12016,10 +12051,21 @@ router.get('/trade-signals', async (req, res) => {
         AND (expires_at IS NULL OR expires_at > NOW())
       ORDER BY ticker, scored_at DESC, confidence DESC
     `);
-    return res.json({ signals, count: signals.length, generated_at: new Date().toISOString() });
+    // Update cache on every successful read
+    _signalsCache = { signals, generated_at: new Date().toISOString() };
+    return res.json({ signals, count: signals.length, generated_at: _signalsCache.generated_at });
   } catch (err) {
+    // Pool exhausted during boot burst — serve last known good cache rather than empty
+    if (_signalsCache && (err.message.includes('too many clients') || err.message.includes('timeout'))) {
+      return res.json({
+        signals: _signalsCache.signals,
+        count:   _signalsCache.signals.length,
+        generated_at: _signalsCache.generated_at,
+        note: 'served from cache — DB busy at boot',
+      });
+    }
     console.error('[trade-signals] error:', err.message);
-    // Pool exhausted or table missing — return empty rather than 500
+    // No cache yet and DB busy — return empty (first boot only)
     if (err.message.includes('too many clients') || err.message.includes('timeout')) {
       return res.json({ signals: [], count: 0, generated_at: new Date().toISOString(), note: 'DB busy — retry shortly' });
     }
