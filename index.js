@@ -19,37 +19,27 @@ const workers = [
   // localIntelWorker.js — REMOVED: pre-Postgres legacy, wrote to data/localIntel.json flat file, 2-ZIP scope
   // dataIngestWorker.js   — REMOVED: pre-Postgres legacy, wrote to data/localIntel.json flat file, SJC-only ZIP filter
   // localIntelMCP spawned separately below with DB_POOL_MAX=2 (HTTP server needs concurrency)
-  { name: 'Zip Coordinator',    file: 'workers/zipCoordinatorWorker.js' },
-  // enrichmentAgent.js — REMOVED: reads/writes data/zips/*.json flat files (/tmp on Railway, lost on redeploy). overpassWorker + websiteEnricherWorker + businessMergeWorker cover this in Postgres.
-  { name: 'ACP Broadcaster',    file: 'workers/acpBroadcaster.js' },
-  // ── LocalIntel learning loop workers ─────────────────────────────────────────────
-  // acsWorker spawned by dashboard-server.js LOCAL_INTEL_WORKERS — do NOT double-spawn here
-  // mcpProbeWorker disabled — re-enable after SunBiz import + brief-validator >90% pass rate
-  // { name: 'MCP Probe',            file: 'workers/mcpProbeWorker.js' },
-  { name: 'Router Learning',      file: 'workers/routerLearningWorker.js' },
-  // verticalAgentWorker.js — REMOVED: writes gaps to data/gaps/*.json (/tmp, lost on redeploy). Gap-closure loop broken in production — re-enable when gaps table exists in Postgres.
+  // ── Workers below are spawned by dashboard-server.js LOCAL_INTEL_WORKERS ────────────────
+  // Do NOT add them here — they already run under DB_POOL_MAX=1 + NODE_OPTIONS=512MB there.
+  // Duplicating here causes double-spawn restart storms (was root cause of 1475x censusLayer starts).
+  //
+  // Moved to dashboard-server: zipCoordinatorWorker, acpBroadcaster, routerLearningWorker,
+  //   promptEvolutionWorker, overpassWorker, sunbizWorker, businessMergeWorker,
+  //   irsSoiWorker, censusLayerWorker, fccBroadbandWorker, permitWorker, mcpProbeWorker
+  //
+  // ── GSB-only workers (NOT in dashboard-server) ────────────────────────────
   { name: 'Chamber Scraper',      file: 'workers/chamberScraper.js' },
-  { name: 'Prompt Evolution',     file: 'workers/promptEvolutionWorker.js' },
-  // briefValidator.js — REMOVED: QA tool, not a data worker. Run manually as needed: node workers/briefValidator.js
   ...(process.env.FINANCIAL_ANALYST_ENTITY_ID
     ? [{ name: 'Financial Analyst', file: 'financialAnalyst.js' }]
     : []),
-  // ── LocalIntel source workers (data ingestion + reconciliation) ───────────
-  { name: 'OSM Overpass',         file: 'workers/overpassWorker.js' },
+  // ── LocalIntel source workers (index.js-only) ─────────────────────────────
   { name: 'Yellow Pages',         file: 'workers/yellowPagesScraper.js' },
-  // { name: 'FL SunBiz',            file: 'workers/sunbizWorker.js' },
-  // MANUAL TRIGGER ONLY — SFTP download, do not auto-start. Trigger from admin panel.
   // { name: 'SunBiz Match',         file: 'workers/sunbizMatchWorker.js' },
-  // MANUAL TRIGGER ONLY (B120) — gated on SUNBIZ_MATCH_MANUAL_TRIGGER=true; trigger via POST /api/admin/trigger-sunbiz-match.
-  { name: 'Business Merge',       file: 'workers/businessMergeWorker.js' },
-  // ── LocalIntel intelligence layers (ZIP-level economic data) ─────────────
-  { name: 'IRS SOI',              file: 'workers/irsSoiWorker.js' },
-  { name: 'Census Layer',         file: 'workers/censusLayerWorker.js' },
+  // MANUAL TRIGGER ONLY (B120) — gated on SUNBIZ_MATCH_MANUAL_TRIGGER=true
+  // ── LocalIntel intelligence layers (index.js-only) ────────────────────────
   { name: 'Census Macro',         file: 'workers/censusMacroWorker.js' },
   { name: 'Trade Signals',        file: 'workers/tradeSignalWorker.js'  },
   { name: 'SJC ArcGIS',          file: 'workers/sjcArcGisWorker.js' },
-  { name: 'FCC Broadband',        file: 'workers/fccBroadbandWorker.js' },
-  { name: 'Permit Worker',        file: 'workers/permitWorker.js' },
 ];
 
 console.log(`
