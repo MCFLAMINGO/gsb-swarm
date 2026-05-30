@@ -7795,8 +7795,8 @@ app.use((req, res, next) => {
   // [ISOLATED-TEST] { name: 'LODES Jobs Worker',             file: 'workers/lodesWorker.js'         },  // annual data
   // [ISOLATED-TEST] { name: 'QWI Workforce Worker',          file: 'workers/qwiWorker.js'           },
   // [ISOLATED-TEST] { name: 'CES Employment Worker',         file: 'workers/cesWorker.js'           },
-  { name: 'QCEW Wages Worker',             file: 'workers/qcewWorker.js'          },
-  // [ISOLATED-TEST] { name: 'School Enrollment Worker',      file: 'workers/schoolEnrollmentWorker.js' }, // B87 — 90-day freshness (Urban Institute CCD)
+  // [ISOLATED-TEST] { name: 'QCEW Wages Worker',             file: 'workers/qcewWorker.js'          },
+  { name: 'School Enrollment Worker',      file: 'workers/schoolEnrollmentWorker.js' },
   // [ISOLATED-TEST] { name: 'County Permits Worker',         file: 'workers/countyPermitsWorker.js'    }, // B87 — 30-day freshness (Census BPS + CBP NAICS 236)
     // ── World model derived signals (runs after input workers) ──
     // { name: 'FCC Broadband Worker',        file: 'workers/fccBroadbandWorker.js'  }, // disabled — not consumed by any query path
