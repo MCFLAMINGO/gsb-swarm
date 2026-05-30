@@ -292,6 +292,8 @@ async function runPass() {
       catch (err) { console.error('[irs-soi] Pass crashed:', err.message); await hb.pingError('irsSoiWorker', err.message); }
     }
     console.log('[irs-soi] Sleeping 24h');
+    await db.disconnect(); // release connection slot during sleep
     await sleep(SLEEP_MS);
+    // pool reconnects lazily on next db.query()
   }
 })();

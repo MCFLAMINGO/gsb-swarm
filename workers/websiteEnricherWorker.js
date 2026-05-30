@@ -364,6 +364,7 @@ async function runPass() {
       console.error('[web-enricher] Cycle error:', err.message);
       try { await (require('../lib/workerHeartbeat')).pingError(WORKER_NAME, err.message); } catch(_) {}
     }
+    await db.disconnect(); // release connection slot during sleep
     await sleep(SLEEP_MS);
   }
 })();
