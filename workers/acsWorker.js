@@ -22,6 +22,7 @@
 const fs      = require('fs');
 const path    = require('path');
 const https   = require('https');
+const db      = require('../lib/db');
 const pgStore = require('../lib/pgStore');
 const { getZipsByPriority } = require('./flZipRegistry');
 
