@@ -7793,8 +7793,8 @@ app.use((req, res, next) => {
   // [ISOLATED-TEST] { name: 'FRED Unemployment Worker',      file: 'workers/fredWorker.js'          },  // 30-day freshness check
   // [ISOLATED-TEST] { name: 'BEA Income Worker',             file: 'workers/beaWorker.js'           },  // 30-day freshness check
   // [ISOLATED-TEST] { name: 'LODES Jobs Worker',             file: 'workers/lodesWorker.js'         },  // annual data
-  { name: 'QWI Workforce Worker',          file: 'workers/qwiWorker.js'           },
-  // [ISOLATED-TEST] { name: 'CES Employment Worker',         file: 'workers/cesWorker.js'           },  // 2-day freshness check (built-in)
+  // [ISOLATED-TEST] { name: 'QWI Workforce Worker',          file: 'workers/qwiWorker.js'           },
+  { name: 'CES Employment Worker',         file: 'workers/cesWorker.js'           },
   // [ISOLATED-TEST] { name: 'QCEW Wages Worker',             file: 'workers/qcewWorker.js'          },  // 30-day freshness check (built-in)
   // [ISOLATED-TEST] { name: 'School Enrollment Worker',      file: 'workers/schoolEnrollmentWorker.js' }, // B87 — 90-day freshness (Urban Institute CCD)
   // [ISOLATED-TEST] { name: 'County Permits Worker',         file: 'workers/countyPermitsWorker.js'    }, // B87 — 30-day freshness (Census BPS + CBP NAICS 236)

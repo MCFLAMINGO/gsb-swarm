@@ -57,8 +57,8 @@ async function run() {
       const age = Date.now() - new Date(hb[0].last_run).getTime();
       const days = age / 86400000;
       if (age < FRESH_MS) {
-        console.log(`[schoolEnrollment] Data fresh (${days.toFixed(1)} days old, window 90d) — skipping run`);
-        return;
+        console.log('[schoolEnrollment] Data fresh — skipping');
+        process.exit(0);
       }
     }
   } catch (_) { /* no heartbeat yet — run */ }
@@ -69,13 +69,13 @@ async function run() {
     const rows = await db.query(`SELECT zip FROM fl_zip_geo`);
     if (!Array.isArray(rows) || rows.length === 0) {
       console.warn('[schoolEnrollment] fl_zip_geo is empty — skipping run');
-      return;
+      process.exit(0);
     }
     flZipSet = new Set(rows.map(r => String(r.zip).trim()).filter(Boolean));
     console.log(`[schoolEnrollment] Loaded ${flZipSet.size} FL ZIPs from fl_zip_geo`);
   } catch (e) {
     console.error('[schoolEnrollment] Failed to load fl_zip_geo:', e.message);
-    return;
+    process.exit(1);
   }
 
   // Fetch all FL schools
@@ -84,14 +84,14 @@ async function run() {
     payload = await fetchJson(URL);
   } catch (e) {
     console.error('[schoolEnrollment] Urban Institute fetch failed:', e.message);
-    return;
+    process.exit(1);
   }
 
   const results = Array.isArray(payload?.results) ? payload.results : [];
   console.log(`[schoolEnrollment] API returned ${results.length} schools (count=${payload?.count})`);
   if (results.length === 0) {
     console.warn('[schoolEnrollment] No schools in API response — aborting upsert');
-    return;
+    process.exit(1);
   }
 
   // Group by zip_mailing, filter to FL ZIPs with non-null/non-zero enrollment
@@ -140,7 +140,7 @@ async function run() {
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.log(`[schoolEnrollment] ✅ Done — ${done} ZIP upserts — ${elapsed}s`);
-  return;
+  process.exit(0);
 }
 
 run().catch(e => { console.error('[schoolEnrollment] fatal:', e.message); });
