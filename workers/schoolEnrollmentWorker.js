@@ -19,7 +19,7 @@ const db      = require('../lib/db');
 const pgStore = require('../lib/pgStore');
 
 const URL = 'https://educationdata.urban.org/api/v1/schools/ccd/directory/2022/?fips=12&school_status=1&limit=5000';
-const FRESH_MS = 90 * 24 * 60 * 60 * 1000;
+const FRESH_MS = 180 * 24 * 60 * 60 * 1000; // 180d — NCES data is annual
 
 function fetchJson(url) {
   return new Promise((resolve, reject) => {

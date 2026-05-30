@@ -25,7 +25,7 @@ const https   = require('https');
 const db      = require('../lib/db');
 const pgStore = require('../lib/pgStore');
 
-const FRESH_MS = 30 * 24 * 60 * 60 * 1000;
+const FRESH_MS = 180 * 24 * 60 * 60 * 1000; // 180d — CBP data is annual
 const CENSUS_API_KEY = process.env.Census_Data_API || process.env.CENSUS_API_KEY || null;
 const STATE_FIPS = '12'; // Florida
 

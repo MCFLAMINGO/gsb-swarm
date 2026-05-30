@@ -35,7 +35,8 @@ const TMP_DIR           = os.tmpdir();
 const CSV_CACHE_FP      = path.join(TMP_DIR, 'irs_soi_2022.csv');
 const CSV_URL           = 'https://www.irs.gov/pub/irs-soi/22zpallagi.csv';
 const FL_STATEFIPS      = '12';
-const LOOP_SLEEP_H      = 24;
+const LOOP_SLEEP_H      = 24;         // 24h sleep — Node setTimeout overflows >24.8d
+const FRESH_H           = 24 * 180;   // 180d freshness window — IRS SOI is annual data
 const CSV_MAX_AGE_H     = 72;   // re-download every 3 days
 const FULL_REFRESH      = process.env.FULL_REFRESH === 'true';
 
@@ -280,7 +281,8 @@ async function runPass() {
 // ── Daemon loop ───────────────────────────────────────────────────────────────
 (async function main() {
   const hb = require('../lib/workerHeartbeat');
-  const FRESH_MS = LOOP_SLEEP_H * 60 * 60 * 1000;
+  const FRESH_MS = FRESH_H * 60 * 60 * 1000;         // 180d freshness check
+  const SLEEP_MS  = LOOP_SLEEP_H * 60 * 60 * 1000;   // 24h sleep (avoids overflow)
   console.log('[irs-soi] Worker started');
   while (true) {
     if (await hb.isFresh('irsSoiWorker', FRESH_MS)) {
@@ -289,7 +291,7 @@ async function runPass() {
       try { await runPass(); await hb.ping('irsSoiWorker'); }
       catch (err) { console.error('[irs-soi] Pass crashed:', err.message); await hb.pingError('irsSoiWorker', err.message); }
     }
-    console.log(`[irs-soi] Sleeping ${LOOP_SLEEP_H}h`);
-    await sleep(FRESH_MS);
+    console.log('[irs-soi] Sleeping 24h');
+    await sleep(SLEEP_MS);
   }
 })();

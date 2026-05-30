@@ -47,8 +47,9 @@ const OUTFLOW_URL = 'https://www.irs.gov/pub/irs-soi/countyoutflow2122.csv';
 const INFLOW_PATH  = path.join(os.tmpdir(), 'irs_mig_inflow2122.csv');
 const OUTFLOW_PATH = path.join(os.tmpdir(), 'irs_mig_outflow2122.csv');
 const CSV_MAX_AGE_H = 72;
-const CYCLE_H = 24 * 7;  // weekly
-const SKIP_FRESH_H = 6 * 24;
+const CYCLE_H = 24;           // 24h sleep — Node setTimeout overflows >24.8d
+const FRESH_H = 24 * 180;     // 180d freshness window — IRS migration is annual
+const SKIP_FRESH_H = 6 * 24;  // per-ZIP skip window (6 days)
 const FL_FIPS = '12';
 const VINTAGE = '2021-2022';
 
@@ -293,7 +294,8 @@ async function runPass() {
 // ── Daemon loop ───────────────────────────────────────────────────────────────
 (async function main() {
   const hb = require('../lib/workerHeartbeat');
-  const FRESH_MS = CYCLE_H * 3600 * 1000;
+  const FRESH_MS = FRESH_H * 3600 * 1000;       // 180d freshness check
+  const SLEEP_MS  = CYCLE_H * 3600 * 1000;       // 24h sleep (avoids overflow)
   await sleep(60 * 1000); // 60s startup stagger
   console.log('[irsMig] Worker started');
   while (true) {
@@ -303,8 +305,8 @@ async function runPass() {
       try { await runPass(); await hb.ping('irsMigrationWorker'); }
       catch (e) { console.error('[irsMig] Pass crashed:', e.message); await hb.pingError('irsMigrationWorker', e.message); }
     }
-    console.log(`[irsMig] Sleeping ${CYCLE_H}h`);
-    await sleep(FRESH_MS);
+    console.log('[irsMig] Sleeping 24h');
+    await sleep(SLEEP_MS);
   }
 })();
 

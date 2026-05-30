@@ -171,13 +171,13 @@ async function run() {
     process.exit(1);
   }
 
-  // Freshness check — skip if ran within 30 days (LAUS data is monthly, BLS lags ~4 weeks) — FRED_FORCE=true bypasses
+  // Freshness check — skip if ran within 180 days (LAUS vintage is annual) — FRED_FORCE=true bypasses
   const forceRun = process.env.FRED_FORCE === 'true';
   try {
     const hb = await db.query(`SELECT last_run FROM worker_heartbeat WHERE worker_name = 'fredWorker'`);
     if (!forceRun && Array.isArray(hb) && hb[0]?.last_run) {
       const ageDays = (Date.now() - new Date(hb[0].last_run).getTime()) / 86400000;
-      if (ageDays < 30) {
+      if (ageDays < 180) {
         console.log(`[fred] Data fresh (${ageDays.toFixed(1)} days old) — skipping. Use FRED_FORCE=true to override.`);
         process.exit(0);
       }

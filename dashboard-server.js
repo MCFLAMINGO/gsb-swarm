@@ -7758,51 +7758,51 @@ app.use((req, res, next) => {
     // { name: 'LocalIntel Claim',     file: 'localIntelWorker.js' }, // DEPRECATED — filesystem-based, superseded by Postgres + localIntelAgent.js
     // { name: 'LocalIntel MCP',       file: 'localIntelMCP.js' },    // DEPRECATED — filesystem-based MCP, superseded by /api/local-intel/mcp route
     // { name: 'Data Ingest',          file: 'dataIngestWorker.js' }, // DEPRECATED — filesystem-based, superseded by POST /api/local-intel/ingest → Postgres
-  // [ISOLATED-TEST] { name: 'Zip Coordinator',      file: 'workers/zipCoordinatorWorker.js' },
-  // [ISOLATED-TEST] { name: 'Enrichment Agent',     file: 'workers/enrichmentAgent.js' },
-  // [ISOLATED-TEST] { name: 'ACP Broadcaster',      file: 'workers/acpBroadcaster.js' },
+  { name: 'Zip Coordinator',      file: 'workers/zipCoordinatorWorker.js' },
+  { name: 'Enrichment Agent',     file: 'workers/enrichmentAgent.js' },
+  { name: 'ACP Broadcaster',      file: 'workers/acpBroadcaster.js' },
     // ── Tidal layer workers ──
-  // [ISOLATED-TEST] { name: 'Bedrock Worker',       file: 'workers/bedrockWorker.js' },
-  // [ISOLATED-TEST] { name: 'Oracle Worker',        file: 'workers/oracleWorker.js' },
-  // [ISOLATED-TEST] { name: 'Ocean Floor Worker',   file: 'workers/oceanFloorWorker.js' },
-  // [ISOLATED-TEST] { name: 'Surface Current',      file: 'workers/surfaceCurrentWorker.js' },
-  // [ISOLATED-TEST] { name: 'Wave Surface Worker',  file: 'workers/waveSurfaceWorker.js' },
+  { name: 'Bedrock Worker',       file: 'workers/bedrockWorker.js' },
+  { name: 'Oracle Worker',        file: 'workers/oracleWorker.js' },
+  { name: 'Ocean Floor Worker',   file: 'workers/oceanFloorWorker.js' },
+  { name: 'Surface Current',      file: 'workers/surfaceCurrentWorker.js' },
+  { name: 'Wave Surface Worker',  file: 'workers/waveSurfaceWorker.js' },
     // { name: 'BTR Worker',           file: 'workers/btrWorker.js' }, // disabled — timing out on all ZIPs (stjohnstax.us unreachable), wasting retries
-  // [ISOLATED-TEST] { name: 'Vertical Agent',        file: 'workers/verticalAgentWorker.js' },
+  { name: 'Vertical Agent',        file: 'workers/verticalAgentWorker.js' },
     // { name: 'Prompt Evolution',       file: 'workers/promptEvolutionWorker.js' }, // disabled — no production traffic yet, nothing to learn from
   { name: 'Census Layer',                  file: 'workers/censusLayerWorker.js'     },
-  // [ISOLATED-TEST] { name: 'Overpass Worker',         file: 'workers/overpassWorker.js'        },
-  // [ISOLATED-TEST] { name: 'IRS SOI Worker',               file: 'workers/irsSoiWorker.js'          },
-  // [ISOLATED-TEST] { name: 'ACP Intel Cycle',         file: 'workers/localIntelAcpCycle.js'    },
+  { name: 'Overpass Worker',         file: 'workers/overpassWorker.js'        },
+  { name: 'IRS SOI Worker',               file: 'workers/irsSoiWorker.js'          },
+  { name: 'ACP Intel Cycle',         file: 'workers/localIntelAcpCycle.js'    },
     // { name: 'MCP Probe Worker',          file: 'workers/mcpProbeWorker.js'        }, // disabled — no real users yet
-  // [ISOLATED-TEST] { name: 'Router Learning Worker',     file: 'workers/routerLearningWorker.js'  },
-  // [ISOLATED-TEST] { name: 'Enrichment Fill Worker',     file: 'workers/enrichmentFillWorker.js'  },
-  // [ISOLATED-TEST] { name: 'Task Seed Worker',           file: 'workers/taskSeedWorker.js'        },
-  // [ISOLATED-TEST] { name: 'Business Merge Worker',      file: 'workers/businessMergeWorker.js'   },
-  // [ISOLATED-TEST] { name: 'ZIP Brief Worker',           file: 'workers/zipBriefWorker.js'        },
-  // [ISOLATED-TEST] { name: 'Hours Parse Worker',         file: 'workers/hoursParseWorker.js'      },
+  { name: 'Router Learning Worker',     file: 'workers/routerLearningWorker.js'  },
+  { name: 'Enrichment Fill Worker',     file: 'workers/enrichmentFillWorker.js'  },
+  { name: 'Task Seed Worker',           file: 'workers/taskSeedWorker.js'        },
+  { name: 'Business Merge Worker',      file: 'workers/businessMergeWorker.js'   },
+  { name: 'ZIP Brief Worker',           file: 'workers/zipBriefWorker.js'        },
+  { name: 'Hours Parse Worker',         file: 'workers/hoursParseWorker.js'      },
     // { name: 'Embedding Worker',           file: 'workers/embeddingWorker.js'       }, // disabled — Railway disk ephemeral, needs pgvector
-  // [ISOLATED-TEST] { name: 'ACS Demographics Worker',       file: 'workers/acsWorker.js'             },
-  // [ISOLATED-TEST] { name: 'Sunbiz Import Worker', file: 'workers/sunbizWorker.js' }, // B91 — 3-trip streaming, no disk
-  // [ISOLATED-TEST] { name: 'Search Vector Backfill',      file: 'workers/searchVectorBackfillWorker.js' },
+  { name: 'ACS Demographics Worker',       file: 'workers/acsWorker.js'             },
+  { name: 'Sunbiz Import Worker', file: 'workers/sunbizWorker.js' }, // B91 — 3-trip streaming, no disk
+  { name: 'Search Vector Backfill',      file: 'workers/searchVectorBackfillWorker.js' },
     // { name: 'Embedding Backfill',          file: 'workers/embeddingBackfillWorker.js' }, // disabled — index recreates at 1.2GB, 0 scans, no query path uses <-> operator yet
-  // [ISOLATED-TEST] { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' },
-  // [ISOLATED-TEST] { name: 'Permit Worker',               file: 'workers/permitWorker.js' },
-  // [ISOLATED-TEST] { name: 'FDOT AADT Worker',               file: 'workers/fdotWorker.js'   },
+  { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' },
+  { name: 'Permit Worker',               file: 'workers/permitWorker.js' },
+  { name: 'FDOT AADT Worker',               file: 'workers/fdotWorker.js'   },
     // ── World model input workers (run on boot, self-throttle via heartbeat) ──
-  // [ISOLATED-TEST] { name: 'FRED Unemployment Worker',      file: 'workers/fredWorker.js'          },  // 30-day freshness check
-  // [ISOLATED-TEST] { name: 'BEA Income Worker',             file: 'workers/beaWorker.js'           },  // 30-day freshness check
-  // [ISOLATED-TEST] { name: 'LODES Jobs Worker',             file: 'workers/lodesWorker.js'         },  // annual data
-  // [ISOLATED-TEST] { name: 'QWI Workforce Worker',          file: 'workers/qwiWorker.js'           },
-  // [ISOLATED-TEST] { name: 'CES Employment Worker',         file: 'workers/cesWorker.js'           },
-  // [ISOLATED-TEST] { name: 'QCEW Wages Worker',             file: 'workers/qcewWorker.js'          },
-  // [ISOLATED-TEST] { name: 'School Enrollment Worker',      file: 'workers/schoolEnrollmentWorker.js' },
-  // [ISOLATED-TEST] { name: 'County Permits Worker',         file: 'workers/countyPermitsWorker.js'    },
+  { name: 'FRED Unemployment Worker',      file: 'workers/fredWorker.js'          },  // 30-day freshness check
+  { name: 'BEA Income Worker',             file: 'workers/beaWorker.js'           },  // 30-day freshness check
+  { name: 'LODES Jobs Worker',             file: 'workers/lodesWorker.js'         },  // annual data
+  { name: 'QWI Workforce Worker',          file: 'workers/qwiWorker.js'           },
+  { name: 'CES Employment Worker',         file: 'workers/cesWorker.js'           },
+  { name: 'QCEW Wages Worker',             file: 'workers/qcewWorker.js'          },
+  { name: 'School Enrollment Worker',      file: 'workers/schoolEnrollmentWorker.js' },
+  { name: 'County Permits Worker',         file: 'workers/countyPermitsWorker.js'    },
     // ── World model derived signals (runs after input workers) ──
-  // [ISOLATED-TEST] { name: 'FCC Broadband Worker',          file: 'workers/fccBroadbandWorker.js'  },
-  // [ISOLATED-TEST] { name: 'IRS Migration Worker',          file: 'workers/irsMigrationWorker.js'  },
-  // [ISOLATED-TEST] { name: 'World Model Worker',            file: 'workers/worldModelWorker.js'    },
-  // [ISOLATED-TEST] { name: 'Business Signal Worker',        file: 'workers/businessSignalWorker.js' },  // B65 — 24h freshness; derives claimed/wallet/task/closure rates → zip_signals
+  { name: 'FCC Broadband Worker',          file: 'workers/fccBroadbandWorker.js'  },
+  { name: 'IRS Migration Worker',          file: 'workers/irsMigrationWorker.js'  },
+  { name: 'World Model Worker',            file: 'workers/worldModelWorker.js'    },
+  { name: 'Business Signal Worker',        file: 'workers/businessSignalWorker.js' },  // B65 — 24h freshness; derives claimed/wallet/task/closure rates → zip_signals
   ];
 
   function spawnLocalIntelWorker(w, attempt = 0) {

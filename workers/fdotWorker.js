@@ -31,7 +31,8 @@
 const https  = require('https');
 const db     = require('../lib/db');
 
-const LOOP_H         = 48;
+const LOOP_H         = 24;           // 24h sleep — Node setTimeout overflows >24.8d
+const FRESH_H        = 24 * 180;     // 180d freshness window — AADT is annual data
 const CONCURRENCY    = 8;
 const BATCH_DELAY_MS = 120;
 const BBOX_DEG       = 0.045; // ~5km radius bounding box in decimal degrees
@@ -240,7 +241,8 @@ async function run() {
 // ── Boot + loop ───────────────────────────────────────────────────────────────
 (async function main() {
   const hb = require('../lib/workerHeartbeat');
-  const FRESH_MS = LOOP_H * 60 * 60 * 1000;
+  const FRESH_MS = FRESH_H * 60 * 60 * 1000;     // 180d freshness check
+  const SLEEP_MS  = LOOP_H  * 60 * 60 * 1000;     // 24h sleep (avoids overflow)
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
   console.log('[fdot] Worker started');
   while (true) {
@@ -250,7 +252,7 @@ async function run() {
       try { await run(); await hb.ping('fdotWorker'); }
       catch (e) { console.error('[fdot] Pass crashed:', e.message); await hb.pingError('fdotWorker', e.message); }
     }
-    console.log(`[fdot] Sleeping ${LOOP_H}h`);
-    await sleep(FRESH_MS);
+    console.log('[fdot] Sleeping 24h');
+    await sleep(SLEEP_MS);
   }
 })();
