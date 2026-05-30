@@ -7782,13 +7782,13 @@ app.use((req, res, next) => {
   // [ISOLATED-TEST] { name: 'ZIP Brief Worker',           file: 'workers/zipBriefWorker.js'        },
   // [ISOLATED-TEST] { name: 'Hours Parse Worker',         file: 'workers/hoursParseWorker.js'      },
     // { name: 'Embedding Worker',           file: 'workers/embeddingWorker.js'       }, // disabled — Railway disk ephemeral, needs pgvector
-  // [ISOLATED-TEST] { name: 'ACS Demographics Worker',    file: 'workers/acsWorker.js'             },
+  { name: 'ACS Demographics Worker',       file: 'workers/acsWorker.js'             },
   // [ISOLATED-TEST] { name: 'Sunbiz Import Worker', file: 'workers/sunbizWorker.js' }, // B91 — 3-trip streaming, no disk
   // [ISOLATED-TEST] { name: 'Search Vector Backfill',      file: 'workers/searchVectorBackfillWorker.js' },
     // { name: 'Embedding Backfill',          file: 'workers/embeddingBackfillWorker.js' }, // disabled — index recreates at 1.2GB, 0 scans, no query path uses <-> operator yet
   // [ISOLATED-TEST] { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' },
   // [ISOLATED-TEST] { name: 'Permit Worker',               file: 'workers/permitWorker.js' },
-  { name: 'FDOT AADT Worker',               file: 'workers/fdotWorker.js'   },
+  // [ISOLATED-TEST] { name: 'FDOT AADT Worker',               file: 'workers/fdotWorker.js'   },
     // ── World model input workers (run on boot, self-throttle via heartbeat) ──
   // [ISOLATED-TEST] { name: 'FRED Unemployment Worker',      file: 'workers/fredWorker.js'          },  // 30-day freshness check
   // [ISOLATED-TEST] { name: 'BEA Income Worker',             file: 'workers/beaWorker.js'           },  // 30-day freshness check
