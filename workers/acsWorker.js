@@ -439,7 +439,8 @@ async function run() {
 }
 
 // ── Daemon loop ───────────────────────────────────────────────────────────────
-const CYCLE_MS = 30 * 24 * 60 * 60 * 1000; // 30d — ACS is annual data
+const CYCLE_MS    = 30 * 24 * 60 * 60 * 1000; // 30d freshness window
+const SLEEP_MS    = 24 * 60 * 60 * 1000;       // 24h sleep — Node setTimeout overflows >24.8d
 (async function main() {
   const hb = require('../lib/workerHeartbeat');
   console.log('[acsWorker] Worker started');
@@ -450,7 +451,7 @@ const CYCLE_MS = 30 * 24 * 60 * 60 * 1000; // 30d — ACS is annual data
       try { await run(); await hb.ping('acsWorker'); }
       catch (e) { console.error('[acsWorker] Pass crashed:', e.message); await hb.pingError('acsWorker', e.message); }
     }
-    console.log('[acsWorker] Sleeping 30d');
-    await sleep(CYCLE_MS);
+    console.log('[acsWorker] Sleeping 24h');
+    await sleep(SLEEP_MS);
   }
 })();
