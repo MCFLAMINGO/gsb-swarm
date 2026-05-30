@@ -211,11 +211,20 @@ function buildDescription(name, meta, category, city, zip) {
   return null; // nothing useful — leave existing
 }
 
-if (require.main === module) {
-  (async () => {
+// ── Daemon loop ─────────────────────────────────────────────────────────────
+// Runs as a continuous worker under LOCAL_INTEL_WORKERS.
+// FRESH_MS = 7 days — re-enriches newly added businesses weekly.
+// SLEEP_MS = 24h — avoids Node.js setTimeout overflow (max ~24.8d).
+const WORKER_NAME = 'websiteEnricherWorker';
+const FRESH_MS    = 7 * 24 * 3600 * 1000;  // 7 days freshness
+const SLEEP_MS    = 24 * 3600 * 1000;       // 24h sleep (safe for Node)
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function runPass() {
     const FULL_REFRESH = process.env.FULL_REFRESH === 'true';
-    const CONCURRENCY  = parseInt(process.env.CONCURRENCY || '8', 10);
-    console.log(`[web-enricher] Starting — FULL_REFRESH=${FULL_REFRESH}, CONCURRENCY=${CONCURRENCY}`);
+    const CONCURRENCY  = parseInt(process.env.CONCURRENCY || '5', 10);  // 5 concurrent — gentle on DB pool
+    console.log(`[web-enricher] Starting pass — FULL_REFRESH=${FULL_REFRESH}, CONCURRENCY=${CONCURRENCY}`);
 
     // B66: Statewide scope for email harvest — drop ZIP filter, add contact_email
     // IS NULL so we only fetch businesses we haven't already harvested. Still
@@ -324,8 +333,37 @@ if (require.main === module) {
       process.stdout.write(`\r[web-enricher] ${i + Math.min(CONCURRENCY, toProcess.length - i)}/${toProcess.length} processed (${updated} updated, ${skipped} skipped, ${failed} failed)...`);
     }
 
-    console.log(`\n[web-enricher] Done — ${updated} updated, ${skipped} skipped, ${failed} failed`);
+    console.log(`\n[web-enricher] Pass done — ${updated} updated, ${skipped} skipped, ${failed} failed`);
     console.log(`[web-enricher] Emails found: ${emailsFound} / ${processed} processed`);
-    process.exit(0);
-  })().catch(e => { console.error('[web-enricher] FATAL:', e.message); process.exit(1); });
+    return updated;
 }
+
+(async function main() {
+  const hb = require('../lib/workerHeartbeat');
+  console.log('[web-enricher] Worker started');
+
+  // Wait for DB to be ready
+  for (let i = 0; i < 10; i++) {
+    try { await db.query('SELECT 1'); break; }
+    catch (e) {
+      console.warn(`[web-enricher] DB not ready (${i+1}/10)`);
+      await sleep(5000);
+      if (i === 9) { console.error('[web-enricher] DB never ready — exiting'); process.exit(1); }
+    }
+  }
+
+  while (true) {
+    try {
+      if (await hb.isFresh(WORKER_NAME, FRESH_MS)) {
+        console.log(`[web-enricher] Fresh — sleeping ${SLEEP_MS / 3600000}h`);
+      } else {
+        const updated = await runPass();
+        await hb.ping(WORKER_NAME, updated);
+      }
+    } catch (err) {
+      console.error('[web-enricher] Cycle error:', err.message);
+      try { await (require('../lib/workerHeartbeat')).pingError(WORKER_NAME, err.message); } catch(_) {}
+    }
+    await sleep(SLEEP_MS);
+  }
+})();

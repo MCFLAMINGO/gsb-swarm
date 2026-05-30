@@ -52,21 +52,23 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 // ── Signal aggregation ────────────────────────────────────────────────────────
 
 async function getFlAggregates() {
-  // Statewide FL averages from zip_signals
+  // Statewide FL averages from zip_signals (state='12' — FL FIPS)
+  // bps_total_units_mo: use monthly when available, fall back to annual/12 as proxy.
+  // macro_bfs_apps_latest: populated by censusMacroWorker BFS layer.
   const [agg] = await db.query(`
     SELECT
-      AVG(bps_total_units_mo)          AS avg_permits_mo,
-      AVG(macro_bfs_apps_latest)       AS avg_bfs_apps,
-      AVG(sunbiz_new_12mo)             AS avg_sunbiz_new,
-      AVG(sunbiz_dissolved_12mo)       AS avg_sunbiz_diss,
-      AVG(acs_vacancy_pct)             AS avg_vacancy,
-      AVG(acs_median_hhi)              AS avg_hhi,
-      SUM(bps_total_units_mo)          AS total_permits_mo,
-      SUM(macro_bfs_apps_latest)       AS total_bfs_apps,
-      SUM(sunbiz_new_12mo)             AS total_sunbiz_new,
-      COUNT(*)                         AS zip_count
+      AVG(COALESCE(bps_total_units_mo, bps_total_units_annual / 12.0)) AS avg_permits_mo,
+      AVG(macro_bfs_apps_latest)                                        AS avg_bfs_apps,
+      AVG(sunbiz_new_12mo)                                              AS avg_sunbiz_new,
+      AVG(sunbiz_dissolved_12mo)                                        AS avg_sunbiz_diss,
+      AVG(acs_vacancy_pct)                                              AS avg_vacancy,
+      AVG(acs_median_hhi)                                               AS avg_hhi,
+      SUM(COALESCE(bps_total_units_mo, bps_total_units_annual / 12.0)) AS total_permits_mo,
+      SUM(macro_bfs_apps_latest)                                        AS total_bfs_apps,
+      SUM(sunbiz_new_12mo)                                              AS total_sunbiz_new,
+      COUNT(*)                                                          AS zip_count
     FROM zip_signals
-    WHERE state = '12' OR zip IS NOT NULL
+    WHERE state = '12'
   `);
 
   // BFS trend: last 3 months vs prior 3 months statewide

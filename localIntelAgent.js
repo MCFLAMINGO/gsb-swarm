@@ -9053,14 +9053,16 @@ router.post('/admin/run-trade-signals', async (req, res) => {
       NXRT:'NexPoint Residential', LOW:"Lowe's", FRPH:'FRP Holdings',
       FOUR:'Shift4 Payments', SBGI:'Sinclair Broadcast' };
 
-    // Get FL aggregates
+    // Get FL aggregates — monthly permit proxy: COALESCE(monthly, annual/12) when monthly not yet loaded
     const [agg] = await db.query(`
-      SELECT AVG(bps_total_units_mo) AS avg_permits_mo, AVG(macro_bfs_apps_latest) AS avg_bfs_apps,
+      SELECT AVG(COALESCE(bps_total_units_mo, bps_total_units_annual/12.0)) AS avg_permits_mo,
+             AVG(macro_bfs_apps_latest) AS avg_bfs_apps,
              AVG(sunbiz_new_12mo) AS avg_sunbiz_new, AVG(sunbiz_dissolved_12mo) AS avg_sunbiz_diss,
              AVG(acs_vacancy_pct) AS avg_vacancy, AVG(acs_median_hhi) AS avg_hhi,
-             SUM(bps_total_units_mo) AS total_permits_mo, SUM(macro_bfs_apps_latest) AS total_bfs_apps,
+             SUM(COALESCE(bps_total_units_mo, bps_total_units_annual/12.0)) AS total_permits_mo,
+             SUM(macro_bfs_apps_latest) AS total_bfs_apps,
              SUM(sunbiz_new_12mo) AS total_sunbiz_new, COUNT(*) AS zip_count
-      FROM zip_signals WHERE state = '12' OR zip IS NOT NULL
+      FROM zip_signals WHERE state = '12'
     `);
 
     const bfsTrend = await db.query(`
@@ -9095,11 +9097,122 @@ router.post('/admin/run-trade-signals', async (req, res) => {
       bfsMomentum, totalNesFirms: parseInt(nes?.total_nes_firms)||0,
       nesConstruction: parseInt(nes?.total_nes_construction)||0,
       netMigration: parseInt(mig?.net_migration)||0,
+      latestBfsPeriod: bfsTrend[0]?.period || null,
     };
+
+    // Real scoring logic (mirrors tradeSignalWorker.js scoreSignals)
+    function scoreToDirection(score) {
+      if (score >= 62) return 'LONG';
+      if (score >= 42) return 'WATCH';
+      return 'SHORT';
+    }
+    function scoreSignals(ticker) {
+      switch (ticker) {
+        case 'DHI': {
+          const permitScore = fl.totalPermitsMo > 8000 ? 75 : fl.totalPermitsMo > 5000 ? 55 : 35;
+          const bfsScore    = fl.bfsMomentum > 5 ? 75 : fl.bfsMomentum > 0 ? 55 : 35;
+          const migScore    = fl.netMigration > 0 ? 70 : 40;
+          const score       = Math.round((permitScore*0.5)+(bfsScore*0.3)+(migScore*0.2));
+          return { score, direction: scoreToDirection(score),
+            thesis: `FL permit volume and BFS formation signal ${score>=62?'accelerating':score>=42?'steady':'slowing'} housing demand. DHI has heaviest FL single-family exposure among national builders.`,
+            signal_source: 'bps_total_units_mo + macro_bfs_apps_latest + irs_mig_net_returns',
+            signal_value: `${fl.totalPermitsMo.toLocaleString()} units/mo FL statewide · BFS momentum ${fl.bfsMomentum>0?'+':''}${fl.bfsMomentum}% · net migration ${fl.netMigration>0?'+':''}${fl.netMigration}`,
+            options_note: score>=65?'3-month call options 10-15% OTM on next earnings catalyst':null,
+            risk_note: 'Interest rate sensitivity — thesis breaks if 30yr mortgage > 7.5%' };
+        }
+        case 'SBCF': {
+          const formationScore = fl.avgSunbizNew > 50 ? 72 : fl.avgSunbizNew > 25 ? 55 : 38;
+          const netFormation   = fl.avgSunbizNew - fl.avgSunbizDiss;
+          const netScore       = netFormation > 10 ? 70 : netFormation > 0 ? 55 : 35;
+          const bfsScore       = fl.bfsMomentum > 5 ? 68 : fl.bfsMomentum > 0 ? 52 : 38;
+          const score          = Math.round((formationScore*0.4)+(netScore*0.35)+(bfsScore*0.25));
+          return { score, direction: scoreToDirection(score),
+            thesis: `FL SMB formation rate ${netFormation>5?'expanding':netFormation>0?'stable':'contracting'} — SBCF loan book quality directly tied to net business formation in FL counties.`,
+            signal_source: 'sunbiz_new_12mo + sunbiz_dissolved_12mo + macro_bfs_apps_latest',
+            signal_value: `Sunbiz avg +${fl.avgSunbizNew.toFixed(0)} new / -${fl.avgSunbizDiss.toFixed(0)} dissolved per ZIP · net ${netFormation.toFixed(1)} · BFS ${fl.bfsMomentum>0?'+':''}${fl.bfsMomentum}%`,
+            options_note: score>=65?'Sell puts on weakness for entry — low option premium name':null,
+            risk_note: 'Concentrated FL credit risk — any FL-specific recession hits disproportionately' };
+        }
+        case 'HCA': {
+          const hhiScore  = fl.avgHhi > 70000 ? 65 : fl.avgHhi > 50000 ? 55 : 48;
+          const migScore  = fl.netMigration > 5000 ? 72 : fl.netMigration > 0 ? 58 : 42;
+          const nesScore  = fl.totalNesFirms > 100000 ? 65 : 55;
+          const score     = Math.round((hhiScore*0.4)+(migScore*0.4)+(nesScore*0.2));
+          return { score, direction: scoreToDirection(score),
+            thesis: `FL population inflows drive structural healthcare demand. HCA holds ~25% of FL hospital beds. Migration + aging demographics = multi-year volume tailwind.`,
+            signal_source: 'acs_median_hhi + irs_mig_net_returns + nes_total_firms',
+            signal_value: `Avg FL HHI $${fl.avgHhi.toLocaleString(undefined,{maximumFractionDigits:0})} · net migration ${fl.netMigration>0?'+':''}${fl.netMigration.toLocaleString()} · NES firms ${fl.totalNesFirms.toLocaleString()}`,
+            options_note: null,
+            risk_note: 'Medicaid reimbursement cuts — FL Medicaid policy changes directly hit HCA margins' };
+        }
+        case 'NXRT': {
+          const vacancyScore = fl.avgVacancy < 5 ? 72 : fl.avgVacancy < 8 ? 58 : 38;
+          const migScore     = fl.netMigration > 0 ? 70 : 42;
+          const permitScore  = fl.totalPermitsMo > 6000 ? 45 : 62;
+          const score        = Math.round((vacancyScore*0.4)+(migScore*0.4)+(permitScore*0.2));
+          return { score, direction: scoreToDirection(score),
+            thesis: `FL rental market ${fl.avgVacancy<5?'tight':'softening'} — vacancy at ${fl.avgVacancy.toFixed(1)}% with ${fl.netMigration>0?'positive':'negative'} migration. NXRT sunbelt portfolio 40%+ FL concentrated.`,
+            signal_source: 'acs_vacancy_pct + irs_mig_net_returns + bps_total_units_mo',
+            signal_value: `Avg FL vacancy ${fl.avgVacancy.toFixed(1)}% · net migration ${fl.netMigration>0?'+':''}${fl.netMigration.toLocaleString()} · permits ${fl.totalPermitsMo.toLocaleString()}/mo`,
+            options_note: null,
+            risk_note: 'New supply risk — FL permitted 100k+ units/yr; completions lag 18-24 months' };
+        }
+        case 'LOW': {
+          const permitScore = fl.totalPermitsMo > 8000 ? 72 : fl.totalPermitsMo > 5000 ? 58 : 40;
+          const hhiScore    = fl.avgHhi > 65000 ? 68 : fl.avgHhi > 50000 ? 55 : 42;
+          const nesConScore = fl.nesConstruction > 5000 ? 70 : 55;
+          const score       = Math.round((permitScore*0.45)+(hhiScore*0.3)+(nesConScore*0.25));
+          return { score, direction: scoreToDirection(score),
+            thesis: `FL permit velocity + solo contractor density (${fl.nesConstruction.toLocaleString()} NES construction firms) directly tracks Lowe's Pro segment — the highest-margin part of their business.`,
+            signal_source: 'bps_total_units_mo + acs_median_hhi + nes_construction_firms',
+            signal_value: `FL permits ${fl.totalPermitsMo.toLocaleString()}/mo · avg HHI $${fl.avgHhi.toLocaleString(undefined,{maximumFractionDigits:0})} · NES construction firms ${fl.nesConstruction.toLocaleString()}`,
+            options_note: score>=65?'Buy calls before quarterly earnings when FL permit data confirms acceleration':null,
+            risk_note: 'Housing market slowdown or lumber price spike compresses project economics' };
+        }
+        case 'FRPH': {
+          const bfsScore  = fl.bfsMomentum > 5 ? 70 : fl.bfsMomentum > 0 ? 55 : 38;
+          const formScore = fl.avgSunbizNew > 40 ? 68 : fl.avgSunbizNew > 20 ? 55 : 40;
+          const score     = Math.round((bfsScore*0.5)+(formScore*0.5));
+          return { score, direction: scoreToDirection(score),
+            thesis: `FL business formation ${fl.bfsMomentum>0?'accelerating':'contracting'} — FRPH industrial/flex space demand lags business formation by 12-18 months. Small float, low coverage.`,
+            signal_source: 'macro_bfs_apps_latest + sunbiz_new_12mo',
+            signal_value: `BFS momentum ${fl.bfsMomentum>0?'+':''}${fl.bfsMomentum}% · sunbiz avg ${fl.avgSunbizNew.toFixed(0)} new entities/ZIP/yr`,
+            options_note: null,
+            risk_note: 'Illiquid small-cap — wide spreads, options not practical. Equity only.' };
+        }
+        case 'FOUR': {
+          const nesScore  = fl.totalNesFirms > 80000 ? 70 : fl.totalNesFirms > 50000 ? 58 : 42;
+          const formScore = fl.avgSunbizNew > 40 ? 68 : fl.avgSunbizNew > 20 ? 55 : 40;
+          const bfsScore  = fl.bfsMomentum > 5 ? 68 : fl.bfsMomentum > 0 ? 55 : 38;
+          const score     = Math.round((nesScore*0.4)+(formScore*0.35)+(bfsScore*0.25));
+          return { score, direction: scoreToDirection(score),
+            thesis: `FL solo/SMB operator density (${fl.totalNesFirms.toLocaleString()} NES firms) + formation velocity signals payment volume expansion for Shift4's core FL market.`,
+            signal_source: 'nes_total_firms + sunbiz_new_12mo + macro_bfs_apps_latest',
+            signal_value: `NES total firms ${fl.totalNesFirms.toLocaleString()} · sunbiz new avg ${fl.avgSunbizNew.toFixed(0)}/ZIP · BFS ${fl.bfsMomentum>0?'+':''}${fl.bfsMomentum}%`,
+            options_note: score>=65?'30-45 day call spreads on breakout above 52-week high':null,
+            risk_note: 'Competition from Stripe/Square compressing SMB take rates nationwide' };
+        }
+        case 'SBGI': {
+          const hhiScore = fl.avgHhi > 65000 ? 62 : fl.avgHhi > 50000 ? 52 : 40;
+          const bizScore = fl.avgSunbizNew > 40 ? 60 : fl.avgSunbizNew > 20 ? 50 : 38;
+          const score    = Math.round((hhiScore*0.5)+(bizScore*0.5));
+          return { score, direction: scoreToDirection(score),
+            thesis: `FL local ad spend proxy — SMB formation + HHI signal advertiser budget health. SBGI holds FL broadcast licenses in major DMAs. Speculative/deep value only.`,
+            signal_source: 'acs_median_hhi + sunbiz_new_12mo',
+            signal_value: `Avg FL HHI $${fl.avgHhi.toLocaleString(undefined,{maximumFractionDigits:0})} · sunbiz new avg ${fl.avgSunbizNew.toFixed(0)}/ZIP`,
+            options_note: null,
+            risk_note: 'Heavy debt load — any revenue miss triggers balance sheet concern. High risk.' };
+        }
+        default: return null;
+      }
+    }
 
     const results = [];
     for (const ticker of TICKERS) {
       try {
+        const scored = scoreSignals(ticker);
+        if (!scored) { results.push({ ticker, error: 'unknown ticker' }); continue; }
+        const { score, direction, thesis, signal_source, signal_value, options_note, risk_note } = scored;
         const expiresAt = new Date(Date.now() + 90*86400*1000);
         // Per-ticker delete then insert — safe if loop fails mid-way
         await db.query(`DELETE FROM trade_signals WHERE ticker = $1 AND scored_at::date = CURRENT_DATE`, [ticker]);
@@ -9108,12 +9221,11 @@ router.post('/admin/run-trade-signals', async (req, res) => {
              (ticker, company, direction, confidence, thesis, signal_source, signal_value,
               data_vintage, options_note, risk_note, status, scored_at, expires_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',NOW(),$11)`,
-          [ticker, COMPANIES[ticker], 'WATCH', 50,
-           `FL data signals for ${COMPANIES[ticker]} — scored via LocalIntel`,
-           'zip_signals', `ZIPs: ${fl.zipCount} · permits: ${fl.totalPermitsMo}/mo · BFS: ${fl.bfsMomentum}%`,
-           'LocalIntel', null, 'See tradeSignalWorker for full scoring', expiresAt]
+          [ticker, COMPANIES[ticker], direction, score, thesis, signal_source, signal_value,
+           fl.latestBfsPeriod ? `BFS ${fl.latestBfsPeriod}` : 'LocalIntel',
+           options_note, risk_note, expiresAt]
         );
-        results.push({ ticker, ok: true });
+        results.push({ ticker, direction, score, ok: true });
       } catch (e) {
         results.push({ ticker, error: e.message });
       }
