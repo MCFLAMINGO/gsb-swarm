@@ -7772,7 +7772,7 @@ app.use((req, res, next) => {
     // { name: 'Prompt Evolution',       file: 'workers/promptEvolutionWorker.js' }, // disabled — no production traffic yet, nothing to learn from
   // [ISOLATED-TEST] { name: 'Census Layer',            file: 'workers/censusLayerWorker.js'     },
   // [ISOLATED-TEST] { name: 'Overpass Worker',         file: 'workers/overpassWorker.js'        },
-    // { name: 'IRS SOI Worker',          file: 'workers/irsSoiWorker.js'          }, // disabled — IRS income data not consumed by any query path yet
+  { name: 'IRS SOI Worker',               file: 'workers/irsSoiWorker.js'          },
   // [ISOLATED-TEST] { name: 'ACP Intel Cycle',         file: 'workers/localIntelAcpCycle.js'    },
     // { name: 'MCP Probe Worker',          file: 'workers/mcpProbeWorker.js'        }, // disabled — no real users yet
   // [ISOLATED-TEST] { name: 'Router Learning Worker',     file: 'workers/routerLearningWorker.js'  },
@@ -7799,7 +7799,7 @@ app.use((req, res, next) => {
   // [ISOLATED-TEST] { name: 'School Enrollment Worker',      file: 'workers/schoolEnrollmentWorker.js' },
   // [ISOLATED-TEST] { name: 'County Permits Worker',         file: 'workers/countyPermitsWorker.js'    },
     // ── World model derived signals (runs after input workers) ──
-  { name: 'FCC Broadband Worker',          file: 'workers/fccBroadbandWorker.js'  },
+  // [ISOLATED-TEST] { name: 'FCC Broadband Worker',          file: 'workers/fccBroadbandWorker.js'  },
     // { name: 'IRS Migration Worker',        file: 'workers/irsMigrationWorker.js'  }, // disabled — not consumed by any query path
   // [ISOLATED-TEST] { name: 'World Model Worker',            file: 'workers/worldModelWorker.js'    },
   // [ISOLATED-TEST] { name: 'Business Signal Worker',        file: 'workers/businessSignalWorker.js' },  // B65 — 24h freshness; derives claimed/wallet/task/closure rates → zip_signals
