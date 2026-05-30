@@ -7792,8 +7792,8 @@ app.use((req, res, next) => {
     // ── World model input workers (run on boot, self-throttle via heartbeat) ──
   // [ISOLATED-TEST] { name: 'FRED Unemployment Worker',      file: 'workers/fredWorker.js'          },  // 30-day freshness check
   // [ISOLATED-TEST] { name: 'BEA Income Worker',             file: 'workers/beaWorker.js'           },  // 30-day freshness check
-  { name: 'LODES Jobs Worker',             file: 'workers/lodesWorker.js'         },  // annual data
-  // [ISOLATED-TEST] { name: 'QWI Workforce Worker',          file: 'workers/qwiWorker.js'           },  // 14-day freshness check
+  // [ISOLATED-TEST] { name: 'LODES Jobs Worker',             file: 'workers/lodesWorker.js'         },  // annual data
+  { name: 'QWI Workforce Worker',          file: 'workers/qwiWorker.js'           },
   // [ISOLATED-TEST] { name: 'CES Employment Worker',         file: 'workers/cesWorker.js'           },  // 2-day freshness check (built-in)
   // [ISOLATED-TEST] { name: 'QCEW Wages Worker',             file: 'workers/qcewWorker.js'          },  // 30-day freshness check (built-in)
   // [ISOLATED-TEST] { name: 'School Enrollment Worker',      file: 'workers/schoolEnrollmentWorker.js' }, // B87 — 90-day freshness (Urban Institute CCD)
