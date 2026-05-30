@@ -7770,7 +7770,7 @@ app.use((req, res, next) => {
     // { name: 'BTR Worker',           file: 'workers/btrWorker.js' }, // disabled — timing out on all ZIPs (stjohnstax.us unreachable), wasting retries
   // [ISOLATED-TEST] { name: 'Vertical Agent',        file: 'workers/verticalAgentWorker.js' },
     // { name: 'Prompt Evolution',       file: 'workers/promptEvolutionWorker.js' }, // disabled — no production traffic yet, nothing to learn from
-  // [ISOLATED-TEST] { name: 'Census Layer',            file: 'workers/censusLayerWorker.js'     },
+  { name: 'Census Layer',                  file: 'workers/censusLayerWorker.js'     },
   // [ISOLATED-TEST] { name: 'Overpass Worker',         file: 'workers/overpassWorker.js'        },
   // [ISOLATED-TEST] { name: 'IRS SOI Worker',               file: 'workers/irsSoiWorker.js'          },
   // [ISOLATED-TEST] { name: 'ACP Intel Cycle',         file: 'workers/localIntelAcpCycle.js'    },
@@ -7782,7 +7782,7 @@ app.use((req, res, next) => {
   // [ISOLATED-TEST] { name: 'ZIP Brief Worker',           file: 'workers/zipBriefWorker.js'        },
   // [ISOLATED-TEST] { name: 'Hours Parse Worker',         file: 'workers/hoursParseWorker.js'      },
     // { name: 'Embedding Worker',           file: 'workers/embeddingWorker.js'       }, // disabled — Railway disk ephemeral, needs pgvector
-  { name: 'ACS Demographics Worker',       file: 'workers/acsWorker.js'             },
+  // [ISOLATED-TEST] { name: 'ACS Demographics Worker',       file: 'workers/acsWorker.js'             },
   // [ISOLATED-TEST] { name: 'Sunbiz Import Worker', file: 'workers/sunbizWorker.js' }, // B91 — 3-trip streaming, no disk
   // [ISOLATED-TEST] { name: 'Search Vector Backfill',      file: 'workers/searchVectorBackfillWorker.js' },
     // { name: 'Embedding Backfill',          file: 'workers/embeddingBackfillWorker.js' }, // disabled — index recreates at 1.2GB, 0 scans, no query path uses <-> operator yet

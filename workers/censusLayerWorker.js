@@ -2321,28 +2321,28 @@ async function runCensusLayer() {
 // The schedule file controls whether each sub-layer actually re-fetches —
 // daily check is cheap, actual Census fetches only happen on their cadence.
 
-const CENSUS_INTERVAL = 30 * 24 * 60 * 60 * 1000; // 30d — census data is annual
-(async () => {
-  const hb = require('../lib/workerHeartbeat');
-  if (await hb.isFresh('censusLayerWorker', CENSUS_INTERVAL)) {
-    console.log('[censusLayer] Fresh — skipping startup run');
-  } else {
-    await runCensusLayer().catch(err => {
-      console.error('[censusLayer] Fatal on startup:', err.message);
-      hb.pingError('censusLayerWorker', err.message);
-    });
-    await hb.ping('censusLayerWorker');
-  }
-  setInterval(async () => {
-    await runCensusLayer().catch(err => {
-      console.error('[censusLayer] Scheduled error:', err.message);
-      hb.pingError('censusLayerWorker', err.message);
-    });
-    await hb.ping('censusLayerWorker');
-  }, CENSUS_INTERVAL);
-})();
+const CENSUS_INTERVAL = 30 * 24 * 60 * 60 * 1000; // 30d freshness window
+const CENSUS_SLEEP_MS =  24 * 60 * 60 * 1000;      // 24h sleep — Node setTimeout overflows >24.8d
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-console.log('[censusLayer] Worker started. ZBP=once, CBP=monthly, PDB=quarterly.');
+(async function main() {
+  console.log('[censusLayer] Worker started. ZBP=once, CBP=monthly, PDB=quarterly.');
+  while (true) {
+    if (await hb.isFresh('censusLayerWorker', CENSUS_INTERVAL)) {
+      console.log('[censusLayer] Fresh — skipping pass');
+    } else {
+      try {
+        await runCensusLayer();
+        await hb.ping('censusLayerWorker');
+      } catch (err) {
+        console.error('[censusLayer] Pass crashed:', err.message);
+        await hb.pingError('censusLayerWorker', err.message);
+      }
+    }
+    console.log('[censusLayer] Sleeping 24h');
+    await sleep(CENSUS_SLEEP_MS);
+  }
+})();
 
 process.on('uncaughtException',  err => console.error('[censusLayer] Uncaught:', err.message));
 process.on('unhandledRejection', r   => console.error('[censusLayer] Rejection:', r));
