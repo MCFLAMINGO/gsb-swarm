@@ -7788,7 +7788,7 @@ app.use((req, res, next) => {
     // { name: 'Embedding Backfill',          file: 'workers/embeddingBackfillWorker.js' }, // disabled — index recreates at 1.2GB, 0 scans, no query path uses <-> operator yet
   // [ISOLATED-TEST] { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' },
   // [ISOLATED-TEST] { name: 'Permit Worker',               file: 'workers/permitWorker.js' },
-  // [ISOLATED-TEST] { name: 'FDOT AADT Worker',              file: 'workers/fdotWorker.js'   },
+  { name: 'FDOT AADT Worker',               file: 'workers/fdotWorker.js'   },
     // ── World model input workers (run on boot, self-throttle via heartbeat) ──
   // [ISOLATED-TEST] { name: 'FRED Unemployment Worker',      file: 'workers/fredWorker.js'          },  // 30-day freshness check
   // [ISOLATED-TEST] { name: 'BEA Income Worker',             file: 'workers/beaWorker.js'           },  // 30-day freshness check
@@ -7800,7 +7800,7 @@ app.use((req, res, next) => {
   // [ISOLATED-TEST] { name: 'County Permits Worker',         file: 'workers/countyPermitsWorker.js'    },
     // ── World model derived signals (runs after input workers) ──
   // [ISOLATED-TEST] { name: 'FCC Broadband Worker',          file: 'workers/fccBroadbandWorker.js'  },
-  { name: 'IRS Migration Worker',          file: 'workers/irsMigrationWorker.js'  },
+  // [ISOLATED-TEST] { name: 'IRS Migration Worker',          file: 'workers/irsMigrationWorker.js'  },
   // [ISOLATED-TEST] { name: 'World Model Worker',            file: 'workers/worldModelWorker.js'    },
   // [ISOLATED-TEST] { name: 'Business Signal Worker',        file: 'workers/businessSignalWorker.js' },  // B65 — 24h freshness; derives claimed/wallet/task/closure rates → zip_signals
   ];
