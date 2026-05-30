@@ -238,5 +238,19 @@ async function run() {
 }
 
 // ── Boot + loop ───────────────────────────────────────────────────────────────
-run().catch(e => console.error('[fdot] fatal:', e));
-setInterval(() => run().catch(e => console.error('[fdot] loop error:', e)), LOOP_H * 60 * 60 * 1000);
+(async function main() {
+  const hb = require('../lib/workerHeartbeat');
+  const FRESH_MS = LOOP_H * 60 * 60 * 1000;
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+  console.log('[fdot] Worker started');
+  while (true) {
+    if (await hb.isFresh('fdotWorker', FRESH_MS)) {
+      console.log('[fdot] Fresh — skipping pass');
+    } else {
+      try { await run(); await hb.ping('fdotWorker'); }
+      catch (e) { console.error('[fdot] Pass crashed:', e.message); await hb.pingError('fdotWorker', e.message); }
+    }
+    console.log(`[fdot] Sleeping ${LOOP_H}h`);
+    await sleep(FRESH_MS);
+  }
+})();

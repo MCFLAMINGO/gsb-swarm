@@ -7797,9 +7797,9 @@ app.use((req, res, next) => {
   // [ISOLATED-TEST] { name: 'CES Employment Worker',         file: 'workers/cesWorker.js'           },
   // [ISOLATED-TEST] { name: 'QCEW Wages Worker',             file: 'workers/qcewWorker.js'          },
   // [ISOLATED-TEST] { name: 'School Enrollment Worker',      file: 'workers/schoolEnrollmentWorker.js' },
-  { name: 'County Permits Worker',         file: 'workers/countyPermitsWorker.js'    },
+  // [ISOLATED-TEST] { name: 'County Permits Worker',         file: 'workers/countyPermitsWorker.js'    },
     // ── World model derived signals (runs after input workers) ──
-    // { name: 'FCC Broadband Worker',        file: 'workers/fccBroadbandWorker.js'  }, // disabled — not consumed by any query path
+  { name: 'FCC Broadband Worker',          file: 'workers/fccBroadbandWorker.js'  },
     // { name: 'IRS Migration Worker',        file: 'workers/irsMigrationWorker.js'  }, // disabled — not consumed by any query path
   // [ISOLATED-TEST] { name: 'World Model Worker',            file: 'workers/worldModelWorker.js'    },
   // [ISOLATED-TEST] { name: 'Business Signal Worker',        file: 'workers/businessSignalWorker.js' },  // B65 — 24h freshness; derives claimed/wallet/task/closure rates → zip_signals

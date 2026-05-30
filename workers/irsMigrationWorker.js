@@ -292,13 +292,19 @@ async function runPass() {
 
 // ── Daemon loop ───────────────────────────────────────────────────────────────
 (async function main() {
+  const hb = require('../lib/workerHeartbeat');
+  const FRESH_MS = CYCLE_H * 3600 * 1000;
   await sleep(60 * 1000); // 60s startup stagger
   console.log('[irsMig] Worker started');
   while (true) {
-    try { await runPass(); }
-    catch (e) { console.error('[irsMig] Pass crashed:', e.message); }
+    if (await hb.isFresh('irsMigrationWorker', FRESH_MS)) {
+      console.log('[irsMig] Fresh — skipping pass');
+    } else {
+      try { await runPass(); await hb.ping('irsMigrationWorker'); }
+      catch (e) { console.error('[irsMig] Pass crashed:', e.message); await hb.pingError('irsMigrationWorker', e.message); }
+    }
     console.log(`[irsMig] Sleeping ${CYCLE_H}h`);
-    await sleep(CYCLE_H * 3600 * 1000);
+    await sleep(FRESH_MS);
   }
 })();
 
