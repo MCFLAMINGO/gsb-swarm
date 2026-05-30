@@ -98,14 +98,14 @@ async function run() {
       const days = age / 86400000;
       if (age < FRESH_MS) {
         console.log(`[countyPermits] Data fresh (${days.toFixed(1)} days old, window 30d) — skipping run`);
-        return;
+        process.exit(0);
       }
     }
   } catch (_) { /* run */ }
 
   if (!CENSUS_API_KEY) {
     console.warn('[countyPermits] No Census_Data_API / CENSUS_API_KEY env var — cannot fetch CBP, aborting');
-    return;
+    process.exit(1);
   }
 
   // All distinct FL counties
@@ -117,11 +117,11 @@ async function run() {
     counties = Array.isArray(rows) ? rows.map(r => String(r.county_fips)) : [];
   } catch (e) {
     console.error('[countyPermits] Failed to load counties from fl_zip_geo:', e.message);
-    return;
+    process.exit(1);
   }
   if (counties.length === 0) {
     console.warn('[countyPermits] fl_zip_geo has no counties — aborting');
-    return;
+    process.exit(1);
   }
   console.log(`[countyPermits] Processing ${counties.length} FL counties`);
 
@@ -184,7 +184,7 @@ async function run() {
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.log(`[countyPermits] ✅ Done — ${countyDone} counties, ${zipsDone} ZIP upserts — ${elapsed}s`);
-  return;
+  process.exit(0);
 }
 
 run().catch(e => { console.error('[countyPermits] fatal:', e.message); });
