@@ -11427,7 +11427,7 @@ router.post('/subscription-confirm', express.json(), async (req, res) => {
 
 router.post('/create-agent-wallet', express.json(), async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
-  const { phone } = req.body || {};
+  const { phone, wallet_address } = req.body || {};
   if (!phone) return res.status(400).json({ error: 'phone required' });
 
   try {
@@ -11437,36 +11437,67 @@ router.post('/create-agent-wallet', express.json(), async (req, res) => {
     if (!sub) return res.status(403).json({ error: 'not_subscribed' });
 
     const existing = await db.query(
-      `SELECT wallet_address FROM subscriber_wallets WHERE subscriber_phone = $1`, [phone]
+      `SELECT wallet_address, wallet_type FROM subscriber_wallets WHERE subscriber_phone = $1`, [phone]
     );
-    if (existing.length) {
-      return res.json({ ok: true, wallet_address: existing[0].wallet_address, already_existed: true });
+
+    // If customer is updating with a Surge-provided address, allow overwrite
+    if (wallet_address) {
+      if (!/^0x[0-9a-fA-F]{40}$/.test(wallet_address)) {
+        return res.status(400).json({ error: 'invalid wallet address' });
+      }
+      const walletType = 'surge_base';
+      if (existing.length) {
+        await db.query(
+          `UPDATE subscriber_wallets SET wallet_address = $1, wallet_type = $2, updated_at = NOW()
+           WHERE subscriber_phone = $3`,
+          [wallet_address, walletType, phone]
+        );
+      } else {
+        await db.query(
+          `INSERT INTO subscriber_wallets (subscriber_phone, wallet_address, wallet_type)
+           VALUES ($1, $2, $3)`,
+          [phone, wallet_address, walletType]
+        );
+      }
+      await db.query(
+        `UPDATE subscriber_accounts SET path_usd_wallet = $1, updated_at = NOW() WHERE phone = $2`,
+        [wallet_address, phone]
+      );
+      return res.json({
+        ok: true,
+        wallet_address,
+        wallet_type: walletType,
+        message: 'Surge wallet linked. AI agents on the LocalIntel network can now route jobs and payments to you.',
+        already_existed: existing.length > 0
+      });
     }
 
+    // No wallet_address provided — return existing if present
+    if (existing.length) {
+      return res.json({ ok: true, wallet_address: existing[0].wallet_address, wallet_type: existing[0].wallet_type, already_existed: true });
+    }
+
+    // Fallback: generate custodial address (legacy path — no private key stored)
     const { generatePrivateKey, privateKeyToAccount } = require('viem/accounts');
     const privateKey = generatePrivateKey();
     const account = privateKeyToAccount(privateKey);
     const walletAddress = account.address;
 
-    // NOTE: encrypted_pk is intentionally null for now — private key is NOT stored
-    // Future: encrypt with KMS before storing
     await db.query(
       `INSERT INTO subscriber_wallets (subscriber_phone, wallet_address, wallet_type)
-       VALUES ($1, $2, 'tempo_custodial')`,
+       VALUES ($1, $2, 'custodial_legacy')`,
       [phone, walletAddress]
     );
-
     await db.query(
       `UPDATE subscriber_accounts SET path_usd_wallet = $1, updated_at = NOW() WHERE phone = $2`,
       [walletAddress, phone]
     );
-
     return res.json({
       ok: true,
       wallet_address: walletAddress,
-      wallet_type: 'tempo_custodial',
-      message: 'Agent wallet created. This address can receive pathUSD and dispatch tasks on your behalf on the Tempo network.',
-      surge_portal: `https://surge.basalthq.com/portal?recipient=${walletAddress}`,
+      wallet_type: 'custodial_legacy',
+      message: 'Temporary wallet address assigned. Link your Surge wallet for full agent payment support.',
+      surge_portal: `https://surge.basalthq.com`,
       already_existed: false
     });
   } catch (err) {
