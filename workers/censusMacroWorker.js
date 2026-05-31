@@ -234,12 +234,23 @@ async function ingestBFS() {
         ba_wba:      toN(latestRow[idxWBA]),
       };
 
-      // Get ZIPs in this county from zip_signals
+      // Get ZIPs in this county via fl_zip_geo FIPS join (reliable — avoids county name string mismatch)
+      const countyFips = `12${fips}`; // full 5-digit FIPS e.g. '12109'
       const countyZips = await db.query(
-        `SELECT zip FROM zip_signals WHERE county ILIKE $1`,
-        [name]
+        `SELECT DISTINCT z.zip FROM zip_signals z
+         JOIN fl_zip_geo g ON g.zip = z.zip
+         WHERE g.county_fips = $1`,
+        [countyFips]
       );
-      for (const { zip } of countyZips) {
+      // Fallback: if fl_zip_geo join returns nothing, try county name
+      const zipList = countyZips.length > 0 ? countyZips : await db.query(
+        `SELECT zip FROM zip_signals WHERE county ILIKE $1`, [name]
+      );
+      const resolvedZips = countyZips.length > 0 ? countyZips : zipList;
+      if (resolvedZips.length === 0) {
+        console.warn(`[censusMacro] BFS: no ZIPs found for ${name} (fips=${countyFips}) — skipping stamp`);
+      }
+      for (const { zip } of resolvedZips) {
         await db.query(
           `INSERT INTO zip_macro_signals (zip, bfs_county_apps_total, bfs_county_apps_highprop, bfs_county_wba, bfs_county_period, bfs_updated_at, updated_at)
            VALUES ($1,$2,$3,$4,$5,NOW(),NOW())
@@ -500,10 +511,18 @@ async function main() {
   while (true) {
     try {
       // Heartbeat gate — 28 days TTL (BFS monthly, others annual/one-time gate themselves)
-      if (await isFresh(WORKER_NAME, BFS_TTL_DAYS * 24 * 3600 * 1000)) {
-        console.log(`[censusMacro] heartbeat fresh — sleeping ${LOOP_SLEEP_H}h`);
+      // Override: if macro_bfs_apps_latest is null/0 statewide, data was never written — force run
+      const [bfsCheck] = await db.query(
+        `SELECT COUNT(*) AS n FROM zip_signals WHERE macro_bfs_apps_latest IS NOT NULL AND macro_bfs_apps_latest > 0 AND state = '12'`
+      );
+      const bfsPopulated = parseInt(bfsCheck?.n || 0) > 0;
+      if (bfsPopulated && await isFresh(WORKER_NAME, BFS_TTL_DAYS * 24 * 3600 * 1000)) {
+        console.log(`[censusMacro] heartbeat fresh + BFS data present (${bfsCheck.n} ZIPs) — sleeping ${LOOP_SLEEP_H}h`);
         await sleep(LOOP_SLEEP_H * 3600 * 1000);
         continue;
+      }
+      if (!bfsPopulated) {
+        console.log(`[censusMacro] macro_bfs_apps_latest is empty statewide — forcing BFS ingest despite heartbeat`);
       }
 
       // Get all FL ZIPs from zip_signals
