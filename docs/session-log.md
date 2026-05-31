@@ -4862,3 +4862,36 @@ Dedup logic also added to count unique worker files across both lists.
 Steady-state DB connections after boot: ~7 (MCP×2 + dash×2 + main×3)
 Peak during active worker run: +N for however many workers are mid-run
 All workers are now restart-safe via hb.isFresh() freshness checks
+
+---
+## B136 — Tree service keyword routing + 500 diagnosis
+**Date:** 2026-05-31
+
+### Bug 1 fix: "I need a tree service" → not routing to landscaping RFQ
+**Root cause:** `_SVC_MAP` in `localIntelAgent.js` lacked tree-specific keywords. `detectServiceRequest()` found `isRequest=true` (triggered by "I need") but `resolvedCat=null` → fell through to "couldn't match it to a service category yet" fallback.
+
+**Fix:** Added to landscaping section of `_SVC_MAP`:
+- `'tree service':'landscaping'`
+- `'tree cut':'landscaping'`
+- `'cut down tree':'landscaping'`
+- `'cut tree':'landscaping'`
+- `'stump':'landscaping'`
+- `'arborist':'landscaping'`
+- `'tree removal':'landscaping'`
+
+### Bug 2 diagnosis: "aqua grill in ponte vedra" → HTTP 500
+**Root cause:** Transient pool exhaustion during boot storm. Log `[/search] error: timeout exceeded when trying to connect` at 05:11:20 UTC = 1:11 AM EDT — exactly when user tested. All workers were stampeding for connections at boot. Once clean-exit workers finished (2-3 min), pool freed and search worked.
+
+**Not a code defect** — no fix needed. The outer `catch (e)` in GET /search correctly returns 500 with `e.message` when pool times out. This is expected behavior during boot.
+
+### Postgres volume ⚠️1 warning
+Railway UI metric reporting glitch on `postgres-volume-_fXt`. Service shows Online + Deployment successful. Data intact (614,430 businesses, search returning real results). No action needed.
+
+---
+## B137 — Fix slang form CORS (POST /slang)
+**Date:** 2026-05-31
+
+### Bug: "Anyone can leave a legacy. wont save" — slang form silently failing
+**Root cause:** `POST /api/local-intel/slang` had no CORS headers and no OPTIONS preflight handler. Browser cross-origin preflight from `thelocalintel.com` → `gsb-swarm-production.up.railway.app` was blocked → fetch threw network error → frontend caught and showed "Couldn't save — try again".
+
+**Fix:** Added `router.options('/slang')` preflight handler + `Access-Control-Allow-Origin: *` header on the POST handler.

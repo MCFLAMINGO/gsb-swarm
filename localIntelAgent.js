@@ -3917,7 +3917,14 @@ router.post('/push/unsubscribe', express.json(), async (req, res) => {
 // ── B7: Community slang (Tier 3 aliases) ─────────────────────────────────────
 // POST /api/local-intel/slang — submit a community slang term
 // Body: { term, businessName, creditedTo?, zip? } OR { query: "SLANG = BUSINESS", creditedTo?, zip? }
+router.options('/slang', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.sendStatus(204);
+});
 router.post('/slang', express.json(), async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
   try {
     const { parseSlangSubmission } = require('./lib/slangParser');
     const submittedBy = req.body?.From || req.body?.from || req.body?.phone ||
@@ -5891,9 +5898,11 @@ router.post('/ask', express.json(), handleAskRequest);
 const _SVC_MAP = {
   // Landscaping
   'lawn':'landscaping','mow':'landscaping','mowing':'landscaping','landscap':'landscaping',
-  'grass':'landscaping','yard':'landscaping','tree trimm':'landscaping','hedge':'landscaping',
-  'trim':'landscaping','bush':'landscaping','mulch':'landscaping','irrigation':'landscaping',
-  'sprinkler':'landscaping',
+  'grass':'landscaping','yard':'landscaping','tree trimm':'landscaping','tree service':'landscaping',
+  'tree cut':'landscaping','cut down tree':'landscaping','cut tree':'landscaping',
+  'stump':'landscaping','arborist':'landscaping','tree removal':'landscaping',
+  'hedge':'landscaping','trim':'landscaping','bush':'landscaping','mulch':'landscaping',
+  'irrigation':'landscaping','sprinkler':'landscaping',
   // Cleaning
   'clean':'cleaning','maid':'cleaning','housekeep':'cleaning','janitorial':'cleaning',
   'pressure wash':'cleaning','window clean':'cleaning',
