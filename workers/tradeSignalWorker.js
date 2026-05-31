@@ -68,7 +68,7 @@ async function getFlAggregates() {
       SUM(sunbiz_new_12mo)                                              AS total_sunbiz_new,
       COUNT(*)                                                          AS zip_count
     FROM zip_signals
-    WHERE state = '12'
+    WHERE state = 'FL'
   `);
 
   // BFS trend: last 3 months vs prior 3 months statewide

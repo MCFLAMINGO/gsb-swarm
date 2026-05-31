@@ -513,7 +513,7 @@ async function main() {
       // Heartbeat gate — 28 days TTL (BFS monthly, others annual/one-time gate themselves)
       // Override: if macro_bfs_apps_latest is null/0 statewide, data was never written — force run
       const [bfsCheck] = await db.query(
-        `SELECT COUNT(*) AS n FROM zip_signals WHERE macro_bfs_apps_latest IS NOT NULL AND macro_bfs_apps_latest > 0 AND state = '12'`
+        `SELECT COUNT(*) AS n FROM zip_signals WHERE macro_bfs_apps_latest IS NOT NULL AND macro_bfs_apps_latest > 0 AND state = 'FL'`
       );
       const bfsPopulated = parseInt(bfsCheck?.n || 0) > 0;
       if (bfsPopulated && await isFresh(WORKER_NAME, BFS_TTL_DAYS * 24 * 3600 * 1000)) {
@@ -526,7 +526,7 @@ async function main() {
       }
 
       // Get all FL ZIPs from zip_signals
-      const zipRows = await db.query(`SELECT zip FROM zip_signals WHERE state = '12' OR state IS NULL ORDER BY zip`);
+      const zipRows = await db.query(`SELECT zip FROM zip_signals WHERE state = 'FL' ORDER BY zip`);
       const allZips = zipRows.map(r => r.zip);
       console.log(`[censusMacro] processing ${allZips.length} FL ZIPs`);
 

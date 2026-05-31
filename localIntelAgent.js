@@ -9062,7 +9062,7 @@ router.post('/admin/run-trade-signals', async (req, res) => {
              SUM(COALESCE(bps_total_units_mo, bps_total_units_annual/12.0)) AS total_permits_mo,
              SUM(macro_bfs_apps_latest) AS total_bfs_apps,
              SUM(sunbiz_new_12mo) AS total_sunbiz_new, COUNT(*) AS zip_count
-      FROM zip_signals WHERE state = '12'
+      FROM zip_signals WHERE state = 'FL'
     `);
 
     const bfsTrend = await db.query(`
