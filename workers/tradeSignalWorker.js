@@ -318,17 +318,28 @@ async function main() {
 
   while (true) {
     try {
-      // Check if existing scores are all uniform (50) — means previous run had no real data
+      // Check if existing scores are stale/broken — means previous run had no real data
       const [uniformCheck] = await db.query(
         `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE confidence = 50) AS at50 FROM trade_signals WHERE status='active'`
       );
       const allUniform = parseInt(uniformCheck?.total||0) > 0 && uniformCheck.total === uniformCheck.at50;
-      if (!allUniform && await isFresh(WORKER_NAME, TTL_DAYS * 24 * 3600 * 1000)) {
+
+      // Also detect zeroed-out aggregates: if zip_signals has real HHI data but
+      // stored signal_value strings show "$0", the state column was NULL during last run.
+      const [zeroCheck] = await db.query(
+        `SELECT COUNT(*) FILTER (WHERE signal_value LIKE '%HHI $0%') AS zero_hhi_count
+         FROM trade_signals WHERE status='active'`
+      );
+      const hasZeroHhi = parseInt(zeroCheck?.zero_hhi_count || 0) > 0;
+
+      const needsRescore = allUniform || hasZeroHhi;
+      if (!needsRescore && await isFresh(WORKER_NAME, TTL_DAYS * 24 * 3600 * 1000)) {
         console.log(`[tradeSignal] fresh — sleeping ${LOOP_SLEEP_H}h`);
         await sleep(LOOP_SLEEP_H * 3600 * 1000);
         continue;
       }
       if (allUniform) console.log(`[tradeSignal] all signals at confidence=50 (stale data) — forcing rescore`);
+      if (hasZeroHhi) console.log(`[tradeSignal] signals show avg HHI $0 (state column was NULL) — forcing rescore after migration fix`);
       const written = await runScoring();
       await updateHeartbeat(WORKER_NAME, written || 0);
     } catch (err) {
