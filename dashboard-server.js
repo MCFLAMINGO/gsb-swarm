@@ -7775,19 +7775,19 @@ app.use((req, res, next) => {
   { name: 'IRS SOI Worker',               file: 'workers/irsSoiWorker.js'          },
   { name: 'ACP Intel Cycle',         file: 'workers/localIntelAcpCycle.js'    },
     // { name: 'MCP Probe Worker',          file: 'workers/mcpProbeWorker.js'        }, // disabled — no real users yet
-  { name: 'Router Learning Worker',     file: 'workers/routerLearningWorker.js'  },
+  // { name: 'Router Learning Worker',     file: 'workers/routerLearningWorker.js'  }, // B129 — over conn cap, re-enable when on Postgres hobby (50 conns)
   { name: 'Enrichment Fill Worker',     file: 'workers/enrichmentFillWorker.js'  },
   { name: 'Task Seed Worker',           file: 'workers/taskSeedWorker.js'        },
   { name: 'Business Merge Worker',      file: 'workers/businessMergeWorker.js'   },
   { name: 'Website Enricher',           file: 'workers/websiteEnricherWorker.js' },  // weekly — description, email, tags for businesses with websites
-  { name: 'ZIP Brief Worker',           file: 'workers/zipBriefWorker.js'        },
+  // { name: 'ZIP Brief Worker',           file: 'workers/zipBriefWorker.js'        }, // B129 — over conn cap
   { name: 'Hours Parse Worker',         file: 'workers/hoursParseWorker.js'      },
     // { name: 'Embedding Worker',           file: 'workers/embeddingWorker.js'       }, // disabled — Railway disk ephemeral, needs pgvector
   { name: 'ACS Demographics Worker',       file: 'workers/acsWorker.js'             },
   { name: 'Sunbiz Import Worker', file: 'workers/sunbizWorker.js' }, // B91 — 3-trip streaming, no disk
-  { name: 'Search Vector Backfill',      file: 'workers/searchVectorBackfillWorker.js' },
+  // { name: 'Search Vector Backfill',      file: 'workers/searchVectorBackfillWorker.js' }, // B129 — over conn cap
     // { name: 'Embedding Backfill',          file: 'workers/embeddingBackfillWorker.js' }, // disabled — index recreates at 1.2GB, 0 scans, no query path uses <-> operator yet
-  { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' },
+  // { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' }, // B129 — over conn cap
   { name: 'Permit Worker',               file: 'workers/permitWorker.js' },
   { name: 'FDOT AADT Worker',               file: 'workers/fdotWorker.js'   },
     // ── World model input workers (run on boot, self-throttle via heartbeat) ──

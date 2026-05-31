@@ -114,12 +114,27 @@ function spawnWorker({ name, file }) {
   const MCP_POOL         = 2;  // localIntelMCP
   const DASHBOARD_POOL   = 2;  // dashboard-server — reads only, 2 is sufficient
   const MAIN_POOL        = 3;  // localIntelAgent in main process — admin endpoints need headroom for concurrent requests
-  const DB_WORKERS       = workers.filter(w => {
+  // Count DB workers from BOTH index.js list AND dashboard-server LOCAL_INTEL_WORKERS.
+  // The old check only scanned index.js workers — missed all 38 dashboard workers and
+  // logged a false 12/25 while the real count was 47 (B129 root cause).
+  const countDbWorkers = (list) => list.filter(w => {
     try {
       const src = require('fs').readFileSync(require('path').join(__dirname, w.file), 'utf8');
-      return src.includes("require('../lib/db')") || src.includes('require("../lib/db")');
-    } catch (_) { return true; } // assume uses DB if file unreadable
+      return src.includes("require('../lib/db')") || src.includes('require("../lib/db")') ||
+             src.includes("require('./lib/db')") || src.includes('require("./lib/db")');
+    } catch (_) { return true; }
   }).length;
+  // Parse dashboard-server LOCAL_INTEL_WORKERS list by reading the file
+  let dashWorkers = [];
+  try {
+    const dashSrc = require('fs').readFileSync(require('path').join(__dirname, 'dashboard-server.js'), 'utf8');
+    const match = dashSrc.match(/const LOCAL_INTEL_WORKERS\s*=\s*\[([\s\S]*?)\];/);
+    if (match) {
+      const workerLines = match[1].match(/\{\s*name:[^}]+file:\s*'([^']+)'/g) || [];
+      dashWorkers = workerLines.map(l => { const m = l.match(/file:\s*'([^']+)'/); return m ? { file: m[1] } : null; }).filter(Boolean);
+    }
+  } catch (_) {}
+  const DB_WORKERS       = countDbWorkers(workers) + countDbWorkers(dashWorkers);
   const TOTAL_CONNS = DB_WORKERS * WORKER_POOL + MCP_POOL + DASHBOARD_POOL + MAIN_POOL;
   if (TOTAL_CONNS > RAILWAY_PG_CAP) {
     console.error(`[SWARM] ❌ CONNECTION BUDGET EXCEEDED: ${DB_WORKERS} DB workers × ${WORKER_POOL} + MCP ${MCP_POOL} + dash ${DASHBOARD_POOL} + main ${MAIN_POOL} = ${TOTAL_CONNS} > cap ${RAILWAY_PG_CAP}`);
