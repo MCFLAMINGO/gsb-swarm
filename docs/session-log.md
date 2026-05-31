@@ -4744,3 +4744,31 @@ Root cause (two parts):
 
 ### Fix (commit this session)
 - `localIntelMCP.js` lines 719 + 757: `const { db }` → `const db`
+
+---
+## B129 — Loop→exit conversion for all persistent workers
+**Date:** 2026-05-31
+
+### Problem
+Railway memory cost at $47/mo (of $60.85 total). Root cause: workers with `while(true)`, `setInterval`, or explicit keep-alive patterns holding DB connections and RAM indefinitely. Budget checker in `index.js` was blind to `dashboard-server.js` LOCAL_INTEL_WORKERS, reporting false `12/25` when real count was 47 → every query timed out.
+
+### Fix — 7 workers converted to clean-exit (process.exit(0))
+| Worker | Old pattern | Fix |
+|---|---|---|
+| enrichmentFillWorker.js | while(true) loop | process.exit(0) after run |
+| surfaceCurrentWorker.js | setInterval | process.exit(0) after run |
+| overpassWorker.js | while(true) loop | process.exit(0) after run |
+| localIntelAcpCycle.js | while(true) loop | process.exit(0) after run |
+| hoursParseWorker.js | setInterval(runParseBatch, DAILY) | process.exit(0) after batch pass |
+| taskSeedWorker.js | setInterval(() => {}, 1 << 30) keep-alive | process.exit(0) after runOnce() |
+| waveSurfaceWorker.js | setTimeout → setInterval hourly | process.exit(0) in .finally() |
+
+### Connection budget after B129
+- Persistent workers holding connections: 13 (was 20)
+- Steady-state: 13×1 + MCP×2 + dash×2 + main×3 = **20/25** ✓
+- 5 connections of headroom vs 2 before
+
+### Notes
+- waveSurfaceWorker runs once on deploy (aggregates existing wave_events). When real MCP query volume warrants it, add Railway cron to trigger hourly.
+- taskSeedWorker keep-alive (`setInterval(() => {}, 1 << 30)`) was intentional anti-restart hack — replaced by clean-exit since Railway cron/deploy handles scheduling.
+- hoursParseWorker freshness check (`hours_json IS NOT NULL`) makes it restart-safe: re-deploy skips already-parsed rows.

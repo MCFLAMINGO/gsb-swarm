@@ -236,11 +236,13 @@ function scheduleNextRun() {
 
 console.log('[waveSurfaceWorker] Starting — Layer 3 Wave Surface worker');
 
-// Run immediately on start
-aggregateWaveSurface().catch(e => console.error("[waveSurface] run error:", e.message));
-
-// Then schedule recurring runs at :05 each hour
-scheduleNextRun();
+// Run once then exit; Railway cron handles hourly scheduling
+aggregateWaveSurface()
+  .catch(e => console.error('[waveSurface] run error:', e.message))
+  .finally(() => {
+    console.log('[waveSurfaceWorker] Done — exiting.');
+    process.exit(0);
+  });
 
 // ── Exports ───────────────────────────────────────────────────────────────────
 

@@ -284,11 +284,10 @@ module.exports = { runParseBatch, parseHours, isOpenNow };
 // ── Forkable entry point ────────────────────────────────────────────────────
 // When run as a forked worker process, do one batch pass then schedule daily.
 if (require.main === module) {
-  const DAILY = 24 * 60 * 60 * 1000;
   (async () => {
-    console.log('[hoursParseWorker] Starting initial batch pass...');
+    console.log('[hoursParseWorker] Starting batch pass...');
     await runParseBatch();
-    // Schedule daily re-runs to catch newly enriched rows
-    setInterval(runParseBatch, DAILY);
+    console.log('[hoursParseWorker] Done — exiting.');
+    process.exit(0);
   })();
 }

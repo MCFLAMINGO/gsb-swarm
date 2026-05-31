@@ -182,7 +182,6 @@ async function runOnce() {
     } catch (_) {}
   }
 
-  console.log('[task-seed] Run-once complete — staying alive idle (no loop)');
-  // Stay alive so dashboard-server fork supervisor doesn't restart in a loop.
-  setInterval(() => {}, 1 << 30);
+  console.log('[task-seed] Run-once complete — exiting.');
+  process.exit(0);
 })();
