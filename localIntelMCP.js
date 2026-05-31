@@ -716,7 +716,7 @@ let ZIP_CENTERS = {};  // { zip: { lat, lon, label } } — loaded from fl_zip_ge
 
 async function loadZipCenters() {
   try {
-    const { db } = require('./lib/db');
+    const db = require('./lib/db');
     const rows = await db.query(
       `SELECT zip, lat, lon, county FROM fl_zip_geo WHERE lat IS NOT NULL AND lon IS NOT NULL`
     );
@@ -754,7 +754,7 @@ async function resolveZipFromCoords(lat, lon) {
 
   // Slow path: direct Postgres query (cache not ready yet)
   try {
-    const { db } = require('./lib/db');
+    const db = require('./lib/db');
     const rows = await db.query(
       `SELECT zip,
          (point($1,$2) <@> point(lon::float8, lat::float8)) AS dist

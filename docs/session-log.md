@@ -4718,3 +4718,29 @@ Root cause (two parts):
 - After a partial run completes (e.g., 200 ZIPs), a restart skips those 200 and picks up at ZIP 201.
 - Heap pressure is bounded: each ZIP processes in serial, result is released after the loop iteration GC.
 - No change to the 25-day freshness window (ACS data is annual — monthly refresh is plenty).
+
+---
+## B127 — BFS → BDS replacement + zip_signals state fix
+**Date:** 2026-05-31
+
+### zip_signals state column mismatch (commit 1e5e871)
+- **Root cause:** Migration 017 seeded `zip_signals.state = 'FL'` for all 2110 rows. All scorer queries used `WHERE state = '12'` (FL FIPS) — zero rows matched → all aggregations returned 0.
+- **Fix:** Changed 4 references from `'12'` → `'FL'` across `localIntelAgent.js`, `tradeSignalWorker.js`, `censusMacroWorker.js`.
+
+### Census BFS API → BDS (commit 2682708)
+- **Root cause:** `timeseries/bfs` county endpoint returns 404 — it was never a real county-level API. Confirmed with valid Census API key.
+- **Replacement:** `timeseries/bds` (Business Dynamics Statistics) — county geography, verified live data for all 67 FL counties. Variables: `ESTABS_ENTRY, ESTABS_EXIT, ESTABS_ENTRY_RATE, FIRM, EMP`.
+- **Sample verified:** Duval County FL 2023: ESTABS_ENTRY=2929, ESTABS_EXIT=2599, FIRM=20095, EMP=506031.
+- **Changes:** `ingestBFS()` rewritten in `censusMacroWorker.js`. TTL=180d (annual data). Source='bds'. Annual momentum (latest vs prior year). BFS_TTL_DAYS=180. All 3 files updated.
+
+---
+## B128 — Fix ZIP_CENTERS load (localIntelMCP.js)
+**Date:** 2026-05-31
+
+### Problem
+`loadZipCenters()` and `resolveZipFromCoords()` in `localIntelMCP.js` used `const { db } = require('./lib/db')` — but `lib/db.js` exports `{ query, queryOne, upsertBusiness, isReady, getPool, disconnect }` (no `db` key). This caused `db` to be `undefined` and `db.query()` to throw `Cannot read properties of undefined (reading 'query')` on every boot.
+
+**Effect:** `ZIP_CENTERS` never populated from Postgres → lat/lon coord resolution always fell back to haversine over empty cache (returning null) → lat/lon-based queries defaulted to ZIP 32082.
+
+### Fix (commit this session)
+- `localIntelMCP.js` lines 719 + 757: `const { db }` → `const db`
