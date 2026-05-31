@@ -91,18 +91,21 @@ async function checkBudgetGate() {
     return;
   }
 
+  // Hard cap at 2 concurrent agents — Railway Hobby Postgres = 25 conn cap.
+  // Each ZipAgent holds 1 connection; 10 agents was blowing the budget.
+  // Raise this only after upgrading to Postgres Standard (100 conns).
   if (revenue7d === 0) {
-    CONCURRENT_AGENTS = 6;
+    CONCURRENT_AGENTS = 2;
     gateStatus = 'zero_revenue';
-    console.log('[ZipCoordinator] Budget gate: zero revenue — running 6 agents for FL expansion (data-first mode)');
+    console.log('[ZipCoordinator] Budget gate: zero revenue — running 2 agents (conn cap)');
   } else if (revenue7d < 5) {
-    CONCURRENT_AGENTS = 5;
+    CONCURRENT_AGENTS = 2;
     gateStatus = 'low_revenue';
-    console.log(`[ZipCoordinator] Budget gate: revenue7d=$${revenue7d.toFixed(4)} — setting 5 agents`);
+    console.log(`[ZipCoordinator] Budget gate: revenue7d=$${revenue7d.toFixed(4)} — setting 2 agents (conn cap)`);
   } else {
-    CONCURRENT_AGENTS = 10;
+    CONCURRENT_AGENTS = 2;
     gateStatus = 'full';
-    console.log(`[ZipCoordinator] Budget gate: revenue7d=$${revenue7d.toFixed(4)} — setting 10 agents`);
+    console.log(`[ZipCoordinator] Budget gate: revenue7d=$${revenue7d.toFixed(4)} — capped at 2 agents (conn cap)`);
   }
 }
 

@@ -4772,3 +4772,22 @@ Railway memory cost at $47/mo (of $60.85 total). Root cause: workers with `while
 - waveSurfaceWorker runs once on deploy (aggregates existing wave_events). When real MCP query volume warrants it, add Railway cron to trigger hourly.
 - taskSeedWorker keep-alive (`setInterval(() => {}, 1 << 30)`) was intentional anti-restart hack — replaced by clean-exit since Railway cron/deploy handles scheduling.
 - hoursParseWorker freshness check (`hours_json IS NOT NULL`) makes it restart-safe: re-deploy skips already-parsed rows.
+
+---
+## B130 — ZipCoordinator agent cap + budget checker no-exit fix
+**Date:** 2026-05-31
+
+### Problem 1 — ZipCoordinator spawning 10 ZipAgents at boot
+Budget gate: revenue7d=$250 → CONCURRENT_AGENTS=10. Each ZipAgent holds 1 DB connection.
+At boot: 16 persistent workers + MCP×2 + dash×2 + main×3 + 10 ZipAgents = 33/25 → guaranteed timeouts.
+Root cause: budget gate was revenue-aware but not connection-cap-aware.
+
+**Fix:** Hard cap CONCURRENT_AGENTS=2 for all revenue tiers. Railway Hobby = 25 conn cap.
+Raise only after upgrading to Postgres Standard (100 conns).
+
+### Problem 2 — budget checker process.exit(1) killing service at boot
+Budget checker regex matched commented-out `// { name: ...` entries in LOCAL_INTEL_WORKERS,
+inflating count to 53 workers → 60 estimated connections → process.exit(1) at every boot.
+
+**Fix:** Changed to warn-only (console.warn). Budget checker never kills the service.
+Dedup logic also added to count unique worker files across both lists.
