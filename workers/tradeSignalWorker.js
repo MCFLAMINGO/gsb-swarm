@@ -71,14 +71,14 @@ async function getFlAggregates() {
     WHERE state = 'FL'
   `);
 
-  // BFS trend: last 3 months vs prior 3 months statewide
+  // BDS trend: latest year vs prior year statewide (annual — BDS replaced BFS)
   const bfsTrend = await db.query(`
-    SELECT period, SUM((metrics->>'ba_total')::int) AS total_apps
+    SELECT period, SUM((metrics->>'estabs_entry')::int) AS total_apps
     FROM macro_indicators
-    WHERE source = 'bfs' AND geo_id LIKE '12%'
+    WHERE source = 'bds' AND geo_id LIKE '12%'
     GROUP BY period
     ORDER BY period DESC
-    LIMIT 6
+    LIMIT 4
   `);
 
   // NES statewide
@@ -101,9 +101,10 @@ async function getFlAggregates() {
 
   // BFS momentum: compare recent 3 months vs prior 3 months
   let bfsMomentum = 0;
-  if (bfsTrend.length >= 6) {
-    const recent = bfsTrend.slice(0, 3).reduce((s, r) => s + (parseInt(r.total_apps) || 0), 0);
-    const prior  = bfsTrend.slice(3, 6).reduce((s, r) => s + (parseInt(r.total_apps) || 0), 0);
+  if (bfsTrend.length >= 2) {
+    // BDS is annual: compare latest year vs prior year
+    const recent = parseInt(bfsTrend[0]?.total_apps) || 0;
+    const prior  = parseInt(bfsTrend[1]?.total_apps) || 0;
     bfsMomentum  = prior > 0 ? Math.round(((recent - prior) / prior) * 100) : 0;
   }
 
