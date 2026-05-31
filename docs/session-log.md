@@ -2,6 +2,16 @@
 
 Problem / Fix / Result entries for every B-numbered session, plus all dated session entries.
 
+## 2026-05-31 — B133: Fix localIntelMCP permit_updated_at column error
+
+**Problem:** Railway Postgres logs showed `column "permit_updated_at" does not exist` firing 117 times across the log window — once per MCP tool call. In `localIntelMCP.js` line 3056, the `dataAsOf` freshness query references `permit_updated_at` but the actual column in `zip_signals` is `bps_updated_at` (Building Permit Survey). The error was silently swallowed by a `catch (_) {}` so no MCP calls failed, but every single call was firing a failed Postgres query and consuming a connection round-trip.
+
+**Fix:** One-word change in `localIntelMCP.js` — `permit_updated_at` → `bps_updated_at`.
+
+**Result:** MCP `dataAsOf` freshness check now resolves correctly with no Postgres errors. 117 silent errors per log window eliminated.
+
+---
+
 ## 2026-05-31 — B132: Fix trade signal zeros — backfill zip_signals.state + force rescore
 
 **Problem:** Trade signals dashboard showing "avg HHI $0", "NES total firms 0", "sunbiz new avg 0/ZIP" for all tickers except DHI (which uses irs_mig_net_returns, a different path). Root cause was two-layered: (1) `tradeSignalWorker.js` queries `WHERE state = 'FL'` in `getFlAggregates()`. The migration 017 seed populated `state='FL'` only for ZIPs that existed in `zip_intelligence` at migration time. Every subsequent worker write goes through `pgStore.upsertZipSignals()`, which dynamically builds its INSERT from only the columns the caller passes — `state` was never passed by any worker, so any ZIP row created or updated after migration 017 has `state = NULL`. With ~2382 of 2383 ZIP rows having `state = NULL`, `zipCount = 1` and all the AVG/SUM aggregations across FL nearly zero. (2) The TTL freshness check in the worker (`isFresh` over 7 days) would have prevented a rescore even after the state fix because signals were written today and aren't all at confidence=50.

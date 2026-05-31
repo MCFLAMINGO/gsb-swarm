@@ -3053,7 +3053,7 @@ async function handleRPC(req, callerInfo) {
           const zip = toolArgs?.zip || parsed?.zip || null;
           if (zip) {
             const [freshRow] = await db.query(
-              `SELECT GREATEST(zbp_updated_at, cbp_updated_at, acs_updated_at, permit_updated_at) AS freshest
+              `SELECT GREATEST(zbp_updated_at, cbp_updated_at, acs_updated_at, bps_updated_at) AS freshest
                FROM zip_signals WHERE zip = $1 LIMIT 1`, [zip]
             );
             dataAsOf = freshRow?.freshest || null;
