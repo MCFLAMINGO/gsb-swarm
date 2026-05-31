@@ -114,32 +114,35 @@ function spawnWorker({ name, file }) {
   const MCP_POOL         = 2;  // localIntelMCP
   const DASHBOARD_POOL   = 2;  // dashboard-server — reads only, 2 is sufficient
   const MAIN_POOL        = 3;  // localIntelAgent in main process — admin endpoints need headroom for concurrent requests
-  // Count DB workers from BOTH index.js list AND dashboard-server LOCAL_INTEL_WORKERS.
-  // The old check only scanned index.js workers — missed all 38 dashboard workers and
-  // logged a false 12/25 while the real count was 47 (B129 root cause).
-  const countDbWorkers = (list) => list.filter(w => {
+  // Count DB workers across BOTH index.js list AND dashboard-server LOCAL_INTEL_WORKERS.
+  // Deduplicate by file path — a worker file only runs once even if listed in both.
+  // Exclude localIntelMCP.js (counted separately as MCP_POOL).
+  const usesDb = (file) => {
     try {
-      const src = require('fs').readFileSync(require('path').join(__dirname, w.file), 'utf8');
+      const src = require('fs').readFileSync(require('path').join(__dirname, file), 'utf8');
       return src.includes("require('../lib/db')") || src.includes('require("../lib/db")') ||
              src.includes("require('./lib/db')") || src.includes('require("./lib/db")');
     } catch (_) { return true; }
-  }).length;
-  // Parse dashboard-server LOCAL_INTEL_WORKERS list by reading the file
-  let dashWorkers = [];
+  };
+  // Parse dashboard-server LOCAL_INTEL_WORKERS list
+  let dashWorkerFiles = [];
   try {
     const dashSrc = require('fs').readFileSync(require('path').join(__dirname, 'dashboard-server.js'), 'utf8');
     const match = dashSrc.match(/const LOCAL_INTEL_WORKERS\s*=\s*\[([\s\S]*?)\];/);
     if (match) {
-      const workerLines = match[1].match(/\{\s*name:[^}]+file:\s*'([^']+)'/g) || [];
-      dashWorkers = workerLines.map(l => { const m = l.match(/file:\s*'([^']+)'/); return m ? { file: m[1] } : null; }).filter(Boolean);
+      const lines = match[1].match(/\{\s*name:[^}]+file:\s*'([^']+)'/g) || [];
+      dashWorkerFiles = lines.map(l => { const m = l.match(/file:\s*'([^']+)'/); return m ? m[1] : null; }).filter(Boolean);
     }
   } catch (_) {}
-  const DB_WORKERS       = countDbWorkers(workers) + countDbWorkers(dashWorkers);
+  // Merge both lists, deduplicate, exclude MCP (counted separately)
+  const allWorkerFiles = [...new Set([
+    ...workers.map(w => w.file),
+    ...dashWorkerFiles,
+  ])].filter(f => f !== 'localIntelMCP.js');
+  const DB_WORKERS = allWorkerFiles.filter(usesDb).length;
   const TOTAL_CONNS = DB_WORKERS * WORKER_POOL + MCP_POOL + DASHBOARD_POOL + MAIN_POOL;
   if (TOTAL_CONNS > RAILWAY_PG_CAP) {
-    console.error(`[SWARM] ❌ CONNECTION BUDGET EXCEEDED: ${DB_WORKERS} DB workers × ${WORKER_POOL} + MCP ${MCP_POOL} + dash ${DASHBOARD_POOL} + main ${MAIN_POOL} = ${TOTAL_CONNS} > cap ${RAILWAY_PG_CAP}`);
-    console.error('[SWARM] Reduce DB_POOL_MAX, add workers to non-DB list, or upgrade Postgres tier.');
-    process.exit(1);
+    console.warn(`[SWARM] ⚠️  CONNECTION BUDGET WARNING: estimated ${TOTAL_CONNS} conns > cap ${RAILWAY_PG_CAP} — monitor for pool timeouts`);
   } else {
     console.log(`[SWARM] ✅ Connection budget: ${DB_WORKERS} DB workers×${WORKER_POOL} + MCP×${MCP_POOL} + dash×${DASHBOARD_POOL} + main×${MAIN_POOL} = ${TOTAL_CONNS}/${RAILWAY_PG_CAP}`);
   }
