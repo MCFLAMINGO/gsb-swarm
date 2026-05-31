@@ -3931,27 +3931,31 @@ router.post('/slang', express.json(), async (req, res) => {
       req.headers['x-session-id'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
       req.socket?.remoteAddress || 'anonymous';
 
-    let slangTerm, businessName;
+    let slangTerm, descriptionRaw;
     if (req.body?.query) {
       const parsed = parseSlangSubmission(req.body.query);
       if (!parsed) {
-        return res.status(400).json({ ok: false, error: 'Use format: SLANG = BUSINESS NAME' });
+        return res.status(400).json({ ok: false, error: 'Use format: SLANG = DESCRIPTION' });
       }
       slangTerm = parsed.slangTerm;
-      businessName = parsed.businessQuery;
+      descriptionRaw = parsed.businessQuery;
     } else {
       slangTerm = (req.body?.term || '').trim();
-      businessName = (req.body?.businessName || '').trim();
+      // support both legacy 'businessName' and new 'description' field
+      descriptionRaw = (req.body?.description || req.body?.businessName || '').trim();
     }
 
-    if (!slangTerm || !businessName) {
-      return res.status(400).json({ ok: false, error: 'Both slang term and business name are required. Format: SLANG = BUSINESS NAME' });
+    if (!slangTerm || !descriptionRaw) {
+      return res.status(400).json({ ok: false, error: 'Both a slang term and a description are required.' });
     }
 
     const NEGATIVE_RE = /\b(shit|fuck|crap|ass|bitch|damn|hell|suck|stupid|awful|terrible|worst|hate|racist|sexist|slur)\b/i;
     const isNegative = NEGATIVE_RE.test(slangTerm);
+    const creditedTo = (req.body?.creditedTo || '').trim() || null;
 
-    const { canonical, business_id: pinnedId } = await resolveBusinessAlias(businessName);
+    // Try to match a business — but it's optional now.
+    // Slang can describe neighborhoods, streets, landmarks, vibes, anything local.
+    const { canonical, business_id: pinnedId } = await resolveBusinessAlias(descriptionRaw);
     const searchZips = req.body?.zip ? [req.body.zip] : TARGET_ZIPS;
 
     let business = null;
@@ -3972,50 +3976,61 @@ router.post('/slang', express.json(), async (req, res) => {
       business = rows[0] || null;
     }
 
-    if (!business) {
-      return res.json({
-        ok: false,
-        error: `Couldn't find "${businessName}" in our network. Make sure the business is listed first.`,
-        tip: 'Check the spelling or try the full business name.'
-      });
-    }
-
-    const existing = await db.query(
-      `SELECT id, submitted_by, credited_to, votes FROM business_slang
-        WHERE term_lower = lower(trim($1)) AND business_id = $2 LIMIT 1`,
-      [slangTerm, business.business_id]
-    );
+    // Check for duplicate — match on term + (business_id if found, else description)
+    const existing = business
+      ? await db.query(
+          `SELECT id, submitted_by, credited_to, votes FROM business_slang
+            WHERE term_lower = lower(trim($1)) AND business_id = $2 LIMIT 1`,
+          [slangTerm, business.business_id]
+        )
+      : await db.query(
+          `SELECT id, submitted_by, credited_to, votes FROM business_slang
+            WHERE term_lower = lower(trim($1)) AND business_id IS NULL
+              AND lower(trim(description)) = lower(trim($2)) LIMIT 1`,
+          [slangTerm, descriptionRaw]
+        );
 
     if (existing.length) {
       const e = existing[0];
+      const label = business ? business.name : descriptionRaw;
       const isOriginator = e.submitted_by === submittedBy;
       return res.json({
         ok: true,
         already_exists: true,
         message: isOriginator
-          ? `You already submitted "${slangTerm}" for ${business.name}. You're immortalized.`
-          : `"${slangTerm}" for ${business.name} was already submitted by ${e.credited_to || 'someone in the community'}. You can upvote it instead.`,
+          ? `You already submitted "${slangTerm}" for ${label}. You're immortalized.`
+          : `"${slangTerm}" for ${label} was already submitted by ${e.credited_to || 'someone in the community'}. You can upvote it instead.`,
         votes: e.votes,
         credited_to: e.credited_to || null,
       });
     }
 
-    const creditedTo = (req.body?.creditedTo || '').trim() || null;
-    await db.query(
-      `INSERT INTO business_slang (term, business_id, submitted_by, is_negative, credited_to)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [slangTerm, business.business_id, submittedBy, isNegative, creditedTo]
-    );
+    if (business) {
+      await db.query(
+        `INSERT INTO business_slang (term, business_id, description, submitted_by, is_negative, credited_to)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [slangTerm, business.business_id, business.name, submittedBy, isNegative, creditedTo]
+      );
+    } else {
+      // No business match — store as a free-form local knowledge entry
+      await db.query(
+        `INSERT INTO business_slang (term, business_id, description, submitted_by, is_negative, credited_to)
+         VALUES ($1, NULL, $2, $3, $4, $5)`,
+        [slangTerm, descriptionRaw, submittedBy, isNegative, creditedTo]
+      );
+    }
 
+    const label = business ? business.name : descriptionRaw;
     const msg = isNegative
       ? `Thanks — "${slangTerm}" has been submitted for review. It will be visible once approved.`
-      : `"${slangTerm}" = ${business.name} has been added! ${creditedTo ? `${creditedTo} gets` : 'You get'} credit for being first to immortalize it.`;
+      : `"${slangTerm}" = ${label} has been added! ${creditedTo ? `${creditedTo} gets` : 'You get'} credit for being first to immortalize it.`;
 
     return res.json({
       ok: true,
       message: msg,
       slang_term: slangTerm,
-      business_name: business.name,
+      description: label,
+      business_id: business ? business.business_id : null,
       credited_to: creditedTo,
       is_negative: isNegative,
       pending_review: isNegative,

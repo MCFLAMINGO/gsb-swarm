@@ -4895,3 +4895,20 @@ Railway UI metric reporting glitch on `postgres-volume-_fXt`. Service shows Onli
 **Root cause:** `POST /api/local-intel/slang` had no CORS headers and no OPTIONS preflight handler. Browser cross-origin preflight from `thelocalintel.com` → `gsb-swarm-production.up.railway.app` was blocked → fetch threw network error → frontend caught and showed "Couldn't save — try again".
 
 **Fix:** Added `router.options('/slang')` preflight handler + `Access-Control-Allow-Origin: *` header on the POST handler.
+
+---
+## B138 — Slang form: support any description, not just business names
+**Date:** 2026-05-31
+
+### Change
+`business_slang.business_id` was NOT NULL + FK — forced every submission to match a Postgres business.
+Slang should work for neighborhoods, streets, landmarks, vibes, anything local.
+
+**Migration 058:** `business_id` made nullable (FK kept, deferred), `description` column added.
+
+**Backend:** `POST /slang` now:
+- Tries to match a business (still stores `business_id` when found for aliasResolver)
+- If no match, stores as free-form with `business_id = NULL` and `description = raw input`
+- Accepts `description` field (legacy `businessName` still works for backward compat)
+
+**Frontend:** Second input placeholder → "What is it?", helper text updated to show neighborhood/street examples.
