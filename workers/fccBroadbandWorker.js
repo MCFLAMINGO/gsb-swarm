@@ -318,7 +318,7 @@ async function runPass() {
       catch (e) { console.error('[fccBroadband] Pass crashed:', e.message); await hb.pingError('fccBroadbandWorker', e.message); }
     }
     console.log(`[fccBroadband] Sleeping ${CYCLE_H}h`);
-    await db.disconnect(); // release connection slot during sleep
+    try { await db.disconnect(); } catch (_) {} // release connection slot during sleep
     await sleep(FRESH_MS);
   }
 })();

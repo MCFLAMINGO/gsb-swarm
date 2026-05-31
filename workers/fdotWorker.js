@@ -253,7 +253,7 @@ async function run() {
       catch (e) { console.error('[fdot] Pass crashed:', e.message); await hb.pingError('fdotWorker', e.message); }
     }
     console.log('[fdot] Sleeping 24h');
-    await db.disconnect(); // release connection slot during sleep
+    try { await db.disconnect(); } catch (_) {} // release connection slot during sleep
     await sleep(SLEEP_MS);
   }
 })();

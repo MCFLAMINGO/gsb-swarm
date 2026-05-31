@@ -453,7 +453,7 @@ const SLEEP_MS    = 24 * 60 * 60 * 1000;       // 24h sleep — Node setTimeout 
       catch (e) { console.error('[acsWorker] Pass crashed:', e.message); await hb.pingError('acsWorker', e.message); }
     }
     console.log('[acsWorker] Sleeping 24h');
-    await db.disconnect(); // release connection slot during sleep
+    try { await db.disconnect(); } catch (_) {} // release connection slot during sleep
     await sleep(SLEEP_MS);
   }
 })();

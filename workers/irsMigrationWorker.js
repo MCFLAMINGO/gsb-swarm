@@ -306,7 +306,7 @@ async function runPass() {
       catch (e) { console.error('[irsMig] Pass crashed:', e.message); await hb.pingError('irsMigrationWorker', e.message); }
     }
     console.log('[irsMig] Sleeping 24h');
-    await db.disconnect(); // release connection slot during sleep
+    try { await db.disconnect(); } catch (_) {} // release connection slot during sleep
     await sleep(SLEEP_MS);
   }
 })();

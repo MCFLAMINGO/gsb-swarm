@@ -2340,7 +2340,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       }
     }
     console.log('[censusLayer] Sleeping 24h');
-    await db.disconnect(); // release connection slot during sleep
+    try { await db.disconnect(); } catch (_) {} // release connection slot during sleep
     await sleep(CENSUS_SLEEP_MS);
   }
 })();
