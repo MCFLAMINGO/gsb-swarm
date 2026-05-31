@@ -834,6 +834,15 @@ const x402Middleware = paymentMiddleware(
 
 const router = express.Router();
 
+// ── CORS — open for all origins (frontend + agents call from vercel/thelocalintel.com) ──
+router.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key, x-agent-id, x-session-id, Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 // ── Usage ledger middleware ──────────────────────────────────────────────────────
 // Logs every query to Postgres usage_ledger. This is the billing layer.
 // caller_id = x-agent-id header | x-api-key first 8 chars | ip

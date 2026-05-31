@@ -4912,3 +4912,14 @@ Slang should work for neighborhoods, streets, landmarks, vibes, anything local.
 - Accepts `description` field (legacy `businessName` still works for backward compat)
 
 **Frontend:** Second input placeholder → "What is it?", helper text updated to show neighborhood/street examples.
+
+---
+## B139 — Global CORS middleware on localIntelAgent router
+**Date:** 2026-05-31
+
+### Bug: market-intel "Failed to fetch" + any route called from vercel/thelocalintel.com
+**Root cause:** 148 routes in localIntelAgent.js, only 33 had Access-Control headers.
+`GET /trade-signals` had none — browser blocked preflight from swarm-deploy-throw.vercel.app.
+
+**Fix:** Single `router.use()` CORS middleware added right after `router = express.Router()`.
+Covers every route: GET, POST, PUT, DELETE, OPTIONS. Headers: `*, Content-Type, x-api-key, x-agent-id, x-session-id, Authorization`.
