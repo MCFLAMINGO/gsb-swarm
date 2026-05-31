@@ -2,6 +2,16 @@
 
 Problem / Fix / Result entries for every B-numbered session, plus all dated session entries.
 
+## 2026-05-31 — B135: Fix trade signals showing 0 on dashboard — cache early-exit + frontend retry
+
+**Problem:** Market Intel dashboard showing "No signals yet" / 0 signals even though `_signalsCache` was warmed with 8 signals at boot. Two bugs converged: (1) In `localIntelAgent.js` the trade-signals startup cache warm loop had an unconditional `break` after the `if (rows.length > 0)` block — the next line `// Table empty — no signals yet, stop retrying` followed by `break` fired whether rows were found OR not. If the warm ran between a DELETE and INSERT during tradeSignalWorker's rescore, it found 0 rows and stopped retrying permanently, leaving `_signalsCache = null`. (2) In the Vercel dashboard (`market-intel/page.tsx`) the `useEffect` fired once with no retry. If the first fetch returned `signals: []` (DB timeout before cache was populated, or cache was null), the page showed 0 forever with no recovery path.
+
+**Fix:** (a) `localIntelAgent.js` — removed the premature `break` on empty rows; the loop now retries all 12 attempts (60s window) until it finds signals. (b) `market-intel/page.tsx` — added auto-retry logic in `useEffect`: if initial load returns 0 signals and no hard error, retries up to 3× with 5s delay, covering the boot burst window.
+
+**Result:** Dashboard recovers automatically from boot-burst timeouts. Even if the first fetch fires before the cache is warm, the page retries silently and displays signals once the DB pool clears.
+
+---
+
 ## 2026-05-31 — B134: Move runMigration() to main process — fix boot-race migration timeout
 
 **Problem:** Railway logs showed `[db-migrate] Non-fatal: timeout exceeded when trying to connect` on every deploy. `runMigration()` was called from `dashboard-server.js` (a forked child process). The dashboard is spawned at the same time as all other workers, so when ~15+ processes all try to acquire DB connections in the first 15 seconds of boot, the pool is exhausted and the migration runner times out before it can execute. This meant new migration files (like 057_backfill_zip_signals_state.sql) never actually ran. The B132 trade signal fix deployed but migration 057 never applied, so trade signals still showed `FL state: 1 ZIPs` and all zeros.

@@ -365,8 +365,7 @@ let TARGET_ZIPS = ['32202','32207','32216','32244','32256','32073','33602','3362
           console.log(`[localIntelAgent] trade-signals cache warmed: ${rows.length} signals`);
           break;
         }
-        // Table empty — no signals yet, stop retrying
-        break;
+        // Table empty — keep retrying; tradeSignalWorker may still be writing
       } catch (_) {
         // Pool busy during boot — retry
       }
