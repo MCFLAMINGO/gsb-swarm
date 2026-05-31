@@ -284,16 +284,12 @@ async function runPass() {
   const FRESH_MS = FRESH_H * 60 * 60 * 1000;         // 180d freshness check
   const SLEEP_MS  = LOOP_SLEEP_H * 60 * 60 * 1000;   // 24h sleep (avoids overflow)
   console.log('[irs-soi] Worker started');
-  while (true) {
-    if (await hb.isFresh('irsSoiWorker', FRESH_MS)) {
-      console.log('[irs-soi] Fresh — skipping pass');
-    } else {
-      try { await runPass(); await hb.ping('irsSoiWorker'); }
-      catch (err) { console.error('[irs-soi] Pass crashed:', err.message); await hb.pingError('irsSoiWorker', err.message); }
-    }
-    console.log('[irs-soi] Sleeping 24h');
-    try { await db.disconnect(); } catch (_) {} // release connection slot during sleep
-    await sleep(SLEEP_MS);
-    // pool reconnects lazily on next db.query()
+  if (await hb.isFresh('irsSoiWorker', FRESH_MS)) {
+    console.log('[irs-soi] Fresh — skipping pass');
+  } else {
+    try { await runPass(); await hb.ping('irsSoiWorker'); }
+    catch (err) { console.error('[irs-soi] Pass crashed:', err.message); await hb.pingError('irsSoiWorker', err.message); }
   }
+  console.log('[irs-soi] Done — exiting.');
+  process.exit(0);
 })();

@@ -781,7 +781,7 @@ app.listen(PORT, () => {
   console.log(`[EnrichmentAgent] Running on port ${PORT}`);
   console.log(`[EnrichmentAgent] Sources: yelp_public + ${FSQ_KEY ? 'foursquare' : 'foursquare(no key)'} + nominatim + own_website_scrape`);
   enrichmentCycle().catch(err => console.error('[EnrichmentAgent] Init error:', err));
-  setInterval(() => enrichmentCycle().catch(err => console.error('[EnrichmentAgent]', err)), CYCLE_MS);
+  // clean-exit after first cycle
 });
 
 // Re-export staleness utilities so callers can use enrichmentAgent as the single import point

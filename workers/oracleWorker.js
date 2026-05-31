@@ -913,10 +913,9 @@ const ORACLE_INTERVAL = 6 * 60 * 60 * 1000;
     await runOracle().catch(err => console.error('[oracleWorker] Fatal:', err.message));
     await hb.ping('oracleWorker');
   }
-  setInterval(async () => {
-    await runOracle().catch(err => console.error('[oracleWorker] Scheduled error:', err.message));
-    await hb.ping('oracleWorker');
-  }, ORACLE_INTERVAL);
+  console.log('[oracleWorker] Done — exiting.');
+  process.exit(0);
+  // clean-exit: Railway cron handles scheduling
 })();
 
 process.on('uncaughtException',  err => console.error('[oracleWorker] Uncaught:', err.message));

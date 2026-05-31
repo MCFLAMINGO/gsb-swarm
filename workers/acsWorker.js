@@ -445,15 +445,12 @@ const SLEEP_MS    = 24 * 60 * 60 * 1000;       // 24h sleep — Node setTimeout 
 (async function main() {
   const hb = require('../lib/workerHeartbeat');
   console.log('[acsWorker] Worker started');
-  while (true) {
-    if (await hb.isFresh('acsWorker', CYCLE_MS)) {
-      console.log('[acsWorker] Fresh — skipping pass');
-    } else {
-      try { await run(); await hb.ping('acsWorker'); }
-      catch (e) { console.error('[acsWorker] Pass crashed:', e.message); await hb.pingError('acsWorker', e.message); }
-    }
-    console.log('[acsWorker] Sleeping 24h');
-    try { await db.disconnect(); } catch (_) {} // release connection slot during sleep
-    await sleep(SLEEP_MS);
+  if (await hb.isFresh('acsWorker', CYCLE_MS)) {
+    console.log('[acsWorker] Fresh — skipping pass');
+  } else {
+    try { await run(); await hb.ping('acsWorker'); }
+    catch (e) { console.error('[acsWorker] Pass crashed:', e.message); await hb.pingError('acsWorker', e.message); }
   }
+  console.log('[acsWorker] Done — exiting.');
+  process.exit(0);
 })();

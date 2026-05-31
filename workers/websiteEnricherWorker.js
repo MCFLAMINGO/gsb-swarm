@@ -352,19 +352,17 @@ async function runPass() {
     }
   }
 
-  while (true) {
-    try {
-      if (await hb.isFresh(WORKER_NAME, FRESH_MS)) {
-        console.log(`[web-enricher] Fresh — sleeping ${SLEEP_MS / 3600000}h`);
-      } else {
-        const updated = await runPass();
-        await hb.ping(WORKER_NAME, updated);
-      }
-    } catch (err) {
-      console.error('[web-enricher] Cycle error:', err.message);
-      try { await (require('../lib/workerHeartbeat')).pingError(WORKER_NAME, err.message); } catch(_) {}
+  try {
+    if (await hb.isFresh(WORKER_NAME, FRESH_MS)) {
+      console.log(`[web-enricher] Fresh — skipping`);
+    } else {
+      const updated = await runPass();
+      await hb.ping(WORKER_NAME, updated);
     }
-    try { await db.disconnect(); } catch (_) {} // release connection slot during sleep
-    await sleep(SLEEP_MS);
+  } catch (err) {
+    console.error('[web-enricher] Cycle error:', err.message);
+    try { await (require('../lib/workerHeartbeat')).pingError(WORKER_NAME, err.message); } catch(_) {}
   }
+  console.log('[web-enricher] Done — exiting.');
+  process.exit(0);
 })();

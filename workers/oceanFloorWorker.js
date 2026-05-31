@@ -436,9 +436,6 @@ process.on('unhandledRejection', (reason) => {
     await runOceanFloor();
     await hb.ping('oceanFloorWorker');
   }
-  setInterval(async () => {
-    try { await runOceanFloor(); await hb.ping('oceanFloorWorker'); }
-    catch (err) { logError('weeklyInterval', err); }
-  }, WEEKLY_MS);
-  console.log(`[oceanFloorWorker] Scheduled: weekly (${WEEKLY_MS}ms)`);
+  console.log('[oceanFloorWorker] Done — exiting.');
+  process.exit(0);
 })();

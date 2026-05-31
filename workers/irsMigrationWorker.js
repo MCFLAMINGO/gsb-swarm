@@ -298,17 +298,14 @@ async function runPass() {
   const SLEEP_MS  = CYCLE_H * 3600 * 1000;       // 24h sleep (avoids overflow)
   await sleep(60 * 1000); // 60s startup stagger
   console.log('[irsMig] Worker started');
-  while (true) {
-    if (await hb.isFresh('irsMigrationWorker', FRESH_MS)) {
-      console.log('[irsMig] Fresh — skipping pass');
-    } else {
-      try { await runPass(); await hb.ping('irsMigrationWorker'); }
-      catch (e) { console.error('[irsMig] Pass crashed:', e.message); await hb.pingError('irsMigrationWorker', e.message); }
-    }
-    console.log('[irsMig] Sleeping 24h');
-    try { await db.disconnect(); } catch (_) {} // release connection slot during sleep
-    await sleep(SLEEP_MS);
+  if (await hb.isFresh('irsMigrationWorker', FRESH_MS)) {
+    console.log('[irsMig] Fresh — skipping pass');
+  } else {
+    try { await runPass(); await hb.ping('irsMigrationWorker'); }
+    catch (e) { console.error('[irsMig] Pass crashed:', e.message); await hb.pingError('irsMigrationWorker', e.message); }
   }
+  console.log('[irsMig] Done — exiting.');
+  process.exit(0);
 })();
 
 module.exports = { runPass };

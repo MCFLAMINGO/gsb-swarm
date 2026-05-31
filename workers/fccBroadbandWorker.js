@@ -310,17 +310,14 @@ async function runPass() {
   const FRESH_MS = CYCLE_H * 3600 * 1000;
   await sleep(45 * 1000); // stagger startup
   console.log('[fccBroadband] Worker started — FCC BDC Tier-1, weekly county pulse');
-  while (true) {
-    if (await hb.isFresh('fccBroadbandWorker', FRESH_MS)) {
-      console.log('[fccBroadband] Fresh — skipping pass');
-    } else {
-      try { await runPass(); await hb.ping('fccBroadbandWorker'); }
-      catch (e) { console.error('[fccBroadband] Pass crashed:', e.message); await hb.pingError('fccBroadbandWorker', e.message); }
-    }
-    console.log(`[fccBroadband] Sleeping ${CYCLE_H}h`);
-    try { await db.disconnect(); } catch (_) {} // release connection slot during sleep
-    await sleep(FRESH_MS);
+  if (await hb.isFresh('fccBroadbandWorker', FRESH_MS)) {
+    console.log('[fccBroadband] Fresh — skipping pass');
+  } else {
+    try { await runPass(); await hb.ping('fccBroadbandWorker'); }
+    catch (e) { console.error('[fccBroadband] Pass crashed:', e.message); await hb.pingError('fccBroadbandWorker', e.message); }
   }
+  console.log('[fccBroadband] Done — exiting.');
+  process.exit(0);
 })();
 
 module.exports = { runPass };

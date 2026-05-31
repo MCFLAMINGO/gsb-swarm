@@ -399,8 +399,6 @@ process.on('unhandledRejection', (reason) => {
     await runBedrock('full');
   }
 
-  // Keep process alive so spawnLocalIntelWorker doesn't auto-restart it.
-  // No setInterval for re-runs — Railway redeploys handle monthly cadence.
-  console.log('[bedrockWorker] Done. Staying alive until next deploy.');
-  setInterval(() => {}, 60 * 60 * 1000); // 1hr keep-alive, well under 32-bit limit
+  console.log('[bedrockWorker] Done — exiting.');
+  process.exit(0);
 })();

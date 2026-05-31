@@ -2327,22 +2327,19 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 (async function main() {
   console.log('[censusLayer] Worker started. ZBP=once, CBP=monthly, PDB=quarterly.');
-  while (true) {
-    if (await hb.isFresh('censusLayerWorker', CENSUS_INTERVAL)) {
-      console.log('[censusLayer] Fresh — skipping pass');
-    } else {
-      try {
-        await runCensusLayer();
-        await hb.ping('censusLayerWorker');
-      } catch (err) {
-        console.error('[censusLayer] Pass crashed:', err.message);
-        await hb.pingError('censusLayerWorker', err.message);
-      }
+  if (await hb.isFresh('censusLayerWorker', CENSUS_INTERVAL)) {
+    console.log('[censusLayer] Fresh — skipping pass');
+  } else {
+    try {
+      await runCensusLayer();
+      await hb.ping('censusLayerWorker');
+    } catch (err) {
+      console.error('[censusLayer] Pass crashed:', err.message);
+      await hb.pingError('censusLayerWorker', err.message);
     }
-    console.log('[censusLayer] Sleeping 24h');
-    try { await db.disconnect(); } catch (_) {} // release connection slot during sleep
-    await sleep(CENSUS_SLEEP_MS);
   }
+  console.log('[censusLayer] Done — exiting.');
+  process.exit(0);
 })();
 
 process.on('uncaughtException',  err => console.error('[censusLayer] Uncaught:', err.message));

@@ -353,13 +353,9 @@ async function triggerMerge() {
 }
 
 async function start() {
-  // Initial run on start
   await runMerge();
-
-  // Loop every 12h
-  setInterval(async () => {
-    if (!(await shouldSkip())) await runMerge();
-  }, LOOP_SLEEP_H * 60 * 60 * 1000);
+  console.log('[businessMerge] Done — exiting.');
+  process.exit(0);
 }
 
 module.exports = { start, triggerMerge, runMerge };

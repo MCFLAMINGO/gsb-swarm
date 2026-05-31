@@ -245,15 +245,12 @@ async function run() {
   const SLEEP_MS  = LOOP_H  * 60 * 60 * 1000;     // 24h sleep (avoids overflow)
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
   console.log('[fdot] Worker started');
-  while (true) {
-    if (await hb.isFresh('fdotWorker', FRESH_MS)) {
-      console.log('[fdot] Fresh — skipping pass');
-    } else {
-      try { await run(); await hb.ping('fdotWorker'); }
-      catch (e) { console.error('[fdot] Pass crashed:', e.message); await hb.pingError('fdotWorker', e.message); }
-    }
-    console.log('[fdot] Sleeping 24h');
-    try { await db.disconnect(); } catch (_) {} // release connection slot during sleep
-    await sleep(SLEEP_MS);
+  if (await hb.isFresh('fdotWorker', FRESH_MS)) {
+    console.log('[fdot] Fresh — skipping pass');
+  } else {
+    try { await run(); await hb.ping('fdotWorker'); }
+    catch (e) { console.error('[fdot] Pass crashed:', e.message); await hb.pingError('fdotWorker', e.message); }
   }
+  console.log('[fdot] Done — exiting.');
+  process.exit(0);
 })();

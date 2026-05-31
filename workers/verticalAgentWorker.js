@@ -589,14 +589,7 @@ if (require.main === module) {
   (async () => {
     await runAllVerticals();
 
-    setInterval(async () => {
-      try { await runAllVerticals(); }
-      catch (err) { console.error('[verticalAgent] Interval error:', err.message); }
-    }, INTERVAL_MS);
-
-    // Keep-alive
-    setInterval(() => {}, 1 << 30);
-
-    console.log(`[verticalAgent] Scheduled — re-runs every ${INTERVAL_MS / 3600000}h`);
+    console.log('[verticalAgent] Done — exiting.');
+    process.exit(0);
   })();
 }

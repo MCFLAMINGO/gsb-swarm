@@ -4791,3 +4791,34 @@ inflating count to 53 workers → 60 estimated connections → process.exit(1) a
 
 **Fix:** Changed to warn-only (console.warn). Budget checker never kills the service.
 Dedup logic also added to count unique worker files across both lists.
+
+---
+## B131 — Convert 13 more persistent workers to clean-exit
+**Date:** 2026-05-31
+
+### Workers converted
+| Worker | Old pattern | Fix |
+|---|---|---|
+| irsSoiWorker.js | while(true) + 24h sleep | process.exit(0) after run |
+| acsWorker.js | while(true) + 24h sleep | process.exit(0) after run |
+| permitWorker.js | while(true) + sleep | process.exit(0) after run |
+| fdotWorker.js | while(true) + 24h sleep | process.exit(0) after run |
+| fccBroadbandWorker.js | while(true) + sleep | process.exit(0) after run |
+| irsMigrationWorker.js | while(true) + 24h sleep | process.exit(0) after run |
+| websiteEnricherWorker.js | while(true) + sleep | process.exit(0) after run |
+| censusLayerWorker.js | while(true) + 24h sleep | process.exit(0) after run |
+| bedrockWorker.js | setInterval keep-alive | process.exit(0) after run |
+| oracleWorker.js | setInterval 6h | process.exit(0) after run |
+| oceanFloorWorker.js | setInterval weekly | process.exit(0) after run |
+| verticalAgentWorker.js | setInterval 6h + keep-alive | process.exit(0) after run |
+| businessMergeWorker.js | setInterval 12h | process.exit(0) after run |
+
+### Not converted (Express servers — have live HTTP endpoints)
+- zipCoordinatorWorker.js — serves /queue, /budget-status, /coverage (dashboard uses these)
+- acpBroadcaster.js — serves ACP webhook endpoints
+- enrichmentAgent.js — serves /trigger, /log endpoints; setInterval removed, runs once then idles
+
+### Expected result
+Steady-state DB connections after boot: ~7 (MCP×2 + dash×2 + main×3)
+Peak during active worker run: +N for however many workers are mid-run
+All workers are now restart-safe via hb.isFresh() freshness checks
