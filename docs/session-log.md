@@ -2,6 +2,16 @@
 
 Problem / Fix / Result entries for every B-numbered session, plus all dated session entries.
 
+## 2026-05-31 — B134: Move runMigration() to main process — fix boot-race migration timeout
+
+**Problem:** Railway logs showed `[db-migrate] Non-fatal: timeout exceeded when trying to connect` on every deploy. `runMigration()` was called from `dashboard-server.js` (a forked child process). The dashboard is spawned at the same time as all other workers, so when ~15+ processes all try to acquire DB connections in the first 15 seconds of boot, the pool is exhausted and the migration runner times out before it can execute. This meant new migration files (like 057_backfill_zip_signals_state.sql) never actually ran. The B132 trade signal fix deployed but migration 057 never applied, so trade signals still showed `FL state: 1 ZIPs` and all zeros.
+
+**Fix:** Moved `runMigration()` into `index.js` main async block, **before** dashboard spawn, backfill, or any worker launch. Added a 5-attempt retry loop (5s between attempts) to handle cold-start DB warmup. Removed the `runMigration()` call from `dashboard-server.js` entirely so there's no race.
+
+**Result:** On next deploy, migration 057 will run successfully before any worker connects. `zip_signals.state='FL'` will be set for all 2383 ZIPs. tradeSignalWorker will rescore with real FL-wide data. No more `[db-migrate] Non-fatal: timeout` in logs.
+
+---
+
 ## 2026-05-31 — B133: Fix localIntelMCP permit_updated_at column error
 
 **Problem:** Railway Postgres logs showed `column "permit_updated_at" does not exist` firing 117 times across the log window — once per MCP tool call. In `localIntelMCP.js` line 3056, the `dataAsOf` freshness query references `permit_updated_at` but the actual column in `zip_signals` is `bps_updated_at` (Building Permit Survey). The error was silently swallowed by a `catch (_) {}` so no MCP calls failed, but every single call was firing a failed Postgres query and consuming a connection round-trip.

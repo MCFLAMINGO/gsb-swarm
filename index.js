@@ -147,6 +147,28 @@ function spawnWorker({ name, file }) {
     console.log(`[SWARM] ✅ Connection budget: ${DB_WORKERS} DB workers×${WORKER_POOL} + MCP×${MCP_POOL} + dash×${DASHBOARD_POOL} + main×${MAIN_POOL} = ${TOTAL_CONNS}/${RAILWAY_PG_CAP}`);
   }
 
+  // ── Boot: run DB migrations FIRST — before dashboard/workers spawn ─────────
+  // Migrations must run before anything else touches the DB. Running from the
+  // dashboard child process (old approach) caused race conditions where all boot
+  // processes hammered the pool simultaneously and migration timed out.
+  // Retry up to 5×5s = 25s to handle cold-start DB warmup.
+  try {
+    const { runMigration } = require('./lib/dbMigrate');
+    let migOk = false;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        migOk = await runMigration();
+        if (migOk !== false) break;
+      } catch (e) {
+        console.warn(`[SWARM] Migration attempt ${attempt}/5 failed: ${e.message}`);
+      }
+      if (attempt < 5) await new Promise(r => setTimeout(r, 5000));
+    }
+    if (!migOk) console.warn('[SWARM] Migrations did not complete — DB may be unavailable at boot');
+  } catch (e) {
+    console.warn('[SWARM] Migration runner failed (non-fatal):', e.message);
+  }
+
   // ── Boot: rescore all flat-file confidence scores (deterministic, <1s) ──────
   try {
     require('./scripts/enrichConfidence');

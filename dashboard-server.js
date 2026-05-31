@@ -50,8 +50,9 @@ if (globalThis.__ACP_SDK__) {
 // ── Anthropic (Claude) — lazy async import ──────────────────────────────────
 // ── NVIDIA NIM inference (replaces Anthropic haiku) ────────────────────────────────
 // ── PostgreSQL — run schema migration on startup ──────────────────────────────
-const { runMigration } = require('./lib/dbMigrate');
-runMigration().catch(e => console.warn('[db-migrate] Non-fatal:', e.message));
+// Migrations run from index.js main process BEFORE workers/dashboard spawn. (B134)
+// Removed here to eliminate boot-race where all processes competed for pool
+// connections simultaneously, causing migration timeouts on every deploy.
 
 // u2500u2500 One-time startup: clean poisoned hours in businesses table u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500
 // Nulls HTML/JS artifacts scraped into hours field from bad ingest passes.
