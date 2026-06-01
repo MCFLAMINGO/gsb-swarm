@@ -2,10 +2,20 @@ name: SunBiz SFTP Download
 
 on:
   schedule:
-    # 1st of every month at 2am UTC
-    - cron: '0 2 1 * *'
+    # Daily delta at 6am UTC (FL DOS posts previous business day's filings overnight)
+    - cron: '0 6 * * *'
+    # Full quarterly snapshot on the 2nd of Jan/Apr/Jul/Oct at 3am UTC
+    - cron: '0 3 2 1,4,7,10 *'
   workflow_dispatch:
-    # Allow manual trigger from GitHub UI
+    inputs:
+      mode:
+        description: 'Download mode'
+        required: false
+        default: 'daily'
+        type: choice
+        options:
+          - daily
+          - quarterly
 
 jobs:
   download-and-upload:
@@ -16,47 +26,83 @@ jobs:
       - name: Install sshpass
         run: sudo apt-get install -y sshpass
 
-      - name: Download cordata zips from FL DOS SFTP
+      - name: Determine mode
+        id: mode
+        run: |
+          # quarterly if manually triggered with mode=quarterly, or if it's the 2nd of Jan/Apr/Jul/Oct
+          INPUT_MODE="${{ github.event.inputs.mode }}"
+          DAY=$(date -u +%d)
+          MONTH=$(date -u +%m)
+          if [ "$INPUT_MODE" = "quarterly" ] || { [ "$DAY" = "02" ] && echo "$MONTH" | grep -qE "^(01|04|07|10)$"; }; then
+            echo "mode=quarterly" >> $GITHUB_OUTPUT
+          else
+            echo "mode=daily" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download quarterly full snapshot (cordata.zip)
+        if: steps.mode.outputs.mode == 'quarterly'
         run: |
           mkdir -p /tmp/sunbiz
-          for i in 0 1 2 3 4 5 6 7 8 9; do
-            echo "Downloading cordata${i}.zip..."
-            sshpass -p 'PubAccess1845!' sftp -o StrictHostKeyChecking=no \
-              -o ConnectTimeout=30 \
-              Public@sftp.floridados.gov:/doc/quarterly/cor/cordata${i}.zip \
-              /tmp/sunbiz/cordata${i}.zip
-            echo "cordata${i}.zip: $(du -sh /tmp/sunbiz/cordata${i}.zip | cut -f1)"
-          done
+          echo "Downloading quarterly cordata.zip from doc/quarterly/Cor/..."
+          sshpass -p 'PubAccess1845!' sftp -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=60 \
+            Public@sftp.floridados.gov:doc/quarterly/Cor/cordata.zip \
+            /tmp/sunbiz/cordata.zip
+          echo "cordata.zip: $(du -sh /tmp/sunbiz/cordata.zip | cut -f1)"
 
-      - name: Upload zips to Railway
+      - name: Download daily delta (YYYYMMDD c.txt)
+        if: steps.mode.outputs.mode == 'daily'
         run: |
-          for i in 0 1 2 3 4 5 6 7 8 9; do
-            echo "Uploading cordata${i}.zip to Railway..."
+          mkdir -p /tmp/sunbiz
+          # Try yesterday first, fall back to 2 days ago (weekend/holiday gap)
+          for OFFSET in 1 2 3; do
+            DATE=$(date -u -d "-${OFFSET} days" +%Y%m%d 2>/dev/null || date -u -v-${OFFSET}d +%Y%m%d)
+            FILENAME="${DATE}c.txt"
+            echo "Trying doc/cor/${FILENAME}..."
+            if sshpass -p 'PubAccess1845!' sftp -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=30 \
+              Public@sftp.floridados.gov:doc/cor/${FILENAME} \
+              /tmp/sunbiz/${FILENAME} 2>/dev/null; then
+              echo "Downloaded ${FILENAME}: $(du -sh /tmp/sunbiz/${FILENAME} | cut -f1)"
+              echo "DELTA_FILE=${FILENAME}" >> $GITHUB_ENV
+              break
+            fi
+          done
+          if [ -z "$DELTA_FILE" ]; then
+            echo "No delta file found for last 3 days — skipping (holiday/weekend gap normal)"
+            exit 0
+          fi
+
+      - name: Upload to Railway
+        run: |
+          mkdir -p /tmp/sunbiz
+          for FILE in /tmp/sunbiz/*.zip /tmp/sunbiz/*.txt; do
+            [ -f "$FILE" ] || continue
+            BASENAME=$(basename $FILE)
+            echo "Uploading $BASENAME..."
             HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
               -X POST \
               -H "x-operator-token: ${{ secrets.SUNBIZ_OPERATOR_TOKEN }}" \
-              -F "file=@/tmp/sunbiz/cordata${i}.zip" \
+              -F "file=@${FILE}" \
               https://gsb-swarm-production.up.railway.app/api/admin/sunbiz-upload)
             if [ "$HTTP_STATUS" != "200" ]; then
-              echo "ERROR: Upload of cordata${i}.zip failed with HTTP $HTTP_STATUS"
+              echo "ERROR: Upload of $BASENAME failed with HTTP $HTTP_STATUS"
               exit 1
             fi
-            echo "cordata${i}.zip uploaded OK (HTTP $HTTP_STATUS)"
+            echo "$BASENAME uploaded OK"
           done
 
-      - name: Set SUNBIZ_FILES_PATH and trigger worker
+      - name: Trigger SunBiz worker
         run: |
-          # Set the env var on Railway so sunbizWorker knows to use /tmp/sunbiz
-          # Then trigger the worker
           HTTP_STATUS=$(curl -s -o /tmp/trigger_response.txt -w "%{http_code}" \
             -X POST \
             -H "x-operator-token: ${{ secrets.SUNBIZ_OPERATOR_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d '{"filesPath": "/tmp/sunbiz"}' \
+            -d "{\"filesPath\": \"/tmp/sunbiz\", \"mode\": \"${{ steps.mode.outputs.mode }}\"}" \
             https://gsb-swarm-production.up.railway.app/api/admin/trigger-sunbiz)
           cat /tmp/trigger_response.txt
           if [ "$HTTP_STATUS" != "200" ]; then
             echo "ERROR: Trigger failed with HTTP $HTTP_STATUS"
             exit 1
           fi
-          echo "SunBiz worker triggered successfully"
+          echo "SunBiz worker triggered (${{ steps.mode.outputs.mode }} mode)"

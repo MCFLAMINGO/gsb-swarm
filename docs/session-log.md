@@ -4923,3 +4923,17 @@ Slang should work for neighborhoods, streets, landmarks, vibes, anything local.
 
 **Fix:** Single `router.use()` CORS middleware added right after `router = express.Router()`.
 Covers every route: GET, POST, PUT, DELETE, OPTIONS. Headers: `*, Content-Type, x-api-key, x-agent-id, x-session-id, Authorization`.
+
+---
+## B140 — Fix SunBiz SFTP workflow: FL DOS path change + daily deltas
+**Date:** 2026-06-01
+
+### Root cause
+FL DOS restructured their SFTP at `sftp.floridados.gov`. Old: `/doc/quarterly/cor/cordata0.zip`…`cordata9.zip` (10 split files). New: single `doc/quarterly/Cor/cordata.zip` + daily delta files at `doc/cor/YYYYMMDDc.txt` (going back to 2011, updated daily).
+
+### Fix
+- **Quarterly mode:** downloads `doc/quarterly/Cor/cordata.zip` (single file)
+- **Daily mode (new):** downloads yesterday's `doc/cor/YYYYMMDDc.txt` delta, falls back 2-3 days for weekends/holidays
+- **Schedule:** daily at 6am UTC (delta) + quarterly on 2nd of Jan/Apr/Jul/Oct
+- **Manual trigger:** workflow_dispatch now accepts `mode: daily|quarterly`
+- No public records request needed — all data is publicly accessible via SFTP
