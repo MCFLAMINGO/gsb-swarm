@@ -3591,6 +3591,47 @@ router.post('/rfq/book', express.json(), async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/rfq-contact — attach email or phone to a job for async callback ──
+// Body: { job_code, email?, phone? }
+router.post('/rfq-contact', express.json(), async (req, res) => {
+  try {
+    const { job_code, email, phone } = req.body || {};
+    if (!job_code) return res.status(400).json({ ok: false, error: 'job_code required' });
+    if (!email && !phone) return res.status(400).json({ ok: false, error: 'email or phone required' });
+
+    // Basic validation
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const phoneRe = /^[\d\s\(\)\-\+]{7,15}$/;
+    if (email && !emailRe.test(email)) return res.status(400).json({ ok: false, error: 'invalid email' });
+    if (phone && !phoneRe.test(phone)) return res.status(400).json({ ok: false, error: 'invalid phone' });
+
+    // Upsert contact info onto the rfq_jobs row
+    const rows = await db.query(
+      `UPDATE rfq_jobs SET
+         contact_email = COALESCE($1, contact_email),
+         contact_phone = COALESCE($2, contact_phone),
+         updated_at = NOW()
+       WHERE code = $3
+       RETURNING id, code, category, zip, contact_email, contact_phone`,
+      [email || null, phone || null, job_code]
+    );
+
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'Job not found' });
+
+    console.log(`[rfq-contact] Job ${job_code} — contact saved (email=${!!email} phone=${!!phone})`);
+    return res.json({
+      ok: true,
+      message: email
+        ? `Got it — we’ll email you at ${email} when a provider responds.`
+        : `Got it — we’ll text or call ${phone} when a provider responds.`,
+      job_code,
+    });
+  } catch (err) {
+    console.error('[rfq-contact]', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── GET /api/local-intel/surge/menu/:id — fetch live Surge menu (UUID or Sunbiz ID) ──
 router.get('/surge/menu/:id', async (req, res) => {
   try {
@@ -5962,6 +6003,40 @@ const _SVC_MAP = {
   // Pest / auto / IT
   'mechanic':'auto','oil change':'auto','car wash':'auto','tire':'auto',
   'computer repair':'it_support','wifi':'it_support','tech support':'it_support',
+  // Healthcare
+  'doctor':'healthcare','physician':'healthcare','medical':'healthcare',
+  'urgent care':'healthcare','clinic':'healthcare','dentist':'healthcare',
+  'dental':'healthcare','therapist':'healthcare','therapy':'healthcare',
+  'chiropractor':'healthcare','chiropractic':'healthcare','optometrist':'healthcare',
+  'optician':'healthcare','eye doctor':'healthcare','dermatologist':'healthcare',
+  'dermatology':'healthcare','pediatrician':'healthcare','pediatric':'healthcare',
+  'psychiatrist':'healthcare','psychiatry':'healthcare','counseling':'healthcare',
+  'mental health':'healthcare','physical therapy':'healthcare','pt ':'healthcare',
+  'cardiologist':'healthcare','orthopedic':'healthcare','surgeon':'healthcare',
+  'specialist':'healthcare','primary care':'healthcare','family doctor':'healthcare',
+  'health':'healthcare','nurse':'healthcare','prescription':'healthcare',
+  'pharmacy':'pharmacy','drug store':'pharmacy',
+  'veterinarian':'veterinary','vet ':'veterinary','animal hospital':'veterinary',
+  'pet care':'veterinary','pet ':'veterinary',
+  // Legal
+  'lawyer':'legal','attorney':'legal','legal help':'legal','lawsuit':'legal',
+  'notary':'legal','paralegal':'legal',
+  // Financial
+  'accountant':'financial','tax prep':'financial','bookkeeping':'financial',
+  'financial advisor':'financial','insurance':'insurance','insure':'insurance',
+  // Real estate
+  'realtor':'real_estate','real estate':'real_estate','home buy':'real_estate',
+  'mortgage':'real_estate','home loan':'real_estate',
+  // Childcare
+  'daycare':'childcare','day care':'childcare','babysit':'childcare',
+  'nanny':'childcare','afterschool':'childcare','preschool':'childcare',
+  // Tutoring / education
+  'tutor':'tutoring','tutoring':'tutoring','homework help':'tutoring',
+  // Beauty / wellness
+  'haircut':'beauty','barber':'beauty','salon':'beauty','nail':'beauty',
+  'massage':'wellness','spa':'wellness',
+  // Security
+  'security system':'security','alarm':'security','camera install':'security',
 };
 // Phrases that signal "I want a service done" (not a business name search)
 const _REQUEST_PHRASES = [
@@ -6752,7 +6827,6 @@ router.get('/search', harvestGuard, async (req, res) => {
 
         if (providerCount > 0) {
           const topName  = topProviders[0].name;
-          // actualZip may differ from resolvedZip when we expanded to a neighbor
           const expanded  = actualZip && resolvedZip && actualZip !== resolvedZip;
           const areaStr   = actualZip
             ? (expanded ? ` in nearby ${actualZip} (nearest available)` : ` in ${actualZip}`)
@@ -6760,26 +6834,27 @@ router.get('/search', harvestGuard, async (req, res) => {
           srNarrative =
             `We found ${providerCount} verified ${catLabel} provider${providerCount > 1 ? 's' : ''}${areaStr} ` +
             `and notified them about your request${jobCode ? ' (Job ' + jobCode + ')' : ''}. ` +
-            `Top match: ${topName}. Call (904) 506-7476 to get a callback when they respond.`;
+            `Top match: ${topName}. Leave your email or phone below and we’ll send you their response.`;
         } else if (resolvedCat) {
           srNarrative =
-            `We don't have a verified ${catLabel} provider${resolvedZip ? ' in ' + resolvedZip + ' or nearby ZIPs' : ''} yet` +
+            `We don’t have a verified ${catLabel} provider${resolvedZip ? ' in ' + resolvedZip + ' or nearby ZIPs' : ''} yet` +
             `${jobCode ? ' — but we logged your request as Job ' + jobCode + '.' : '.'} ` +
-            `Call (904) 506-7476 and we'll find one for you.`;
+            `Leave your contact info below and we’ll reach out when one becomes available.`;
         } else {
           srNarrative =
-            `We heard your request but couldn't match it to a service category yet. ` +
-            `Call (904) 506-7476 and describe what you need — we'll route it to the right provider.`;
+            `We heard your request but couldn’t match it to a service category yet. ` +
+            `Leave your email or phone number and describe what you need — we’ll route it to the right provider.`;
         }
 
         return res.json({
-          type:       'service_request',
-          query:      raw,
-          zip:        resolvedZip,
-          category:   resolvedCat,
-          job_code:   jobCode,
-          total:      providerCount,
-          narrative:  srNarrative,
+          type:         'service_request',
+          query:        raw,
+          zip:          resolvedZip,
+          category:     resolvedCat,
+          job_code:     jobCode,
+          total:        providerCount,
+          narrative:    srNarrative,
+          contact_prompt: true,  // frontend: show email/phone collection widget
           results:    topProviders.map(r => ({
             name:       r.name,
             zip:        r.zip,
@@ -6845,7 +6920,9 @@ router.get('/search', harvestGuard, async (req, res) => {
       FROM businesses b
       LEFT JOIN zip_signals zs ON zs.zip = b.zip
       WHERE b.status != 'inactive'
-      AND NOT ('likely_person_not_business' = ANY(COALESCE(b.quality_flags, ARRAY[]::text[])))`;
+      AND (b.confidence_score IS NULL OR b.confidence_score >= 0.35)
+      AND NOT ('likely_person_not_business' = ANY(COALESCE(b.quality_flags, ARRAY[]::text[])))
+      AND NOT ('seeded_placeholder' = ANY(COALESCE(b.quality_flags, ARRAY[]::text[])))`;
 
     // B70: concept-aware ORDER BY (zip_signals weighted by concept profile).
     const _searchConcept = detectConcept(q || raw || '') || 'GENERAL';
@@ -6904,7 +6981,8 @@ router.get('/search', harvestGuard, async (req, res) => {
       // short query) and ILIKE/token name search came up empty, probe tsvector
       // too — and if that's also empty, return a clean 0-result message rather
       // than letting category expansion surface unrelated businesses.
-      if (!rows.length && !nlIntentResolved && q && q.split(/\s+/).length <= 4) {
+      // Extend guard to 6 words — 'aqua grill in ponte vedra' is still a name search
+      if (!rows.length && !nlIntentResolved && q && q.split(/\s+/).length <= 6) {
         let tsHits = [];
         try {
           const tsQuery = q.trim().split(/\s+/)
@@ -6912,7 +6990,11 @@ router.get('/search', harvestGuard, async (req, res) => {
             .map(t => t.replace(/[^a-zA-Z0-9]/g, '') + ':*')
             .filter(Boolean)
             .join(' & ');
-          if (tsQuery) {
+          // Must have at least 2 meaningful tokens to avoid false positives
+          // (single word like 'grill' would match unrelated Tampa businesses)
+          const tokenCount = tsQuery.split(' & ').length;
+          if (tsQuery && tokenCount >= 2) {
+            // Probe only within user-supplied ZIP (or immediate neighbor, not all FL)
             const tsZipClause = zip ? ' AND zip = $2' : ' AND zip = ANY($2)';
             const tsZipParam  = zip ? zip : TARGET_ZIPS;
             tsHits = await db.query(

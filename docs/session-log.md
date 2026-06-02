@@ -2,6 +2,28 @@
 
 Problem / Fix / Result entries for every B-numbered session, plus all dated session entries.
 
+## 2026-06-02 — B144: Healthcare routing, contact collection, name-search ZIP guard, confidence filter
+
+**Problem (1 — Healthcare routing):** Query "I need a doctor" returned no service match because `_SVC_MAP` only covered ~10 categories. Healthcare terms (doctor, physician, medical, urgent care, clinic, dentist, therapist, chiropractor, optometrist, pharmacy, veterinary) plus professional services (lawyer, accountant, realtor, childcare, tutor, barber, salon, massage, security) were all missing.
+
+**Fix:** Added all missing keyword → category mappings to `_SVC_MAP`. Healthcare terms map to `'healthcare'`, professional services to their respective verticals.
+
+**Problem (2 — Hardcoded phone CTA):** All three narrative response types ended with "Call (904) 506-7476..." — a hardcoded number that made no sense for a statewide FL platform and implied paying on search (wrong payment model).
+
+**Fix:** Replaced hardcoded phone CTA with `"Leave your email or phone below..."` across all three narrative paths. Added `contact_prompt: true` to `service_request` JSON responses. Added `POST /rfq-contact` endpoint that saves `contact_email`/`contact_phone` to `rfq_jobs` table. Migration `061_rfq_jobs_contact_fields.sql` adds both columns.
+
+**Problem (3 — Name-search wrong-ZIP results):** Searching "aqua grill ponte vedra" returned Tampa businesses. The name-search guard (`queryWords.length <= 4`) was too tight — 5-word+ queries bypassed it and fell through to a ZIP-unfiltered tsvector search.
+
+**Fix:** Extended guard to `<= 6` words. Tightened tsvector probe to require `tokenCount >= 2` meaningful tokens before treating as a name search. Name searches that find no match in the user's ZIP now return an honest "not found" instead of wrong-city results.
+
+**Problem (4 — Low-confidence browse results):** Browse path could surface placeholder/seeded businesses with near-zero confidence scores, making results look fake.
+
+**Fix:** Added `AND (b.confidence_score IS NULL OR b.confidence_score >= 0.35)` and `AND NOT ('seeded_placeholder' = ANY(b.data_sources))` to `BASE_SELECT`.
+
+**Result:** Healthcare queries route correctly. Contact collection replaces the hardcoded phone. Name searches in wrong ZIPs return honest not-found. Browse results exclude placeholder businesses. Frontend contact widget (email/phone input shown when `contact_prompt: true`) pending UX discussion.
+
+---
+
 ## 2026-05-31 — B135: Fix trade signals showing 0 on dashboard — cache early-exit + frontend retry
 
 **Problem:** Market Intel dashboard showing "No signals yet" / 0 signals even though `_signalsCache` was warmed with 8 signals at boot. Two bugs converged: (1) In `localIntelAgent.js` the trade-signals startup cache warm loop had an unconditional `break` after the `if (rows.length > 0)` block — the next line `// Table empty — no signals yet, stop retrying` followed by `break` fired whether rows were found OR not. If the warm ran between a DELETE and INSERT during tradeSignalWorker's rescore, it found 0 rows and stopped retrying permanently, leaving `_signalsCache = null`. (2) In the Vercel dashboard (`market-intel/page.tsx`) the `useEffect` fired once with no retry. If the first fetch returned `signals: []` (DB timeout before cache was populated, or cache was null), the page showed 0 forever with no recovery path.

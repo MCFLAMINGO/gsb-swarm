@@ -207,21 +207,17 @@ async function pickNextZips(n) {
 (async function main() {
   console.log('[acp-cycle] ACP intelligence cycle started');
 
-  // Stagger 2 min — let Overpass + IRS SOI initialize first
-  await sleep(2 * 60 * 1000);
-
-  while (true) {
-    const zips = await pickNextZips(ZIPS_PER_CYCLE);
-    if (zips.length === 0) {
-      console.log('[acp-cycle] All ZIPs fresh — waiting');
-    } else {
-      console.log(`[acp-cycle] Cycle — ${zips.join(', ')}`);
-      for (const zip of zips) {
-        try   { await runZipCycle(zip); }
-        catch (err) { console.error(`[acp-cycle] ${zip} error:`, err.message); }
-        await sleep(3000);
-      }
+  const zips = await pickNextZips(ZIPS_PER_CYCLE);
+  if (zips.length === 0) {
+    console.log('[acp-cycle] All ZIPs fresh — nothing to do');
+  } else {
+    console.log(`[acp-cycle] Cycle — ${zips.join(', ')}`);
+    for (const zip of zips) {
+      try   { await runZipCycle(zip); }
+      catch (err) { console.error(`[acp-cycle] ${zip} error:`, err.message); }
+      await sleep(3000);
     }
-    await sleep(CYCLE_INTERVAL);
   }
+  console.log('[acp-cycle] Run complete — exiting cleanly');
+  process.exit(0);
 })();

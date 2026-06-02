@@ -581,14 +581,25 @@ module.exports = { runAllVerticals, runVertical, handleVerticalQuery, VERTICALS,
 // ── Bootstrap (when run as worker) ───────────────────────────────────────────
 
 if (require.main === module) {
-  const INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+  const CYCLE_MS = 6 * 60 * 60 * 1000; // 6h freshness window
 
   process.on('uncaughtException', (err) => console.error('[verticalAgent] Uncaught:', err.message));
   process.on('unhandledRejection', (r) => console.error('[verticalAgent] Rejection:', r));
 
   (async () => {
-    await runAllVerticals();
-
+    const hb = require('../lib/workerHeartbeat');
+    console.log('[verticalAgent] Worker started');
+    if (await hb.isFresh('verticalAgentWorker', CYCLE_MS)) {
+      console.log('[verticalAgent] Fresh — skipping pass (ran within 6h)');
+    } else {
+      try {
+        await runAllVerticals();
+        await hb.ping('verticalAgentWorker');
+      } catch (e) {
+        console.error('[verticalAgent] Pass crashed:', e.message);
+        await hb.pingError('verticalAgentWorker', e.message);
+      }
+    }
     console.log('[verticalAgent] Done — exiting.');
     process.exit(0);
   })();

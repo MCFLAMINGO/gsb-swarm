@@ -295,8 +295,6 @@ console.log('[surfaceCurrentWorker] Starting — Layer 2 Surface Current worker'
     await computeSurfaceCurrent().catch(err => console.error('[surfaceCurrentWorker] Initial run error:', err.message));
     await hb.ping('surfaceCurrentWorker');
   }
-  setInterval(async () => {
-    await computeSurfaceCurrent().catch(err => console.error('[surfaceCurrentWorker] Scheduled run error:', err.message));
-    await hb.ping('surfaceCurrentWorker');
-  }, INTERVAL_MS);
+  console.log('[surfaceCurrentWorker] Run complete — exiting cleanly');
+  process.exit(0);
 })();
