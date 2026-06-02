@@ -86,6 +86,19 @@ async function insertBatch(rows) {
   const valid = rows.filter(r => r.name && r.zip);
   if (!valid.length) return 0;
 
+  // Dedup within the batch — Postgres rejects ON CONFLICT DO UPDATE if two rows
+  // in the same batch share the same conflict key (lower(name), zip).
+  // Keep the last occurrence of each key (highest confidence wins).
+  const seen = new Map();
+  for (const r of valid) {
+    const key = `${r.name.toLowerCase().trim()}|${r.zip}`;
+    const existing = seen.get(key);
+    if (!existing || (r.confidence_score || 0) > (existing.confidence_score || 0)) {
+      seen.set(key, r);
+    }
+  }
+  const deduped = Array.from(seen.values());
+
   // Build parameterized multi-row INSERT
   const cols = [
     'name','zip','address','city','phone','website','hours',
@@ -96,7 +109,7 @@ async function insertBatch(rows) {
   const params = [];
   let pi = 1;
 
-  for (const r of valid) {
+  for (const r of deduped) {
     values.push(`($${pi},$${pi+1},$${pi+2},$${pi+3},$${pi+4},$${pi+5},$${pi+6},$${pi+7},$${pi+8},$${pi+9},$${pi+10},$${pi+11},$${pi+12},$${pi+13},$${pi+14},NOW())`);
     params.push(
       r.name, r.zip, r.address, r.city, r.phone, r.website, r.hours,
@@ -129,7 +142,7 @@ async function insertBatch(rows) {
   } catch (e) {
     // On batch error, fall back to one-by-one to isolate bad records
     let written = 0;
-    for (const r of valid) {
+    for (const r of deduped) {
       try {
         const s = `
           INSERT INTO businesses (${cols.join(',')})

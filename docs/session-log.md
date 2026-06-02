@@ -4952,3 +4952,16 @@ Postgres volume at 80% from two sources:
 - **Migration 060:** Consolidate all `ALTER TABLE businesses ADD COLUMN` into one migration that runs once
 - Removed inline ALTER TABLE calls from: enrichmentFillWorker.js, menuFetchAgent.js, agentBid.js, localIntelAgent.js
 - Autovacuum can now run on `businesses` without lock contention
+
+---
+## B142 — Fix batch upsert duplicate key error
+**Date:** 2026-06-02
+
+### Root cause
+`backfillBusinesses.insertBatch()` sending batches with duplicate `(lower(name), zip)` pairs.
+Postgres rejects the entire batch with `ON CONFLICT DO UPDATE command cannot affect row a second time`.
+Already had row-by-row fallback but still logged the error and wasted a retry cycle.
+
+### Fix
+Dedup the batch before building the multi-row VALUES clause — keep highest confidence_score per key.
+Fallback loop also updated to iterate `deduped` not `valid`.
