@@ -4965,3 +4965,24 @@ Already had row-by-row fallback but still logged the error and wasted a retry cy
 ### Fix
 Dedup the batch before building the multi-row VALUES clause — keep highest confidence_score per key.
 Fallback loop also updated to iterate `deduped` not `valid`.
+
+---
+## B143 — 3-min boot guard on non-fatal pool writers
+**Date:** 2026-06-02
+
+### Problem
+During migration 060 (ALTER TABLE businesses, ~20min), 474 timeout errors from:
+- `logTask` (telemetry) — 116x
+- `appendProbeLog` — 116x  
+- `getRouterPatches` — 13x
+- `watchdog tick` — 38x
+
+All non-fatal, all burning pool connections during an already-stressed boot window.
+
+### Fix
+Added `if (process.uptime() < 180) return` to:
+- `lib/telemetry.js` → logTask
+- `lib/pgStore.js` → appendProbeLog + getRouterPatches
+- `lib/dispatchWatchdog.js` → tick
+
+First 3 minutes of boot these all skip silently — pool reserved for migrations and worker init.
