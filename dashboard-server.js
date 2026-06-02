@@ -7831,8 +7831,10 @@ app.use((req, res, next) => {
       const delay = (code === 0 && !signal)
         ? CLEAN_EXIT_DELAY_MS
         : crashDelays[Math.min(attempt, crashDelays.length - 1)];
-      const reason = (code === 0 && !signal) ? 'clean exit — data fresh' : `crash (code=${code}, signal=${signal})`;
-      console.warn(`[local-intel-workers] ${w.name} exited: ${reason} — restarting in ${Math.round(delay/60000)}m (attempt ${attempt + 1})`);
+      const isClean = (code === 0 && !signal);
+      const reason = isClean ? 'clean exit — data fresh' : `crash (code=${code}, signal=${signal})`;
+      const msg = `[local-intel-workers] ${w.name} exited: ${reason} — restarting in ${Math.round(delay/60000)}m (attempt ${attempt + 1})`;
+      if (isClean) console.log(msg); else console.warn(msg);
       setTimeout(() => spawnLocalIntelWorker(w, attempt + 1), delay);
     });
     console.log(`[local-intel-workers] Started ${w.name} (PID ${child.pid})`);
