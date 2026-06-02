@@ -217,12 +217,7 @@ async function buildServicesJson(url) {
 async function fetchAndStoreMenu({ url, businessId, name, zip }) {
   const services = await buildServicesJson(url);
 
-  // Ensure services_json column exists
-  await db.query(`
-    ALTER TABLE businesses ADD COLUMN IF NOT EXISTS services_json JSONB;
-    ALTER TABLE businesses ADD COLUMN IF NOT EXISTS menu_fetched_at TIMESTAMPTZ;
-  `).catch(e => console.warn('[menuFetchAgent] alter table:', e.message));
-
+  // columns exist via migration 060
   let result;
   if (businessId) {
     result = await db.query(

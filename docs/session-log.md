@@ -4937,3 +4937,18 @@ FL DOS restructured their SFTP at `sftp.floridados.gov`. Old: `/doc/quarterly/co
 - **Schedule:** daily at 6am UTC (delta) + quarterly on 2nd of Jan/Apr/Jul/Oct
 - **Manual trigger:** workflow_dispatch now accepts `mode: daily|quarterly`
 - No public records request needed — all data is publicly accessible via SFTP
+
+---
+## B141 — Fix 80% disk: remove inline ALTER TABLE + retention cleanup
+**Date:** 2026-06-02
+
+### Root cause
+Postgres volume at 80% from two sources:
+1. **Table bloat on `businesses`** — multiple workers (enrichmentFillWorker, menuFetchAgent, agentBid) and a route handler were running `ALTER TABLE businesses ADD COLUMN IF NOT EXISTS` inline on every boot/request. This acquires ACCESS EXCLUSIVE lock on the 614k-row table, blocks concurrent upserts, autovacuum can't clean dead tuples → bloat accumulates.
+2. **Unbounded log tables** — `usage_ledger`, `sms_query_log`, `chat_log`, `resolution_history` had no retention policy, growing forever.
+
+### Fix
+- **Migration 059:** DELETE rows older than retention window from all log tables + VACUUM to reclaim space immediately
+- **Migration 060:** Consolidate all `ALTER TABLE businesses ADD COLUMN` into one migration that runs once
+- Removed inline ALTER TABLE calls from: enrichmentFillWorker.js, menuFetchAgent.js, agentBid.js, localIntelAgent.js
+- Autovacuum can now run on `businesses` without lock contention

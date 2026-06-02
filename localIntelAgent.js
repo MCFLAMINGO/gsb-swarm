@@ -3865,9 +3865,7 @@ router.post('/push/subscribe', express.json(), async (req, res) => {
         last_used_at TIMESTAMPTZ
       )
     `);
-    await pool.query(`
-      ALTER TABLE businesses ADD COLUMN IF NOT EXISTS notify_push BOOLEAN DEFAULT false
-    `);
+    // notify_push column added via migration 060
     // Look up business by dispatch_token
     const { rows: [biz] } = await pool.query(
       `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,

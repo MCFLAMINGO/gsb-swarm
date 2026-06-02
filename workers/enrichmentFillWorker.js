@@ -406,9 +406,7 @@ const CATEGORY_INTEL_TEMPLATES = {
 
 // ── Schema ───────────────────────────────────────────────────────────────────
 async function ensureSchema() {
-  await db.query(`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS category_intel JSONB`);
-  await db.query(`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS enrichment_source TEXT DEFAULT 'system'`);
-  await db.query(`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS enrichment_updated_at TIMESTAMPTZ`);
+  // columns moved to migration 060 — no inline ALTER TABLE
   await db.query(`
     CREATE TABLE IF NOT EXISTS business_tasks (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -519,21 +517,18 @@ async function runCycle(cycleIndex) {
 
   await new Promise(r => setTimeout(r, STAGGER_MS));
 
-  let cycleIndex = 0;
-  while (true) {
+  try {
+    await runCycle(0);
+  } catch (err) {
+    console.error('[enrichment-fill] Cycle error:', err.message);
     try {
-      await runCycle(cycleIndex);
-    } catch (err) {
-      console.error('[enrichment-fill] Cycle error:', err.message);
-      try {
-        await logWorker({
-          worker_name: 'enrichmentFillWorker',
-          event_type: 'fail',
-          error_message: err.message,
-        });
-      } catch (_) {}
-    }
-    cycleIndex++;
-    await new Promise(r => setTimeout(r, CYCLE_MS));
+      await logWorker({
+        worker_name: 'enrichmentFillWorker',
+        event_type: 'fail',
+        error_message: err.message,
+      });
+    } catch (_) {}
   }
+  console.log('[enrichment-fill] Run complete — exiting cleanly');
+  process.exit(0);
 })();
