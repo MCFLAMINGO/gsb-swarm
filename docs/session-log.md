@@ -2,13 +2,15 @@
 
 Problem / Fix / Result entries for every B-numbered session, plus all dated session entries.
 
-## 2026-06-02 — B148: Operator alert email on new web contact
+## 2026-06-02 — B148: Business re-broadcast on contact submit (no middleman)
 
-**Problem:** Contacts submitted via the web widget were saved to `rfq_jobs` but nothing notified anyone. Leads could sit unread indefinitely.
+**Problem:** Contacts submitted via the web widget were saved to `rfq_jobs` but no provider was notified with the actual contact details. The initial `broadcastJob` fired at search time — before the user had submitted their email/phone — so businesses received a job alert with no way to respond directly to the customer.
 
-**Fix:** Added `setImmediate` fire-and-forget Resend alert inside `/rfq-contact` handler. Fires after the contact row is saved, never blocks the response. Sends to `erik@mcflamingo.com` from `intel@thelocalintel.com`. Email shows job code, category, ZIP, and contact info (email + phone). If Resend fails, logs a warning — never surfaces to the user.
+**Wrong fix (discarded):** Operator alert to `erik@mcflamingo.com`. The payment model and relationship model are business ↔ customer. LocalIntel is the road, not the middleman.
 
-**Result:** Every web contact submission triggers an immediate email to erik@mcflamingo.com with the lead details.
+**Correct fix:** When a contact is submitted via `/rfq-contact`, a second `broadcastJob` fires (fire-and-forget via `setImmediate`) with the customer contact info included in the job description. Businesses receive: category, ZIP, and `Customer contact: Email: ... | Phone: ...` so they can respond directly. No operator in the loop.
+
+**Result:** Customer submits contact → providers get a second notification with the customer's actual email/phone → business contacts customer directly. LocalIntel routes, never intermediates.
 
 ---
 
