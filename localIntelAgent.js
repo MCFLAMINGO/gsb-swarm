@@ -8553,7 +8553,7 @@ router.get('/platform-stats', async (req, res) => {
            WHERE caller_phone NOT IN ('web-search','unknown',''))       AS unique_callers,
         (SELECT COUNT(*) FROM conversation_threads)                     AS threads_total,
         (SELECT COUNT(*) FROM conversation_threads
-           WHERE updated_at > NOW() - INTERVAL '7 days')               AS threads_7d
+           WHERE created_at > NOW() - INTERVAL '7 days')               AS threads_7d
     `);
     return res.json({ ok: true, businesses: biz, usage });
   } catch (e) {
