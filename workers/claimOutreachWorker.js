@@ -182,6 +182,12 @@ async function run() {
   const limit = process.env.TEST_EMAIL ? 1
     : Math.min(parseInt(process.env.OUTREACH_BATCH_LIMIT || String(EMAIL_DAILY_LIMIT), 10), EMAIL_DAILY_LIMIT);
 
+  // Diagnostic: count at each filter stage
+  const [diagBase]    = await db.query(`SELECT COUNT(*) AS n FROM businesses WHERE claimed_at IS NULL AND status != 'inactive' AND contact_email IS NOT NULL`);
+  const [diagShape]   = await db.query(`SELECT COUNT(*) AS n FROM businesses WHERE claimed_at IS NULL AND status != 'inactive' AND contact_email IS NOT NULL AND contact_email ~ '^[^@]+@[^@]+[.][^@]{2,}$'`);
+  const [diagCooldown]= await db.query(`SELECT COUNT(*) AS n FROM businesses b WHERE b.claimed_at IS NULL AND b.status != 'inactive' AND b.contact_email IS NOT NULL AND b.contact_email ~ '^[^@]+@[^@]+[.][^@]{2,}$' AND NOT EXISTS (SELECT 1 FROM claim_outreach co WHERE co.business_id = b.business_id AND co.channel = 'email' AND co.error IS NULL AND co.sent_at > NOW() - INTERVAL '${OUTREACH_COOLDOWN_DAYS} days')`);
+  console.log(`[claim-outreach] diag — base: ${diagBase.n}, after shape filter: ${diagShape.n}, after cooldown: ${diagCooldown.n}`);
+
   const rows = await db.query(
     `SELECT DISTINCT ON (b.contact_email) b.business_id, b.name, b.phone, b.contact_email, b.zip, b.category, b.city
        FROM businesses b
