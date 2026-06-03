@@ -2,6 +2,30 @@
 
 Problem / Fix / Result entries for every B-numbered session, plus all dated session entries.
 
+## 2026-06-02 — B147: Contact collection widget + rfq-contact hardening
+
+**Problem:** Backend was sending `contact_prompt: true` and `sub_label` / `is_narrowing` in service_request responses but the frontend ignored all of it. Task card still had hardcoded `Call (904) 506-7476` button. `/rfq-contact` required `job_code` — if the RFQ broadcast failed silently, the contact was never saved.
+
+**Fix (search.html):**
+- Removed hardcoded phone CTA from task card
+- Added inline contact widget: email + phone inputs, "Connect me" button
+- `submitContact(widgetId, jobCode, category, zip)` POSTs to `/rfq-contact` with session_id header
+- Success state collapses inputs, shows "Got it — we'll email/text you" confirmation
+- Error state re-enables button with error message
+- Sub-category chip: when `sub_label` is present, shows green pill above task status (e.g. "MAMMOGRAM SCREENING")
+- Narrowing state: task status reads "Narrowed to matching providers" vs "Request sent to matching providers"
+- Each widget gets a unique ID (`cw-<timestamp36>`) so multiple service requests per session don't collide
+
+**Fix (localIntelAgent.js `/rfq-contact`):**
+- Removed hard `job_code required` guard — job_code is now optional
+- If job_code present: updates existing rfq_jobs row
+- If job_code absent or job not found: creates a new rfq_jobs row (`WEB-<code>`) so no contact is ever lost
+- Accepts `category` and `zip` from body for fallback row creation
+
+**Result:** User searches "I need a doctor" → gets task card with green HEALTHCARE chip. Enters email → clicks Connect me → inputs collapse, confirmation shown. Contact saved to rfq_jobs. If narrowed: "I need a doctor" → "for a mammogram" → chip shows MAMMOGRAM SCREENING, status says "Narrowed to matching providers".
+
+---
+
 ## 2026-06-02 — B146: Sub-category depth + multi-turn narrowing
 
 **Problem:** Multi-turn refinement had no depth. "I need a doctor" returned all healthcare providers. "for a mammogram" on the next turn was treated as an unrelated query. No way to narrow a category to a specialty across turns.

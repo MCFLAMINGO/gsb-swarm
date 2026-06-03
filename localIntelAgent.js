@@ -3595,8 +3595,7 @@ router.post('/rfq/book', express.json(), async (req, res) => {
 // Body: { job_code, email?, phone? }
 router.post('/rfq-contact', express.json(), async (req, res) => {
   try {
-    const { job_code, email, phone } = req.body || {};
-    if (!job_code) return res.status(400).json({ ok: false, error: 'job_code required' });
+    const { job_code, email, phone, category, zip } = req.body || {};
     if (!email && !phone) return res.status(400).json({ ok: false, error: 'email or phone required' });
 
     // Basic validation
@@ -3605,26 +3604,41 @@ router.post('/rfq-contact', express.json(), async (req, res) => {
     if (email && !emailRe.test(email)) return res.status(400).json({ ok: false, error: 'invalid email' });
     if (phone && !phoneRe.test(phone)) return res.status(400).json({ ok: false, error: 'invalid phone' });
 
-    // Upsert contact info onto the rfq_jobs row
-    const rows = await db.query(
-      `UPDATE rfq_jobs SET
-         contact_email = COALESCE($1, contact_email),
-         contact_phone = COALESCE($2, contact_phone),
-         updated_at = NOW()
-       WHERE code = $3
-       RETURNING id, code, category, zip, contact_email, contact_phone`,
-      [email || null, phone || null, job_code]
-    );
+    let rows = [];
 
-    if (!rows.length) return res.status(404).json({ ok: false, error: 'Job not found' });
+    if (job_code) {
+      // Attach contact to existing job
+      rows = await db.query(
+        `UPDATE rfq_jobs SET
+           contact_email = COALESCE($1, contact_email),
+           contact_phone = COALESCE($2, contact_phone),
+           updated_at = NOW()
+         WHERE code = $3
+         RETURNING id, code, category, zip, contact_email, contact_phone`,
+        [email || null, phone || null, job_code]
+      );
+    }
 
-    console.log(`[rfq-contact] Job ${job_code} — contact saved (email=${!!email} phone=${!!phone})`);
+    // B147: If no job_code or job not found, create a new row so no contact is ever lost.
+    if (!rows.length) {
+      const newCode = 'WEB-' + Date.now().toString(36).toUpperCase();
+      rows = await db.query(
+        `INSERT INTO rfq_jobs (code, category, zip, status, contact_email, contact_phone, caller_phone, description)
+         VALUES ($1, $2, $3, 'open', $4, $5, 'web-contact', 'Web contact submission')
+         ON CONFLICT (code) DO NOTHING
+         RETURNING id, code, category, zip, contact_email, contact_phone`,
+        [newCode, category || 'general', zip || null, email || null, phone || null]
+      ).catch(() => []);
+    }
+
+    const savedCode = rows[0]?.code || job_code || 'saved';
+    console.log(`[rfq-contact] Job ${savedCode} — contact saved (email=${!!email} phone=${!!phone})`);
     return res.json({
       ok: true,
       message: email
-        ? `Got it — we’ll email you at ${email} when a provider responds.`
-        : `Got it — we’ll text or call ${phone} when a provider responds.`,
-      job_code,
+        ? `Got it — we'll email you at ${email} when a provider responds.`
+        : `Got it — we'll text or call ${phone} when a provider responds.`,
+      job_code: savedCode,
     });
   } catch (err) {
     console.error('[rfq-contact]', err.message);
