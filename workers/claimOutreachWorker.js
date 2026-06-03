@@ -196,6 +196,17 @@ async function run() {
         AND b.contact_email NOT LIKE '%.svg'
         AND b.contact_email NOT LIKE '%craigslist.org'
         AND b.contact_email NOT LIKE '%@2x.%'
+        -- Filter URL-encoded artifacts (e.g. %20info@...)
+        AND b.contact_email NOT LIKE '\%%'
+        -- Filter emails shorter than 6 chars total
+        AND LENGTH(b.contact_email) >= 6
+        -- Filter phone numbers used as email local part (digits/hyphens/parens/plus only before @)
+        AND b.contact_email !~ '^[0-9+()\-]+@'
+        -- Filter local part that is all digits (e.g. 32967@aol.com, 1@1.com)
+        AND split_part(b.contact_email, '@', 1) !~ '^[0-9]+$'
+        -- Filter toll-free / vanity numbers embedded in local part (e.g. 1-866-520-ugly...)
+        AND split_part(b.contact_email, '@', 1) !~ '^1[-.]?8(00|33|44|55|66|77|88)'
+        -- Must match basic valid email shape
         AND b.contact_email ~ '^[^@\s]+@[^@\s]+\.[^@\s]{2,}$'
         AND NOT EXISTS (
           SELECT 1 FROM claim_outreach co
