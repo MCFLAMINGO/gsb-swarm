@@ -3666,7 +3666,6 @@ router.post('/rfq-contact', express.json(), async (req, res) => {
         console.warn('[rfq-contact] Re-broadcast failed:', alertErr.message);
       }
     });
-    });
 
     return res.json({
       ok: true,
