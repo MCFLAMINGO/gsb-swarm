@@ -183,11 +183,20 @@ async function run() {
     : Math.min(parseInt(process.env.OUTREACH_BATCH_LIMIT || String(EMAIL_DAILY_LIMIT), 10), EMAIL_DAILY_LIMIT);
 
   const rows = await db.query(
-    `SELECT b.business_id, b.name, b.phone, b.contact_email, b.zip, b.category, b.city
+    `SELECT DISTINCT ON (b.contact_email) b.business_id, b.name, b.phone, b.contact_email, b.zip, b.category, b.city
        FROM businesses b
       WHERE b.claimed_at IS NULL
         AND b.status != 'inactive'
         AND b.contact_email IS NOT NULL
+        -- Filter obvious bad emails from scraper
+        AND b.contact_email NOT LIKE '%@domain.%'
+        AND b.contact_email NOT LIKE '%.png'
+        AND b.contact_email NOT LIKE '%.jpg'
+        AND b.contact_email NOT LIKE '%.gif'
+        AND b.contact_email NOT LIKE '%.svg'
+        AND b.contact_email NOT LIKE '%craigslist.org'
+        AND b.contact_email NOT LIKE '%@2x.%'
+        AND b.contact_email ~ '^[^@\s]+@[^@\s]+\.[^@\s]{2,}$'
         AND NOT EXISTS (
           SELECT 1 FROM claim_outreach co
            WHERE co.business_id = b.business_id
@@ -195,6 +204,7 @@ async function run() {
              AND co.sent_at > NOW() - INTERVAL '${OUTREACH_COOLDOWN_DAYS} days'
         )
       ORDER BY
+        b.contact_email,
         confidence_score DESC NULLS LAST,
         b.name
       LIMIT $1`,
