@@ -204,6 +204,7 @@ async function run() {
         AND b.contact_email NOT LIKE '%@2x.%'
         AND b.contact_email NOT LIKE '%craigslist.org'
         AND b.contact_email NOT LIKE '%@domain.%'
+        AND b.contact_email NOT LIKE '%@xyz.%'
         -- Filter URL-encoded artifacts (e.g. %20info@...)
         AND b.contact_email NOT LIKE '!%%' ESCAPE '!'
         -- Filter all-digit local part (phone numbers, zip codes: 1@1.com, 32967@aol.com)
@@ -257,6 +258,8 @@ async function run() {
       const html    = buildEmailHtml(biz);
       // TEST_EMAIL override — sends to a single address instead of the business
       const sendTo  = process.env.TEST_EMAIL || biz.contact_email;
+      // Rate limit: Resend allows 5 req/sec — stay safely under
+      await new Promise(r => setTimeout(r, 300));
       const result  = await sendOutreachEmail(sendTo, subject, html);
       if (result.sent) {
         emailsSent++;
