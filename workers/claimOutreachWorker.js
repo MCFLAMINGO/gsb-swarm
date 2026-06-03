@@ -212,6 +212,7 @@ async function run() {
           SELECT 1 FROM claim_outreach co
            WHERE co.business_id = b.business_id
              AND co.channel = 'email'
+             AND co.error IS NULL
              AND co.sent_at > NOW() - INTERVAL '${OUTREACH_COOLDOWN_DAYS} days'
         )
       ORDER BY
