@@ -118,7 +118,48 @@ This positions LocalIntel closer to Telegram bots / WhatsApp Business / WeChat m
 
 ---
 
-## Architecture Decisions (locked in — don't revisit)
+---
+
+## North Star Vision — Human↔Digital↔Human Flow (2026-06-02)
+
+**The fundamental problem LocalIntel solves:** Today there is friction at every boundary between human intent and real-world action. A person has a need → they search → they read a list → they pick up a phone → they wait → they talk to someone → maybe the job gets done. Every handoff is manual, every gate is a potential drop-off.
+
+**The coming model:** Personal AI agents carry human intent. They talk to LocalIntel's agent layer directly. LocalIntel routes to business nodes. Business nodes respond programmatically. The human gets a notification: "Your mammogram is booked for Tuesday at 10am." Zero manual bridging.
+
+**The three car tiers (agent quality spectrum):**
+- **Honda (basic)** — The web search UI today. Human drives manually. LocalIntel is a tool they use. Types a query, reads results, makes a call.
+- **BMW (personal AI)** — User's own AI agent (Claude, GPT, etc.) knows their preferences, schedule, location. Talks to LocalIntel MCP, posts RFQ, gets structured quotes back, asks user one question. Closes the loop with minimal human input.
+- **Ferrari (fully autonomous)** — Agent knows the user's calendar, insurance, budget, preferences. Posts to LocalIntel, negotiates availability with business node, books, pays (pathUSD), confirms. Human gets a push notification.
+
+**LocalIntel's job is the same for all three tiers:** Be the best possible road. Fast, reliable, deep data, agent-readable responses, zero friction at the API layer. The road doesn't care what car drives on it.
+
+**The feedback loop that makes the road smarter:**
+- Every failed query → `intent_dead_ends` → acquisition target for onboarding new businesses
+- Every successful booking → `resolution_history` → signals which categories have capacity
+- Every gap between what users ask and what's available → `rfq_gaps` → product roadmap
+- Real traffic data is more current than any federal dataset — when live, this closes the loop automatically
+
+**What this means for every build decision:**
+- Every API response needs a `results` array (machine-readable) AND a `narrative` string (human-readable) — both channels always
+- Session threading (`conversation_threads`) is the memory layer for all three tiers — human tab session, agent session, SMS thread — same table, same logic
+- Business nodes with published services + availability are more valuable than listings alone — that's the depth that enables Ferrari-tier routing
+- `intent_dead_ends` is the most important table in the system once traffic flows — it tells you exactly what to go sign up next
+
+**Info-in / Info-out channels (all paths to the road):**
+
+| Channel | Direction | Status | Notes |
+|---|---|---|---|
+| Web search UI | Human → LocalIntel | Live | Multi-turn as of B145 |
+| SMS (Twilio) | Human → LocalIntel | Live | Thread-aware since B41 |
+| Voice (Twilio) | Human → LocalIntel | Live | CallSid-keyed sessions |
+| MCP server | Agent → LocalIntel | Live | 22 tools, Smithery registered |
+| RFQ dispatch | LocalIntel → Business | Live | Email/SMS on confirmed job |
+| Claim outreach | LocalIntel → Business | Live | SMS CLAIM reply flow |
+| Business node API | Agent ↔ Business | Future | Business publishes services + availability, agents negotiate directly |
+| WhatsApp/iMessage | Human → LocalIntel | Future | Same thread model, new channel |
+| White-glove agent | LocalIntel agent → Business | Future | LocalIntel-owned agents that onboard businesses via conversation |
+
+---
 
 ## Architecture Decisions (locked in — don't revisit)
 

@@ -2,6 +2,22 @@
 
 Problem / Fix / Result entries for every B-numbered session, plus all dated session entries.
 
+## 2026-06-02 — B145: Session threading for web UI + north star vision docs
+
+**Problem:** Web search UI sent every query as a stateless GET. `getContext()` and `appendTurn()` were only wired to the Twilio/SMS POST path (`customerId` from `req.body.From`). The GET `/search` handler had `sessionId` extracted from `x-session-id` header but never passed it to the conversation threading layer. Result: multi-turn web queries had zero memory — ZIP not carried forward, "that place" not resolved, sub-category narrowing impossible.
+
+**Fix (frontend):** `search.html` now generates a `li_session_id` UUID in `sessionStorage` on page load (format: `web-<timestamp36>-<random7>`). Cleared on tab refresh — matches the "fresh on every refresh" design decision. Sent as `x-session-id` header on every `callSearch` fetch.
+
+**Fix (backend):** GET `/search` handler now: (1) loads `getContext(sessionId, raw)` after extracting `sessionId` from `x-session-id` header — carries ZIP and last intent forward when user doesn't supply them; (2) `appendTurn` writes both the user query and the system response to `conversation_threads` after each search. Web sessions use the same `conversation_threads` table as SMS and voice — same logic, different channel tag (`'web'`).
+
+**Docs updated:**
+- `docs/architecture.md` — Added North Star Vision section: Human↔Digital↔Digital↔Human flow, three-tier agent model (Honda/BMW/Ferrari), info-in/out channel table, feedback loop description
+- `docs/intent-routing.md` — Added Conversational Commerce section: multi-turn refinement patterns (doctor, landscaper), sub-category depth roadmap, business availability signals design
+
+**Result:** Web UI now has the same conversation memory as SMS. User searches "I need a doctor" → ZIP is stored. Next query "for a mammogram" → ZIP and last intent carried forward automatically. Foundation for sub-category narrowing in next session.
+
+---
+
 ## 2026-06-02 — B144: Healthcare routing, contact collection, name-search ZIP guard, confidence filter
 
 **Problem (1 — Healthcare routing):** Query "I need a doctor" returned no service match because `_SVC_MAP` only covered ~10 categories. Healthcare terms (doctor, physician, medical, urgent care, clinic, dentist, therapist, chiropractor, optometrist, pharmacy, veterinary) plus professional services (lawyer, accountant, realtor, childcare, tutor, barber, salon, massage, security) were all missing.

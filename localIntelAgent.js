@@ -6362,7 +6362,7 @@ router.get('/search', harvestGuard, async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   const t0 = Date.now();
   const raw   = (req.query.q   || '').trim();
-  const zip   = (req.query.zip || '').trim() || null;
+  let   zip   = (req.query.zip || '').trim() || null;
   let cat   = (req.query.cat || '').trim() || null;
   const limit = Math.min(parseInt(req.query.limit) || 20, 50);
 
@@ -6383,6 +6383,21 @@ router.get('/search', harvestGuard, async (req, res) => {
     // by sessionId and ask which restaurant. The next message ("at McFlamingo")
     // is resolved against the pending intent.
     const sessionId = (req.headers['x-session-id'] || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || '').toString().split(',')[0].trim() || null;
+
+    // B145: Load conversation thread context for web sessions.
+    // x-session-id from browser sessionStorage ties turns together within a tab.
+    // Enables: ZIP carry-forward, referential resolution ("that place", "them"),
+    // sub-category narrowing ("I need a doctor" → "for a mammogram").
+    let _webThreadCtx = null;
+    if (sessionId && raw) {
+      _webThreadCtx = await getContext(sessionId, raw).catch(() => null);
+      if (_webThreadCtx) {
+        // Carry ZIP forward when user didn't supply one
+        if (!zip && _webThreadCtx.zip) zip = _webThreadCtx.zip;
+        // Carry category forward for sub-category narrowing
+        if (!cat && _webThreadCtx.lastIntent) cat = _webThreadCtx.lastIntent;
+      }
+    }
 
     // Venue follow-up: "can I buy a ticket", "how do I get there", etc.
     // Resolves against the most-recent single venue result stored for this session.
@@ -7437,6 +7452,26 @@ router.get('/search', harvestGuard, async (req, res) => {
       if (venueCategories.includes(r.category) || r.group === 'entertainment') {
         _pendingVenueContext.set(sessionId, { ...r, ts: Date.now() });
       }
+    }
+
+    // B145: Append both turns to conversation thread so next query has context.
+    // Fire-and-forget — never block the response.
+    if (sessionId && raw) {
+      const _resolvedIntent = cat || (nlTags && nlTags[0]) || 'general';
+      const _topName = results[0]?.name || null;
+      const _topId   = results[0]?.business_id || null;
+      appendTurn({
+        callerId: sessionId, channel: 'web', role: 'user',
+        content: raw, zip: zip || null, intent: _resolvedIntent,
+      }).catch(() => {});
+      appendTurn({
+        callerId: sessionId, channel: 'web', role: 'system',
+        content: narrative || (results.length ? `Found ${results.length} results` : 'No results'),
+        zip: zip || null, intent: _resolvedIntent,
+        businessId:   _topId,
+        businessName: _topName,
+        resolvesVia:  results.length ? 'search' : 'no_results',
+      }).catch(() => {});
     }
 
     return res.json({

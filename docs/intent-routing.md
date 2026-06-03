@@ -57,6 +57,39 @@ This means the claimed+wallet businesses are the product. The data layer is the 
 
 ---
 
+## Conversational Commerce — Multi-Turn Refinement (B145+)
+
+**The human pattern:**
+1. "I need a doctor" → returns list of healthcare providers
+2. "for a mammogram" → narrows to imaging/radiology
+3. "next week" → checks published availability; if none: honest handoff with contact info
+
+**The landscaper pattern (organized business):**
+1. "I need my lawn mowed" → returns 3 companies with reviews + prices
+2. User picks one → "When do you need it?"
+3. "tomorrow before noon" → job request fired to business; if scheduling published: confirmed; if not: warm handoff
+
+**Session threading (B145 — live):**
+- Web UI generates `li_session_id` in `sessionStorage` (UUID, cleared on tab refresh)
+- Sent as `x-session-id` header on every GET /search request
+- Backend loads `conversation_threads` via `getContext(sessionId)` — same table as SMS/voice
+- ZIP carry-forward, last-business context, referential resolution all work on web now
+- `appendTurn` writes both user query + system response to `conversation_threads` after each search
+
+**Sub-category depth (next):**
+Current `_SVC_MAP` maps keywords → broad category. Need a second layer:
+- `healthcare` → `healthcare:imaging`, `healthcare:primary`, `healthcare:dental`, `healthcare:mental`
+- `landscaping` → `landscaping:mowing`, `landscaping:tree`, `landscaping:irrigation`
+- etc.
+This lets the second turn ("for a mammogram") narrow the search rather than restart it.
+
+**Business availability signals (future — enables Ferrari tier):**
+- When a business claims, they can set: `typically_available: 'same_week' | 'next_week' | 'schedule_only'`
+- This single field is enough for agent routing to know whether to attempt booking or hand off
+- Full calendar integration is optional and additive — the flag alone unlocks agent-to-agent flow
+
+---
+
 ## Roadmap (next sessions)
 
 ### Tier 2 — Data Activation ✅ COMPLETE (session 7)
