@@ -223,7 +223,6 @@ async function run() {
         )
       ORDER BY
         b.contact_email,
-        confidence_score DESC NULLS LAST,
         b.name
       LIMIT $1`,
     [limit]
