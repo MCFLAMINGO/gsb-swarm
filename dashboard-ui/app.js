@@ -2359,3 +2359,54 @@ async function pauseAllWorkers() {
     btn.textContent = 'Pause All Workers';
   }
 }
+
+// ── Business Outreach panel ───────────────────────────────────────────────────
+async function triggerOutreach() {
+  const testEmail = (document.getElementById('li-outreach-test-email')?.value || '').trim();
+  const limit     = parseInt(document.getElementById('li-outreach-limit')?.value || '1', 10);
+  const result    = document.getElementById('li-outreach-result');
+  const btn       = document.querySelector('[onclick="triggerOutreach()"]');
+  const status    = document.getElementById('li-outreach-status');
+
+  if (!result || !btn) return;
+  btn.disabled    = true;
+  result.style.color   = '#94a3b8';
+  result.textContent   = 'Triggering…';
+  if (status) status.textContent = '';
+
+  try {
+    // Pass TEST_EMAIL and BATCH_LIMIT as query params — worker reads them from env
+    // We override via a dedicated trigger endpoint that accepts params
+    const r = await fetch(`${LI_BASE}/admin/worker/run`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-token': LI_ADMIN_TOKEN,
+      },
+      body: JSON.stringify({
+        worker: 'claimOutreachWorker',
+        env: {
+          CLAIM_OUTREACH_LIVE: 'true',
+          ...(testEmail ? { TEST_EMAIL: testEmail } : {}),
+          OUTREACH_BATCH_LIMIT: String(Math.min(limit, 500)),
+        },
+      }),
+    });
+
+    const data = await r.json();
+    if (!r.ok || data.errors?.length) {
+      result.style.color  = '#f87171';
+      result.textContent  = 'Error: ' + (data.errors?.[0]?.error || data.error || r.statusText);
+    } else {
+      result.style.color  = '#a3e635';
+      const dest = testEmail ? `test → ${testEmail}` : `live (${limit} businesses)`;
+      result.textContent  = `✓ Outreach triggered — ${dest}. Check Railway logs for delivery.`;
+      if (status) status.textContent = `Last run: ${new Date().toLocaleTimeString()}`;
+    }
+  } catch (e) {
+    result.style.color  = '#f87171';
+    result.textContent  = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}

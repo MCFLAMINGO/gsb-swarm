@@ -9977,13 +9977,23 @@ function workerAdminGate(req, res) {
 
 router.post('/admin/worker/run', express.json(), async (req, res) => {
   if (!workerAdminGate(req, res)) return;
-  const { worker, group } = req.body || {};
+  const { worker, group, env: extraEnv } = req.body || {};
   if (!worker && !group) {
     return res.status(400).json({ error: 'must provide either "worker" or "group" in body' });
   }
+  // Sanitize extraEnv — only allow string values, no overwriting core Railway vars
+  const safeEnv = {};
+  if (extraEnv && typeof extraEnv === 'object') {
+    const blocked = ['PORT','DATABASE_URL','RAILWAY_','NODE_ENV','PATH'];
+    for (const [k, v] of Object.entries(extraEnv)) {
+      if (typeof v === 'string' && !blocked.some(b => k.startsWith(b))) {
+        safeEnv[k] = v;
+      }
+    }
+  }
   try {
     const results = worker
-      ? [await workerRunner.runWorker(worker)]
+      ? [await workerRunner.runWorker(worker, safeEnv)]
       : await workerRunner.runGroup(group);
     const triggered = results.filter(r => r.status === 'started' || r.status === 'already_running');
     const errors = results.filter(r => r.status === 'error');

@@ -179,7 +179,8 @@ async function run() {
 
   await ensureTable();
 
-  const limit = process.env.TEST_EMAIL ? 1 : EMAIL_DAILY_LIMIT; // 1 if test mode
+  const limit = process.env.TEST_EMAIL ? 1
+    : Math.min(parseInt(process.env.OUTREACH_BATCH_LIMIT || String(EMAIL_DAILY_LIMIT), 10), EMAIL_DAILY_LIMIT);
 
   const rows = await db.query(
     `SELECT b.business_id, b.name, b.phone, b.contact_email, b.zip, b.category, b.city
