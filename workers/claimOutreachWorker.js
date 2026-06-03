@@ -204,7 +204,9 @@ async function run() {
         AND b.contact_email NOT LIKE '%@2x.%'
         AND b.contact_email NOT LIKE '%craigslist.org'
         AND b.contact_email NOT LIKE '%@domain.%'
-        -- Filter all-digit local part (phone numbers, zip codes)
+        -- Filter URL-encoded artifacts (e.g. %20info@...)
+        AND b.contact_email NOT LIKE '!%%' ESCAPE '!'
+        -- Filter all-digit local part (phone numbers, zip codes: 1@1.com, 32967@aol.com)
         AND split_part(b.contact_email, '@', 1) !~ '^[0-9]+$'
         AND NOT EXISTS (
           SELECT 1 FROM claim_outreach co
