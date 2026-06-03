@@ -7075,7 +7075,10 @@ router.get('/search', harvestGuard, async (req, res) => {
         }
 
         if (providerCount > 0) {
-          const topName   = topProviders[0].name;
+          const top       = topProviders[0];
+          const topName   = top.name;
+          const topPhone  = top.phone  || null;
+          const topWeb    = top.website || null;
           const expanded  = actualZip && resolvedZip && actualZip !== resolvedZip;
           const areaStr   = actualZip
             ? (expanded ? ` in nearby ${actualZip} (nearest available)` : ` in ${actualZip}`)
@@ -7084,9 +7087,15 @@ router.get('/search', harvestGuard, async (req, res) => {
           const intro = isNarrowing
             ? `Narrowed to ${providerCount} ${catLabel} provider${providerCount > 1 ? 's' : ''}${areaStr}`
             : `Found ${providerCount} verified ${catLabel} provider${providerCount > 1 ? 's' : ''}${areaStr}`;
+          // B150: direct contact info inline — human can call right now without waiting
+          const directContact = topPhone || topWeb
+            ? ` You can reach ${topName} directly` +
+              (topPhone ? ` at ${topPhone}` : '') +
+              (topWeb   ? `${topPhone ? ' or' : ''} at ${topWeb}` : '') + '.'
+            : '';
           srNarrative =
-            `${intro} — notified them about your request${jobCode ? ' (Job ' + jobCode + ')' : ''}. ` +
-            `Top match: ${topName}. Leave your email or phone below and we'll connect you.`;
+            `${intro} — notified them about your request${jobCode ? ' (Job ' + jobCode + ')' : ''}.${directContact} ` +
+            `Or leave your email/phone below and we'll connect you.`;
         } else if (resolvedCat) {
           const noResultIntro = resolvedSubLabel
             ? `No verified ${catLabel} providers found${resolvedZip ? ' in ' + resolvedZip + ' or nearby ZIPs' : ''} yet`
