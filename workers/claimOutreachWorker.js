@@ -268,10 +268,12 @@ async function run() {
         });
       } else {
         errors++;
+        const errMsg = result.reason + (result.error ? `: ${result.error}` : '');
+        console.log(`[claim-outreach] email FAILED → ${biz.contact_email} (biz: ${biz.name}) — ${errMsg}`);
         await recordOutreach({
           business_id: biz.business_id,
           channel: 'email',
-          error: result.reason + (result.error ? `: ${result.error}` : ''),
+          error: errMsg,
         });
       }
     }
