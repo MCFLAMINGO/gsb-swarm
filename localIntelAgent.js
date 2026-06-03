@@ -8531,6 +8531,28 @@ router.post('/admin/business/:id/claim', express.json(), async (req, res) => {
 });
 
 // GET /api/local-intel/admin/stats — platform-wide summary
+// GET /api/local-intel/email-stats — public aggregate counts, no PII
+router.get('/email-stats', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  try {
+    const [row] = await db.query(`
+      SELECT
+        COUNT(*)                                                        AS total_active,
+        COUNT(notification_email)                                       AS notification_email,
+        COUNT(contact_email)                                            AS contact_email,
+        COUNT(COALESCE(notification_email, contact_email))              AS either_email,
+        COUNT(*) FILTER (WHERE notification_email IS NOT NULL
+                           AND contact_email IS NOT NULL)               AS both_emails,
+        COUNT(phone)                                                    AS has_phone,
+        COUNT(COALESCE(notification_email, contact_email, phone::text)) AS reachable
+      FROM businesses WHERE status != 'inactive'
+    `);
+    return res.json({ ok: true, ...row });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/admin/stats', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   const role = adminAuth(req, res);
