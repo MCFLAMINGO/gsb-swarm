@@ -2,6 +2,28 @@
 
 Problem / Fix / Result entries for every B-numbered session, plus all dated session entries.
 
+## 2026-06-02 — B146: Sub-category depth + multi-turn narrowing
+
+**Problem:** Multi-turn refinement had no depth. "I need a doctor" returned all healthcare providers. "for a mammogram" on the next turn was treated as an unrelated query. No way to narrow a category to a specialty across turns.
+
+**Fix — `_SUBCAT_MAP`:** 90+ keyword → `[category, subCategory, humanLabel]` entries across healthcare (imaging, lab, primary, pediatric, dental, vision, mental health, physical therapy, dermatology, cardiology), landscaping (mowing, trimming, tree service, irrigation), cleaning, plumbing, HVAC, roofing, legal, financial, auto, real estate, veterinary.
+
+**Fix — `detectServiceRequest(raw, threadCtx)`:** Now accepts thread context as second arg. Two detection paths:
+1. Full request ("I need a doctor for a mammogram") — returns `{ category: 'healthcare', subCategory: 'imaging', subLabel: 'mammogram screening' }`
+2. Pure narrowing turn ("for a mammogram", no request phrase) — if thread has prior category context, treated as a service request with `isNarrowing: true`
+
+**Fix — SQL `fetchProviders`:** When `subCategory` is set, adds a tsvector + ILIKE filter against `services_text` and `description`. Graceful degradation: if subcat filter returns 0, retries without it.
+
+**Fix — Narrative:** Uses `subLabel` as the category label when available ("mammogram screening providers" not "healthcare providers"). Narrowing turns say "Narrowed to X providers" instead of "Found X providers".
+
+**Fix — Thread writes:** `service_request` path now also calls `appendTurn` with intent stored as `healthcare:imaging` (compound format). Next turn's `getContext` will have this in `lastIntent`, enabling further narrowing.
+
+**Response shape:** Added `sub_category`, `sub_label`, `is_narrowing` fields to `service_request` JSON response for frontend use.
+
+**Result:** "I need a doctor" → all healthcare. "for a mammogram" → narrows to imaging providers. "lawn mowing" alone routes correctly as a narrowing turn if healthcare was prior context. All categories degrade gracefully to broad match if specialty returns 0 results.
+
+---
+
 ## 2026-06-02 — B145: Session threading for web UI + north star vision docs
 
 **Problem:** Web search UI sent every query as a stateless GET. `getContext()` and `appendTurn()` were only wired to the Twilio/SMS POST path (`customerId` from `req.body.From`). The GET `/search` handler had `sessionId` extracted from `x-session-id` header but never passed it to the conversation threading layer. Result: multi-turn web queries had zero memory — ZIP not carried forward, "that place" not resolved, sub-category narrowing impossible.

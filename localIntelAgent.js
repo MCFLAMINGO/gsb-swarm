@@ -5957,7 +5957,120 @@ router.post('/ask', express.json(), handleAskRequest);
 
 // ── Service-request detector for /search ───────────────────────────────────────────
 // Deterministic vocabulary scoring — same approach as voiceIntake, no LLM.
-// Returns { isRequest: bool, category: string|null }
+// Returns { isRequest: bool, category: string|null, subCategory: string|null, subLabel: string|null }
+//
+// Sub-category layer (B146): narrows a broad category to a specialty.
+// Used for multi-turn refinement: turn 1 sets category, turn 2 narrows subCategory.
+// SQL filter: tsvector search on services_text + description + tags when subCategory is set.
+//
+// Format: { kw: [category, subCategory, humanLabel] }
+const _SUBCAT_MAP = {
+  // Healthcare
+  'mammogram':       ['healthcare', 'imaging',       'mammogram screening'],
+  'mri':             ['healthcare', 'imaging',       'MRI imaging'],
+  'xray':            ['healthcare', 'imaging',       'X-ray imaging'],
+  'x-ray':           ['healthcare', 'imaging',       'X-ray imaging'],
+  'ultrasound':      ['healthcare', 'imaging',       'ultrasound'],
+  'radiology':       ['healthcare', 'imaging',       'radiology'],
+  'imaging':         ['healthcare', 'imaging',       'medical imaging'],
+  'blood test':      ['healthcare', 'lab',           'blood test / lab work'],
+  'lab work':        ['healthcare', 'lab',           'lab work'],
+  'lab ':            ['healthcare', 'lab',           'lab work'],
+  'checkup':         ['healthcare', 'primary',       'checkup / primary care'],
+  'check-up':        ['healthcare', 'primary',       'checkup / primary care'],
+  'annual physical': ['healthcare', 'primary',       'annual physical'],
+  'physical exam':   ['healthcare', 'primary',       'physical exam'],
+  'primary care':    ['healthcare', 'primary',       'primary care'],
+  'family doctor':   ['healthcare', 'primary',       'family doctor'],
+  'pediatric':       ['healthcare', 'pediatric',     'pediatric care'],
+  'child doctor':    ['healthcare', 'pediatric',     'pediatric care'],
+  'kid doctor':      ['healthcare', 'pediatric',     'pediatric care'],
+  'teeth clean':     ['healthcare', 'dental',        'teeth cleaning'],
+  'tooth pain':      ['healthcare', 'dental',        'dental care'],
+  'cavity':          ['healthcare', 'dental',        'cavity / dental'],
+  'braces':          ['healthcare', 'dental',        'orthodontics'],
+  'orthodont':       ['healthcare', 'dental',        'orthodontics'],
+  'eye exam':        ['healthcare', 'vision',        'eye exam'],
+  'glasses':         ['healthcare', 'vision',        'glasses / vision'],
+  'contacts':        ['healthcare', 'vision',        'contact lenses'],
+  'anxiety':         ['healthcare', 'mental_health', 'anxiety treatment'],
+  'depression':      ['healthcare', 'mental_health', 'depression treatment'],
+  'counseling':      ['healthcare', 'mental_health', 'counseling'],
+  'mental health':   ['healthcare', 'mental_health', 'mental health'],
+  'therapy':         ['healthcare', 'mental_health', 'therapy'],
+  'back pain':       ['healthcare', 'physical_therapy', 'back pain treatment'],
+  'knee pain':       ['healthcare', 'physical_therapy', 'physical therapy'],
+  'physical therapy':['healthcare', 'physical_therapy', 'physical therapy'],
+  'skin ':           ['healthcare', 'dermatology',   'dermatology / skin care'],
+  'acne':            ['healthcare', 'dermatology',   'acne treatment'],
+  'heart ':          ['healthcare', 'cardiology',    'cardiology'],
+  'cardio':          ['healthcare', 'cardiology',    'cardiology'],
+  // Landscaping
+  'mow':             ['landscaping', 'mowing',        'lawn mowing'],
+  'lawn mow':        ['landscaping', 'mowing',        'lawn mowing'],
+  'grass cut':       ['landscaping', 'mowing',        'grass cutting'],
+  'hedge trim':      ['landscaping', 'trimming',      'hedge trimming'],
+  'bush trim':       ['landscaping', 'trimming',      'bush trimming'],
+  'tree trim':       ['landscaping', 'tree_service',  'tree trimming'],
+  'tree remov':      ['landscaping', 'tree_service',  'tree removal'],
+  'stump':           ['landscaping', 'tree_service',  'stump removal'],
+  'arborist':        ['landscaping', 'tree_service',  'arborist'],
+  'mulch':           ['landscaping', 'mulching',      'mulching'],
+  'irrigation':      ['landscaping', 'irrigation',    'irrigation / sprinklers'],
+  'sprinkler':       ['landscaping', 'irrigation',    'sprinkler system'],
+  // Cleaning
+  'deep clean':      ['cleaning', 'deep_clean',  'deep cleaning'],
+  'move out clean':  ['cleaning', 'move_out',    'move-out cleaning'],
+  'pressure wash':   ['cleaning', 'pressure_wash','pressure washing'],
+  'window clean':    ['cleaning', 'windows',     'window cleaning'],
+  'carpet clean':    ['cleaning', 'carpet',      'carpet cleaning'],
+  // Plumbing
+  'water heater':    ['plumbing', 'water_heater', 'water heater'],
+  'drain clog':      ['plumbing', 'drain',        'drain cleaning'],
+  'clogged drain':   ['plumbing', 'drain',        'drain cleaning'],
+  'leak ':           ['plumbing', 'leak_repair',  'leak repair'],
+  // HVAC
+  'air condition':   ['hvac', 'ac',        'air conditioning'],
+  'heat pump':       ['hvac', 'heat_pump', 'heat pump'],
+  'furnace':         ['hvac', 'heating',   'furnace / heating'],
+  'duct clean':      ['hvac', 'ducts',     'duct cleaning'],
+  // Roofing
+  'roof repair':     ['roofing', 'repair',      'roof repair'],
+  'roof replac':     ['roofing', 'replacement', 'roof replacement'],
+  'gutter':          ['roofing', 'gutters',     'gutter service'],
+  // Legal
+  'divorce':         ['legal', 'family_law',  'divorce / family law'],
+  'estate plan':     ['legal', 'estate',      'estate planning'],
+  'will ':           ['legal', 'estate',      'will / estate planning'],
+  'dui':             ['legal', 'criminal',    'DUI defense'],
+  'personal injury': ['legal', 'personal_injury', 'personal injury'],
+  'real estate law': ['legal', 'real_estate', 'real estate law'],
+  'contract review': ['legal', 'contract',    'contract review'],
+  // Financial
+  'tax return':      ['financial', 'tax',        'tax preparation'],
+  'tax prep':        ['financial', 'tax',        'tax preparation'],
+  'bookkeep':        ['financial', 'bookkeeping','bookkeeping'],
+  'retirement':      ['financial', 'retirement', 'retirement planning'],
+  // Auto
+  'oil change':      ['auto', 'oil_change',  'oil change'],
+  'brake':           ['auto', 'brakes',      'brake service'],
+  'tire':            ['auto', 'tires',       'tire service'],
+  'transmission':    ['auto', 'transmission','transmission repair'],
+  'body work':       ['auto', 'body',        'auto body / collision'],
+  'car detail':      ['auto', 'detailing',   'car detailing'],
+  // Real estate
+  'buy home':        ['real_estate', 'buying',   'home buying'],
+  'sell home':       ['real_estate', 'selling',  'home selling / listing'],
+  'home valuation':  ['real_estate', 'valuation','home valuation'],
+  'commercial lease':['real_estate', 'commercial','commercial real estate'],
+  // Veterinary
+  'dog groom':       ['veterinary', 'grooming',   'dog grooming'],
+  'cat groom':       ['veterinary', 'grooming',   'cat grooming'],
+  'spay':            ['veterinary', 'surgical',   'spay / neuter'],
+  'neuter':          ['veterinary', 'surgical',   'spay / neuter'],
+  'pet vaccin':      ['veterinary', 'vaccines',   'pet vaccines'],
+  'emergency vet':   ['veterinary', 'emergency',  'emergency vet'],
+};
 const _SVC_MAP = {
   // Landscaping
   'lawn':'landscaping','mow':'landscaping','mowing':'landscaping','landscap':'landscaping',
@@ -6049,16 +6162,53 @@ const _REQUEST_PHRASES = [
 ];
 const _REQUEST_RE = new RegExp(_REQUEST_PHRASES.join('|'), 'i');
 
-function detectServiceRequest(raw) {
+function detectServiceRequest(raw, threadCtx) {
   const lower = raw.toLowerCase();
-  const isRequest = _REQUEST_RE.test(lower);
-  if (!isRequest) return { isRequest: false, category: null };
-  // Find best category match
-  let category = null;
-  for (const [kw, cat] of Object.entries(_SVC_MAP)) {
-    if (lower.includes(kw)) { category = cat; break; }
+
+  // B146: Check sub-category map first — works on both full requests and
+  // pure narrowing turns ("for a mammogram", "tree trimming") when the thread
+  // already has a category context from a prior turn.
+  let subCategory = null;
+  let subLabel    = null;
+  let subcatOverrideCategory = null;
+  for (const [kw, [subcatCat, subcat, label]] of Object.entries(_SUBCAT_MAP)) {
+    if (lower.includes(kw)) {
+      subCategory = subcat;
+      subLabel    = label;
+      subcatOverrideCategory = subcatCat;
+      break;
+    }
   }
-  return { isRequest: true, category };
+
+  // B146: Pure narrowing turn — user says "for a mammogram" with no request phrase.
+  // Treat as a service request if the thread already has a matching category.
+  const priorCat = threadCtx?.lastIntent || null;
+  if (!_REQUEST_RE.test(lower) && subCategory) {
+    // Narrowing follow-up is valid when the subcat's parent matches prior category
+    // OR we have any prior service context at all.
+    if (priorCat || subcatOverrideCategory) {
+      return {
+        isRequest:    true,
+        category:     priorCat || subcatOverrideCategory,
+        subCategory,
+        subLabel,
+        isNarrowing:  true,   // flag so narrative says "narrowed" not "new request"
+      };
+    }
+    return { isRequest: false, category: null, subCategory: null, subLabel: null };
+  }
+
+  const isRequest = _REQUEST_RE.test(lower);
+  if (!isRequest) return { isRequest: false, category: null, subCategory: null, subLabel: null };
+
+  // Full request — find broad category from _SVC_MAP
+  let category = subcatOverrideCategory || null;
+  if (!category) {
+    for (const [kw, cat] of Object.entries(_SVC_MAP)) {
+      if (lower.includes(kw)) { category = cat; break; }
+    }
+  }
+  return { isRequest: true, category, subCategory, subLabel, isNarrowing: false };
 }
 
 // ── ORDER_ITEM intent: route "order ITEM at/from BIZ" → menu fetch + match ────
@@ -6710,8 +6860,9 @@ router.get('/search', harvestGuard, async (req, res) => {
     // ── Service request detection: route natural-language requests to category search
     // Must happen before name matching so "I need my street light fixed" doesn't
     // match businesses with "need" in their name.
+    // B146: pass thread context so narrowing turns ("for a mammogram") resolve correctly.
     if (raw) {
-      const svcDetect = detectServiceRequest(raw);
+      const svcDetect = detectServiceRequest(raw, _webThreadCtx);
       if (svcDetect.isRequest) {
         // ── Extract ZIP from query text if not supplied via filter ─────────────
         // e.g. "in ponte vedra" → 32082, "in nocatee" → 32081, bare 5-digit ZIP
@@ -6752,10 +6903,15 @@ router.get('/search', harvestGuard, async (req, res) => {
             }
           }
         }
-        const resolvedCat = svcDetect.category;
+        const resolvedCat    = svcDetect.category;
+        const resolvedSubCat  = svcDetect.subCategory || null;   // B146
+        const resolvedSubLabel= svcDetect.subLabel    || null;   // B146
+        const isNarrowing     = svcDetect.isNarrowing || false;  // B146
 
         // ── Provider lookup with automatic neighbor expansion on zero results ──
         // B70: concept-aware ranking via zip_signals JOIN.
+        // B146: when a subCategory is detected, add a tsvector search clause to
+        // narrow results to providers that mention the specialty.
         const _svcConcept = detectConcept(raw || resolvedCat || '') || 'GENERAL';
         const _svcRanked  = buildConceptOrderBy(_svcConcept, 'zs', 'b');
         const SVC_PROVIDER_QUERY = `SELECT b.name, b.zip, b.address, b.city, b.phone, b.website, b.category, b.lat, b.lon,
@@ -6765,33 +6921,62 @@ router.get('/search', harvestGuard, async (req, res) => {
         let actualZip     = resolvedZip; // may change to a neighbor ZIP
         if (resolvedCat) {
           // Helper: query providers for a given zip (null = all NE FL)
-          const fetchProviders = async (z) => {
-            const p = z ? [`%${resolvedCat}%`, z, 5] : [`%${resolvedCat}%`, 5];
-            const clause = z ? ' AND b.zip = $2' : '';
-            const lim = z ? '$3' : '$2';
+          // B146: subcatClause adds a tsvector filter when a sub-category is known.
+          // Graceful degradation: if subcat filter returns 0, re-run without it.
+          const fetchProviders = async (z, useSubcat = true) => {
+            const useSub = useSubcat && resolvedSubCat;
+            // Build params: $1=cat, $2=zip (opt), $3=subcat tsquery (opt)
+            const params = [`%${resolvedCat}%`];
+            let paramIdx = 2;
+            const zipClauseLocal = z ? ` AND b.zip = $${paramIdx++}` : '';
+            if (z) params.push(z);
+            const subcatClauseLocal = useSub
+              ? ` AND (b.search_vector @@ plainto_tsquery('english', $${paramIdx++})
+                    OR b.services_text ILIKE $${paramIdx++}
+                    OR b.description   ILIKE $${paramIdx++})`
+              : '';
+            if (useSub) {
+              const kw = resolvedSubLabel || resolvedSubCat;
+              params.push(kw, `%${kw}%`, `%${kw}%`);
+            }
+            params.push(5);
             return db.query(
               SVC_PROVIDER_QUERY + ` FROM businesses b
                LEFT JOIN zip_signals zs ON zs.zip = b.zip
                WHERE b.status != 'inactive'
-                 AND (b.category ILIKE $1 OR b.category_group ILIKE $1)${clause}
+                 AND (b.category ILIKE $1 OR b.category_group ILIKE $1)${zipClauseLocal}${subcatClauseLocal}
                ORDER BY ${_svcRanked}
-               LIMIT ${lim}`, p
+               LIMIT $${params.length}`, params
             );
           };
 
-          let provRows = await fetchProviders(resolvedZip);
+          let provRows = await fetchProviders(resolvedZip, true);
 
           // Zero results in specific ZIP → try each neighbor ZIP in order
           if (!provRows.length && resolvedZip && ZIP_NEIGHBORS[resolvedZip]) {
             for (const neighborZip of ZIP_NEIGHBORS[resolvedZip]) {
-              provRows = await fetchProviders(neighborZip);
+              provRows = await fetchProviders(neighborZip, true);
               if (provRows.length) { actualZip = neighborZip; break; }
             }
           }
-          // Still zero → try all NE FL
+          // Still zero → try all NE FL with subcat
           if (!provRows.length) {
-            provRows = await fetchProviders(null);
+            provRows = await fetchProviders(null, true);
             if (provRows.length) actualZip = null;
+          }
+          // B146: Graceful degradation — subcat returned 0, retry without subcat filter
+          if (!provRows.length && resolvedSubCat) {
+            provRows = await fetchProviders(resolvedZip, false);
+            if (!provRows.length && resolvedZip && ZIP_NEIGHBORS[resolvedZip]) {
+              for (const neighborZip of ZIP_NEIGHBORS[resolvedZip]) {
+                provRows = await fetchProviders(neighborZip, false);
+                if (provRows.length) { actualZip = neighborZip; break; }
+              }
+            }
+            if (!provRows.length) {
+              provRows = await fetchProviders(null, false);
+              if (provRows.length) actualZip = null;
+            }
           }
 
           providerCount = provRows.length;
@@ -6813,7 +6998,8 @@ router.get('/search', harvestGuard, async (req, res) => {
         }
 
         // Build a service-request narrative
-        const catLabel   = resolvedCat ? resolvedCat.replace(/_/g, ' ') : 'service';
+        // B146: use subLabel when available ("mammogram screening" > "healthcare")
+        const catLabel = resolvedSubLabel || (resolvedCat ? resolvedCat.replace(/_/g, ' ') : 'service');
         let srNarrative;
         let jobCode = null;
 
@@ -6841,24 +7027,47 @@ router.get('/search', harvestGuard, async (req, res) => {
         }
 
         if (providerCount > 0) {
-          const topName  = topProviders[0].name;
+          const topName   = topProviders[0].name;
           const expanded  = actualZip && resolvedZip && actualZip !== resolvedZip;
           const areaStr   = actualZip
             ? (expanded ? ` in nearby ${actualZip} (nearest available)` : ` in ${actualZip}`)
             : ' in Northeast Florida';
+          // B146: narrowing turn gets a different opener
+          const intro = isNarrowing
+            ? `Narrowed to ${providerCount} ${catLabel} provider${providerCount > 1 ? 's' : ''}${areaStr}`
+            : `Found ${providerCount} verified ${catLabel} provider${providerCount > 1 ? 's' : ''}${areaStr}`;
           srNarrative =
-            `We found ${providerCount} verified ${catLabel} provider${providerCount > 1 ? 's' : ''}${areaStr} ` +
-            `and notified them about your request${jobCode ? ' (Job ' + jobCode + ')' : ''}. ` +
-            `Top match: ${topName}. Leave your email or phone below and we’ll send you their response.`;
+            `${intro} — notified them about your request${jobCode ? ' (Job ' + jobCode + ')' : ''}. ` +
+            `Top match: ${topName}. Leave your email or phone below and we'll connect you.`;
         } else if (resolvedCat) {
+          const noResultIntro = resolvedSubLabel
+            ? `No verified ${catLabel} providers found${resolvedZip ? ' in ' + resolvedZip + ' or nearby ZIPs' : ''} yet`
+            : `No verified ${catLabel} provider${resolvedZip ? ' in ' + resolvedZip + ' or nearby ZIPs' : ''} yet`;
           srNarrative =
-            `We don’t have a verified ${catLabel} provider${resolvedZip ? ' in ' + resolvedZip + ' or nearby ZIPs' : ''} yet` +
-            `${jobCode ? ' — but we logged your request as Job ' + jobCode + '.' : '.'} ` +
-            `Leave your contact info below and we’ll reach out when one becomes available.`;
+            `${noResultIntro}${jobCode ? ' — but we logged your request as Job ' + jobCode + '.' : '.'} ` +
+            `Leave your contact info below and we'll reach out when one becomes available.`;
         } else {
           srNarrative =
-            `We heard your request but couldn’t match it to a service category yet. ` +
-            `Leave your email or phone number and describe what you need — we’ll route it to the right provider.`;
+            `We heard your request but couldn't match it to a service category yet. ` +
+            `Leave your email or phone number and describe what you need — we'll route it to the right provider.`;
+        }
+
+        // B146: store this turn in conversation thread so next query can narrow further
+        if (sessionId) {
+          const _intentForThread = resolvedSubCat
+            ? `${resolvedCat}:${resolvedSubCat}`
+            : resolvedCat;
+          appendTurn({
+            callerId: sessionId, channel: 'web', role: 'user',
+            content: raw, zip: resolvedZip || null, intent: _intentForThread,
+          }).catch(() => {});
+          appendTurn({
+            callerId: sessionId, channel: 'web', role: 'system',
+            content: srNarrative,
+            zip: resolvedZip || null, intent: _intentForThread,
+            businessName: topProviders[0]?.name || null,
+            resolvesVia: 'service_request',
+          }).catch(() => {});
         }
 
         return res.json({
@@ -6866,6 +7075,9 @@ router.get('/search', harvestGuard, async (req, res) => {
           query:        raw,
           zip:          resolvedZip,
           category:     resolvedCat,
+          sub_category: resolvedSubCat  || null,  // B146
+          sub_label:    resolvedSubLabel || null,  // B146
+          is_narrowing: isNarrowing,               // B146
           job_code:     jobCode,
           total:        providerCount,
           narrative:    srNarrative,
