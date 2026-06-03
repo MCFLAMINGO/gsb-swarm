@@ -179,7 +179,7 @@ async function run() {
 
   await ensureTable();
 
-  const limit = EMAIL_DAILY_LIMIT; // SMS off
+  const limit = process.env.TEST_EMAIL ? 1 : EMAIL_DAILY_LIMIT; // 1 if test mode
 
   const rows = await db.query(
     `SELECT b.business_id, b.name, b.phone, b.contact_email, b.zip, b.category, b.city
@@ -232,10 +232,13 @@ async function run() {
     // ── Email ──
     if (emailsSent < EMAIL_DAILY_LIMIT && biz.contact_email) {
       const subject = `${truncateName(biz.name, 60)} — your free LocalIntel profile is ready`;
-      const html = buildEmailHtml(biz);
-      const result = await sendOutreachEmail(biz.contact_email, subject, html);
+      const html    = buildEmailHtml(biz);
+      // TEST_EMAIL override — sends to a single address instead of the business
+      const sendTo  = process.env.TEST_EMAIL || biz.contact_email;
+      const result  = await sendOutreachEmail(sendTo, subject, html);
       if (result.sent) {
         emailsSent++;
+        console.log(`[claim-outreach] email sent → ${sendTo} (biz: ${biz.name})`);
         await recordOutreach({
           business_id: biz.business_id,
           channel: 'email',
