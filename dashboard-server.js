@@ -2,6 +2,27 @@
 // Express 4 + WebSocket + ACP SDK for live job firing
 require('dotenv').config();
 
+// ── Inbound rate limiter — protect Twilio spend ───────────────────────────────
+// In-memory counters, reset at midnight UTC. No DB hit on hot path.
+// SMS: 20 messages/number/day  |  Voice: 10 calls/number/day
+const _rl = {
+  sms:   new Map(), // phone → { count, day }
+  voice: new Map(),
+  day: () => new Date().toISOString().slice(0, 10), // YYYY-MM-DD UTC
+  check(type, phone, limit) {
+    const today = this.day();
+    const map   = this[type];
+    const entry = map.get(phone);
+    if (!entry || entry.day !== today) {
+      map.set(phone, { count: 1, day: today });
+      return true; // allowed
+    }
+    if (entry.count >= limit) return false; // blocked
+    entry.count++;
+    return true; // allowed
+  }
+};
+
 // ── Resend (bleeding.cash email delivery) ────────────────────────────────────
 let resendClient = null;
 if (process.env.RESEND_API_KEY) {
@@ -7117,12 +7138,22 @@ app.post('/api/run-app-test', requireOperator, async (req, res) => {
 
 // POST /api/voice/incoming — initial call, greet and gather speech
 app.post('/api/voice/incoming', express.urlencoded({ extended: false }), async (req, res) => {
+  const callerPhone = req.body.From || req.body.Caller || 'unknown';
+
+  // ── Rate limit — 10 voice calls per number per day ───────────────
+  if (callerPhone !== 'unknown' && !_rl.check('voice', callerPhone, 10)) {
+    console.warn(`[voice/incoming] rate-limited ${callerPhone}`);
+    res.set('Content-Type', 'text/xml');
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna-Neural">You have reached the LocalIntel daily call limit. Please try again tomorrow or visit the local intel dot com.</Say><Hangup/></Response>');
+    return;
+  }
+
   try {
     const { handleIncoming } = require('./lib/voiceIntake');
     const result = await handleIncoming({
       stage: 'greeting',
       speechResult: null,
-      callerPhone: req.body.From || req.body.Caller || 'unknown',
+      callerPhone,
       callSid: req.body.CallSid || null,
     });
     res.set('Content-Type', result.contentType);
@@ -7166,6 +7197,14 @@ app.post('/api/voice/process', express.urlencoded({ extended: false }), async (r
 async function handleSmsInbound(req, res) {
   const from = req.body.From || req.body.from || '';
   const body = (req.body.Body || req.body.body || '').trim();
+
+  // ── Rate limit — 20 SMS per number per day ──────────────────────────
+  if (from && !_rl.check('sms', from, 20)) {
+    res.set('Content-Type', 'text/xml');
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Message>You\'ve reached the LocalIntel daily message limit. Try again tomorrow or visit thelocalintel.com.</Message></Response>');
+    console.warn(`[sms-inbound] rate-limited ${from}`);
+    return;
+  }
 
   // ── Task dispatch reply check (FIRST) ─────────────────────────────────────
   // If this SMS is a YES/NO/DONE/FAIL reply from a registered agent, the task
