@@ -2,6 +2,16 @@
 
 Problem / Fix / Result entries for every B-numbered session, plus all dated session entries.
 
+## 2026-06-02 — B148: Operator alert email on new web contact
+
+**Problem:** Contacts submitted via the web widget were saved to `rfq_jobs` but nothing notified anyone. Leads could sit unread indefinitely.
+
+**Fix:** Added `setImmediate` fire-and-forget Resend alert inside `/rfq-contact` handler. Fires after the contact row is saved, never blocks the response. Sends to `erik@mcflamingo.com` from `intel@thelocalintel.com`. Email shows job code, category, ZIP, and contact info (email + phone). If Resend fails, logs a warning — never surfaces to the user.
+
+**Result:** Every web contact submission triggers an immediate email to erik@mcflamingo.com with the lead details.
+
+---
+
 ## 2026-06-02 — B147: Contact collection widget + rfq-contact hardening
 
 **Problem:** Backend was sending `contact_prompt: true` and `sub_label` / `is_narrowing` in service_request responses but the frontend ignored all of it. Task card still had hardcoded `Call (904) 506-7476` button. `/rfq-contact` required `job_code` — if the RFQ broadcast failed silently, the contact was never saved.

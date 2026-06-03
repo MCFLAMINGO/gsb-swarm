@@ -3632,7 +3632,40 @@ router.post('/rfq-contact', express.json(), async (req, res) => {
     }
 
     const savedCode = rows[0]?.code || job_code || 'saved';
+    const savedCat  = rows[0]?.category || category || 'general';
+    const savedZip  = rows[0]?.zip || zip || 'unknown';
     console.log(`[rfq-contact] Job ${savedCode} — contact saved (email=${!!email} phone=${!!phone})`);
+
+    // B148: fire-and-forget operator alert — never blocks the response
+    setImmediate(async () => {
+      try {
+        const { Resend } = require('resend');
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        const contactLine = [email && `Email: ${email}`, phone && `Phone: ${phone}`].filter(Boolean).join(' | ');
+        await resend.emails.send({
+          from:    'LocalIntel <intel@thelocalintel.com>',
+          to:      'erik@mcflamingo.com',
+          subject: `New lead — ${savedCat} in ${savedZip} (${savedCode})`,
+          html: `
+            <div style="font-family:sans-serif;max-width:520px;margin:0 auto;">
+              <h2 style="color:#16A34A;margin-bottom:4px;">New LocalIntel Lead</h2>
+              <table style="width:100%;border-collapse:collapse;font-size:15px;">
+                <tr><td style="padding:6px 0;color:#666;width:100px;">Job</td><td><strong>${savedCode}</strong></td></tr>
+                <tr><td style="padding:6px 0;color:#666;">Category</td><td>${savedCat}</td></tr>
+                <tr><td style="padding:6px 0;color:#666;">ZIP</td><td>${savedZip}</td></tr>
+                <tr><td style="padding:6px 0;color:#666;">Contact</td><td><strong>${contactLine}</strong></td></tr>
+              </table>
+              <p style="margin-top:16px;font-size:13px;color:#999;">
+                Logged in rfq_jobs. Reach out to the contact directly.
+              </p>
+            </div>`,
+        });
+        console.log(`[rfq-contact] Operator alert sent for ${savedCode}`);
+      } catch (alertErr) {
+        console.warn('[rfq-contact] Operator alert failed:', alertErr.message);
+      }
+    });
+
     return res.json({
       ok: true,
       message: email
