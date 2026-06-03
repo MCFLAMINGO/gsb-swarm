@@ -8555,7 +8555,8 @@ router.get('/platform-stats', async (req, res) => {
         (SELECT COUNT(*) FROM conversation_threads
            WHERE created_at > NOW() - INTERVAL '7 days')               AS threads_7d
     `);
-    return res.json({ ok: true, businesses: biz, usage });
+    const [dbsize] = await db.query(`SELECT pg_size_pretty(pg_database_size(current_database())) AS db_size, pg_database_size(current_database()) AS db_bytes`);
+    return res.json({ ok: true, businesses: biz, usage, db: dbsize });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
