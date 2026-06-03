@@ -18,10 +18,11 @@
 
 const db = require('../lib/db');
 
-const SMS_DAILY_LIMIT        = 200;
-const EMAIL_DAILY_LIMIT      = 200;
+const SMS_DAILY_LIMIT        = 0;    // SMS off — email only (free Resend)
+const EMAIL_DAILY_LIMIT      = 500;  // Resend free tier: 3,000/month
 const OUTREACH_COOLDOWN_DAYS = 30;
-const CLAIM_BASE_URL         = process.env.CLAIM_BASE_URL || 'https://thelocalintel.com/claim';
+const INBOX_BASE_URL         = process.env.INBOX_BASE_URL || 'https://www.thelocalintel.com/inbox.html';
+const CLAIM_BASE_URL         = process.env.CLAIM_BASE_URL || 'https://www.thelocalintel.com/claim';
 
 // ── Safety guard ────────────────────────────────────────────────────────────
 // Set CLAIM_OUTREACH_LIVE=true in Railway env to actually send.
@@ -108,17 +109,27 @@ function buildSmsBody(biz) {
 }
 
 function buildEmailHtml(biz) {
-  const url = `${CLAIM_BASE_URL}?biz=${biz.business_id}`;
-  return `<p>Hi ${escapeHtml(biz.name)},</p>
-<p>Your business is listed on <strong>LocalIntel</strong>, Florida's local business intelligence platform. Customers and AI agents are searching for businesses like yours right now.</p>
-<p>Claim your free profile to:</p>
-<ul>
-  <li>Receive job requests and RFQs directly</li>
-  <li>Get paid via LocalIntel when jobs complete</li>
-  <li>Show up first in local searches</li>
-</ul>
-<p><a href="${url}">Claim your profile →</a></p>
-<p style="color:#666;font-size:12px;">— The LocalIntel Team<br/>thelocalintel.com</p>`;
+  const ctaUrl   = `${CLAIM_BASE_URL}?biz=${biz.business_id}`;
+  const ctaLabel = 'Claim your free profile →';
+  const catLabel = biz.category ? biz.category.replace(/_/g, ' ') : 'local services';
+  const zipStr   = biz.zip ? ` in ${biz.zip}` : '';
+  return `
+<div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
+  <p style="font-size:16px">Hi <strong>${escapeHtml(biz.name)}</strong>,</p>
+  <p>Your business is already listed on <strong>LocalIntel</strong> — Florida's local commerce network built for the AI agent economy.</p>
+  <p>Customers and AI agents are searching for <strong>${escapeHtml(catLabel)}${zipStr}</strong> right now.
+  When someone requests your service, LocalIntel routes it directly to your inbox —
+  no middleman, no commission on search. You and the customer connect directly.</p>
+  <p style="margin:24px 0">
+    <a href="${ctaUrl}" style="background:#16A34A;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block">${ctaLabel}</a>
+  </p>
+  <p style="font-size:13px;color:#555">LocalIntel is free for businesses. Join the AI agent economy — let customers and their agents find you.</p>
+  <p style="font-size:12px;color:#999;margin-top:32px">
+    — The LocalIntel Team &nbsp;|&nbsp; <a href="https://www.thelocalintel.com" style="color:#999">thelocalintel.com</a><br/>
+    You're listed for ${escapeHtml(catLabel)} services${zipStr}.<br/>
+    <a href="https://www.thelocalintel.com/unsubscribe?biz=${biz.business_id}" style="color:#999">Unsubscribe</a>
+  </p>
+</div>`;
 }
 
 function escapeHtml(s) {
@@ -143,27 +154,47 @@ async function recordOutreach({ business_id, channel, message_sid = null, email_
   }
 }
 
+// Ensure claim_outreach table exists
+async function ensureTable() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS claim_outreach (
+      id           BIGSERIAL PRIMARY KEY,
+      business_id  TEXT NOT NULL,
+      channel      TEXT NOT NULL,
+      sent_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      message_sid  TEXT,
+      email_id     TEXT,
+      error        TEXT
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS claim_outreach_biz_idx ON claim_outreach(business_id, sent_at DESC)`);
+}
+
+
 async function run() {
   console.log('[claim-outreach] START');
   if (!LIVE_MODE) {
     console.log('[claim-outreach] ⚠️  DRY RUN MODE — set CLAIM_OUTREACH_LIVE=true in Railway env to send real messages');
   }
-  const limit = SMS_DAILY_LIMIT + EMAIL_DAILY_LIMIT;
+
+  await ensureTable();
+
+  const limit = EMAIL_DAILY_LIMIT; // SMS off
 
   const rows = await db.query(
     `SELECT b.business_id, b.name, b.phone, b.contact_email, b.zip, b.category, b.city
        FROM businesses b
-      WHERE b.claimed = false
-        AND b.status = 'active'
-        AND b.merchant_email IS NULL
-        AND (b.phone IS NOT NULL OR b.contact_email IS NOT NULL)
+      WHERE b.claimed_at IS NULL
+        AND b.status != 'inactive'
+        AND b.contact_email IS NOT NULL
         AND NOT EXISTS (
           SELECT 1 FROM claim_outreach co
            WHERE co.business_id = b.business_id
+             AND co.channel = 'email'
              AND co.sent_at > NOW() - INTERVAL '${OUTREACH_COOLDOWN_DAYS} days'
         )
       ORDER BY
-        (CASE WHEN b.phone IS NOT NULL AND b.contact_email IS NOT NULL THEN 0 ELSE 1 END),
+        confidence_score DESC NULLS LAST,
         b.name
       LIMIT $1`,
     [limit]
