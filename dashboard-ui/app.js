@@ -2262,6 +2262,12 @@ async function loadDeadEnds() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Load claim stats immediately and refresh every 60s
+  loadClaimStats();
+  setInterval(loadClaimStats, 60000);
+});
+
+document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.nav-item[data-section="transcripts"]').forEach(el => {
     el.addEventListener('click', () => setTimeout(loadTranscripts, 50));
   });
@@ -2358,6 +2364,23 @@ async function pauseAllWorkers() {
     btn.disabled = false;
     btn.textContent = 'Pause All Workers';
   }
+}
+
+// ── Claim Stats ─────────────────────────────────────────────────────────────
+async function loadClaimStats() {
+  try {
+    const r = await fetch(`${LI_BASE}/claim-stats`);
+    const d = await r.json();
+    if (!d.ok) return;
+    const el = document.getElementById('li-claim-stats');
+    if (!el) return;
+    el.innerHTML = `
+      <span title="Emails delivered">📤 ${d.outreach.delivered} delivered</span> &nbsp;|&nbsp;
+      <span title="Failed sends">❌ ${d.outreach.failed} failed</span> &nbsp;|&nbsp;
+      <span title="Businesses claimed after outreach">🏆 ${d.claimed_after_outreach} claimed</span> &nbsp;|&nbsp;
+      <span title="Total claimed businesses">Total claimed: ${d.claimed_total}</span>
+    `;
+  } catch (e) { /* silent */ }
 }
 
 // ── Business Outreach panel ───────────────────────────────────────────────────

@@ -8584,6 +8584,48 @@ router.get('/email-stats', async (req, res) => {
   }
 });
 
+// GET /api/local-intel/claim-stats — outreach funnel: sent → claimed
+router.get('/claim-stats', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  try {
+    const [outreach] = await db.query(`
+      SELECT
+        COUNT(*)                                             AS total_sent,
+        COUNT(*) FILTER (WHERE error IS NULL)               AS delivered,
+        COUNT(*) FILTER (WHERE error IS NOT NULL)           AS failed,
+        COUNT(DISTINCT business_id)                         AS unique_businesses,
+        MIN(sent_at)                                        AS first_sent,
+        MAX(sent_at)                                        AS last_sent
+      FROM claim_outreach
+      WHERE channel = 'email'
+    `);
+    const [claimed] = await db.query(`
+      SELECT COUNT(*) AS total_claimed
+      FROM businesses
+      WHERE claimed_at IS NOT NULL
+    `);
+    const [recent] = await db.query(`
+      SELECT COUNT(*) AS claimed_after_outreach
+      FROM businesses b
+      WHERE b.claimed_at IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM claim_outreach co
+          WHERE co.business_id = b.business_id
+            AND co.error IS NULL
+            AND b.claimed_at > co.sent_at
+        )
+    `);
+    return res.json({
+      ok: true,
+      outreach,
+      claimed_total: claimed.total_claimed,
+      claimed_after_outreach: recent.claimed_after_outreach,
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/admin/stats', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   const role = adminAuth(req, res);
