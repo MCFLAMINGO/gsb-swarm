@@ -8584,6 +8584,33 @@ router.get('/email-stats', async (req, res) => {
   }
 });
 
+// POST /api/local-intel/admin/set-pos — set pos_type on a business (admin only)
+// Body: { business_id, pos_type }
+router.post('/admin/set-pos', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const token = req.headers['x-admin-token'] || req.query.admin_token;
+  if (token !== (process.env.LOCAL_INTEL_ADMIN_TOKEN || '') && token !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const { business_id, pos_type } = req.body || {};
+  if (!business_id || !pos_type) return res.status(400).json({ error: 'business_id and pos_type required' });
+  try {
+    await db.query(
+      `UPDATE businesses
+          SET pos_config = jsonb_set(COALESCE(pos_config, '{}'::jsonb), '{pos_type}', $1::jsonb)
+        WHERE business_id = $2`,
+      [JSON.stringify(pos_type), business_id]
+    );
+    const [biz] = await db.query(
+      `SELECT business_id, name, pos_config FROM businesses WHERE business_id = $1`,
+      [business_id]
+    );
+    return res.json({ ok: true, updated: biz });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/local-intel/admin/biz-id?name=mcflamingo — get business_id by name (admin only)
 router.get('/admin/biz-id', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
