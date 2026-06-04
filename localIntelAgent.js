@@ -8584,6 +8584,29 @@ router.get('/email-stats', async (req, res) => {
   }
 });
 
+// GET /api/local-intel/admin/biz-id?name=mcflamingo — get business_id by name (admin only)
+router.get('/admin/biz-id', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const role = adminAuth(req, res);
+  if (!role) return res.status(401).json({ error: 'unauthorized' });
+  const name = (req.query.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name required' });
+  try {
+    const rows = await db.query(
+      `SELECT business_id, name, zip, wallet, claimed_at,
+              pos_config->>'pos_type' AS pos_type
+         FROM businesses
+        WHERE LOWER(name) LIKE LOWER($1)
+        ORDER BY claimed_at DESC NULLS LAST
+        LIMIT 5`,
+      [`%${name}%`]
+    );
+    return res.json({ ok: true, results: rows });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/local-intel/claim-stats — outreach funnel: sent → claimed
 router.get('/claim-stats', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
