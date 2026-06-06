@@ -925,6 +925,55 @@ const VERTICAL_VOCAB = {
     'tropical vibes yard','fire pit sesh','curb appeal era',
     'pool lanai combo','backyard oasis','artificial turf save','privacy hedge moment',
     'yard situation','landscape quotes','how much for lanai','outdoor refresh',
+    // ── Gig Worker / Independent Service Provider Types ──
+    // Transportation & Delivery
+    'private driver','personal driver','private chauffeur','airport driver','airport transfer',
+    'black car service','limo service','town car','party bus',
+    'food delivery','meal delivery','grocery delivery','pharmacy delivery','medical delivery',
+    'local delivery','same day delivery','courier service','package delivery','last mile delivery',
+    'laundry pickup','laundry delivery','dry cleaning pickup','office lunch delivery',
+    'meal kit delivery','healthy meal delivery','eco friendly delivery',
+    // Home & Personal Services
+    'house cleaner','home cleaning','apartment cleaning','move out cleaning','deep clean',
+    'maid service','recurring cleaning','weekly cleaning','biweekly cleaning',
+    'handyman service','odd jobs','small repairs','furniture assembly','ikea assembly',
+    'moving help','moving labor','loading help','packing help','moving assistance',
+    'dog walker','dog walking','pet sitter','pet sitting','house sitter','house sitting',
+    'cat sitter','pet care','overnight pet care','vacation pet care',
+    'babysitter','babysitting','nanny','childcare','after school care',
+    'elder care','senior care','companion care','errand service','grocery errand',
+    'tutor','tutoring','private tutor','math tutor','reading tutor','test prep',
+    'music lessons','guitar lessons','piano lessons','drum lessons','voice lessons',
+    'personal trainer','private trainer','in home trainer','fitness coach',
+    'yoga instructor','private yoga','pilates instructor',
+    // Creative & Digital Freelance
+    'freelance photographer','event photographer','portrait photographer','headshot photographer',
+    'freelance videographer','video editor','content creator','social media manager',
+    'freelance writer','copywriter','blog writer','content writer',
+    'graphic designer','logo designer','brand designer','freelance designer',
+    'web developer','freelance developer','website builder','wordpress developer',
+    'virtual assistant','va services','remote assistant','admin assistant',
+    'bookkeeper','freelance bookkeeper','quickbooks bookkeeper',
+    // Skilled trades / independent
+    'independent plumber','independent electrician','independent hvac','independent contractor',
+    'freelance handyman','gig handyman',
+    // Gig economy / platform alternatives
+    'uber alternative','lyft alternative','doordash alternative','instacart alternative',
+    'taskrabbit alternative','rover alternative','independent service provider',
+    'gig worker','gig economy','side hustle','side gig','freelancer','independent contractor',
+    'own my business','start my business','be my own boss','self employed',
+    'sunbiz registration','florida llc','form an llc','start an llc','business formation',
+    // Search phrases
+    'private driver near me','personal driver near me','airport transfer near me',
+    'dog walker near me','pet sitter near me','house sitter near me',
+    'tutor near me','private tutor near me','music lessons near me',
+    'personal trainer near me','yoga instructor near me',
+    'freelance photographer near me','headshot photographer near me',
+    'house cleaner near me','cleaning service near me','deep clean near me',
+    'handyman near me','furniture assembly near me','moving help near me',
+    'food delivery independent','local food delivery','local courier',
+    'need a ride','need a driver','need someone to','looking for someone to',
+    'i need help with','can someone','hire someone to',
 
   ],
 
@@ -1379,9 +1428,25 @@ const VERTICAL_SIGNALS = {
     'edible garden|vegetable garden install|rock garden|xeriscape|sustainable landscaping|' +
     'permeable pavers|rainwater harvest|erosion control|grading drainage|tropical landscaping|' +
     'curb appeal makeover|front yard makeover|landscape design|full property maintenance|' +
-    'screened lanai quotes|pool cage addition|backyard oasis|artificial turf save',
+    'screened lanai quotes|pool cage addition|backyard oasis|artificial turf save|' +
+    // Gig worker / independent service searches
+    'private driver|personal driver|airport transfer|black car service|limo service|' +
+    'food delivery|meal delivery|grocery delivery|pharmacy delivery|local delivery|courier service|' +
+    'laundry pickup|meal kit delivery|dog walker|dog walking|pet sitter|pet sitting|house sitter|' +
+    'house cleaner|home cleaning|deep clean|maid service|moving help|moving labor|furniture assembly|' +
+    'babysitter|babysitting|elder care|senior care|errand service|' +
+    'private tutor|music lessons|guitar lessons|piano lessons|personal trainer|in home trainer|' +
+    'yoga instructor|pilates instructor|' +
+    'freelance photographer|headshot photographer|freelance videographer|content creator|' +
+    'social media manager|freelance writer|copywriter|graphic designer|logo designer|' +
+    'web developer|freelance developer|virtual assistant|freelance bookkeeper|' +
+    'gig worker|side hustle|side gig|freelancer|independent contractor|self employed|' +
+    'sunbiz registration|florida llc|form an llc|start an llc|business formation|' +
+    'need a ride|need a driver|need someone to|looking for someone to|' +
+    'i need help with|hire someone to|be my own boss',
     'i'
   ),
+
   realtor:      /real estate|\brealtor\b|mortgage broker|loan officer|title company|home stager|days on market|cap rate|\bforeclosure\b|homeowners assoc|\bzoning\b|single family|multifamily|listing agent|buyers agent/i,
 };
 
