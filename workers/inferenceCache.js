@@ -385,6 +385,40 @@ const VERTICAL_VOCAB = {
     'pulled a brick','pack luck','set is mid','completed the set','psa 10 pop 1',
     'card is fire','card is clean','off-centered','beater card',
     'investment flip card','sealed investment','grail card','grail pull',
+    // ── Sports Equipment (Student & Pro, 2026) ──
+    'dumbbells','adjustable weights','neoprene weights','resistance bands','resistance loops','mobility bands',
+    'exercise mat','yoga mat','foam roller','massage gun','hyperice','portable sauna','ice bath',
+    'agility ladder','speed cones','training cones','jump rope','weighted jump rope','speed rope',
+    'owala bottle','sports water bottle',
+    'basketball','indoor basketball','outdoor basketball','composite basketball','leather game ball',
+    'basketball shoes','high tops','ankle brace','ankle sleeve','shooting sleeve','arm band',
+    'dribble goggles','weighted basketball',
+    'soccer cleats','football cleats','firm ground cleats','turf cleats','molded cleats',
+    'soccer ball','match ball','training ball','rugby ball',
+    'mouthguard','shin guards','shoulder pads','football helmet','receiver gloves','goalkeeper gloves',
+    'compression shorts','compression tights','portable goal','practice net',
+    'nike mercurial','adidas predator','custom mouthguard',
+    'baseball glove','softball glove','catchers mitt','fielders glove',
+    'aluminum bat','composite bat','bbcor bat','youth bat',
+    'baseball','softballs','batting helmet','baseball cleats','batting gloves','batting tee','pitching net',
+    'tennis racket','pickleball paddle','racquetball racket','badminton racket',
+    'tennis balls','pickleball balls','overgrip','tennis grip','court shoes','racket bag',
+    'wilson racket','babolat racket','head racket',
+    'running shoes','distance trainers','track spikes','carbon plate shoes',
+    'compression socks running','compression sleeves','running headband','running visor',
+    'gps watch','fitness tracker','garmin watch','parachute trainer','resistance harness',
+    'golf clubs','golf irons','golf driver','golf wedge','golf putter',
+    'golf balls','golf tees','golf glove','golf rangefinder','golf bag',
+    'swim goggles','swim cap','swim fins','pull buoy','kickboard','swim paddles',
+    'volleyball','volleyball kneepads','volleyball net','volleyball shoes',
+    'hockey stick','ice skates','hockey pads','hockey helmet','hockey gloves','field hockey stick',
+    'fresh cleats','cleats are gas','new trainers','broke in trainers',
+    'game ball','practice rock','new stick','fresh bat','strung up my racket',
+    'mouthguard game','strapped up','ankle sleeve on lock',
+    'agility ladder sesh','band work','hitting the roller',
+    'compression game','new dri-fit','practice uniform','fresh kit','new gear drop',
+    'budget cop','for tryouts','sponsor gear','custom fit','pro model',
+    'full kit refresh','gear check','team issued','these boots are cheating',
     'shadowless card','first edition card',
   ],
 
@@ -666,7 +700,19 @@ const VERTICAL_SIGNALS = {
     'card sleeve|top loader|card binder|grading submission|whatnot break|group break|live break|' +
     'ripping packs|pack rip|chase card|god pack|alt art|full art card|secret rare|holo card|' +
     'copped some slabs|added to the pc|ebay snipe|payday rip|pulled a brick|pack luck|' +
-    'card is mooning|card stonks|low pop report|investment flip|sealed investment|grail card|grail pull',
+    'card is mooning|card stonks|low pop report|investment flip|sealed investment|grail card|grail pull|' +
+    // Sports equipment
+    'dumbbells|adjustable weights|resistance bands|agility ladder|foam roller|massage gun|jump rope|' +
+    'basketball shoes|high tops|ankle brace|shooting sleeve|dribble goggles|' +
+    'soccer cleats|football cleats|turf cleats|shin guards|receiver gloves|goalkeeper gloves|' +
+    'bbcor bat|composite bat|baseball glove|catchers mitt|batting tee|' +
+    'tennis racket|pickleball paddle|overgrip|wilson racket|babolat racket|' +
+    'running shoes|track spikes|carbon plate shoes|gps watch|resistance harness|' +
+    'golf clubs|golf rangefinder|swim goggles|pull buoy|volleyball kneepads|hockey stick|ice skates|' +
+    'fresh cleats|cleats are gas|new trainers|game ball|practice rock|new stick|fresh bat|' +
+    'mouthguard game|strapped up|ankle sleeve|agility ladder sesh|band work|hitting the roller|' +
+    'compression game|new dri-fit|fresh kit|new gear drop|budget cop|for tryouts|' +
+    'sponsor gear|pro model|full kit refresh|gear check|these boots are cheating',
     'i'
   ),
   beauty: new RegExp(
