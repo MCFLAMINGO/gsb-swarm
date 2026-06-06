@@ -99,6 +99,27 @@ const INTENT_SIGNALS = {
   ],
 };
 
+// Task/order intent — direct routing to local_intel_rfq regardless of vertical
+// Fires when a customer agent wants to GET something done, not just find information
+const TASK_SIGNALS = [
+  /\border\b/i,
+  /\bplace an order\b/i,
+  /\bi (want|need|would like) (a |an |some |to )?(food|lunch|dinner|breakfast|meal|pizza|burger|taco|sushi|sandwich|coffee|drink|delivery|pickup)/i,
+  /\bget (food|lunch|dinner|breakfast|a meal|delivery|pickup)\b/i,
+  /\bdeliver(y|ed) to\b/i,
+  /\bpick ?up (from|at|order)\b/i,
+  /\bbook (a |an )?(appointment|service|job|contractor|cleaner|landscaper|plumber|electrician|handyman)\b/i,
+  /\bhire (a |an )?(contractor|landscaper|plumber|electrician|handyman|cleaner|driver|mover)\b/i,
+  /\b(mow|cut|trim) (my )?(lawn|grass|yard)\b/i,
+  /\b(fix|repair|install|replace|clean) (my )?(roof|hvac|pipe|drain|fence|driveway|pool|ac|air)/i,
+  /\bsend (a |an )?(driver|courier|delivery)\b/i,
+  /\bi need (someone|a person|a business|a company) to\b/i,
+  /\bcan (someone|a business|you) (come|help|do|fix|make|bring|deliver)\b/i,
+  /\blooking for (someone|a business|a contractor|a driver) to\b/i,
+  /\bget (it|this|that) done\b/i,
+  /\brequest (a |an )?(quote|bid|estimate|service|job)\b/i,
+];
+
 // Zone/demographics intent — direct routing to local_intel_zone regardless of vertical
 const ZONE_SIGNALS = [
   /\bpopulation\b/i,
@@ -122,12 +143,19 @@ const ZONE_SIGNALS = [
  * Zone fires before vertical detection — demographics questions always go to local_intel_zone.
  */
 function detectIntent(query) {
+  // Task/order intent fires first — agent wants to get something done
+  for (const pattern of TASK_SIGNALS) {
+    if (pattern.test(query)) return 'task';
+  }
+  // Lookup: find existing businesses/providers
   for (const pattern of INTENT_SIGNALS.lookup) {
     if (pattern.test(query)) return 'lookup';
   }
+  // Zone: demographics/income/population
   for (const pattern of ZONE_SIGNALS) {
     if (pattern.test(query)) return 'zone';
   }
+  // Market: gap analysis, saturation, opportunity
   for (const pattern of INTENT_SIGNALS.market) {
     if (pattern.test(query)) return 'market';
   }
@@ -266,10 +294,13 @@ function detectRegion(query) {
 function pickTool(query, vertical) {
   const intent = detectIntent(query);
 
-  // Lookup intent always wins — user wants a list, not market analysis
+  // Task/order intent — route to RFQ so a business can fulfill it
+  if (intent === 'task') return 'local_intel_rfq';
+
+  // Lookup intent — user wants a list of existing businesses
   if (intent === 'lookup') return 'local_intel_search';
 
-  // Zone/demographics intent — always route to local_intel_zone regardless of vertical
+  // Zone/demographics intent — always route to local_intel_zone
   if (intent === 'zone') return 'local_intel_zone';
 
   // Market intent + no vertical → oracle (general market question)
