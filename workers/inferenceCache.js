@@ -127,6 +127,43 @@ const VERTICAL_VOCAB = {
     // market terms
     'cuisine','daypart gap','food cost','covers','table turns',
     'food saturation','restaurant density','dining saturation',
+    // ── Grocery / Food Products (2026 Amazon/Walmart top searches) ──
+    'celsius energy drink','celsius variety pack','monster energy','monster zero ultra',
+    'premier protein shake','core power shake','protein shake','protein drink',
+    'nespresso pods','coffee pods','keurig pods','k-cup','nespresso vertuo',
+    'sparkling water','flavored sparkling water','la croix','bubly','perrier sparkling',
+    'sparkling ice','bloom nutrition','prebiotic soda','olipop','poppi soda',
+    'protein water','bodyarmor drink','gatorade','electrolyte drink','electrolyte packet',
+    'bone broth','collagen drink','mushroom coffee','functional mushroom drink',
+    'bananas','banana bunch','blueberries','strawberries','avocados','hass avocado',
+    'mini cucumbers','english cucumber','baby spinach','salad kit','spring mix',
+    'lemons','limes','honeycrisp apples','gala apples','tomatoes on the vine','bell peppers',
+    'frito lay variety pack','goldfish crackers','oreos','cheez-its','popchips','veggie straws',
+    'kind bar','rxbar','quest bar','protein bar','trail mix','chips ahoy','nutter butter',
+    'beef jerky','jack links','nuts and seeds','granola bar','snack pack',
+    'gum','mints','chocolate bar','hershey bar','lindt chocolate',
+    'olive oil','california olive ranch','barilla pasta','de cecco pasta',
+    'jasmine rice','basmati rice','lundberg rice',
+    'canned tuna','starkist tuna','canned chicken','peanut butter','jif peanut butter','skippy',
+    'honey','raw honey','mccormick spices','baking soda','baking powder','flour','sugar',
+    'canned beans','bush beans','canned tomatoes','pasta sauce',
+    'soy sauce','gochujang','hot sauce','cholula','franks hot sauce','sriracha',
+    'ketchup','salad dressing','hidden valley ranch','newmans own','maple syrup','nutella',
+    'greek yogurt','chobani','fage yogurt','oat milk','oatly','almond milk','silk milk','califia farms',
+    'large eggs','egglands best','cheerios','breakfast cereal','instant oatmeal','quaker oats',
+    'protein pancake mix','granola','kind granola','bear naked granola',
+    'butter','plant butter','earth balance','cheese sticks','string cheese','dave killer bread',
+    'frozen pizza','digiorno pizza','frozen meals','chicken nuggets','tyson chicken',
+    'ice cream','haagen-dazs','ben and jerrys',
+    'veggie burger','beyond meat','impossible burger','plant based meat',
+    'collagen powder','collagen peptides','greens powder','ag1','athletic greens',
+    'beef tallow','grass fed beef tallow','chia seeds','quinoa','flaxseed',
+    'gluten free snack','keto snack','low carb snack','vegan cheese','dairy free',
+    'protein powder','whey protein','plant protein',
+    'grocery haul','grocery run','pantry restock','fridge restock','costco run','target run',
+    'whole foods haul','trader joes haul','walmart grocery','amazon fresh order',
+    'protein slush','coffee pod restock','healthy grocery','meal prep haul','snack restock',
+    'bulk buy','kirkland brand','clean eating haul',
   ],
 
   healthcare: [
@@ -761,7 +798,22 @@ for (const [vertical, terms] of Object.entries(VERTICAL_VOCAB)) {
 
 // Regex fast-path for strong single-keyword signals
 const VERTICAL_SIGNALS = {
-  restaurant:   /\brestaurant\b|\bdining\b|bartend|barback|\bbusser\b|line cook|sous chef|prep cook|pastry chef|sommelier|\bbarista\b|\bfoh\b|\bboh\b|dishwasher|expeditor|\bbrewery\b|gastropub/i,
+  restaurant: new RegExp(
+    '\\brestaurant\\b|\\bdining\\b|bartend|barback|\\bbusser\\b|line cook|sous chef|prep cook|' +
+    'pastry chef|sommelier|\\bbarista\\b|\\bfoh\\b|\\bboh\\b|dishwasher|expeditor|\\bbrewery\\b|gastropub|' +
+    // Grocery & food product searches
+    'celsius energy|monster energy|premier protein|core power shake|protein shake|' +
+    'nespresso pods|coffee pods|keurig pods|sparkling water|la croix|prebiotic soda|olipop|poppi|' +
+    'bone broth|collagen powder|greens powder|mushroom coffee|electrolyte packet|' +
+    'grocery haul|grocery run|pantry restock|fridge restock|costco run|target run|' +
+    'whole foods haul|trader joes|amazon fresh|healthy grocery|meal prep haul|snack restock|' +
+    'protein slush|coffee pod restock|bulk buy|kirkland|' +
+    'olive oil|pasta sauce|canned tuna|peanut butter|hot sauce|sriracha|gochujang|' +
+    'oat milk|almond milk|greek yogurt|chobani|plant based|beyond meat|impossible burger|' +
+    'collagen peptides|beef tallow|grass fed|gluten free|keto snack|vegan cheese|' +
+    'frozen pizza|chicken nuggets|veggie burger|frozen meals',
+    'i'
+  ),
   healthcare:   /urgent care|walk.in clinic|\bpharmacy\b|physical therap|occupational therap|speech therap|chiropract|dermatolog|cardiolog|orthoped|neurolog|psychiatr|psycholog|acupunctur|med spa|medspa|aestheti|\bimaging\b|\bmri\b|\binfusion\b|\bhospice\b|podiatr|pain manag|hormone clinic|iv therap|\bobgyn\b|gynecolog|fertility clinic|audiolog|naturopath/i,
   retail: new RegExp(
     '\\bboutique\\b|supermarket|convenience store|sporting goods|\\bpet store\\b|hardware store|' +
