@@ -99,13 +99,34 @@ const INTENT_SIGNALS = {
   ],
 };
 
+// Zone/demographics intent — direct routing to local_intel_zone regardless of vertical
+const ZONE_SIGNALS = [
+  /\bpopulation\b/i,
+  /\bdemographics?\b/i,
+  /\bmedian (income|household|hhi|home value|rent)\b/i,
+  /\bhousehold income\b/i,
+  /\bhome value\b/i,
+  /\bhow many (people|residents|households)\b/i,
+  /\bwho lives (in|around|near)\b/i,
+  /\bage (distribution|breakdown|profile)\b/i,
+  /\bowner.occupi\b/i,
+  /\brent(ers|al rate|vs own)\b/i,
+  /\bzone (score|data|info|stats)\b/i,
+  /\bspending zone\b/i,
+  /\bincome (level|data|stats|profile)\b/i,
+];
+
 /**
- * detectIntent(query) → 'lookup' | 'market' | null
+ * detectIntent(query) → 'lookup' | 'market' | 'zone' | null
  * Lookup always wins over market if both match — the user wants a list, not analysis.
+ * Zone fires before vertical detection — demographics questions always go to local_intel_zone.
  */
 function detectIntent(query) {
   for (const pattern of INTENT_SIGNALS.lookup) {
     if (pattern.test(query)) return 'lookup';
+  }
+  for (const pattern of ZONE_SIGNALS) {
+    if (pattern.test(query)) return 'zone';
   }
   for (const pattern of INTENT_SIGNALS.market) {
     if (pattern.test(query)) return 'market';
@@ -247,6 +268,9 @@ function pickTool(query, vertical) {
 
   // Lookup intent always wins — user wants a list, not market analysis
   if (intent === 'lookup') return 'local_intel_search';
+
+  // Zone/demographics intent — always route to local_intel_zone regardless of vertical
+  if (intent === 'zone') return 'local_intel_zone';
 
   // Market intent + no vertical → oracle (general market question)
   if (intent === 'market' && !vertical) return 'local_intel_oracle';
