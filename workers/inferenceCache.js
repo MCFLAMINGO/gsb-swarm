@@ -511,6 +511,37 @@ const VERTICAL_VOCAB = {
     'plus size leggings','plus size dress','maternity dress','maternity leggings',
     'looks expensive but cheap','dupe outfit','amazon fashion find',
     'that girl athleisure','coquette outfit','coquette dress','floral coquette',
+    // ── Dating Products, Gifts & Experiences (2026) ──
+    'tinder premium','hinge preferred','bumble premium','dating app subscription',
+    'dating profile glow-up','ai dating coach',
+    'we are not really strangers','conversation cards','couples card game',
+    'scratch off date ideas','date night box','date night kit','date night card game',
+    'massage oil','massage candle','couples massage kit',
+    'picnic basket','picnic kit','outdoor date kit',
+    'wine making kit','cocktail kit','couples cocktail set',
+    'couples board game','movie projector portable','home projector','popcorn maker',
+    'experience gift card','cooking class gift','escape room gift',
+    'custom photo book','custom frame couples',
+    'condoms','trojan condoms','durex condoms','non latex condoms',
+    'water based lube','lubricant','astroglide','uberlube','silicone lube',
+    'couples vibrator','couples toy','we-vibe','lelo toy',
+    'blindfold kit','light bondage','edible body products','edible underwear',
+    'delay spray','intimate wipes','intimate cleanser',
+    'personalized necklace','initial necklace','couples necklace','custom jewelry couples',
+    'custom star map','our night print','forever rose','preserved rose',
+    'chocolate gift box','gourmet chocolate','romantic gift box',
+    'scented candle romantic','couples mugs','matching mugs',
+    'five love languages book','love languages book','dating advice book',
+    'bond touch bracelet','long distance gift','friendship lamp',
+    'flower delivery','bouquet delivery','surprise flowers',
+    'date night haul','pre date panic shopping','rizz kit','situationship survival kit',
+    'green flag date','main character dating','relationship glow-up',
+    'spicy box restock','bedroom drawer refresh','new toy drop',
+    'lube restock','condom run','vibe check bedroom',
+    'boosting my hinge','tinder premium era','profile glow-up','swipe tax',
+    'smelling like a snack','date cart','adding to the date cart',
+    'post date recovery kit','hangover bag','breath mint emergency',
+    'dating app detox','confidence era','situationship starter pack',
     // ── Tech / Electronics (Best Buy / Amazon 2026) ──
     // TVs & Home Theater
     'oled tv','mini-led tv','qled tv','samsung oled','lg oled','sony bravia','tcl tv','hisense tv',
@@ -1046,6 +1077,13 @@ const BEAUTY_TERMS = [
   'high maintenance','pre event glow up','wedding ready','date night refresh',
   'glow up','quick touch up','touch up appointment','quick refresh',
   'everything done','all done up','got glam',
+  // ── Dating Prep (Grooming & Beauty) ──
+  'date night cologne','first date cologne','smelling like a snack','cologne for dates',
+  'date night perfume','smelling expensive','beard trim for date','fresh lineup date',
+  'skincare before date','glass skin before date','teeth whitening for date','smile check',
+  'dewy makeup date','lash lift for date','manscaped everything','below the belt maintenance',
+  'first date shower','date night glow up','first date armor','pre date grooming',
+  'full grooming sesh','date prep','rizz kit','pulling game',
 ];
 
 // Merge beauty terms into VERTICAL_VOCAB so _termIndex picks them up
@@ -1098,6 +1136,18 @@ const VERTICAL_SIGNALS = {
     'holy grail|\\bhaul\\b|comfy but cute|cozy hoodie|' +
     'skincare routine|skincare girly|self.care goodies|wellness girl|' +
     'it bag|structured tote|woven bag|everyday carry|stacked jewelry|gold hoops|' +
+    'tinder premium|hinge preferred|bumble premium|dating app subscription|dating profile glow.?up|' +
+    'conversation cards|date night card|date night box|date night kit|scratch off date|' +
+    'massage oil|massage candle|picnic basket|wine making kit|cocktail kit|couples board game|' +
+    'experience gift card|custom photo book|custom star map|forever rose|preserved rose|' +
+    'trojan condoms|durex condoms|water based lube|lubricant|astroglide|' +
+    'couples vibrator|couples toy|we.vibe|delay spray|intimate wipes|' +
+    'personalized necklace|initial necklace|chocolate gift box|romantic gift box|' +
+    'five love languages|bond touch bracelet|flower delivery|bouquet delivery|' +
+    'date night haul|rizz kit|situationship|spicy box|bedroom drawer refresh|' +
+    'lube restock|condom run|vibe check bedroom|love language gift|' +
+    'boosting my hinge|profile glow.?up|swipe tax|dating app detox|' +
+    'smelling like a snack|below the belt maintenance|' +
     // Men's product searches
     'boxer briefs|mens underwear|moisture wicking|athletic shorts|gym shorts|compression pants|' +
     'quarter zip|bomber jacket|flannel overshirt|carhartt|work boots|hiking boots|dad shoes|' +
@@ -1216,9 +1266,14 @@ const VERTICAL_SIGNALS = {
     'getting waxed|getting smooth|fake tan|spray tan done|hair blown out|' +
     'lash botox|lashes popped|face done|skin reboot|face card refresh|' +
     'fresh blow|blowout refresh|roots done|color done|touch up my|' +
-    'maintenance wax|full body refresh|getting a blowout',
+    'maintenance wax|full body refresh|getting a blowout|' +
+    'date night cologne|first date cologne|smelling like a snack|smelling expensive|' +
+    'beard trim for date|glass skin before date|teeth whitening for date|' +
+    'date night glow.?up|first date outfit|date night fit|' +
+    'rizz kit|pulling game|full grooming sesh|pre.?date grooming|first date armor',
     'i'
   ),
+
   legal: new RegExp(
     // Practice types
     '\\blawyer\\b|\\battorney\\b|law firm|law office|legal aid|pro bono|legal counsel|litigation|' +
