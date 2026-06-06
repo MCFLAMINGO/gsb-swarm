@@ -337,6 +337,86 @@ const VERTICAL_VOCAB = {
   ],
 };
 
+// ── Beauty & Personal Care taxonomy ─────────────────────────────────────────
+// Covers hair, nails, skin, brows/lashes, body, waxing, and medspa-adjacent services.
+// Each term maps to the 'beauty' vertical so searches like "I need a Brazilian blowout"
+// or "gel manicure near me" route to salons/spas, not landscapers.
+const BEAUTY_TERMS = [
+  // ── Venues ──
+  'hair salon','nail salon','beauty salon','day spa','medspa','med spa','medical spa',
+  'barbershop','barber shop','blow dry bar','blowout bar','lash studio','brow bar',
+  'tanning salon','spray tan studio','waxing studio','waxing center','threading salon',
+  'skin care clinic','aesthetics studio','cosmetic studio',
+
+  // ── Hair Services ──
+  'haircut','women\'s haircut','men\'s haircut','kids haircut',
+  'hair styling','blowout','blow dry','blowout service',
+  'hair color','hair colour','root touch-up','root touch up','gray coverage','grey coverage',
+  'highlights','partial highlights','full highlights',
+  'balayage','ombre','sombre','color melt','babylights','foilayage',
+  'keratin treatment','keratin','brazilian blowout','smoothing treatment','frizz treatment',
+  'deep conditioning','olaplex','bond repair','hair mask','protein treatment',
+  'scalp treatment','scalp facial','scalp massage',
+  'hair extensions','tape-in extensions','tape in extensions','sew-in extensions',
+  'clip-in extensions','weft extensions','halo extensions','fusion extensions',
+  'perm','body wave','relaxer','hair straightening','chemical straightening',
+  'updo','wedding hair','bridal hair','event styling','formal style','prom hair',
+  'trim','dusting','split end treatment',
+
+  // ── Nail Care ──
+  'manicure','spa manicure','gel manicure','gel nails',
+  'pedicure','spa pedicure','gel pedicure',
+  'dip powder','dip nails','acrylic nails','acrylics','gel-x','gel x','hard gel',
+  'nail overlay','nail overlay service','nail extensions','press-on nails',
+  'nail art','nail design','chrome nails','nail embellishments',
+  'paraffin treatment','paraffin wax hands','paraffin wax feet',
+  'mani pedi','mani-pedi','manicure and pedicure',
+  'nail fill','acrylic fill','gel fill',
+  'nail removal','soak off',
+
+  // ── Skin & Facial Treatments ──
+  'facial','customized facial','hydrating facial','anti-aging facial',
+  'acne facial','brightening facial','deep cleansing facial',
+  'chemical peel','light peel','medium peel','glycolic peel','lactic peel','vi peel',
+  'microdermabrasion','diamond microderm','crystal microderm',
+  'dermaplaning','dermaplaning facial',
+  'hydrafacial','hydra facial','hydrafacial treatment',
+  'microneedling','rf microneedling','prp microneedling','collagen induction',
+  'laser facial','laser resurfacing','laser skin treatment','ipl treatment','ipl photofacial',
+  'led light therapy','red light therapy',
+  'oxygen facial','collagen facial',
+
+  // ── Brows, Lashes & Makeup ──
+  'brow shaping','eyebrow waxing','eyebrow threading','brow tinting','brow lamination',
+  'lash extensions','classic lashes','volume lashes','hybrid lashes','mega volume lashes',
+  'lash lift','lash tint','lash lift and tint',
+  'makeup application','professional makeup','event makeup','bridal makeup','prom makeup',
+  'airbrush makeup','airbrush foundation',
+  'microblading','ombre brows','powder brows','nano brows','permanent eyebrows',
+  'permanent makeup','semi-permanent makeup','lip blushing','permanent liner',
+
+  // ── Body & Hair Removal ──
+  'waxing','brow wax','lip wax','chin wax','face wax','underarm wax','arm wax',
+  'leg wax','full leg wax','half leg wax','back wax','chest wax',
+  'bikini wax','brazilian wax','brazilian','full body wax',
+  'laser hair removal','laser hair reduction','ipl hair removal',
+  'threading','facial threading','upper lip threading',
+  'spray tan','sunless tan','airbrush tan',
+  'body scrub','body wrap','body exfoliation','sugar scrub',
+  'massage','swedish massage','deep tissue massage','hot stone massage',
+  'prenatal massage','couples massage','sports massage','reflexology',
+
+  // ── Specialized / Medspa ──
+  'teeth whitening','zoom whitening','professional whitening',
+  'botox','filler','lip filler','cheek filler','dermal filler','juvederm','restylane',
+  'kybella','prp','platelet rich plasma',
+  'body contouring','coolsculpting','emsculpt','radiofrequency body','ultrasound body',
+  'skin tightening','rf skin tightening',
+];
+
+// Merge beauty terms into VERTICAL_VOCAB so _termIndex picks them up
+VERTICAL_VOCAB.beauty = (VERTICAL_VOCAB.beauty || []).concat(BEAUTY_TERMS);
+
 // Build reverse index: term → vertical (used by scorer)
 const _termIndex = new Map();
 for (const [vertical, terms] of Object.entries(VERTICAL_VOCAB)) {
@@ -350,7 +430,49 @@ const VERTICAL_SIGNALS = {
   restaurant:   /\brestaurant\b|\bdining\b|bartend|barback|\bbusser\b|line cook|sous chef|prep cook|pastry chef|sommelier|\bbarista\b|\bfoh\b|\bboh\b|dishwasher|expeditor|\bbrewery\b|gastropub/i,
   healthcare:   /urgent care|walk.in clinic|\bpharmacy\b|physical therap|occupational therap|speech therap|chiropract|dermatolog|cardiolog|orthoped|neurolog|psychiatr|psycholog|acupunctur|med spa|medspa|aestheti|\bimaging\b|\bmri\b|\binfusion\b|\bhospice\b|podiatr|pain manag|hormone clinic|iv therap|\bobgyn\b|gynecolog|fertility clinic|audiolog|naturopath/i,
   retail:       /\bboutique\b|supermarket|convenience store|sporting goods|\bpet store\b|hardware store|visual merchand|loss prevention|\bcashier\b|sales associate|retail manager|merchandise planner/i,
-  beauty:        /\bnails?\b|\bmanicure\b|\bpedicure\b|\bwax(ing|ed)?\b|\bhair cut\b|\bhaircut\b|\bhair style\b|\bblowout\b|\bbalayage\b|\bhighlights\b|\bhair color\b|\bbarbershop\b|\bbarber shop\b|\bbarber\b|\beyelash\b|\beyebrow\b|\btanning\b|\bbody wax\b|\bbrazilian\b|\bfacial\b|\bskin care\b|nail salon|hair salon|beauty salon|\bspa\b(?!.*med)/i,
+  beauty: new RegExp(
+    // Venues
+    'hair salon|nail salon|beauty salon|blow.?dry bar|blowout bar|lash studio|brow bar|' +
+    'tanning salon|spray tan studio|waxing (studio|center)|threading salon|skin.?care clinic|' +
+    'aesthetics studio|barbershop|barber shop|day spa|' +
+    // Hair
+    'haircut|hair cut|blowout|blow.?dry|hair colo(r|ur)|root touch.?up|gray coverage|grey coverage|' +
+    'balayage|omb.e|sombre|color melt|babylights|foilayage|' +
+    'keratin( treatment)?|brazilian blowout|smoothing treatment|' +
+    'deep conditioning|olaplex|bond repair|hair mask|protein treatment|' +
+    'scalp treatment|scalp facial|' +
+    'hair extensions|tape.in extension|sew.in extension|' +
+    '\\bperm\\b|body wave|\\brelaxer\\b|hair straightening|' +
+    '\\bupdo\\b|wedding hair|bridal hair|prom hair|' +
+    // Nails
+    '\\bnails?\\b|\\bmanicure\\b|\\bpedicure\\b|gel (nails|manicure|pedicure)|' +
+    'dip powder|dip nails|acrylic nails|\\bacrylics\\b|gel.x|hard gel|' +
+    'nail (art|design|fill|overlay|extensions|removal|embellishment)|' +
+    'paraffin (treatment|wax)|mani.?pedi|acrylic fill|gel fill|soak off|chrome nails|' +
+    // Skin
+    '\\bfacial\\b|chemical peel|microdermabrasion|dermaplaning|hydrafacial|hydra facial|' +
+    'microneedling|laser (facial|resurfacing|skin)|ipl (treatment|photofacial)|' +
+    'led light therapy|red light therapy|collagen induction|' +
+    // Brows / Lashes / Makeup
+    'brow (shaping|tinting|lamination)|eyebrow (waxing|threading|tinting)|' +
+    'lash (extensions|lift|tint)|eyelash extension|lash lift|' +
+    'makeup application|bridal makeup|airbrush makeup|' +
+    'microblading|ombre brows|powder brows|permanent makeup|lip blushing|' +
+    // Body / Hair removal
+    '\\bwax(ing|ed)?\\b|brow wax|lip wax|chin wax|face wax|underarm wax|leg wax|back wax|' +
+    'bikini wax|brazilian wax|\\bbrazilian\\b|full body wax|' +
+    'laser hair removal|laser hair reduction|' +
+    '\\bthreading\\b|threaded|get threaded|eyebrows threaded|lip threaded|' +
+    'spray tan|sunless tan|airbrush tan|' +
+    'body scrub|body wrap|body exfoliation|' +
+    '\\bmassage\\b|swedish massage|deep tissue|hot stone massage|reflexology|' +
+    // Medspa
+    'teeth whitening|\\bbotox\\b|\\bfiller\\b|lip filler|cheek filler|dermal filler|' +
+    'juvederm|restylane|kybella|body contouring|coolsculpting|emsculpt|skin tightening|' +
+    // Salon/spa catch-all
+    '\\bsalon\\b|\\bbarber\\b|\\beyelash\\b|\\beyebrow\\b|\\btanning\\b|\\bspa\\b',
+    'i'
+  ),
   construction: /\bplumber\b|\belectrician\b|\bhvac\b|\broofer\b|\bmasonry\b|\bconcrete\b|\bframing\b|\bdrywall\b|\bpavers\b|\bhardscape\b|\bstucco\b|\bsiding\b|\binsulation\b|\bseptic\b|excavat|\bhandyman\b|screen room|\bcarpenter\b|\bwelder\b|\bforeman\b|superintendent|\bestimator\b|pool builder|solar panel|irrigation system/i,
   realtor:      /real estate|\brealtor\b|mortgage broker|loan officer|title company|home stager|days on market|cap rate|\bforeclosure\b|homeowners assoc|\bzoning\b|single family|multifamily|listing agent|buyers agent/i,
 };
