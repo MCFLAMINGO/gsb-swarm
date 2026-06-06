@@ -412,6 +412,42 @@ const BEAUTY_TERMS = [
   'kybella','prp','platelet rich plasma',
   'body contouring','coolsculpting','emsculpt','radiofrequency body','ultrasound body',
   'skin tightening','rf skin tightening',
+
+  // ── Casual / Slang (TikTok, IG, group chats) ──
+  // Hair slang
+  'hair done','hair did','getting my hair done','getting my hair did','fresh hair',
+  'salon day','blowout refresh','fresh blowout','getting a blowout','getting my blowout',
+  'getting my hair blown out','blow out my hair','roots done','doing my roots','touch up my roots',
+  'color done','getting my color done','balayage refresh','blonde moment','sun-kissed highlights',
+  'keratin to tame','smoothing treatment','tame the frizz','hair chop','getting a chop',
+  'trim my hair','layers done','extensions install','clip ins','adding length','adding volume',
+  'hair mask treatment','repair session','wedding hair done','updo for the event','formal style done',
+  // Nail slang
+  'nails done','nails did','getting my nails done','getting my nails did','fresh mani',
+  'fresh set','fresh nails','mani done','gel mani','structured gel','builder gel',
+  'long lasting mani','pedi done','toes done','nails and toes','nails did toes did',
+  'nails on point','maintenance on the claws','glazed donut nails','acrylics done',
+  'gel x done','dips done','chrome nail','lunchtime mani','quick mani','spa mani',
+  'spa pedi','with the massage and scrub',
+  // Skin slang
+  'face done','getting my face done','glow facial','face card','face card refresh',
+  'face card never declines','skin treatment','pampering my face','exfoliation sesh',
+  'skin reboot','glow up treatment','dermaplaning for the fuzz',
+  // Brows & lashes slang
+  'brows done','getting my brows done','brow wax done','brow tint done','lamination done',
+  'fluffy brows','brows on fleek','lashes done','getting my lashes done','lash set',
+  'full set lashes','volume lashes done','lash botox','lift and tint','lashes popped',
+  'eyes done','full face','full glam','glam done','event makeup done','date night glam',
+  // Body / wax slang
+  'getting waxed','getting smooth','maintenance wax','full body refresh',
+  'hollywood wax','zapping the hair','laser for smooth skin',
+  'spray tan done','fake tan','glow up tan','getting a spray tan',
+  // Combo / general slang
+  'pamper day','girl therapy','self care day','maintenance day','salon day for the hair',
+  'head to toe','everything did','hair nails and lashes','full maintenance',
+  'high maintenance','pre event glow up','wedding ready','date night refresh',
+  'glow up','quick touch up','touch up appointment','quick refresh',
+  'everything done','all done up','got glam',
 ];
 
 // Merge beauty terms into VERTICAL_VOCAB so _termIndex picks them up
@@ -470,7 +506,17 @@ const VERTICAL_SIGNALS = {
     'teeth whitening|\\bbotox\\b|\\bfiller\\b|lip filler|cheek filler|dermal filler|' +
     'juvederm|restylane|kybella|body contouring|coolsculpting|emsculpt|skin tightening|' +
     // Salon/spa catch-all
-    '\\bsalon\\b|\\bbarber\\b|\\beyelash\\b|\\beyebrow\\b|\\btanning\\b|\\bspa\\b',
+    '\\bsalon\\b|\\bbarber\\b|\\beyelash\\b|\\beyebrow\\b|\\btanning\\b|\\bspa\\b|' +
+    // Casual / slang phrases
+    'nails did|nails done|hair did|hair done|getting my nails|getting my hair|' +
+    'fresh mani|fresh set|fresh nails|gel mani|mani done|pedi done|toes done|' +
+    'brows done|lashes done|lash set|face card|glow.?up|pamper day|girl therapy|' +
+    'self.?care day|maintenance day|salon day|full glam|\\bglam\\b|date night refresh|' +
+    'pre.event glow|hair nails|nails and lashes|everything did|head to toe beauty|' +
+    'getting waxed|getting smooth|fake tan|spray tan done|hair blown out|' +
+    'lash botox|lashes popped|face done|skin reboot|face card refresh|' +
+    'fresh blow|blowout refresh|roots done|color done|touch up my|' +
+    'maintenance wax|full body refresh|getting a blowout',
     'i'
   ),
   construction: /\bplumber\b|\belectrician\b|\bhvac\b|\broofer\b|\bmasonry\b|\bconcrete\b|\bframing\b|\bdrywall\b|\bpavers\b|\bhardscape\b|\bstucco\b|\bsiding\b|\binsulation\b|\bseptic\b|excavat|\bhandyman\b|screen room|\bcarpenter\b|\bwelder\b|\bforeman\b|superintendent|\bestimator\b|pool builder|solar panel|irrigation system/i,
