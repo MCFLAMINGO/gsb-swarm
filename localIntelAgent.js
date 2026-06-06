@@ -6592,8 +6592,18 @@ router.get('/search', harvestGuard, async (req, res) => {
       if (_webThreadCtx) {
         // Carry ZIP forward when user didn't supply one
         if (!zip && _webThreadCtx.zip) zip = _webThreadCtx.zip;
-        // Carry category forward for sub-category narrowing
-        if (!cat && _webThreadCtx.lastIntent) cat = _webThreadCtx.lastIntent;
+        // Carry category forward ONLY for sub-category narrowing within the same vertical.
+        // If the new query has its own detectable vertical, do NOT inherit the previous category
+        // (e.g. landscaper search → nails search should not carry 'landscaping' forward).
+        if (!cat && _webThreadCtx.lastIntent) {
+          const { detectVertical } = require('./workers/inferenceCache');
+          const newVertical = detectVertical(raw);
+          const prevVertical = detectVertical(_webThreadCtx.lastIntent || '');
+          // Only carry if same vertical or new query has no detectable vertical of its own
+          if (!newVertical || newVertical === prevVertical) {
+            cat = _webThreadCtx.lastIntent;
+          }
+        }
       }
     }
 
