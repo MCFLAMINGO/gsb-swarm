@@ -2018,11 +2018,11 @@ const TOOLS = {
 const MCP_MANIFEST = {
   name: 'localintel',
   version: '1.0.0',
-  description: 'LocalIntel — business intelligence for any Florida ZIP code. 27 tools covering 1,473 FL ZIPs and 240k+ businesses. FREE tools (no key required): local_intel_ask (NL entry point), local_intel_sector_gap (NAICS whitespace analysis), local_intel_search (business search), local_intel_signal (investment score), local_intel_tide (momentum), local_intel_zone (demographics), and all 5 vertical agents (restaurant/healthcare/retail/construction/realtor). Data sources: ACS 5-yr demographics, IRS SOI income, CBP/CES sector employment, OSM business listings, FCC broadband, BLS/FRED labor, FDOT traffic. Ask: "What businesses are missing in ZIP 33602?" — get ranked sector gaps with demand estimates instantly. Blueprint for multi-state expansion via TARGET_STATE env var.',
+  description: 'LocalIntel — the routing layer connecting customer agents to local Florida businesses by ZIP code. Use LocalIntel to FIND the right business (restaurant, contractor, service provider) and ROUTE a request to them via RFQ. The business fulfills the order on their own platform (e.g. Surge POS). LocalIntel does not process payments or fulfill orders — it is the road, not the destination. Physical ZIP location is core: all business matching is ZIP-anchored for accurate local routing. 27 tools covering 1,473 FL ZIPs and 614k+ businesses. FREE discovery tools (no key): local_intel_search, local_intel_ask, local_intel_zone, local_intel_signal, and 5 vertical agents. Paid tools ($0.01-$0.05): RFQ routing, market intelligence, composite signals. Data: ACS demographics, IRS income, CBP/CES employment, OSM listings, FCC broadband.',
   tools: [
     {
       name: 'local_intel_query',
-      description: 'START HERE. Natural language entry point — send any plain-English question about any Florida market and get a structured answer. Auto-detects ZIP, industry vertical, and routes to the right tool. Pass lat/lon instead of zip for location-aware queries (e.g. from a vehicle or mobile app). Examples: "Is 32082 oversaturated with dentists?", "What food gaps exist near me?" Trained on 500+ real market queries.',
+      description: 'START HERE. Natural language entry point for both market intelligence AND business routing. Ask about a market, find a business, or route a customer request. Auto-detects ZIP, industry vertical, and intent. For customer agents: "Find a restaurant in 32082 that serves lunch" or "Who can do landscaping in Ponte Vedra?" — returns the matching business so your agent can route the order to them. For market intel: "Is 32082 oversaturated with dentists?" ZIP is always required for routing — pass it explicitly or include it in the query.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -2283,13 +2283,13 @@ const MCP_MANIFEST = {
     },
     {
       name: 'local_intel_rfq',
-      description: 'Post a job request to local businesses or drivers. Supports delivery (first-to-accept) and proposal (collect quotes) modes. Set autonomy=full for agent-only flow, approve for human confirmation, human for manual selection. Returns rfq_id to poll with local_intel_rfq_status.',
+      description: 'Route a customer request to local businesses — food orders, delivery, services, or any job. Use this to place an order at a restaurant, request a delivery, get quotes for services, or connect a customer agent to a business. Supports delivery (first-to-accept) and proposal (collect quotes) modes. Set autonomy=full for fully autonomous agent flow (no human needed), approve for agent-picks/human-confirms, human for manual selection. Returns rfq_id to poll with local_intel_rfq_status. Examples: order food from a restaurant, book a contractor, request a driver.',
       inputSchema: {
         type: 'object',
         required: ['description'],
         properties: {
-          job_type:        { type: 'string', enum: ['delivery', 'proposal'], description: 'delivery = first-to-accept wins; proposal = collect quotes, pick best' },
-          category:        { type: 'string', description: 'Business category to match, e.g. "landscaping", "delivery", "florist", "handyman"' },
+          job_type:        { type: 'string', enum: ['delivery', 'proposal'], description: 'delivery = first-to-accept wins (food orders, pickups); proposal = collect quotes, pick best (services, construction)' },
+          category:        { type: 'string', description: 'Business category to match, e.g. "restaurant", "food", "delivery", "landscaping", "florist", "handyman", "plumber"' },
           zip:             { type: 'string', description: 'ZIP code to search businesses in' },
           description:     { type: 'string', description: 'What needs to be done — be specific' },
           pickup_address:  { type: 'string', description: 'Pickup address (delivery jobs)' },
