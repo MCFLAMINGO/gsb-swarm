@@ -207,6 +207,9 @@ async function run() {
         AND b.contact_email NOT LIKE '%@xyz.%'
         -- Filter URL-encoded artifacts (e.g. %20info@...)
         AND b.contact_email NOT LIKE '!%%' ESCAPE '!'
+        -- Filter URL-prefixed artifacts (e.g. http://user@domain.com)
+        AND b.contact_email NOT LIKE 'http%'
+        AND b.contact_email NOT LIKE 'email:%'
         -- Filter all-digit local part (phone numbers, zip codes: 1@1.com, 32967@aol.com)
         AND split_part(b.contact_email, '@', 1) !~ '^[0-9]+$'
         AND NOT EXISTS (
