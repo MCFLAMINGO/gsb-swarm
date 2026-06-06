@@ -4373,10 +4373,12 @@ router.get('/.well-known/mcp/server-card.json', (req, res) => {
 router.get('/mcp', async (req, res) => {
   try {
     // Forward to internal MCP server for tools/list so Smithery sees real tools
+    // Pass ?mode=agent through so wallet/agent callers get the slim 7-tool surface
+    const _mode = req.query.mode || undefined;
     const response = await fetch('http://localhost:3004/mcp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: _mode ? { mode: _mode } : {} } }),
     });
     const data = await response.json();
     // Return as MCP initialize shape with embedded tools for discovery
@@ -4483,6 +4485,11 @@ router.post('/mcp', express.json(), harvestGuard, apiKeyMiddleware, async (req, 
         delivery: { channel: 'json', reply_expected: false },
       };
       console.log('[mcp] intent', JSON.stringify(_intent));
+    }
+    // Forward mode from ?mode=agent query param OR from body params._meta.mode
+    const _postMode = req.query.mode || body?.params?._meta?.mode || undefined;
+    if (_postMode && body.params) {
+      body.params._meta = { ...(body.params._meta || {}), mode: _postMode };
     }
     const response = await fetch('http://localhost:3004/mcp', {
       method: 'POST',
