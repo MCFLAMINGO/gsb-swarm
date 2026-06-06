@@ -419,6 +419,61 @@ const VERTICAL_VOCAB = {
     'compression game','new dri-fit','practice uniform','fresh kit','new gear drop',
     'budget cop','for tryouts','sponsor gear','custom fit','pro model',
     'full kit refresh','gear check','team issued','these boots are cheating',
+    // ── Women's Clothing Top 100 (2026) ──
+    // Lingerie & Intimates
+    'wireless supportive bra','full coverage bra','no underwire bra',
+    'cotton bikini briefs','underwear multipack','nipple covers','silicone pasties','reusable pasties',
+    'bralette','deep v bralette','plunge bralette','strapless bandeau','tube bra','convertible bra','scalloped bra',
+    'shapewear briefs','high waisted control briefs','seamless thong','cheeky panties',
+    'high impact sports bra','everyday sports bra','pajama set','sleep shorts','sleep tank',
+    // Tops
+    'button down blouse','short sleeve blouse','v-neck blouse','dressy casual top',
+    'ribbed tank top','built-in bra tank','racerback tank','slim fit tank',
+    'henley top','oversized graphic tee','sheer blouse','flowy blouse',
+    'cropped tank','baby tee','crop top','long sleeve tee','mock neck top',
+    'puff sleeve top','bell sleeve top','work button-up','sleeveless polo',
+    'built-in bra tank top','sheer top','halter top','ruffled top','bubble hem top',
+    // Bottoms
+    'wide leg palazzo pants','flowy palazzo','drawstring wide leg',
+    'linen blend pants','linen wide leg','relaxed linen pants',
+    'high waisted leggings','butt-lifting leggings','pocketed leggings',
+    'flare leggings','yoga pants','flare yoga pants',
+    'barrel jeans','baggy jeans','straight jeans','high rise ankle jeans',
+    'cargo pants womens','utility pants womens','athletic shorts womens',
+    'denim shorts','high waisted denim shorts','mid thigh shorts',
+    'skort','tennis skirt','flowy maxi skirt','midi skirt','wrap skirt',
+    'capris','pedal pushers','joggers womens','sweatpants womens','bike shorts',
+    'wide leg modal trousers','crepe trousers','balloon pants',
+    // Dresses & Rompers
+    'summer sundress','floral sundress','casual sundress',
+    'tennis dress','athletic dress','built-in shorts dress',
+    'maxi dress','flowy maxi','vacation maxi',
+    'mini dress','bodycon dress','babydoll dress',
+    'shirt dress','button down dress','romper','jumpsuit womens','wide leg jumpsuit',
+    'crochet dress','eyelet dress','lace trim dress',
+    'halter dress','one shoulder dress','linen dress','breezy casual dress',
+    'work sheath dress','wrap dress',
+    // Activewear
+    'matching workout set','workout set womens','leggings and top set',
+    'oversized hoodie womens','quarter zip womens','crewneck sweatshirt womens',
+    'sports tank womens','track pants womens','windbreaker womens',
+    'compression shorts womens','seamless active top',
+    // Outerwear
+    'lightweight cardigan','shrug sweater','chunky cardigan','denim jacket womens',
+    'puffer jacket womens','quilted jacket womens',
+    'blazer womens','casual blazer','work blazer',
+    'overshirt womens','trench coat womens','lightweight trench',
+    // Shoes & Hosiery
+    'arch support flip flops','arch support sandals',
+    'white sneakers womens','dad shoes womens','ballet flats','mary janes','kitten heels',
+    'ankle socks womens','no-show socks womens','tights womens','shapewear tights',
+    // Seasonal / trending 2026
+    'floral pullover','sherpa pullover','eyelet top','lace trim top','polka dot top',
+    'checkered print top','linen set womens','linen shorts set','linen top set',
+    'swim cover up','bodysuit womens','ribbed basics','vacation outfit','transitional sweater',
+    'plus size leggings','plus size dress','maternity dress','maternity leggings',
+    'looks expensive but cheap','dupe outfit','amazon fashion find',
+    'that girl athleisure','coquette outfit','coquette dress','floral coquette',
     'shadowless card','first edition card',
   ],
 
@@ -712,7 +767,21 @@ const VERTICAL_SIGNALS = {
     'fresh cleats|cleats are gas|new trainers|game ball|practice rock|new stick|fresh bat|' +
     'mouthguard game|strapped up|ankle sleeve|agility ladder sesh|band work|hitting the roller|' +
     'compression game|new dri-fit|fresh kit|new gear drop|budget cop|for tryouts|' +
-    'sponsor gear|pro model|full kit refresh|gear check|these boots are cheating',
+    'sponsor gear|pro model|full kit refresh|gear check|these boots are cheating|' +
+    // Women's clothing
+    'wireless supportive bra|full coverage bra|no underwire|silicone pasties|' +
+    'bralette|strapless bandeau|shapewear briefs|seamless thong|high impact sports bra|' +
+    'ribbed tank top|built.in bra tank|sheer blouse|baby tee|mock neck|' +
+    'puff sleeve|bell sleeve|wide leg palazzo|linen wide leg|linen blend pants|' +
+    'flare leggings|barrel jeans|baggy jeans|high rise ankle|cargo pants womens|' +
+    'tennis skirt|skort|flowy maxi|midi skirt|bike shorts womens|' +
+    'summer sundress|floral sundress|tennis dress|built.in shorts dress|babydoll dress|' +
+    'shirt dress|crochet dress|eyelet dress|one shoulder dress|linen dress|' +
+    'matching workout set|oversized hoodie womens|seamless active top|' +
+    'lightweight cardigan|chunky cardigan|casual blazer|trench coat womens|' +
+    'mary janes|kitten heels|shapewear tights|' +
+    'floral pullover|linen set womens|swim cover up|bodysuit womens|' +
+    'looks expensive but cheap|dupe outfit|amazon fashion find|coquette outfit|coquette dress',
     'i'
   ),
   beauty: new RegExp(
