@@ -474,6 +474,56 @@ const VERTICAL_VOCAB = {
     'plus size leggings','plus size dress','maternity dress','maternity leggings',
     'looks expensive but cheap','dupe outfit','amazon fashion find',
     'that girl athleisure','coquette outfit','coquette dress','floral coquette',
+    // ── Tech / Electronics (Best Buy / Amazon 2026) ──
+    // TVs & Home Theater
+    'oled tv','mini-led tv','qled tv','samsung oled','lg oled','sony bravia','tcl tv','hisense tv',
+    'lg c5','lg g5','samsung s95f','samsung s90f','sony qd-oled','tcl qm8k','tcl qm7k','hisense u8',
+    'fire tv','toshiba smart tv','vizio tv','smart tv','4k tv','8k tv',
+    'soundbar','dolby atmos soundbar','samsung soundbar','lg soundbar','sony soundbar',
+    'tv mount','tv wall mount','universal remote','streaming stick','roku stick','fire stick',
+    'home theater','projector','home projector',
+    // Gaming
+    'playstation 5','ps5 pro','ps5 slim','xbox series x','xbox series s',
+    'gaming pc','gaming rig','prebuilt gaming pc','ibuypower','custom gaming pc',
+    'steam deck','rog ally','handheld gaming','gaming handheld',
+    'gaming monitor','oled gaming monitor','1440p monitor','4k gaming monitor',
+    'asus rog monitor','lg 27 inch monitor','msi monitor','samsung odyssey',
+    'gaming headset','steelseries arctis','logitech g pro headset','gaming headphones',
+    'mechanical keyboard','rgb keyboard','corsair k95','razer keyboard','gaming keyboard',
+    'gaming mouse','logitech g pro superlight','razer viper','gaming mice',
+    'dualsense edge','xbox elite controller','gaming controller',
+    'gaming chair','secretlab titan','gaming desk',
+    'mouse pad','gaming mouse pad','cooling pad','capture card','rgb lighting','rgb setup',
+    // Audio
+    'airpods max','sony wh-1000xm5','bose quietcomfort','beats studio','noise cancelling headphones',
+    'wireless earbuds','samsung galaxy buds','nothing ear','earbuds',
+    'bluetooth speaker','jbl speaker','portable speaker','ultimate ears speaker',
+    'sonos','multi-room speaker','klipsch speaker','bowers and wilkins',
+    'cambridge audio','stereo amp','streaming amp',
+    'bluetooth boombox','portable radio','fm radio bluetooth','retro boombox',
+    'vintage jukebox','turntable','record player',
+    'car audio','car receiver','pioneer receiver','jvc receiver','kicker subwoofer','car speakers',
+    // Laptops & Tablets
+    'macbook air','macbook pro','macbook m4','dell xps','lenovo thinkpad',
+    'gaming laptop','chromebook',
+    'ipad air','ipad pro','samsung galaxy tab','android tablet',
+    // Phones & Wearables
+    'iphone','samsung galaxy','google pixel','motorola razr','foldable phone',
+    'apple watch','google pixel watch','oura ring','fitbit','smartwatch','smart ring',
+    // Accessories & Smart Home
+    'gan charger','usb-c charger','retractable cable','charging cable',
+    'portable charger','power bank','wireless charger',
+    'blink camera','ring doorbell','echo device','alexa device','smart home',
+    'webcam','external ssd','surge protector','docking station','mini pc',
+    'vr headset','meta quest','mixed reality',
+    // Tech slang
+    'copped a new oled','upgraded the tv setup','gaming rig refresh','new peripherals',
+    'soundbar for the cinema','cinema room setup','payday haul tech',
+    'best buy run','best buy deal','console deal','soundbar deal',
+    'fresh mouse and keyboard','new headset drop','monitor upgrade',
+    'need a new boombox','garage boombox','party speaker',
+    'setup upgrade','desk setup','battlestation','rgb everything',
+    'pc master race','new build','upgrading my rig','new kicks for the pc',
     'shadowless card','first edition card',
   ],
 
@@ -781,7 +831,24 @@ const VERTICAL_SIGNALS = {
     'lightweight cardigan|chunky cardigan|casual blazer|trench coat womens|' +
     'mary janes|kitten heels|shapewear tights|' +
     'floral pullover|linen set womens|swim cover up|bodysuit womens|' +
-    'looks expensive but cheap|dupe outfit|amazon fashion find|coquette outfit|coquette dress',
+    'looks expensive but cheap|dupe outfit|amazon fashion find|coquette outfit|coquette dress|' +
+    // Tech / Electronics
+    'oled tv|mini.led tv|qled tv|samsung oled|lg oled|sony bravia|tcl tv|hisense tv|' +
+    'lg c5|samsung s95f|fire tv|smart tv|4k tv|soundbar|dolby atmos|tv mount|roku stick|fire stick|' +
+    'playstation 5|ps5 pro|xbox series x|gaming pc|prebuilt gaming pc|steam deck|rog ally|' +
+    'gaming monitor|oled monitor|1440p monitor|4k gaming monitor|asus rog|samsung odyssey|' +
+    'gaming headset|steelseries arctis|logitech g pro|mechanical keyboard|rgb keyboard|corsair k95|' +
+    'gaming mouse|razer viper|dualsense edge|xbox elite controller|gaming chair|secretlab|' +
+    'capture card|rgb lighting|rgb setup|battlestation|' +
+    'airpods max|sony wh.1000xm5|bose quietcomfort|beats studio|noise cancelling headphones|' +
+    'wireless earbuds|galaxy buds|jbl speaker|portable speaker|sonos|klipsch|' +
+    'bluetooth boombox|portable radio|retro boombox|vintage jukebox|turntable|record player|' +
+    'car audio|car receiver|pioneer receiver|kicker subwoofer|' +
+    'macbook air|macbook pro|dell xps|lenovo thinkpad|gaming laptop|' +
+    'ipad air|samsung galaxy tab|oura ring|smartwatch|smart ring|' +
+    'gan charger|portable charger|power bank|blink camera|ring doorbell|echo device|' +
+    'external ssd|docking station|mini pc|vr headset|meta quest|' +
+    'gaming rig refresh|new peripherals|best buy run|desk setup|pc master race|upgrading my rig',
     'i'
   ),
   beauty: new RegExp(
