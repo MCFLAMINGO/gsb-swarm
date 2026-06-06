@@ -777,6 +777,57 @@ const VERTICAL_VOCAB = {
     'handyman near me','handyman for','how much does it cost to',
     'get quotes for','contractor near me','local contractor',
     'same day repair','emergency repair','weekend contractor',
+    // ── Hardware Store Products (Home Depot / Lowes / Ace 2026) ──
+    'ryobi','ryobi one plus','ryobi 18v','milwaukee tool','dewalt','craftsman tool','ego tool','greenworks',
+    'power drill','cordless drill','drill combo kit','impact driver','circular saw','miter saw','table saw',
+    'string trimmer','weed eater','leaf blower','hedge trimmer','chainsaw','pole saw',
+    'pressure washer','power washer','tool combo kit','cordless kit',
+    'lawn mower','push mower','riding mower','zero turn mower','battery mower','self propelled mower',
+    'mulch','mulch delivery','garden soil','miracle gro','raised garden bed',
+    'fertilizer','lawn fertilizer','grass seed','lawn seed',
+    'garden hose','soaker hose','hose reel','sprinkler head',
+    'interior paint','exterior paint','deck paint','fence stain',
+    'paint roller','paint brush','paint sprayer','paint tray',
+    'benjamin moore','valspar paint','behr paint',
+    'primer','caulk','caulk gun','wood filler','spackle',
+    'pressure treated wood','pressure treated lumber','plywood','osb board',
+    'decking boards','composite decking','deck boards',
+    'concrete mix','quikrete','cement','mortar mix',
+    'drywall sheets','drywall mud','joint compound',
+    'kitchen faucet','bathroom faucet','shower head','toilet flapper',
+    'pvc pipe','pex pipe','copper pipe','pipe fittings','ball valve',
+    'electrical outlet','gfci outlet','circuit breaker','wire romex',
+    'led bulb','led light','smart bulb','light fixture',
+    'water softener',
+    'patio furniture set','outdoor dining set','adirondack chair','outdoor rug',
+    'gas grill','charcoal grill','weber grill','traeger grill','pellet grill',
+    'fire pit','propane fire pit',
+    'patio umbrella','gazebo kit','pergola kit','outdoor string lights','deck lighting',
+    'vinyl plank flooring','lvp flooring','laminate flooring','tile flooring','flooring underlayment',
+    'screws','deck screws','wood screws','drywall screws',
+    'nails','framing nails','finish nails','brad nails',
+    'bolts','lag bolts','joist hanger','post base','hurricane tie','metal bracket',
+    'door hinges','cabinet hardware','drawer pulls',
+    'garage shelving','metal shelving','wire shelving','storage rack',
+    'pegboard','tool organizer','garage cabinet','garage storage system',
+    'storage totes','plastic bins','stackable bins',
+    'ring camera','blink camera','smart thermostat','nest thermostat','ecobee',
+    'smart door lock','keypad lock','smart deadbolt',
+    'ceiling fan','outdoor ceiling fan',
+    'portable generator','inverter generator',
+    'extension cord','surge protector',
+    'werner ladder','step ladder','extension ladder',
+    'safety glasses','work gloves','knee pads','dust mask','respirator',
+    'yeti cooler','hard cooler','ice chest',
+    'tool rental','equipment rental','rent tools',
+    'home depot near me','lowes near me','ace hardware near me',
+    'home depot deal','lowes sale','ace hardware sale',
+    'ryobi deal','milwaukee deal','dewalt deal','tool bogo',
+    'mulch delivery near me','paint near me','grill near me',
+    'pro xtra','lowes pro','pro rewards','tool clearance',
+    'special buy','spring tool sale',
+    'diy project','weekend project','home repair supplies',
+    'best caulk','small repair','helpful hardware',
 
   ],
 
@@ -1170,7 +1221,23 @@ const VERTICAL_SIGNALS = {
     'floor refinish|home addition|room addition|mold remediation|' +
     'asbestos removal|chimney repair|chimney sweep|storm damage repair|' +
     'grab bar install|wheelchair ramp|ada modification|' +
-    'contractor near me|local contractor|same day repair|get quotes for',
+    'contractor near me|local contractor|same day repair|get quotes for|' +
+    '\\bryobi\\b|milwaukee tool|\\bdewalt\\b|\\bcraftsman\\b|greenworks|ego tool|' +
+    'power drill|cordless drill|impact driver|circular saw|miter saw|string trimmer|leaf blower|chainsaw|' +
+    'lawn mower|push mower|riding mower|zero turn mower|battery mower|' +
+    'mulch delivery|garden soil|miracle gro|raised garden bed|fertilizer|grass seed|garden hose|' +
+    'interior paint|exterior paint|deck stain|fence stain|paint sprayer|benjamin moore|valspar|behr paint|' +
+    'pressure treated lumber|plywood|decking boards|composite decking|concrete mix|quikrete|' +
+    'kitchen faucet|bathroom faucet|shower head|pvc pipe|pex pipe|gfci outlet|circuit breaker|led bulb|' +
+    'patio furniture set|adirondack chair|weber grill|traeger grill|pellet grill|fire pit|outdoor fire pit|' +
+    'patio umbrella|gazebo kit|pergola kit|outdoor string lights|' +
+    'vinyl plank flooring|lvp flooring|laminate flooring|' +
+    'garage shelving|metal shelving|storage rack|pegboard|garage cabinet|storage totes|' +
+    'smart thermostat|nest thermostat|smart door lock|keypad lock|' +
+    'werner ladder|step ladder|extension ladder|tool rental|equipment rental|' +
+    'home depot near me|lowes near me|ace hardware|home depot deal|lowes sale|' +
+    'ryobi deal|milwaukee deal|dewalt deal|tool bogo|pro xtra|tool clearance|special buy|' +
+    'diy project|weekend project|home repair supplies|best caulk',
     'i'
   ),
   realtor:      /real estate|\brealtor\b|mortgage broker|loan officer|title company|home stager|days on market|cap rate|\bforeclosure\b|homeowners assoc|\bzoning\b|single family|multifamily|listing agent|buyers agent/i,
