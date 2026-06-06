@@ -633,6 +633,8 @@ const VERTICAL_VOCAB = {
     'statute of limitations','legal advice','legal question','legal help near me',
     'how to file for divorce','name change lawyer','adoption lawyer',
     'notary','paralegal','legal document','legal filing',
+    'need a lawyer asap','white collar mess','fighting the charges','plea deal','clean slate',
+    'expungement run','federal situation','target letter','lawyer situation',
   ],
 
     construction: [
@@ -828,6 +830,70 @@ const VERTICAL_VOCAB = {
     'special buy','spring tool sale',
     'diy project','weekend project','home repair supplies',
     'best caulk','small repair','helpful hardware',
+    // ── Landscaping & Outdoor Living (2026 Thumbtack/Angi top requests) ──
+    // Lawn & basic landscaping
+    'lawn care service','mowing service','lawn mowing near me','lawn maintenance',
+    'spring cleanup','fall cleanup','aeration','overseeding','aerate and seed',
+    'weed control','fertilizing service','lawn fertilization',
+    'sod installation','sod replacement','lawn replacement',
+    'xeriscaping','drought tolerant landscaping','native plant landscaping',
+    'mulch installation','mulch refresh','fresh mulch',
+    'shrub trimming','shrub planting','flower bed installation','flower bed maintenance',
+    'edging service','bed edging','landscape edging',
+    'irrigation repair','irrigation installation','sprinkler repair','drip irrigation',
+    // Hardscaping & structures
+    'paver patio installation','paver patio cost','paver walkway',
+    'concrete patio','stamped concrete patio','flagstone patio',
+    'screened patio','screen enclosure','screened enclosure installation',
+    'lanai addition','screened lanai','lanai enclosure','pool lanai','florida lanai',
+    'pool cage','pool screen enclosure','pool cage repair','pool cage installation',
+    'covered patio','patio cover','patio roof extension',
+    'outdoor kitchen installation','outdoor kitchen cost',
+    'fire pit installation','outdoor fireplace','fire feature',
+    'retaining wall installation','retaining wall cost',
+    'walkway pavers','pathway pavers','stepping stones',
+    'driveway pavers','paver driveway',
+    'pergola installation','gazebo installation','pergola with retractable roof',
+    'motorized screens','motorized shades outdoor',
+    'pool deck resurfacing','pool deck addition','pool deck pavers',
+    'raised garden bed installation',
+    // Pools & water features
+    'inground pool installation','inground pool cost','pool installation',
+    'above ground pool','above ground pool install',
+    'pool remodel','pool resurfacing','pool renovation',
+    'hot tub installation','spa installation','hot tub spa',
+    'water feature','fountain installation','pond installation','koi pond',
+    'pool fence','pool safety fence',
+    'pool heater installation','pool equipment upgrade',
+    // Outdoor living & entertainment
+    'backyard makeover','backyard remodel','full backyard renovation','backyard glow-up',
+    'outdoor living room','outdoor dining area','outdoor entertainment space',
+    'sunroom addition','four season room','florida room addition',
+    'outdoor lighting installation','landscape lighting','smart landscape lighting',
+    'privacy fence','vinyl fence','privacy screen','privacy hedge',
+    'outdoor tv wall','outdoor entertainment wall',
+    'holiday lighting','seasonal lighting','christmas light installation',
+    'playground area','swing set area','dog run','pet friendly yard',
+    'bocce ball court','putting green','golf simulator outdoor','sports court',
+    'outdoor shower','tiki bar','cabana installation',
+    // Eco-friendly & specialty
+    'pollinator garden','rain garden','drainage solution','french drain installation',
+    'artificial turf installation','synthetic turf','turf install',
+    'vertical garden','living wall','edible garden','vegetable garden installation',
+    'rock garden','xeriscape design','sustainable landscaping','eco friendly landscaping',
+    'permeable pavers','rainwater harvesting',
+    'slope stabilization','hillside landscaping','erosion control','grading drainage',
+    'ornamental grass planting','tropical landscaping','mediterranean landscaping',
+    'wildlife friendly yard','hoa landscaping','hoa compliant yard',
+    'post storm cleanup','storm cleanup yard',
+    'curb appeal makeover','front yard makeover','landscape design consultation',
+    'full property maintenance','landscape maintenance contract',
+    // Landscaping slang
+    'backyard glow up','full yard refresh','screened lanai quotes','pool cage addition',
+    'outdoor living room setup','paver patio moment','low maintenance yard',
+    'tropical vibes yard','fire pit sesh','curb appeal era',
+    'pool lanai combo','backyard oasis','artificial turf save','privacy hedge moment',
+    'yard situation','landscape quotes','how much for lanai','outdoor refresh',
 
   ],
 
@@ -1237,7 +1303,28 @@ const VERTICAL_SIGNALS = {
     'werner ladder|step ladder|extension ladder|tool rental|equipment rental|' +
     'home depot near me|lowes near me|ace hardware|home depot deal|lowes sale|' +
     'ryobi deal|milwaukee deal|dewalt deal|tool bogo|pro xtra|tool clearance|special buy|' +
-    'diy project|weekend project|home repair supplies|best caulk',
+    'diy project|weekend project|home repair supplies|best caulk|' +
+    // Landscaping & outdoor living
+    'lawn care service|mowing service|spring cleanup|fall cleanup|aeration|overseeding|weed control|' +
+    'sod installation|xeriscaping|drought tolerant|native plant|mulch installation|mulch refresh|' +
+    'shrub trimming|flower bed|edging service|irrigation repair|irrigation installation|sprinkler repair|' +
+    'paver patio|stamped concrete|flagstone patio|screened patio|screen enclosure|screened lanai|' +
+    'lanai addition|pool lanai|florida lanai|pool cage|pool screen enclosure|pool cage repair|' +
+    'covered patio|patio cover|outdoor kitchen installation|fire pit installation|outdoor fireplace|' +
+    'retaining wall installation|walkway pavers|driveway pavers|pergola installation|gazebo installation|' +
+    'pergola retractable|motorized screens|pool deck resurface|' +
+    'inground pool installation|above ground pool|pool remodel|pool resurfacing|' +
+    'hot tub installation|spa installation|water feature|fountain installation|pond installation|' +
+    'pool fence|pool heater installation|' +
+    'backyard makeover|backyard remodel|backyard glow.?up|outdoor living room|outdoor dining area|' +
+    'sunroom addition|four season room|outdoor lighting|landscape lighting|smart landscape lighting|' +
+    'privacy fence|vinyl fence|privacy screen|privacy hedge|holiday lighting|christmas light install|' +
+    'putting green|bocce ball court|sports court|outdoor shower|tiki bar|cabana installation|' +
+    'pollinator garden|rain garden|french drain|artificial turf|synthetic turf|vertical garden|' +
+    'edible garden|vegetable garden install|rock garden|xeriscape|sustainable landscaping|' +
+    'permeable pavers|rainwater harvest|erosion control|grading drainage|tropical landscaping|' +
+    'curb appeal makeover|front yard makeover|landscape design|full property maintenance|' +
+    'screened lanai quotes|pool cage addition|backyard oasis|artificial turf save',
     'i'
   ),
   realtor:      /real estate|\brealtor\b|mortgage broker|loan officer|title company|home stager|days on market|cap rate|\bforeclosure\b|homeowners assoc|\bzoning\b|single family|multifamily|listing agent|buyers agent/i,
