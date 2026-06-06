@@ -564,7 +564,78 @@ const VERTICAL_VOCAB = {
     'shadowless card','first edition card',
   ],
 
-  construction: [
+  legal: [
+    // Practice types / firm types
+    'law firm','law office','attorney','lawyer','legal services','legal aid','pro bono',
+    'legal counsel','general counsel','litigation','litigation firm',
+    // Personal Injury
+    'personal injury lawyer','personal injury attorney','personal injury law',
+    'car accident lawyer','car accident attorney','auto accident lawyer',
+    'truck accident lawyer','motorcycle accident lawyer','motorcycle accident attorney',
+    'slip and fall lawyer','dog bite lawyer','wrongful death lawyer',
+    'premises liability lawyer','uber accident lawyer','lyft accident lawyer',
+    'rideshare accident lawyer','catastrophic injury lawyer',
+    // Family Law
+    'divorce lawyer','divorce attorney','divorce law','divorce near me',
+    'child custody lawyer','child custody attorney','custody lawyer',
+    'child support lawyer','child support attorney',
+    'alimony lawyer','spousal support lawyer','family law attorney','family law firm',
+    'high asset divorce','domestic violence lawyer','restraining order lawyer',
+    'prenup lawyer','prenuptial agreement','postnup lawyer',
+    // Criminal Defense
+    'criminal defense lawyer','criminal defense attorney','criminal lawyer',
+    'dui lawyer','dui attorney','dui defense','dwi lawyer',
+    'felony lawyer','misdemeanor lawyer','drug possession lawyer',
+    'assault lawyer','expungement lawyer','expungement attorney',
+    'reckless driving lawyer','traffic ticket lawyer','traffic attorney',
+    'white collar lawyer','federal criminal defense',
+    // Employment & Labor
+    'employment lawyer','employment attorney','labor lawyer',
+    'wrongful termination lawyer','wrongful termination attorney',
+    'workers compensation lawyer','workers comp attorney','workers comp claim',
+    'discrimination lawyer','workplace discrimination','harassment lawyer',
+    'overtime pay lawyer','wage theft lawyer','fmla lawyer','unpaid wages',
+    // Immigration
+    'immigration lawyer','immigration attorney','green card lawyer',
+    'citizenship lawyer','deportation lawyer','asylum lawyer','visa lawyer',
+    'family immigration attorney','naturalization lawyer',
+    // Estate Planning & Probate
+    'estate planning attorney','estate planning lawyer','estate lawyer',
+    'will lawyer','living trust lawyer','trust attorney',
+    'power of attorney lawyer','probate lawyer','probate attorney',
+    'elder law attorney','guardianship lawyer',
+    // Bankruptcy & Debt
+    'bankruptcy lawyer','bankruptcy attorney','chapter 7 lawyer','chapter 13 lawyer',
+    'foreclosure lawyer','debt relief lawyer','debt settlement lawyer',
+    // Real Estate Law
+    'real estate lawyer','real estate attorney','eviction lawyer','eviction attorney',
+    'landlord tenant lawyer','landlord lawyer','tenant lawyer',
+    'property dispute lawyer','closing attorney','title dispute',
+    // Business & Corporate
+    'business lawyer','business attorney','corporate lawyer','corporate attorney',
+    'llc lawyer','contract lawyer','contract attorney','small business attorney',
+    'intellectual property lawyer','patent lawyer','trademark lawyer',
+    'copyright lawyer','trade secret lawyer',
+    // Other specialties
+    'medical malpractice lawyer','malpractice attorney',
+    'product liability lawyer','class action lawyer','mass tort lawyer',
+    'social security disability lawyer','ssdi lawyer','veterans lawyer',
+    'maritime lawyer','jones act lawyer','aviation accident lawyer',
+    'nursing home abuse lawyer','elder abuse lawyer',
+    'securities lawyer','securities fraud lawyer',
+    'civil rights lawyer','civil rights attorney',
+    'tax lawyer','tax attorney','irs lawyer',
+    'cannabis lawyer','marijuana lawyer',
+    'cybersecurity lawyer','data breach lawyer','privacy lawyer',
+    // Common search phrases
+    'lawyer near me','attorney near me','free consultation lawyer','free legal consultation',
+    'how to sue','sue my landlord','sue my employer','sue my doctor',
+    'statute of limitations','legal advice','legal question','legal help near me',
+    'how to file for divorce','name change lawyer','adoption lawyer',
+    'notary','paralegal','legal document','legal filing',
+  ],
+
+    construction: [
     // trades / business types
     'general contractor','home builder','custom builder',
     'roofing','roofer','roof repair','roof replacement',
@@ -956,7 +1027,45 @@ const VERTICAL_SIGNALS = {
     'maintenance wax|full body refresh|getting a blowout',
     'i'
   ),
-  construction: /\bplumber\b|\belectrician\b|\bhvac\b|\broofer\b|\bmasonry\b|\bconcrete\b|\bframing\b|\bdrywall\b|\bpavers\b|\bhardscape\b|\bstucco\b|\bsiding\b|\binsulation\b|\bseptic\b|excavat|\bhandyman\b|screen room|\bcarpenter\b|\bwelder\b|\bforeman\b|superintendent|\bestimator\b|pool builder|solar panel|irrigation system/i,
+  legal: new RegExp(
+    // Practice types
+    '\\blawyer\\b|\\battorney\\b|law firm|law office|legal aid|pro bono|legal counsel|litigation|' +
+    // Personal Injury
+    'personal injury|car accident lawyer|truck accident lawyer|slip and fall lawyer|' +
+    'dog bite lawyer|wrongful death lawyer|motorcycle accident lawyer|' +
+    'uber accident|lyft accident|rideshare accident|premises liability|' +
+    // Family
+    'divorce lawyer|divorce attorney|child custody lawyer|child support lawyer|' +
+    'alimony lawyer|spousal support|family law attorney|domestic violence lawyer|' +
+    'prenup lawyer|restraining order lawyer|' +
+    // Criminal
+    'criminal defense|dui lawyer|dui attorney|dwi lawyer|felony lawyer|' +
+    'misdemeanor lawyer|drug possession lawyer|assault lawyer|expungement lawyer|' +
+    'reckless driving lawyer|traffic ticket lawyer|white collar lawyer|' +
+    // Employment
+    'employment lawyer|wrongful termination|workers compensation lawyer|workers comp|' +
+    'discrimination lawyer|harassment lawyer|overtime pay lawyer|wage theft|fmla lawyer|' +
+    // Immigration
+    'immigration lawyer|green card lawyer|citizenship lawyer|deportation lawyer|' +
+    'asylum lawyer|visa lawyer|naturalization lawyer|' +
+    // Estate / Probate
+    'estate planning|estate lawyer|will lawyer|living trust lawyer|trust attorney|' +
+    'power of attorney|probate lawyer|elder law attorney|guardianship lawyer|' +
+    // Bankruptcy
+    'bankruptcy lawyer|chapter 7 lawyer|chapter 13 lawyer|foreclosure lawyer|debt relief lawyer|' +
+    // Real Estate Law
+    'eviction lawyer|landlord tenant lawyer|property dispute lawyer|' +
+    // Business / IP
+    'corporate lawyer|llc lawyer|contract lawyer|intellectual property lawyer|patent lawyer|trademark lawyer|' +
+    // Other
+    'medical malpractice|product liability|class action lawyer|ssdi lawyer|veterans lawyer|' +
+    'maritime lawyer|nursing home abuse|securities lawyer|civil rights lawyer|tax lawyer|' +
+    'cannabis lawyer|cybersecurity lawyer|data breach lawyer|' +
+    // Common searches
+    'lawyer near me|attorney near me|free consultation lawyer|how to sue|legal advice|legal help',
+    'i'
+  ),
+    construction: /\bplumber\b|\belectrician\b|\bhvac\b|\broofer\b|\bmasonry\b|\bconcrete\b|\bframing\b|\bdrywall\b|\bpavers\b|\bhardscape\b|\bstucco\b|\bsiding\b|\binsulation\b|\bseptic\b|excavat|\bhandyman\b|screen room|\bcarpenter\b|\bwelder\b|\bforeman\b|superintendent|\bestimator\b|pool builder|solar panel|irrigation system/i,
   realtor:      /real estate|\brealtor\b|mortgage broker|loan officer|title company|home stager|days on market|cap rate|\bforeclosure\b|homeowners assoc|\bzoning\b|single family|multifamily|listing agent|buyers agent/i,
 };
 
@@ -1053,7 +1162,7 @@ function detectVertical(query) {
   // Tokenise into unigrams AND bigrams so "line cook" scores as one hit
   // not two partial hits against unrelated terms.
   const words  = lower.replace(/[^a-z0-9& ]/g, ' ').split(/\s+/).filter(Boolean);
-  const scores = { restaurant: 0, healthcare: 0, retail: 0, construction: 0, realtor: 0, beauty: 0 };
+  const scores = { restaurant: 0, healthcare: 0, retail: 0, construction: 0, realtor: 0, beauty: 0, legal: 0 };
 
   // Unigrams
   for (const w of words) {
