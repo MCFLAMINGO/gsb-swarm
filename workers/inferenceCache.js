@@ -570,7 +570,7 @@ function detectVertical(query) {
   // Tokenise into unigrams AND bigrams so "line cook" scores as one hit
   // not two partial hits against unrelated terms.
   const words  = lower.replace(/[^a-z0-9& ]/g, ' ').split(/\s+/).filter(Boolean);
-  const scores = { restaurant: 0, healthcare: 0, retail: 0, construction: 0, realtor: 0 };
+  const scores = { restaurant: 0, healthcare: 0, retail: 0, construction: 0, realtor: 0, beauty: 0 };
 
   // Unigrams
   for (const w of words) {
