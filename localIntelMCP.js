@@ -40,14 +40,21 @@ const { x402Gate }            = require('./lib/x402Middleware');
 const { upsertAgentSession, logTask } = require('./lib/telemetry');
 
 // ── UCP enrichment ────────────────────────────────────────────────────────────
-// Adds ucp_order_url / ucp_wallet / ucp_note to any business row that has
-// pos_type = 'other' (Surge) AND a wallet address set.
+// Enriches any business row that has a Surge POS connected (pos_type = 'surge' or legacy 'other').
+// Adds order_rail block so any agent knows exactly how to place an order with this business.
 function enrichWithUCP(rows) {
   return rows.map(r => {
-    if (r.pos_type === 'other' && r.wallet) {
-      r.ucp_order_url = 'https://surge.basalthq.com/api/ucp/checkout-sessions';
-      r.ucp_wallet    = r.wallet;
-      r.ucp_note      = 'POST ucp_order_url with shopSlug resolved via GET https://surge.basalthq.com/api/directory/shops?q=' + encodeURIComponent(r.name);
+    const hasSurge = (r.pos_type === 'surge' || r.pos_type === 'other') && r.wallet;
+    if (hasSurge) {
+      r.order_rail = {
+        type:        'surge',
+        wallet:      r.wallet,
+        orderable:   true,
+        note:        'This business accepts orders via Surge POS. Use LocalIntel RFQ (local_intel_rfq) to route an order request, or POST directly to the LocalIntel order endpoint: POST https://gsb-swarm-production.up.railway.app/api/local-intel/place-order with { business_id, sku, qty, fulfillment }.',
+        menu_url:    `https://gsb-swarm-production.up.railway.app/api/local-intel/surge/menu/${r.business_id || ''}`,
+      };
+    } else {
+      r.order_rail = { orderable: false };
     }
     delete r.pos_type;
     delete r.wallet;
