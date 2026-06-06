@@ -44,17 +44,35 @@ const { upsertAgentSession, logTask } = require('./lib/telemetry');
 // Adds order_rail block so any agent knows exactly how to place an order with this business.
 function enrichWithUCP(rows) {
   return rows.map(r => {
-    const hasSurge = (r.pos_type === 'surge' || r.pos_type === 'other') && r.wallet;
+    const hasSurge  = (r.pos_type === 'surge' || r.pos_type === 'other') && r.wallet;
+    const isClaimed = !!(r.claimed_at || r.claimed);
+
     if (hasSurge) {
+      // Full agentic order rail — Surge POS connected
       r.order_rail = {
-        type:        'surge',
-        wallet:      r.wallet,
-        orderable:   true,
-        note:        'This business accepts orders via Surge POS. Use LocalIntel RFQ (local_intel_rfq) to route an order request, or POST directly to the LocalIntel order endpoint: POST https://gsb-swarm-production.up.railway.app/api/local-intel/place-order with { business_id, sku, qty, fulfillment }.',
-        menu_url:    `https://gsb-swarm-production.up.railway.app/api/local-intel/surge/menu/${r.business_id || ''}`,
+        type:      'surge',
+        wallet:    r.wallet,
+        orderable: true,
+        rfq:       true,
+        note:      'Surge POS connected. Route orders via local_intel_rfq (recommended) or POST /api/local-intel/place-order with { business_id, sku, qty, fulfillment }.',
+        menu_url:  `https://gsb-swarm-production.up.railway.app/api/local-intel/surge/menu/${r.business_id || ''}`,
+      };
+    } else if (isClaimed) {
+      // Claimed business — reachable via RFQ even without a POS
+      r.order_rail = {
+        type:      'rfq',
+        orderable: true,
+        rfq:       true,
+        note:      'Owner-claimed business. Send requests via local_intel_rfq — the owner will receive and respond.',
       };
     } else {
-      r.order_rail = { orderable: false };
+      // Unclaimed — RFQ still works (broadcast to business contact), no guarantee of response
+      r.order_rail = {
+        type:      'broadcast',
+        orderable: true,
+        rfq:       true,
+        note:      'Unclaimed listing. RFQ will broadcast to business contact info on file. Response not guaranteed.',
+      };
     }
     delete r.pos_type;
     delete r.wallet;
