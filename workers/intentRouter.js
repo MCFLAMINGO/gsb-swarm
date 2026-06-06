@@ -137,15 +137,24 @@ const ZONE_SIGNALS = [
   /\bincome (level|data|stats|profile)\b/i,
 ];
 
+// Named-business pattern — "Beaches Diner", "McFlamingo", "Larry's Giant Subs", etc.
+// If the query contains a proper-noun business name, it's a lookup not an order task.
+// Signals: capitalized word(s) followed by a business type word, OR a possessive name.
+const NAMED_BUSINESS_RE = /[A-Z][a-z]+(?:\s+[A-Z&'][a-z]*)*(\s+(?:diner|restaurant|cafe|café|grill|kitchen|bar|pub|lounge|bistro|eatery|pizza|subs|grille|seafood|sushi|tacos?|wings?|bbq|bakery|brewery|taproom|winery|cantina|steakhouse|chophouse|brasserie|bouchon|trattoria|osteria|izakaya|ramen|pho|noodle|buffet|express|house|shack|hut|station|stand|cart|truck|market|shop|store|boutique|salon|spa|clinic|office|studio|gym|yard|lawn|landscaping|plumbing|electric|roofing|hvac))/i;
+
 /**
  * detectIntent(query) → 'lookup' | 'market' | 'zone' | null
  * Lookup always wins over market if both match — the user wants a list, not analysis.
  * Zone fires before vertical detection — demographics questions always go to local_intel_zone.
  */
 function detectIntent(query) {
-  // Task/order intent fires first — agent wants to get something done
-  for (const pattern of TASK_SIGNALS) {
-    if (pattern.test(query)) return 'task';
+  // Task/order intent fires first — BUT only if no specific named business is in the query.
+  // "I want beaches diner" = lookup (named business), not a food order task.
+  const hasNamedBusiness = NAMED_BUSINESS_RE.test(query);
+  if (!hasNamedBusiness) {
+    for (const pattern of TASK_SIGNALS) {
+      if (pattern.test(query)) return 'task';
+    }
   }
   // Lookup: find existing businesses/providers
   for (const pattern of INTENT_SIGNALS.lookup) {
