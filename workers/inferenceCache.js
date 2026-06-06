@@ -703,6 +703,81 @@ const VERTICAL_VOCAB = {
     'housing starts','new construction','spec home',
     'infrastructure momentum','development activity',
     'construction saturation','trade shortage','subcontractor gap',
+    // ── Junk Removal / Hauling (Thumbtack/Angi top 2026) ──
+    'junk removal','junk hauling','haul away','junk pickup','same day junk removal',
+    'furniture removal','couch removal','mattress removal','bed frame removal',
+    'appliance removal','fridge removal','washer removal','dryer removal','stove removal',
+    'estate cleanout','estate clean out','full house cleanout',
+    'basement cleanout','basement clean out',
+    'garage cleanout','garage clean out',
+    'attic cleanout','attic clean out',
+    'hoarding cleanup','hoarder cleanout',
+    'construction debris removal','renovation debris','demo debris removal',
+    'yard waste removal','brush removal','branch removal','leaf removal',
+    'hot tub removal','spa removal',
+    'shed demolition','shed removal',
+    'piano removal','piano disposal',
+    'electronics recycling','tv recycling','e-waste removal','ewaste pickup',
+    'scrap metal pickup','scrap metal removal',
+    'tire disposal','tire removal',
+    'carpet removal','flooring removal','old carpet disposal',
+    'bulk trash pickup','bulk item removal',
+    'move out cleanout','move out clean out','apartment cleanout',
+    'foreclosure cleanout','bank owned cleanout',
+    'office junk removal','commercial junk removal',
+    'dumpster rental','dumpster alternative','roll off dumpster',
+    'cheap junk removal','eco friendly junk removal','donate and haul',
+    'renovation trash removal','post renovation cleanup',
+    // ── Home Improvement Task Phrases ──
+    'kitchen remodel cost','bathroom remodel cost','how much to remodel',
+    'garage door replacement','garage door install',
+    'entry door replacement','front door install',
+    'vinyl siding replacement','fiber cement siding','siding install',
+    'hardwood floor installation','laminate floor install','tile floor install',
+    'deck building','deck repair','deck replacement','deck staining',
+    'patio pavers','paver patio','concrete patio','patio addition',
+    'window replacement cost','impact window install',
+    'drywall repair','drywall patch','drywall install',
+    'plumbing leak repair','fixture install','faucet install','toilet install',
+    'electrical outlet install','panel upgrade','lighting install','ceiling fan install',
+    'hvac install','ac installation','furnace install','mini split install',
+    'tree removal','tree trimming cost','stump grinding',
+    'driveway sealing','driveway resurfacing','asphalt driveway','concrete driveway',
+    'countertop install','quartz countertop','granite countertop',
+    'backsplash install','tile backsplash',
+    'shower replacement','tub replacement','walk in shower install',
+    'whole house fan','attic fan','attic ventilation',
+    'basement finishing','basement finish','basement egress',
+    'home office build out','closet organizer','custom closet',
+    'laundry room remodel','mudroom addition',
+    'crown molding install','trim install','wainscoting',
+    'staircase refinishing','stair rail install',
+    'fireplace insert','gas fireplace install','fireplace update',
+    'smart home install','smart lighting','smart thermostat','home security install',
+    'solar panel install','solar panel cost',
+    'insulation upgrade','attic insulation','spray foam insulation',
+    'water heater install','tankless water heater',
+    'sewer line repair','sewer line replacement','drain line repair',
+    'foundation repair cost','crawl space encapsulation',
+    'retaining wall','retaining wall install',
+    'outdoor kitchen','bbq area build','fire pit install',
+    'pool install','pool repair','pool resurfacing',
+    'pressure wash house','house washing','driveway pressure wash',
+    'popcorn ceiling removal','texture ceiling','skim coat',
+    'wallpaper removal','wallpaper install',
+    'hardwood refinishing','floor refinishing','floor sanding',
+    'built in shelving','built in bookcase','wall unit',
+    'home addition','room addition','bump out addition',
+    'mold remediation cost','mold testing','mold removal',
+    'asbestos removal','asbestos testing','lead paint removal',
+    'chimney repair','chimney sweep','chimney liner',
+    'storm damage repair','hail damage repair','wind damage repair',
+    'aging in place','grab bar install','wheelchair ramp','ada modification',
+    // Common phrase patterns
+    'handyman near me','handyman for','how much does it cost to',
+    'get quotes for','contractor near me','local contractor',
+    'same day repair','emergency repair','weekend contractor',
+
   ],
 
   realtor: [
@@ -1065,7 +1140,39 @@ const VERTICAL_SIGNALS = {
     'lawyer near me|attorney near me|free consultation lawyer|how to sue|legal advice|legal help',
     'i'
   ),
-    construction: /\bplumber\b|\belectrician\b|\bhvac\b|\broofer\b|\bmasonry\b|\bconcrete\b|\bframing\b|\bdrywall\b|\bpavers\b|\bhardscape\b|\bstucco\b|\bsiding\b|\binsulation\b|\bseptic\b|excavat|\bhandyman\b|screen room|\bcarpenter\b|\bwelder\b|\bforeman\b|superintendent|\bestimator\b|pool builder|solar panel|irrigation system/i,
+    construction: new RegExp(
+    '\\bplumber\\b|\\belectrician\\b|\\bhvac\\b|\\broofer\\b|\\bmasonry\\b|\\bconcrete\\b|' +
+    '\\bframing\\b|\\bdrywall\\b|\\bpavers\\b|\\bhardscape\\b|\\bstucco\\b|\\bsiding\\b|' +
+    '\\binsulation\\b|\\bseptic\\b|excavat|\\bhandyman\\b|screen room|\\bcarpenter\\b|' +
+    '\\bwelder\\b|\\bforeman\\b|superintendent|\\bestimator\\b|pool builder|solar panel|irrigation system|' +
+    // Junk removal
+    'junk removal|junk hauling|haul away|junk pickup|same day junk|' +
+    'furniture removal|appliance removal|estate cleanout|basement cleanout|garage cleanout|attic cleanout|' +
+    'hoarding cleanup|construction debris|yard waste removal|hot tub removal|shed demolition|' +
+    'piano removal|e.?waste removal|scrap metal pickup|tire disposal|carpet removal|' +
+    'bulk trash pickup|move out cleanout|foreclosure cleanout|dumpster rental|' +
+    'post renovation cleanup|renovation trash|cheap junk removal|' +
+    // Home improvement tasks
+    'kitchen remodel|bathroom remodel|garage door replacement|garage door install|' +
+    'entry door replacement|siding replacement|siding install|' +
+    'hardwood floor install|laminate floor|tile floor install|' +
+    'deck build|deck repair|deck stain|patio pavers|paver patio|' +
+    'window replacement|drywall repair|drywall patch|' +
+    'plumbing leak|fixture install|panel upgrade|ceiling fan install|' +
+    'ac installation|furnace install|mini split|' +
+    'driveway sealing|driveway resurface|countertop install|backsplash install|' +
+    'shower replacement|tub replacement|walk in shower|' +
+    'basement finishing|home office build|closet organizer|custom closet|' +
+    'crown molding|wainscoting|staircase refinish|fireplace insert|' +
+    'smart home install|water heater install|tankless water heater|' +
+    'sewer line repair|retaining wall|outdoor kitchen|fire pit install|' +
+    'pool resurface|pressure wash house|popcorn ceiling|wallpaper removal|' +
+    'floor refinish|home addition|room addition|mold remediation|' +
+    'asbestos removal|chimney repair|chimney sweep|storm damage repair|' +
+    'grab bar install|wheelchair ramp|ada modification|' +
+    'contractor near me|local contractor|same day repair|get quotes for',
+    'i'
+  ),
   realtor:      /real estate|\brealtor\b|mortgage broker|loan officer|title company|home stager|days on market|cap rate|\bforeclosure\b|homeowners assoc|\bzoning\b|single family|multifamily|listing agent|buyers agent/i,
 };
 
