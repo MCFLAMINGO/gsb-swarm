@@ -8636,6 +8636,30 @@ router.get('/admin/biz-id', async (req, res) => {
   }
 });
 
+// DELETE /api/local-intel/admin/delete-biz — hard-delete a bad/duplicate business record (admin only)
+router.delete('/admin/delete-biz', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const token = req.headers['x-admin-token'] || req.query.admin_token;
+  if (token !== (process.env.LOCAL_INTEL_ADMIN_TOKEN || '') && token !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const { business_id } = req.body || {};
+  if (!business_id) return res.status(400).json({ error: 'business_id required' });
+  try {
+    // Fetch record first so we can confirm what we're deleting
+    const rows = await db.query(
+      `SELECT business_id, name, zip, address, phone FROM businesses WHERE business_id = $1`,
+      [business_id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'not found' });
+    await db.query(`DELETE FROM businesses WHERE business_id = $1`, [business_id]);
+    console.log(`[admin] Deleted business ${business_id} — ${rows[0].name} (${rows[0].zip})`);
+    return res.json({ ok: true, deleted: rows[0] });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/local-intel/claim-stats — outreach funnel: sent → claimed
 router.get('/claim-stats', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
