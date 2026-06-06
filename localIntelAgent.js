@@ -6495,11 +6495,6 @@ function detectOrderItemPartial(raw) {
   const NON_FOOD_RE = /\b(?:rent|lease|buy|purchase|book(?:\s+a\s+(?:flight|hotel|venue))?|property|condo|apartment|house|home|land|real\s*estate|landscap|plumb|electr|construct|repair|install|service(?:s)?|hire|find\s+a|search\s+for|know\s+where|tell\s+me|show\s+me|recommend\s+a|suggest\s+a|looking\s+for\s+a\s+(?:home|house|property|place\s+to\s+live)|move|relocat|invest|hotel|vacation|travel|flight|airbnb|vrbo|haircut|hair\s+cut|hair\s+style|blowout|manicure|pedicure|nail|massage|facial|wax|barbershop|salon|spa|gym|workout|yoga|pilates|crossfit|fitness|dentist|dental|doctor|urgent\s+care|prescription|pharmacy|lawyer|attorney|accountant|insurance|mechanic|oil\s+change|car\s+wash|tire|tow|locksmith|pest\s+control|pool\s+service|landscap|irrigation|gutter|roofing|flooring|drywall|painting|fence|deck|remodel|renovation|beach\s+chair|beach\s+umbrella|beach\s+gear|beach\s+supply|outdoor\s+gear|camping\s+gear|sporting\s+goods|kayak|paddleboard|surfboard|fishing\s+gear|bike|bicycle|scooter|drill|power\s+tool|hardware|lumber|screwdriver|wrench|ladder|chainsaw|lawn\s+mower|leaf\s+blower|pressure\s+washer|furniture|mattress|sofa|couch|desk|chair|lamp|shelf|closet|mirror|clothing|apparel|shirt|pants|dress|shoes|sneakers|boots|jacket|coat|hat|sunglasses|swimsuit|flip\s+flops|sunscreen|sunblock|lotion|deodorant|shampoo|soap|toothpaste|toilet\s+paper|paper\s+towel|laundry|detergent|batteries|lightbulb|extension\s+cord|phone\s+charger|laptop|computer|printer|tv|television|speaker|headphones|camera|gift\s+card|flowers|florist|balloon|decoration)\b/i;
   if (NON_FOOD_RE.test(itemQuery)) return { isPartial: false, itemQuery: null };
 
-  // Guard: if itemQuery looks like a named business (e.g. "Beaches Diner", "McFlamingo"),
-  // it's a lookup not a food item — fall through to search.
-  const NAMED_BIZ_ITEM_RE = /[A-Z][a-z]+(?:\s+[A-Z&'][a-z]*)*\s+(?:diner|restaurant|cafe|caf\u00e9|grill|kitchen|bar|pub|lounge|bistro|eatery|pizza|subs|grille|seafood|sushi|bakery|brewery|cantina|steakhouse|buffet|express|house|shack|hut|truck|market)/i;
-  if (NAMED_BIZ_ITEM_RE.test(itemQuery)) return { isPartial: false, itemQuery: null };
-
   return { isPartial: true, itemQuery };
 }
 
@@ -7203,9 +7198,10 @@ router.get('/search', harvestGuard, async (req, res) => {
     // B70: aliased + LEFT JOIN zip_signals so concept-profile ORDER BY can read zs.*
     // signals. LEFT JOIN keeps businesses without a zip_signals row in results
     // (they sort with 0 contribution from zip-level factors).
-    const BASE_SELECT = `SELECT b.name, b.zip, b.address, b.city, b.phone, b.website, b.category, b.category_group,
+    const BASE_SELECT = `SELECT b.business_id, b.name, b.zip, b.address, b.city, b.phone, b.website, b.category, b.category_group,
       b.description, b.tags, b.hours, b.hours_json, b.price_tier, b.services_text,
-      b.lat, b.lon, b.confidence_score, b.claimed_at, b.wallet, b.status
+      b.lat, b.lon, b.confidence_score, b.claimed_at, b.wallet, b.status,
+      b.pos_config->>'pos_type' AS pos_type, b.menu_url
       FROM businesses b
       LEFT JOIN zip_signals zs ON zs.zip = b.zip
       WHERE b.status != 'inactive'
@@ -7411,9 +7407,10 @@ router.get('/search', harvestGuard, async (req, res) => {
           const tsZipParam  = zip ? zip : TARGET_ZIPS;
           try {
             rows = await db.query(
-              `SELECT b.name, b.zip, b.address, b.city, b.phone, b.website, b.category, b.category_group,
+              `SELECT b.business_id, b.name, b.zip, b.address, b.city, b.phone, b.website, b.category, b.category_group,
                 b.description, b.tags, b.hours, b.hours_json, b.price_tier, b.services_text,
                 b.lat, b.lon, b.confidence_score, b.claimed_at, b.wallet, b.status,
+                b.pos_config->>'pos_type' AS pos_type, b.menu_url,
                 ts_rank(b.search_vector, to_tsquery('english', $1)) AS _rank
                FROM businesses b
                LEFT JOIN zip_signals zs ON zs.zip = b.zip
@@ -7558,6 +7555,7 @@ router.get('/search', harvestGuard, async (req, res) => {
     });
 
     const results = rows.slice(0, limit).map(r => ({
+      business_id:   r.business_id || null,
       name:          r.name,
       zip:           r.zip,
       address:       r.address       || '',
@@ -7577,6 +7575,8 @@ router.get('/search', harvestGuard, async (req, res) => {
       confidence:    r.confidence_score ? parseFloat(r.confidence_score) * 100 : 50,
       claimed:       !!r.claimed_at,
       wallet:        r.wallet || null,
+      pos_type:      r.pos_type || null,
+      menu_url:      r.menu_url || null,
     }));
 
     // ── Narrative: "what is X" / "tell me about X" intent ──────────────────
