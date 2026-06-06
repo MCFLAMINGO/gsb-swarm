@@ -227,6 +227,79 @@ const VERTICAL_VOCAB = {
     // market terms
     'retail gap','spending capture','retail saturation','consumer spending',
     'retail density','shopping corridor','anchor tenant',
+    // ── Women's Product Searches & Shopping Slang (2026) ──
+    // Fashion
+    'wireless bra','supportive bralette','seamless bra','push-up bra','comfy bra','no-wire bra',
+    'cotton underwear','bikini briefs','seamless panties','period underwear','shapewear','sculpting shorts',
+    'cute top','ribbed tank','baby tee','oversized button-down','going-out top',
+    'tank top','sleeveless tee',
+    'leggings','flare leggings','butt-lifting leggings','activewear','athleisure','athleisure set','pilates princess',
+    'wide leg pants','palazzo pants','linen pants','flowy pants','barrel jeans','effortless pants',
+    'summer dress','tennis dress','casual dress','wrap dress','floral dress','little black dress','lbd',
+    'coquette dress','that girl dress','that girl outfit','that girl vibe',
+    'graphic tee','oversized tee','basic tee',
+    'relaxed jeans','high rise jeans','mom jeans','baggy jeans','high-rise denim',
+    'cozy hoodie','oversized sweatshirt','cardigan',
+    'crocs','clogs','water shoes','cloud shoes','arch support sandals','ballet flats','kitten heels','cute kicks',
+    'puffer coat','quilted jacket','overshirt',
+    'romper','jumpsuit',
+    'nipple covers','nippies',
+    'pajamas','loungewear','cozy socks','silky set','pajama set','bed rot',
+    'swimwear','bikini','cover up','maternity wear',
+    'skirt','wrap skirt','mini skirt',
+    'fit check','new fit','haul','amazon finds','amazon haul','glow-up clothes','comfy but cute',
+    // Beauty products
+    'moisturizer','tallow moisturizer','beef tallow moisturizer','holy grail cream','slugging',
+    'lip balm','lip stain','lip gloss','lip combo','glazed donut lips','tinted balm',
+    'mascara','sky high mascara','tubing mascara','lash serum','lash lift at home',
+    'sunscreen','spf','tinted sunscreen','spf girly',
+    'face mask','sheet mask','sheet mask moment','glass skin routine',
+    'niacinamide serum','vitamin c serum','snail mucin serum','niacinamide glow','hydration bomb',
+    'acne patch','pimple patch','mighty patch','zit sticker','hero patch',
+    'body lotion','eos lotion',
+    'makeup remover wipes','micellar water',
+    'blush','highlighter','halo glow','blush dump','clean girl makeup','dewy base','no-makeup makeup',
+    'foundation','tinted moisturizer','bb cream','cc cream',
+    'eye cream','neck cream','retinol cream',
+    'cleanser','facial wash','face wash',
+    'exfoliator','chemical exfoliant',
+    'dermaplaning tool','face razor',
+    'shampoo','conditioner','olaplex mask','dry shampoo','olaplex girl',
+    'perfume','body spray','fragrance',
+    'nail polish','press on nails','gel nail kit',
+    'brow gel','brow lamination kit','soap brows',
+    'deodorant',
+    'skincare girly','glow-up haul','shelfie','holy grail products','that girl routine','self-care goodies',
+    // Hair tools
+    'blow dryer','hair dryer','dyson airwrap','flat iron','curling iron','curling wand','blowout tools','heatless curls',
+    'hair clips','claw clips','clip-in extensions','clip ins',
+    'hair growth supplement','viviscal',
+    'hair brush','wide tooth comb','detangling brush',
+    'electric toothbrush','teeth whitening strips',
+    // Accessories & Jewelry
+    'sunglasses','sunglasses slay',
+    'handbag','purse','crossbody bag','tote bag','mini bag','it bag','structured tote','woven bag','everyday carry',
+    'earrings','hoop earrings','gold hoops','chunky earrings','stud earrings',
+    'gold necklace','layered necklaces','bracelet','charm bracelet','stacked jewelry','statement bag',
+    'watch','smart watch',
+    'baseball cap','bucket hat','sun hat',
+    'silk scarf','phone case',
+    // Wellness & Home products
+    'womens multivitamin','collagen supplement','hair skin nails gummies','wellness girl stack',
+    'yoga mat','resistance band','workout set',
+    'stanley cup','insulated water bottle',
+    'weighted blanket','cozy blanket',
+    'cozy girl candles','reed diffuser','room spray',
+    'gua sha','lymphatic drainage tool','led face mask','red light therapy device',
+    'journal','planner','journaling era','that girl setup',
+    'smart scale','self tanner','tanning drops',
+    'whitening kit','mani pedi kit','nail kit','skincare starter kit',
+    // Shopping slang / combo phrases
+    'tiktok made me buy it','sephora cart','full restock','monthly maintenance','glow-up kit',
+    'add to cart','amazon cart','basics refresh','essentials restock',
+    'high maintenance low effort','clean girl aesthetic','coquette core','preppy girly','mob wife',
+    'summer slay','vacation fits','back to school haul',
+    'sephora haul','ulta haul','beauty haul','skincare haul',
   ],
 
   construction: [
@@ -465,7 +538,28 @@ for (const [vertical, terms] of Object.entries(VERTICAL_VOCAB)) {
 const VERTICAL_SIGNALS = {
   restaurant:   /\brestaurant\b|\bdining\b|bartend|barback|\bbusser\b|line cook|sous chef|prep cook|pastry chef|sommelier|\bbarista\b|\bfoh\b|\bboh\b|dishwasher|expeditor|\bbrewery\b|gastropub/i,
   healthcare:   /urgent care|walk.in clinic|\bpharmacy\b|physical therap|occupational therap|speech therap|chiropract|dermatolog|cardiolog|orthoped|neurolog|psychiatr|psycholog|acupunctur|med spa|medspa|aestheti|\bimaging\b|\bmri\b|\binfusion\b|\bhospice\b|podiatr|pain manag|hormone clinic|iv therap|\bobgyn\b|gynecolog|fertility clinic|audiolog|naturopath/i,
-  retail:       /\bboutique\b|supermarket|convenience store|sporting goods|\bpet store\b|hardware store|visual merchand|loss prevention|\bcashier\b|sales associate|retail manager|merchandise planner/i,
+  retail: new RegExp(
+    '\\bboutique\\b|supermarket|convenience store|sporting goods|\\bpet store\\b|hardware store|' +
+    'visual merchand|loss prevention|\\bcashier\\b|sales associate|retail manager|merchandise planner|' +
+    // Product searches
+    'wireless bra|bralette|seamless bra|shapewear|period underwear|' +
+    'leggings|athleisure|activewear|pilates princess|wide.leg pants|barrel jeans|palazzo pants|' +
+    'summer dress|tennis dress|little black dress|wrap dress|' +
+    'tallow moisturizer|beef tallow|glazed donut lips|glass skin|snail mucin|niacinamide|' +
+    'pimple patch|acne patch|lash serum|press.on nails|gel nail kit|brow lamination|' +
+    'dyson airwrap|curling iron|flat iron|claw clips|clip.in extension|' +
+    'stanley cup|gua sha|led face mask|lymphatic drainage|' +
+    // Shopping slang
+    'tiktok made me buy|amazon haul|sephora haul|ulta haul|beauty haul|skincare haul|' +
+    'add to cart|amazon cart|amazon finds|fit check|glow.up clothes|glow.up kit|' +
+    'clean girl aesthetic|coquette core|mob wife|that girl outfit|that girl vibe|' +
+    'basics refresh|full restock|essentials restock|' +
+    'summer slay|vacation fits|back to school haul|' +
+    'holy grail|\\bhaul\\b|comfy but cute|cozy hoodie|' +
+    'skincare routine|skincare girly|self.care goodies|wellness girl|' +
+    'it bag|structured tote|woven bag|everyday carry|stacked jewelry|gold hoops',
+    'i'
+  ),
   beauty: new RegExp(
     // Venues
     'hair salon|nail salon|beauty salon|blow.?dry bar|blowout bar|lash studio|brow bar|' +
