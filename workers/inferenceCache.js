@@ -300,6 +300,62 @@ const VERTICAL_VOCAB = {
     'high maintenance low effort','clean girl aesthetic','coquette core','preppy girly','mob wife',
     'summer slay','vacation fits','back to school haul',
     'sephora haul','ulta haul','beauty haul','skincare haul',
+    // ── Men's Product Searches & Shopping Slang (2026) ──
+    // Fashion & Clothing
+    'boxer briefs','mens underwear','moisture wicking underwear','underwear multipack',
+    'mens t-shirt','crew neck tee','pocket tee','graphic tee mens','plain tee pack',
+    'polo shirt','mens button down','mens button-down',
+    'chinos','cargo pants','straight fit jeans','mens jeans',
+    'quarter zip','mens hoodie','mens sweatshirt',
+    'athletic shorts','gym shorts','compression pants','workout pants','joggers',
+    'bomber jacket','puffer jacket','flannel overshirt','carhartt','work jacket',
+    'white sneakers','dad shoes','hiking boots','work boots','mens sneakers',
+    'compression socks','crew socks','no-show socks','sock pack',
+    'lounge pants','sweatpants','mens pajamas',
+    'muscle shirt','mens tank top',
+    'dress shirt','mens suit','swim trunks',
+    'mens belt','mens wallet',
+    // Grooming & Personal Care
+    'electric trimmer','body groomer','manscaped','philips norelco','the lawnmower',
+    'mens cologne','fragrance mens','dior sauvage','versace cologne','montblanc legend',
+    'cologne sample','signature scent','new frag','layering scents',
+    'mens deodorant','clinical strength mens','antiperspirant',
+    'face moisturizer mens','post-shave balm','aftershave',
+    'shaving cream','shaving gel','safety razor','mens razor','razor bump',
+    'beard oil','beard balm','beard trimmer','beard kit','beard game',
+    'pomade','matte clay','sea salt spray','mens hair product',
+    'minoxidil','biotin hair','hair loss treatment',
+    'dry shampoo mens','body wash mens','bar soap',
+    'whitening toothpaste mens','electric toothbrush mens',
+    // Shoes & Accessories (mens)
+    'new kicks','fresh sneakers','boot season','beater shoes',
+    'mens sunglasses','shades',
+    'mens watch','classic watch',
+    'baseball cap','trucker hat','beanie',
+    'backpack','duffel bag','gym bag','laptop bag',
+    'phone case mens','power bank','portable charger',
+    // Wellness, Tech & Home (mens)
+    'protein powder','protein supplement','supps','mens multivitamin',
+    'hydro flask','mens water bottle',
+    'dumbbells','resistance bands mens','fitness gear mens',
+    'massage gun mens',
+    'wireless earbuds','headphones','airpods',
+    'multi-tool','pocket knife','tactical pants',
+    'grill accessories','air fryer mens','cooler','yeti cooler',
+    // Men's shopping slang / phrases
+    'new fits','fresh threads','wardrobe refresh','copped some gear','daily uniform',
+    'work to gym rotation','gym drip','dad fit check','business casual rotation',
+    'fresh cut','lined up','grooming sesh','maintenance day mens','smell good','smelling right',
+    'clean shave','beard oil game','skincare but make it manly',
+    'copped new kicks','boot season','dad shoes era',
+    'trim the bushes','get a lineup','manscaped run',
+    'payday cop','gear up','upgrade','lowkey needed this',
+    'essentials restock mens','amazon haul mens','underwear haul',
+    'new hoodie drop','comfy fit','oversized for lounging',
+    'new chinos','gym pants','durable work pants',
+    'new cologne','this one hits different',
+    'full maintenance haircut','gym clothes supplements','beard trim deodorant',
+    'hoodie and joggers','basic tees','quarter-zip for the win',
   ],
 
   construction: [
@@ -557,7 +613,19 @@ const VERTICAL_SIGNALS = {
     'summer slay|vacation fits|back to school haul|' +
     'holy grail|\\bhaul\\b|comfy but cute|cozy hoodie|' +
     'skincare routine|skincare girly|self.care goodies|wellness girl|' +
-    'it bag|structured tote|woven bag|everyday carry|stacked jewelry|gold hoops',
+    'it bag|structured tote|woven bag|everyday carry|stacked jewelry|gold hoops|' +
+    // Men's product searches
+    'boxer briefs|mens underwear|moisture wicking|athletic shorts|gym shorts|compression pants|' +
+    'quarter zip|bomber jacket|flannel overshirt|carhartt|work boots|hiking boots|dad shoes|' +
+    'electric trimmer|body groomer|manscaped|beard oil|beard trimmer|beard kit|' +
+    'mens cologne|dior sauvage|signature scent|new frag|post.shave|aftershave|' +
+    'pomade|matte clay|sea salt spray|minoxidil|' +
+    'protein powder|\\bsupps\\b|wireless earbuds|massage gun|multi.tool|' +
+    // Men's slang
+    'fresh threads|wardrobe refresh|copped|gym drip|dad fit|business casual|' +
+    'fresh cut|lined up|grooming sesh|smelling right|beard game|' +
+    'payday cop|gear up|lowkey needed|new hoodie drop|hoodie and joggers|' +
+    'new kicks|boot season|trim the bushes|manscaped run|new frag',
     'i'
   ),
   beauty: new RegExp(
