@@ -2405,7 +2405,10 @@ async function handleRPC(req, callerInfo) {
   if (method === 'notifications/initialized') return null; // no response needed
 
   if (method === 'tools/list') {
-    return { jsonrpc: '2.0', id, result: { tools: MCP_MANIFEST.tools } };
+    return { jsonrpc: '2.0', id, result: {
+      tools: MCP_MANIFEST.tools,
+      serverInfo: { name: MCP_MANIFEST.name, version: MCP_MANIFEST.version, description: MCP_MANIFEST.description },
+    } };
   }
   if (method === 'prompts/list') {
     return {
