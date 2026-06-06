@@ -356,6 +356,36 @@ const VERTICAL_VOCAB = {
     'new cologne','this one hits different',
     'full maintenance haircut','gym clothes supplements','beard trim deodorant',
     'hoodie and joggers','basic tees','quarter-zip for the win',
+    // ── Collector Cards (Trading Cards / Sports Cards / Pokémon / MTG) ──
+    // Products & formats
+    'trading cards','collector cards','sports cards','pokemon cards','magic the gathering','mtg cards',
+    'booster box','booster pack','elite trainer box','etb','blaster box','hobby box','mega box',
+    'sealed product','sealed box','card tin','collection box',
+    'pokemon tcg','pokemon booster','pokemon set',
+    'basketball cards','football cards','baseball cards','nba cards','nfl cards','mlb cards',
+    'rookie card','rc card','rookie patch auto','rpa card','auto card','autograph card',
+    'graded card','psa 10','bgs 9.5','sgc graded','cgc card','slab card','slabbed card',
+    'raw card','ungraded card',
+    'numbered parallel','numbered card','1 of 1','one of one',
+    'vintage card','1952 topps','t206','base set pokemon','shadowless','1st edition pokemon',
+    'charizard card','charizard ex','umbreon card','pikachu illustrator',
+    'cooper flagg card','shohei ohtani card','paul skenes card','lebron card','jordan rookie',
+    'commander deck','mtg singles','dual lands','booster draft',
+    'yugioh cards','one piece cards','lorcana cards','flesh and blood tcg',
+    'card sleeve','top loader','card binder','card saver','card display case',
+    'grading submission','psa submission','bgs submission',
+    'whatnot break','group break','live break','box break',
+    // Collector slang
+    'ripping packs','rip this box','ripping tonight','pack rip',
+    'chase card','pulled the chase','big hit','pack hit',
+    'god pack','alt art card','full art card','secret rare','holo card','reverse holo',
+    'my grail','white whale card','dream card','pc card','personal collection card',
+    'card is mooning','card stonks','market heating up','low pop report',
+    'copped some slabs','added to the pc','ebay snipe','payday rip','sniped a deal',
+    'pulled a brick','pack luck','set is mid','completed the set','psa 10 pop 1',
+    'card is fire','card is clean','off-centered','beater card',
+    'investment flip card','sealed investment','grail card','grail pull',
+    'shadowless card','first edition card',
   ],
 
   construction: [
@@ -625,7 +655,18 @@ const VERTICAL_SIGNALS = {
     'fresh threads|wardrobe refresh|copped|gym drip|dad fit|business casual|' +
     'fresh cut|lined up|grooming sesh|smelling right|beard game|' +
     'payday cop|gear up|lowkey needed|new hoodie drop|hoodie and joggers|' +
-    'new kicks|boot season|trim the bushes|manscaped run|new frag',
+    'new kicks|boot season|trim the bushes|manscaped run|new frag|' +
+    // Collector cards
+    'trading card|sports card|pokemon card|magic the gathering|\\bmtg\\b|booster box|booster pack|' +
+    'elite trainer box|\\betb\\b|blaster box|hobby box|sealed product|' +
+    'rookie card|\\brc card\\b|graded card|psa 10|bgs 9.5|\\bslab\\b|slabbed card|' +
+    'charizard card|charizard ex|umbreon card|pikachu illustrator|' +
+    'numbered parallel|1 of 1|vintage card|shadowless|1st edition pokemon|' +
+    'yugioh card|lorcana card|one piece card|commander deck|' +
+    'card sleeve|top loader|card binder|grading submission|whatnot break|group break|live break|' +
+    'ripping packs|pack rip|chase card|god pack|alt art|full art card|secret rare|holo card|' +
+    'copped some slabs|added to the pc|ebay snipe|payday rip|pulled a brick|pack luck|' +
+    'card is mooning|card stonks|low pop report|investment flip|sealed investment|grail card|grail pull',
     'i'
   ),
   beauty: new RegExp(
