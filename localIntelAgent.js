@@ -12849,3 +12849,95 @@ router.get('/trade-signals', async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
+
+// ── Provider Registration ─────────────────────────────────────────────────────
+// POST /api/local-intel/provider-register
+// Accepts gig worker / independent provider sign-up from the /start page.
+// Stores to provider_registrations table (creates table on first run).
+// Fields: first_name, last_name, email, phone, biz_name, service_type,
+//         service_menu (array), service_area, description, sunbiz_number,
+//         needs_llc_help, payment_usd, payment_surge, payment_forex,
+//         surge_wallet, submitted_at, source
+router.post('/provider-register', express.json(), async (req, res) => {
+  // CORS — allow the landing page origin
+  res.set('Access-Control-Allow-Origin', '*');
+  try {
+    const b = req.body || {};
+
+    // Basic required-field guard
+    const required = ['first_name', 'last_name', 'email', 'phone', 'biz_name', 'service_type', 'service_area'];
+    for (const f of required) {
+      if (!b[f] || !String(b[f]).trim()) {
+        return res.status(400).json({ error: `Missing required field: ${f}` });
+      }
+    }
+
+    // Ensure table exists (idempotent)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS provider_registrations (
+        id              SERIAL PRIMARY KEY,
+        first_name      TEXT NOT NULL,
+        last_name       TEXT NOT NULL,
+        email           TEXT NOT NULL,
+        phone           TEXT NOT NULL,
+        biz_name        TEXT NOT NULL,
+        service_type    TEXT NOT NULL,
+        service_menu    JSONB DEFAULT '[]',
+        service_area    TEXT,
+        description     TEXT,
+        sunbiz_number   TEXT,
+        needs_llc_help  BOOLEAN DEFAULT FALSE,
+        payment_usd     BOOLEAN DEFAULT TRUE,
+        payment_surge   BOOLEAN DEFAULT FALSE,
+        payment_forex   BOOLEAN DEFAULT FALSE,
+        surge_wallet    TEXT,
+        source          TEXT DEFAULT 'start-page',
+        submitted_at    TIMESTAMPTZ DEFAULT NOW(),
+        created_at      TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query(
+      `INSERT INTO provider_registrations
+         (first_name, last_name, email, phone, biz_name, service_type,
+          service_menu, service_area, description, sunbiz_number,
+          needs_llc_help, payment_usd, payment_surge, payment_forex,
+          surge_wallet, source, submitted_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+      [
+        String(b.first_name).trim(),
+        String(b.last_name).trim(),
+        String(b.email).trim().toLowerCase(),
+        String(b.phone).trim(),
+        String(b.biz_name).trim(),
+        String(b.service_type).trim(),
+        JSON.stringify(Array.isArray(b.service_menu) ? b.service_menu : []),
+        String(b.service_area || '').trim(),
+        String(b.description || '').trim(),
+        String(b.sunbiz_number || '').trim() || null,
+        !!b.needs_llc_help,
+        b.payment_usd !== false,
+        !!b.payment_surge,
+        !!b.payment_forex,
+        String(b.surge_wallet || '').trim() || null,
+        String(b.source || 'start-page'),
+        b.submitted_at || new Date().toISOString(),
+      ]
+    );
+
+    console.log(`[provider-register] New registration: ${b.biz_name} (${b.email}) — ${b.service_type}`);
+    return res.status(202).json({ ok: true, message: 'Registration received' });
+
+  } catch (err) {
+    console.error('[provider-register] error:', err.message);
+    return res.status(500).json({ error: 'Registration failed — please try again' });
+  }
+});
+
+router.options('/provider-register', (req, res) =>
+  res.set('Access-Control-Allow-Origin', '*')
+     .set('Access-Control-Allow-Methods', 'POST')
+     .set('Access-Control-Allow-Headers', 'Content-Type')
+     .sendStatus(204)
+);
