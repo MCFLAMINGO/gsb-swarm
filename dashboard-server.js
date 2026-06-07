@@ -7791,7 +7791,7 @@ app.use((req, res, next) => {
   { name: 'Enrichment Agent',     file: 'workers/enrichmentAgent.js' },
   // { name: 'ACP Broadcaster',      file: 'workers/acpBroadcaster.js' },   // disabled — ACP paused, migrate to GSB-THROW env
     // ── Tidal layer workers ──
-  { name: 'Bedrock Worker',       file: 'workers/bedrockWorker.js' },
+  // { name: 'Bedrock Worker',       file: 'workers/bedrockWorker.js' }, // disabled — writes to /tmp (ephemeral), infrastructure_momentum_score never reaches Postgres; permitWorker + fdotWorker cover the same data
   { name: 'Oracle Worker',        file: 'workers/oracleWorker.js' },
   { name: 'Ocean Floor Worker',   file: 'workers/oceanFloorWorker.js' },
   { name: 'Surface Current',      file: 'workers/surfaceCurrentWorker.js' },
