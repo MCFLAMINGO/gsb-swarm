@@ -7799,9 +7799,9 @@ app.use((req, res, next) => {
     // { name: 'BTR Worker',           file: 'workers/btrWorker.js' }, // disabled — timing out on all ZIPs (stjohnstax.us unreachable), wasting retries
   // { name: 'Vertical Agent',        file: 'workers/verticalAgentWorker.js' }, // disabled — ACP paused, migrate to GSB-THROW env
     // { name: 'Prompt Evolution',       file: 'workers/promptEvolutionWorker.js' }, // disabled — no production traffic yet, nothing to learn from
-  { name: 'Census Layer',                  file: 'workers/censusLayerWorker.js'     },
   { name: 'Overpass Worker',         file: 'workers/overpassWorker.js'        },
-  { name: 'IRS SOI Worker',               file: 'workers/irsSoiWorker.js'          },
+  // ── Macro data batch runner (replaces 10 individual workers, 1 shared connection) ──
+  { name: 'Batch Data Runner',       file: 'workers/batchDataWorker.js'       },
   // { name: 'ACP Intel Cycle',         file: 'workers/localIntelAcpCycle.js'    }, // disabled — ACP paused, migrate to GSB-THROW env
     // { name: 'MCP Probe Worker',          file: 'workers/mcpProbeWorker.js'        }, // disabled — no real users yet
   // { name: 'Router Learning Worker',     file: 'workers/routerLearningWorker.js'  }, // B129 — over conn cap, re-enable when on Postgres hobby (50 conns)
@@ -7812,26 +7812,26 @@ app.use((req, res, next) => {
   // { name: 'ZIP Brief Worker',           file: 'workers/zipBriefWorker.js'        }, // B129 — over conn cap
   { name: 'Hours Parse Worker',         file: 'workers/hoursParseWorker.js'      },
     // { name: 'Embedding Worker',           file: 'workers/embeddingWorker.js'       }, // disabled — Railway disk ephemeral, needs pgvector
-  { name: 'ACS Demographics Worker',       file: 'workers/acsWorker.js'             },
+  // acsWorker moved to batchDataWorker
   { name: 'Sunbiz Import Worker', file: 'workers/sunbizWorker.js' }, // B91 — 3-trip streaming, no disk
   // { name: 'Search Vector Backfill',      file: 'workers/searchVectorBackfillWorker.js' }, // B129 — over conn cap
     // { name: 'Embedding Backfill',          file: 'workers/embeddingBackfillWorker.js' }, // disabled — index recreates at 1.2GB, 0 scans, no query path uses <-> operator yet
   // { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' }, // B129 — over conn cap
   { name: 'Permit Worker',               file: 'workers/permitWorker.js' },
   { name: 'FDOT AADT Worker',               file: 'workers/fdotWorker.js'   },
-    // ── World model input workers (run on boot, self-throttle via heartbeat) ──
-  { name: 'FRED Unemployment Worker',      file: 'workers/fredWorker.js'          },  // 30-day freshness check
-  { name: 'BEA Income Worker',             file: 'workers/beaWorker.js'           },  // 30-day freshness check
-  { name: 'LODES Jobs Worker',             file: 'workers/lodesWorker.js'         },  // annual data
+    // ── World model input workers — moved to batchDataWorker (sequential, 1 connection) ──
+  // fredWorker, beaWorker, lodesWorker, irsSoiWorker, irsMigrationWorker,
+  // fccBroadbandWorker, schoolEnrollmentWorker, censusLayerWorker, worldModelWorker → batchDataWorker
   { name: 'QWI Workforce Worker',          file: 'workers/qwiWorker.js'           },
   { name: 'CES Employment Worker',         file: 'workers/cesWorker.js'           },
   { name: 'QCEW Wages Worker',             file: 'workers/qcewWorker.js'          },
-  { name: 'School Enrollment Worker',      file: 'workers/schoolEnrollmentWorker.js' },
+  // schoolEnrollmentWorker moved to batchDataWorker
   { name: 'County Permits Worker',         file: 'workers/countyPermitsWorker.js'    },
     // ── World model derived signals (runs after input workers) ──
-  { name: 'FCC Broadband Worker',          file: 'workers/fccBroadbandWorker.js'  },
-  { name: 'IRS Migration Worker',          file: 'workers/irsMigrationWorker.js'  },
-  { name: 'World Model Worker',            file: 'workers/worldModelWorker.js'    },  // derives sig_growth/opportunity/risk scores from raw signals — core LocalIntel
+  // fccBroadbandWorker moved to batchDataWorker
+  // irsMigrationWorker, worldModelWorker, censusLayerWorker, acsWorker, beaWorker, fredWorker,
+  // lodesWorker, irsSoiWorker, fccBroadbandWorker, schoolEnrollmentWorker
+  // ↑ all moved into batchDataWorker — share 1 connection slot, run sequentially every 6h
   { name: 'Business Signal Worker',        file: 'workers/businessSignalWorker.js' },  // B65 — 24h freshness; derives claimed/wallet/task/closure rates → zip_signals
   ];
 

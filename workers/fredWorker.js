@@ -168,7 +168,7 @@ function chunks(arr, n) {
 async function run() {
   if (!API_KEY) {
     console.error('[fred] ❌ BUREAU_OF_LABOR_STATISTICS_API env var not set — cannot run');
-    process.exit(1);
+    throw new Error('BUREAU_OF_LABOR_STATISTICS_API not set');
   }
 
   // Freshness check — skip if ran within 180 days (LAUS vintage is annual) — FRED_FORCE=true bypasses
@@ -179,7 +179,7 @@ async function run() {
       const ageDays = (Date.now() - new Date(hb[0].last_run).getTime()) / 86400000;
       if (ageDays < 180) {
         console.log(`[fred] Data fresh (${ageDays.toFixed(1)} days old) — skipping. Use FRED_FORCE=true to override.`);
-        process.exit(0);
+        return;
       }
     }
   } catch (_) { /* no heartbeat yet — run */ }
@@ -262,7 +262,9 @@ async function run() {
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.log(`[fred] ✅ Done — ${countyDone} counties, ${zipsDone} ZIP upserts, ${skipped} skipped — ${elapsed}s`);
-  process.exit(0);
 }
 
-run().catch(e => { console.error('[fred] fatal:', e.message); process.exit(1); });
+if (require.main === module) {
+  run().catch(e => { console.error('[fred] fatal:', e.message); process.exit(1); });
+}
+module.exports = { runWorker: run };

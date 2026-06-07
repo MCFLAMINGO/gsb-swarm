@@ -279,10 +279,9 @@ async function runPass() {
 }
 
 // ── Daemon loop ───────────────────────────────────────────────────────────────
-(async function main() {
+async function runWorker() {
   const hb = require('../lib/workerHeartbeat');
-  const FRESH_MS = FRESH_H * 60 * 60 * 1000;         // 180d freshness check
-  const SLEEP_MS  = LOOP_SLEEP_H * 60 * 60 * 1000;   // 24h sleep (avoids overflow)
+  const FRESH_MS = FRESH_H * 60 * 60 * 1000;
   console.log('[irs-soi] Worker started');
   if (await hb.isFresh('irsSoiWorker', FRESH_MS)) {
     console.log('[irs-soi] Fresh — skipping pass');
@@ -290,6 +289,10 @@ async function runPass() {
     try { await runPass(); await hb.ping('irsSoiWorker'); }
     catch (err) { console.error('[irs-soi] Pass crashed:', err.message); await hb.pingError('irsSoiWorker', err.message); }
   }
-  console.log('[irs-soi] Done — exiting.');
-  process.exit(0);
-})();
+  console.log('[irs-soi] Done.');
+}
+
+if (require.main === module) {
+  runWorker().then(() => process.exit(0)).catch(e => { console.error('[irs-soi] fatal:', e.message); process.exit(1); });
+}
+module.exports = { runWorker };

@@ -209,4 +209,7 @@ async function run() {
   return;
 }
 
-run().catch(e => { console.error('[bea] fatal:', e.message); process.exit(1); });
+if (require.main === module) {
+  run().catch(e => { console.error('[bea] fatal:', e.message); process.exit(1); });
+}
+module.exports = { runWorker: run };

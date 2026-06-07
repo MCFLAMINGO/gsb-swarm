@@ -442,7 +442,7 @@ async function run() {
 // ── Daemon loop ───────────────────────────────────────────────────────────────
 const CYCLE_MS    = 30 * 24 * 60 * 60 * 1000; // 30d freshness window
 const SLEEP_MS    = 24 * 60 * 60 * 1000;       // 24h sleep — Node setTimeout overflows >24.8d
-(async function main() {
+async function runWorker() {
   const hb = require('../lib/workerHeartbeat');
   console.log('[acsWorker] Worker started');
   if (await hb.isFresh('acsWorker', CYCLE_MS)) {
@@ -451,6 +451,10 @@ const SLEEP_MS    = 24 * 60 * 60 * 1000;       // 24h sleep — Node setTimeout 
     try { await run(); await hb.ping('acsWorker'); }
     catch (e) { console.error('[acsWorker] Pass crashed:', e.message); await hb.pingError('acsWorker', e.message); }
   }
-  console.log('[acsWorker] Done — exiting.');
-  process.exit(0);
-})();
+  console.log('[acsWorker] Done.');
+}
+
+if (require.main === module) {
+  runWorker().then(() => process.exit(0)).catch(e => { console.error('[acsWorker] fatal:', e.message); process.exit(1); });
+}
+module.exports = { runWorker };
