@@ -1322,6 +1322,7 @@ async function toolSearch({ zip, query, category, group, limit = 20 }) {
       claimed: b.claimed || false,
       possibly_closed: b.possibly_closed || false,
       staleness: stalenessBlock(b),
+      ...(b.order_rail ? { order_rail: b.order_rail } : {}),
     })),
     context_block: results.map(b => fmtBusiness(b)).join('\n'),
     data_freshness: zipFreshnessBlock(results),
@@ -1397,11 +1398,12 @@ async function toolNearby({ lat, lon, zip, radius_miles = 5, category, group, li
         wallet:         r.wallet    || null,
         pos_type:       r.pos_type  || null,
       }));
+      const enrichedResults = enrichWithUCP(results);
       return {
         center: { lat: refLat, lon: refLon },
         radius_miles,
-        total: results.length,
-        businesses: results,
+        total: enrichedResults.length,
+        businesses: enrichedResults,
         context_block: results.map(b => `${b.name} (${b.zip}) ${b.distance_miles}mi — ${b.phone||''}`).join('\n'),
       };
     } catch (e) {
@@ -1439,6 +1441,7 @@ async function toolNearby({ lat, lon, zip, radius_miles = 5, category, group, li
       claimed: b.claimed || false,
       possibly_closed: b.possibly_closed || false,
       staleness: stalenessBlock(b),
+      ...(b.order_rail ? { order_rail: b.order_rail } : {}),
     })),
     context_block: results.map(b => fmtBusiness(b, refLat, refLon)).join('\n'),
     data_freshness: zipFreshnessBlock(results),
@@ -2391,13 +2394,17 @@ async function handleRPC(req, callerInfo) {
 
   // MCP handshake
   if (method === 'initialize') {
+    const isAgentMode = params?._meta?.mode === 'agent';
+    const instructions = isAgentMode
+      ? 'LocalIntel is a task router. Your job: 1) find the right business with local_intel_search (by name/category/zip) or local_intel_nearby (by GPS), 2) send the task with local_intel_rfq, 3) poll with local_intel_rfq_status, 4) confirm with local_intel_book, 5) complete with local_intel_complete. LocalIntel does not fulfill orders — it routes them. The business handles fulfillment on their own platform (e.g. Surge POS). Payment flows between customer and business directly.'
+      : 'LocalIntel gives you market intelligence for any Florida ZIP. All tools below are FREE — no key required. Start with local_intel_ask for any plain-English question (e.g. "What food gaps exist in Tampa?", "Is 33602 oversaturated with gyms?"). Use local_intel_sector_gap to find structural business whitespace — NAICS sectors present at county but absent at ZIP, with ranked demand estimates. Use local_intel_signal for a 0-100 investment score. Use local_intel_zone for demographics (population, HHI, income tier, ownership rate). Use local_intel_tide for momentum scoring. Vertical agents answer domain questions: local_intel_restaurant, local_intel_healthcare, local_intel_retail, local_intel_construction, local_intel_realtor. All tools are read-only. Data: 1,473 FL ZIPs, 240k+ businesses, ACS + IRS + CBP + OSM + BLS + FDOT.';
     return {
       jsonrpc: '2.0', id,
       result: {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {}, prompts: {}, resources: {} },
         serverInfo: { name: MCP_MANIFEST.name, version: MCP_MANIFEST.version },
-        instructions: 'LocalIntel gives you market intelligence for any Florida ZIP. All tools below are FREE — no key required. Start with local_intel_ask for any plain-English question (e.g. "What food gaps exist in Tampa?", "Is 33602 oversaturated with gyms?"). Use local_intel_sector_gap to find structural business whitespace — NAICS sectors present at county but absent at ZIP, with ranked demand estimates. Use local_intel_signal for a 0-100 investment score. Use local_intel_zone for demographics (population, HHI, income tier, ownership rate). Use local_intel_tide for momentum scoring. Vertical agents answer domain questions: local_intel_restaurant, local_intel_healthcare, local_intel_retail, local_intel_construction, local_intel_realtor. All tools are read-only. Data: 1,473 FL ZIPs, 240k+ businesses, ACS + IRS + CBP + OSM + BLS + FDOT.'
+        instructions,
       },
     };
   }
@@ -2405,9 +2412,28 @@ async function handleRPC(req, callerInfo) {
   if (method === 'notifications/initialized') return null; // no response needed
 
   if (method === 'tools/list') {
+    const isAgentMode = params?._meta?.mode === 'agent';
+    // Agent mode: slim task-routing surface — find business + route task.
+    // Data intelligence tools (market signals, demographics, vertical agents) are
+    // excluded so wallet/agent callers see only what they need to execute a task.
+    const AGENT_TOOL_NAMES = new Set([
+      'local_intel_search',    // find a business by name/category/zip
+      'local_intel_nearby',    // find by GPS lat/lon — for location-aware wallets
+      'local_intel_rfq',       // route a task/order to a business
+      'local_intel_rfq_status',// poll RFQ responses
+      'local_intel_book',      // confirm/book a response
+      'local_intel_decline_response', // decline a bad response
+      'local_intel_complete',  // mark job complete, trigger escrow release
+    ]);
+    const tools = isAgentMode
+      ? MCP_MANIFEST.tools.filter(t => AGENT_TOOL_NAMES.has(t.name))
+      : MCP_MANIFEST.tools;
+    const description = isAgentMode
+      ? 'LocalIntel task router — find a business and route a task to them. Use local_intel_search or local_intel_nearby to resolve a business, then local_intel_rfq to send a request. The business fulfills on their own platform. LocalIntel is the road, not the destination.'
+      : MCP_MANIFEST.description;
     return { jsonrpc: '2.0', id, result: {
-      tools: MCP_MANIFEST.tools,
-      serverInfo: { name: MCP_MANIFEST.name, version: MCP_MANIFEST.version, description: MCP_MANIFEST.description },
+      tools,
+      serverInfo: { name: MCP_MANIFEST.name, version: MCP_MANIFEST.version, description },
     } };
   }
   if (method === 'prompts/list') {

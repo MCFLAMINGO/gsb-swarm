@@ -2,6 +2,21 @@
 
 Problem / Fix / Result entries for every B-numbered session, plus all dated session entries.
 
+## 2026-06-02 — B149: rfqBroadcast COALESCE email fix
+
+**Problem:** `broadcastJob()` only read `notification_email` (set by claimed business owners) when selecting email recipients. `contact_email` (scraped by `websiteEnricherWorker` for the bulk of 614K businesses) was never used — so the vast majority of unclaimed businesses were unreachable by email even when the enricher had found their address.
+
+**Fix (`lib/rfqBroadcast.js`):**
+- Both SELECT queries (ZIP-scoped + Florida-wide fallback) changed to `COALESCE(notification_email, contact_email) AS email`
+- Both WHERE filters updated to `COALESCE(notification_email, contact_email) IS NOT NULL`
+- ORDER BY updated to add `(notification_email IS NOT NULL) DESC` — claimed owner emails sort above scraped ones, scraped are the fallback
+
+**Result:** RFQ broadcasts now reach any business with either a claimed or scraped email. No logic change — alias is still `email`, all downstream code untouched.
+
+**Commit:** `2c6f010` — B149
+
+---
+
 ## 2026-06-02 — B148: Business re-broadcast on contact submit (no middleman)
 
 **Problem:** Contacts submitted via the web widget were saved to `rfq_jobs` but no provider was notified with the actual contact details. The initial `broadcastJob` fired at search time — before the user had submitted their email/phone — so businesses received a job alert with no way to respond directly to the customer.
