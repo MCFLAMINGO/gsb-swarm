@@ -114,12 +114,23 @@ async function run() {
     currentData = await fetchAllFLCounties(latestYear);
     console.log(`[bea] Got ${Object.keys(currentData).length} counties for ${latestYear}`);
   } catch (e) {
+    // If BEA dataset is fully offline (error 21), bail immediately — all years will fail
+    if (isBEAOffline(e)) {
+      console.warn('[bea] ⚠️  BEA dataset offline (error 21) — skipping run, will retry next schedule');
+      return;
+    }
     // Try one year earlier if latest isn't available yet
     console.warn(`[bea] ${latestYear} failed (${e.message}), trying ${latestYear - 1}`);
+    await sleep(5000);
     try {
       currentData = await fetchAllFLCounties(latestYear - 1);
     } catch (e2) {
+      if (isBEAOffline(e2)) {
+        console.warn('[bea] ⚠️  BEA dataset offline (error 21) — skipping run, will retry next schedule');
+        return;
+      }
       console.warn(`[bea] ${latestYear - 1} failed (${e2.message}), trying ${latestYear - 2}`);
+      await sleep(5000);
       try {
         currentData = await fetchAllFLCounties(latestYear - 2);
       } catch (e3) {
