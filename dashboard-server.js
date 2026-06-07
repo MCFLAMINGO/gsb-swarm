@@ -107,19 +107,8 @@ if (globalThis.__ACP_SDK__) {
     console.warn('[startup] hours cleanup non-fatal:', e.message);
   }
 
-  // Auto-start deposit listener — polls Tempo + Base for inbound pathUSD/USDC
-  try {
-    const { spawn } = require('child_process');
-    const dlWorker = spawn(process.execPath, ['workers/depositListenerWorker.js'], {
-      cwd: __dirname, env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    dlWorker.stdout.on('data', d => process.stdout.write('[deposit-listener] ' + d));
-    dlWorker.stderr.on('data', d => process.stderr.write('[deposit-listener] ' + d));
-    dlWorker.on('close', code => console.log('[startup] deposit listener exited (' + code + ')'));
-    console.log('[startup] Deposit listener spawned (pid ' + dlWorker.pid + ')');
-  } catch (e) {
-    console.warn('[startup] deposit listener non-fatal:', e.message);
-  }
+  // depositListenerWorker disabled — ACP/Tempo/Base payment rail paused pending GSB-THROW env migration
+  // console.warn('[startup] deposit listener disabled');
 })();
 
 const nvim = require('./lib/nvim');
@@ -7800,7 +7789,7 @@ app.use((req, res, next) => {
     // { name: 'Data Ingest',          file: 'dataIngestWorker.js' }, // DEPRECATED — filesystem-based, superseded by POST /api/local-intel/ingest → Postgres
   { name: 'Zip Coordinator',      file: 'workers/zipCoordinatorWorker.js' },
   { name: 'Enrichment Agent',     file: 'workers/enrichmentAgent.js' },
-  { name: 'ACP Broadcaster',      file: 'workers/acpBroadcaster.js' },
+  // { name: 'ACP Broadcaster',      file: 'workers/acpBroadcaster.js' },   // disabled — ACP paused, migrate to GSB-THROW env
     // ── Tidal layer workers ──
   { name: 'Bedrock Worker',       file: 'workers/bedrockWorker.js' },
   { name: 'Oracle Worker',        file: 'workers/oracleWorker.js' },
@@ -7808,12 +7797,12 @@ app.use((req, res, next) => {
   { name: 'Surface Current',      file: 'workers/surfaceCurrentWorker.js' },
   { name: 'Wave Surface Worker',  file: 'workers/waveSurfaceWorker.js' },
     // { name: 'BTR Worker',           file: 'workers/btrWorker.js' }, // disabled — timing out on all ZIPs (stjohnstax.us unreachable), wasting retries
-  { name: 'Vertical Agent',        file: 'workers/verticalAgentWorker.js' },
+  // { name: 'Vertical Agent',        file: 'workers/verticalAgentWorker.js' }, // disabled — ACP paused, migrate to GSB-THROW env
     // { name: 'Prompt Evolution',       file: 'workers/promptEvolutionWorker.js' }, // disabled — no production traffic yet, nothing to learn from
   { name: 'Census Layer',                  file: 'workers/censusLayerWorker.js'     },
   { name: 'Overpass Worker',         file: 'workers/overpassWorker.js'        },
   { name: 'IRS SOI Worker',               file: 'workers/irsSoiWorker.js'          },
-  { name: 'ACP Intel Cycle',         file: 'workers/localIntelAcpCycle.js'    },
+  // { name: 'ACP Intel Cycle',         file: 'workers/localIntelAcpCycle.js'    }, // disabled — ACP paused, migrate to GSB-THROW env
     // { name: 'MCP Probe Worker',          file: 'workers/mcpProbeWorker.js'        }, // disabled — no real users yet
   // { name: 'Router Learning Worker',     file: 'workers/routerLearningWorker.js'  }, // B129 — over conn cap, re-enable when on Postgres hobby (50 conns)
   { name: 'Enrichment Fill Worker',     file: 'workers/enrichmentFillWorker.js'  },
@@ -7842,7 +7831,7 @@ app.use((req, res, next) => {
     // ── World model derived signals (runs after input workers) ──
   { name: 'FCC Broadband Worker',          file: 'workers/fccBroadbandWorker.js'  },
   { name: 'IRS Migration Worker',          file: 'workers/irsMigrationWorker.js'  },
-  { name: 'World Model Worker',            file: 'workers/worldModelWorker.js'    },
+  // { name: 'World Model Worker',            file: 'workers/worldModelWorker.js'    }, // disabled — ACP paused, migrate to GSB-THROW env
   { name: 'Business Signal Worker',        file: 'workers/businessSignalWorker.js' },  // B65 — 24h freshness; derives claimed/wallet/task/closure rates → zip_signals
   ];
 
@@ -8095,7 +8084,9 @@ server.listen(PORT, '0.0.0.0', async () => {
   // console.warn('[tg-bot] Disabled');
 
   try {
-    await initAcp();
+    // initAcp disabled — ACP paused pending GSB-THROW env migration
+    // await initAcp();
+    console.warn('[acp] ACP client disabled — paused pending GSB-THROW env migration');
   } catch (err) {
     console.error('[acp] initAcp crashed — dashboard still running, fire-job disabled:', err.message);
   }
