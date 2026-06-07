@@ -7831,7 +7831,7 @@ app.use((req, res, next) => {
     // ── World model derived signals (runs after input workers) ──
   { name: 'FCC Broadband Worker',          file: 'workers/fccBroadbandWorker.js'  },
   { name: 'IRS Migration Worker',          file: 'workers/irsMigrationWorker.js'  },
-  // { name: 'World Model Worker',            file: 'workers/worldModelWorker.js'    }, // disabled — ACP paused, migrate to GSB-THROW env
+  { name: 'World Model Worker',            file: 'workers/worldModelWorker.js'    },  // derives sig_growth/opportunity/risk scores from raw signals — core LocalIntel
   { name: 'Business Signal Worker',        file: 'workers/businessSignalWorker.js' },  // B65 — 24h freshness; derives claimed/wallet/task/closure rates → zip_signals
   ];
 
