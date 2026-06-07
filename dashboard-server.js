@@ -8091,29 +8091,8 @@ server.listen(PORT, '0.0.0.0', async () => {
     }
   }
 
-  // Start Telegram bot as background process
-  if (process.env.TELEGRAM_SWAP_BOT || process.env.TELEGRAM_BOT_TOKEN) {
-    try {
-      const { spawn: spawnBot } = require('child_process');
-      const botPath = path.join(__dirname, 'scripts', 'telegram_bot.js');
-      if (fs.existsSync(botPath)) {
-        const botProc = spawnBot('node', [botPath], {
-          cwd: __dirname,
-          env: { ...process.env },
-          stdio: ['ignore', 'pipe', 'pipe'],
-          detached: false,
-        });
-        botProc.stdout.on('data', d => d.toString().split('\n').filter(Boolean).forEach(l => console.log('[tg-bot]', l.trim())));
-        botProc.stderr.on('data', d => console.error('[tg-bot-err]', d.toString().trim()));
-        botProc.on('close', code => console.log('[tg-bot] Exited:', code));
-        console.log('[tg-bot] GSB Swap Bot started PID:', botProc.pid);
-      }
-    } catch (e) {
-      console.warn('[tg-bot] Failed to start:', e.message);
-    }
-  } else {
-    console.warn('[tg-bot] No TELEGRAM_BOT_TOKEN — bot disabled');
-  }
+  // Telegram bot disabled — caused 409 conflicts on redeploy (two instances polling getUpdates)
+  // console.warn('[tg-bot] Disabled');
 
   try {
     await initAcp();
