@@ -111,9 +111,9 @@ function spawnWorker({ name, file }) {
   // If math fails, log loudly and continue — do NOT silently proceed.
   const RAILWAY_PG_CAP   = 25;
   const WORKER_POOL      = 1;  // DB_POOL_MAX per data worker
-  const MCP_POOL         = 2;  // localIntelMCP
-  const DASHBOARD_POOL   = 2;  // dashboard-server — reads only, 2 is sufficient
-  const MAIN_POOL        = 3;  // localIntelAgent in main process — admin endpoints need headroom for concurrent requests
+  const MCP_POOL         = 1;  // localIntelMCP (shares main process pool)
+  const DASHBOARD_POOL   = 0;  // dashboard-server (shares main process pool)
+  const MAIN_POOL        = 6;  // main process pool (search/MCP/routing/admin — raised from 4 after timeout)
   // Count DB workers across BOTH index.js list AND dashboard-server LOCAL_INTEL_WORKERS.
   // Deduplicate by file path — a worker file only runs once even if listed in both.
   // Exclude localIntelMCP.js (counted separately as MCP_POOL).
@@ -130,7 +130,9 @@ function spawnWorker({ name, file }) {
     const dashSrc = require('fs').readFileSync(require('path').join(__dirname, 'dashboard-server.js'), 'utf8');
     const match = dashSrc.match(/const LOCAL_INTEL_WORKERS\s*=\s*\[([\s\S]*?)\];/);
     if (match) {
-      const lines = match[1].match(/\{\s*name:[^}]+file:\s*'([^']+)'/g) || [];
+      // Only count uncommented worker entries
+      const activeLines = match[1].split('\n').filter(l => !l.trim().startsWith('//'));
+      const lines = activeLines.join('\n').match(/\{\s*name:[^}]+file:\s*'([^']+)'/g) || [];
       dashWorkerFiles = lines.map(l => { const m = l.match(/file:\s*'([^']+)'/); return m ? m[1] : null; }).filter(Boolean);
     }
   } catch (_) {}
