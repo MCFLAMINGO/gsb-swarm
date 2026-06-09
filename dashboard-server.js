@@ -7833,6 +7833,9 @@ app.use((req, res, next) => {
   // lodesWorker, irsSoiWorker, fccBroadbandWorker, schoolEnrollmentWorker
   // ↑ all moved into batchDataWorker — share 1 connection slot, run sequentially every 6h
   { name: 'Business Signal Worker',        file: 'workers/businessSignalWorker.js' },  // B65 — 24h freshness; derives claimed/wallet/task/closure rates → zip_signals
+  { name: 'Geocoding Worker',              file: 'workers/geocodingWorker.js'       },  // fills lat/lon for 389K businesses — Census batch API, free, no key
+  { name: 'Category Reclass Worker',       file: 'workers/categoryReclassWorker.js' },  // re-enabled — PgBouncer handles conn cap
+  { name: 'Router Learning Worker',        file: 'workers/routerLearningWorker.js'  },  // re-enabled — PgBouncer handles conn cap
   ];
 
   function spawnLocalIntelWorker(w, attempt = 0) {
