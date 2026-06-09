@@ -118,7 +118,7 @@ async function promoteOsmToBusinesses(zip, pois) {
       const category = resolveCategory(poi);
       const addr = poi.addr || {};
       const address = [addr.street, addr.city].filter(Boolean).join(', ') || null;
-      await db.upsertBusiness({
+      const { business_id } = await db.upsertBusiness({
         name:             poi.name,
         zip:              (addr.postcode || zip).toString().slice(0,5),
         address,
@@ -139,6 +139,13 @@ async function promoteOsmToBusinesses(zip, pois) {
         source_weight:    0.3,
         source_raw:       null,
       });
+      // Write email from OSM contact:email tag — not handled by upsertBusiness
+      if (poi.email && business_id) {
+        await db.query(
+          `UPDATE businesses SET email = $1, contact_email = $1, email_source = 'osm' WHERE business_id = $2 AND email IS NULL`,
+          [poi.email, business_id]
+        );
+      }
       written++;
     } catch (e) {
       failed++;
@@ -392,6 +399,7 @@ function normalisePois(elements) {
         },
         phone   : t.phone || t['contact:phone'] || null,
         website : t.website || t['contact:website'] || null,
+        email   : t.email || t['contact:email'] || null,
         hours   : t.opening_hours || null,
         cuisine,
         tags,
