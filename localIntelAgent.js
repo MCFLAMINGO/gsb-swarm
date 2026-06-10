@@ -1031,14 +1031,14 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip, service
     // OPTED-IN GATE: only claimed businesses receive SMS job requests.
     // Unclaimed listings have never consented to be contacted.
     const businesses = await db.query(
-      `SELECT business_id AS id, name, phone, zip, category, wallet, description
+      `SELECT business_id AS id, name, phone, zip, category, wallet, dispatch_token,
+              COALESCE(notification_email, contact_email) AS email
          FROM businesses
         WHERE zip = ANY($1::text[])
           AND (category ILIKE $2 OR description ILIKE $2)
-          AND phone IS NOT NULL
           AND status != 'inactive'
           AND wallet IS NOT NULL
-          AND notify_sms = TRUE
+          AND COALESCE(notification_email, contact_email) IS NOT NULL
         ORDER BY confidence_score DESC
         LIMIT 5`,
       [targetZips, `%${nlIntent.category}%`]
@@ -1068,32 +1068,39 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip, service
     const rfqId = rfqRows[0]?.id;
     if (!rfqId) throw new Error('rfq insert returned no id');
 
-    // 3. Twilio fan-out — never blocks on a single failure
+    // 3. Email alert fan-out via notificationQueue — never blocks on a single failure.
+    // LocalIntel never sends Twilio SMS to businesses; alert lands in their admin inbox.
+    // If the business has configured notify_sms on their own settings, notificationQueue
+    // handles that via carrier gateway independently.
+    const nq = require('./lib/notificationQueue');
     let notified = 0;
     for (const biz of businesses) {
-      const e164 = toE164(biz.phone);
       try {
         await db.query(
           `INSERT INTO rfq_responses_v2
              (rfq_id, business_id, business_name, business_phone, response)
            VALUES ($1, $2, $3, $4, 'pending')`,
-          [rfqId, biz.id, biz.name, e164 || biz.phone]
+          [rfqId, biz.id, biz.name, biz.phone || null]
         );
 
-        if (!e164) {
-          console.warn(`[rfq] skipping ${biz.name} — unparseable phone:`, biz.phone);
-          continue;
-        }
-
-        const smsBody = serviceAddress
-          ? `[LocalIntel] New job request: ${nlIntent.category} at ${serviceAddress}` +
-            `${zip ? ` (${zip})` : ''}. Reply YES to connect with this customer or NO to pass. ` +
-            `Ref: RFQ-${rfqId}`
-          : `[LocalIntel] New job request in ${zip || 'your area'}: "${userQuery}". ` +
-            `Reply YES to connect with this customer or NO to pass. Ref: RFQ-${rfqId}`;
-        const sendResult = await sendRfqSms(e164, smsBody);
-        if (sendResult.sent) notified++;
-        else console.warn(`[rfq] SMS not sent to ${biz.name}: ${sendResult.reason}`);
+        const catLabel  = nlIntent.category.replace(/_/g, ' ');
+        const addrPart  = serviceAddress ? ` at ${serviceAddress}` : '';
+        const zipPart   = zip ? ` (${zip})` : '';
+        const dashUrl   = biz.dispatch_token
+          ? `https://www.thelocalintel.com/inbox.html?token=${biz.dispatch_token}`
+          : `https://www.thelocalintel.com`;
+        await nq.enqueue(
+          biz.id,
+          `New Job Request: ${catLabel}${zipPart}`,
+          {
+            body:      `${catLabel}${addrPart}${zipPart}: "${userQuery}"`,
+            rfq_id:    rfqId,
+            cta_url:   dashUrl,
+            cta_label: 'View Job in Dashboard',
+          },
+          ['email']
+        );
+        notified++;
       } catch (err) {
         console.error(`[rfq] failed to notify ${biz.name}:`, err.message);
       }
