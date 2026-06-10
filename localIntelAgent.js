@@ -1782,19 +1782,29 @@ router.post('/', async (req, res) => {
     // Plumber, electrician, HVAC, roofer, handyman, painter, landscaper,
     // cleaner, mechanic, towing → handleRFQ broadcasts a Twilio SMS bid to
     // matching businesses and notifies the customer.
-    // B19: FOOD_RFQ_BLOCK guard — food categories must never broadcast an RFQ
-    // bid to restaurants. "V pizza" with no exact match was hitting RFQ as a
-    // catch-all and texting Domino's a service-bid SMS. If a food category
-    // tries to route to RFQ, reroute to search (fall through to Phase 2).
-    const FOOD_RFQ_BLOCK = new Set([
-      'restaurant','food','pizza','dessert','grocery','coffee',
-      'bakery','seafood','sushi','tacos','wings','burger','bbq',
-      'breakfast','brunch','lunch','dinner','takeout','delivery_food'
+    // B19: SEARCH_ONLY_BLOCK — categories that must NEVER trigger a live SMS broadcast.
+    // RFQ is only valid for dispatchable trades: plumber, electrician, hvac, roofer,
+    // handyman, painter, landscaper, cleaner, mechanic, towing.
+    // Everything else — food, healthcare, retail, legal, finance, beauty, gym —
+    // should return search results, not blast real businesses with SMS bids.
+    const SEARCH_ONLY_BLOCK = new Set([
+      // Food
+      'restaurant','food','pizza','dessert','grocery','coffee','bakery','seafood',
+      'sushi','tacos','wings','burger','bbq','breakfast','brunch','lunch','dinner',
+      'takeout','delivery_food','bar','cafe','fast_food','deli','casual_dining',
+      // Healthcare / medical — searching, not dispatching
+      'healthcare','clinic','hospital','doctors','dentist','dental','pharmacy',
+      'urgent_care','veterinary','optician','plastic_surgery','dermatology',
+      'medical_spa','aesthetics','spa_massage','massage',
+      // Retail / beauty / fitness / professional
+      'retail','beauty','beauty_salon','hairdresser','barbershop','gym','gym_chain',
+      'fitness_centre','fitness','hotel','law_firm','legal','lawyer','finance',
+      'bank','insurance','real_estate','florist','jewelry','hardware','auto_dealer',
     ]);
     if (resolvesVia === 'rfq'
         && nlIntentEarly?.category
-        && FOOD_RFQ_BLOCK.has(nlIntentEarly.category)) {
-      console.log(`[B19] food RFQ block — rerouting "${query}" (cat=${nlIntentEarly.category}) from RFQ to SEARCH`);
+        && SEARCH_ONLY_BLOCK.has(nlIntentEarly.category)) {
+      console.log(`[B19] search-only block — rerouting "${query}" (cat=${nlIntentEarly.category}) from RFQ to SEARCH`);
       // fall through — Phase 2 search below will handle it via searchByCategory
     } else if (resolvesVia === 'rfq') {
       return await handleRFQ(req, res, nlIntentEarly, query, customerId, zip);
