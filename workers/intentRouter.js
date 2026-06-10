@@ -440,6 +440,55 @@ const KEYWORD_CATEGORY_MAP = {
   // ─ Pharmacy ───────────────────────────────────────────────────────────
   pharmacy: ['pharmacy','chemist'], prescription: ['pharmacy','chemist'],
   meds: ['pharmacy'], medicine: ['pharmacy'], vitamins: ['pharmacy','grocery'],
+  // Hygiene / OTC products → pharmacy + convenience
+  toothbrush: ['pharmacy','convenience'], toothpaste: ['pharmacy','convenience'],
+  deodorant: ['pharmacy','convenience'], shampoo: ['pharmacy','convenience'],
+  conditioner: ['pharmacy','convenience'], 'body wash': ['pharmacy','convenience'],
+  lotion: ['pharmacy','convenience'], razor: ['pharmacy','convenience'],
+  bandage: ['pharmacy','convenience'], 'first aid': ['pharmacy','convenience'],
+  tylenol: ['pharmacy'], advil: ['pharmacy'], ibuprofen: ['pharmacy'],
+  aspirin: ['pharmacy'], nyquil: ['pharmacy'], 'cough syrup': ['pharmacy'],
+  'allergy meds': ['pharmacy'], antacid: ['pharmacy'],
+  'toilet paper': ['convenience'], 'paper towel': ['convenience'],
+  tissues: ['convenience'], snacks: ['convenience'], chips: ['convenience'],
+  candy: ['convenience'], batteries: ['convenience'], 'phone charger': ['convenience'],
+  // Locksmith
+  locksmith: ['locksmith'], 'locked out': ['locksmith'], 'lock change': ['locksmith'],
+  'lost keys': ['locksmith'],
+  // Pest control
+  'pest control': ['pest_control'], exterminator: ['pest_control'],
+  roaches: ['pest_control'], termites: ['pest_control'],
+  // Painting
+  painter: ['painting'], 'house painter': ['painting'], 'house painting': ['painting'],
+  // Dry cleaning
+  'dry cleaning': ['dry_cleaning'], 'dry cleaner': ['dry_cleaning'],
+  // Jewelry
+  jewelry: ['jewelry'], jeweler: ['jewelry'], diamond: ['jewelry'],
+  necklace: ['jewelry'], 'engagement ring': ['jewelry'],
+  // Clothes / apparel
+  suit: ['clothes'], tailor: ['clothes'], tuxedo: ['clothes'],
+  'chef shoes': ['clothes'], 'work shoes': ['clothes'], alterations: ['clothes'],
+  // Alcohol
+  vodka: ['alcohol'], whiskey: ['alcohol'], tequila: ['alcohol'],
+  bourbon: ['alcohol'], liquor: ['alcohol'], 'liquor store': ['alcohol'],
+  // ATM / bank
+  atm: ['bank'], 'nearest atm': ['bank'], 'need cash': ['bank'],
+  // Concert / venue → bar (closest we have)
+  'concert hall': ['bar'], 'live music': ['bar'], 'music venue': ['bar'],
+  // Bakery → cafe
+  bakery: ['cafe'], pastries: ['cafe'], bagels: ['cafe'],
+  // Ethnic food → restaurant
+  sushi: ['restaurant'], ramen: ['restaurant'], pho: ['restaurant'],
+  'ethiopian food': ['restaurant'], 'indian food': ['restaurant'],
+  'thai food': ['restaurant'], 'chinese food': ['restaurant'],
+  'italian food': ['restaurant'], 'korean food': ['restaurant'],
+  'fish market': ['restaurant'], 'seafood market': ['restaurant'],
+  // Properties
+  'properties for rent': ['real_estate_agency','estate_agent'],
+  'rental property': ['real_estate_agency','estate_agent'],
+  'apartment for rent': ['real_estate_agency','estate_agent'],
+  // Task / delivery
+  errand: ['task'], 'delivery service': ['task'], 'airport pickup': ['task'],
   // ─ Hardware & home repair ────────────────────────────────────────────
   hardware: ['hardware','doityourself'], tools: ['hardware','doityourself'],
   lumber: ['hardware'], plumbing: ['plumber','hardware'], drywall: ['hardware'],
