@@ -1807,7 +1807,22 @@ router.post('/', async (req, res) => {
       console.log(`[B19] search-only block — rerouting "${query}" (cat=${nlIntentEarly.category}) from RFQ to SEARCH`);
       // fall through — Phase 2 search below will handle it via searchByCategory
     } else if (resolvesVia === 'rfq') {
-      return await handleRFQ(req, res, nlIntentEarly, query, customerId, zip);
+      // PAYMENT GATE: SMS dispatch only fires when the request comes from an
+      // authenticated caller (Twilio voice/SMS with a real phone number).
+      // Anonymous web-search queries get search results + a "Request this service"
+      // prompt — they do NOT fire live SMS. Businesses only get notified after
+      // the user has confirmed with their contact info.
+      const isAnonymousWeb = !customerId
+        || customerId === 'web-search'
+        || customerId === 'anonymous'
+        || customerId === 'web';
+      if (isAnonymousWeb) {
+        console.log(`[RFQ-GATE] anonymous web query — rerouting to search, not SMS (cat=${nlIntentEarly?.category})`);
+        // Fall through to Phase 2 search — response will include job_request_prompt flag
+        // so the frontend can surface a "Request this service" CTA instead.
+      } else {
+        return await handleRFQ(req, res, nlIntentEarly, query, customerId, zip);
+      }
     }
     // ── Reservation routing ────────────────────────────────────────────────
     // "reservation at X", "book a table at X", "do you take reservations" →
