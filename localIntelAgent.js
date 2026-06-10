@@ -3405,13 +3405,19 @@ router.get('/inbox', async (req, res) => {
     const rfqService = require('./lib/rfqService');
     // Look up by dispatch_token (set during claim flow or migration)
     const [biz] = await db.query(
-      `SELECT business_id, name, address, zip, category, category_group,
-              wallet, notification_email,
-              notify_push, claimed_at,
+      `SELECT business_id, name, address, city, zip, phone, website, category, category_group,
+              wallet, notification_email, notification_phone,
+              notify_push, notify_sms, notify_email, claimed_at,
               COALESCE(has_hours, false) AS has_hours,
               COALESCE(sunbiz_id, sunbiz_doc_number) AS sunbiz_id,
               hours_json, services_text, menu_url, menu_fetched_at, menu_fetch_error, services_json,
-              CASE WHEN pos_config IS NOT NULL THEN (pos_config->>'pos_type') ELSE NULL END AS pos_type
+              CASE WHEN pos_config IS NOT NULL THEN (pos_config->>'pos_type') ELSE NULL END AS pos_type,
+              owner_name, owner_email, owner_phone, year_established, license_number,
+              tagline, why_choose_us, specialties_text, photo_url,
+              booking_url, booking_system, accepts_walkins, lead_time_hours, same_day_available,
+              accepts_rfq, accepts_appointments, accepts_reservations, accepts_walkin_orders,
+              payment_methods, service_radius_miles, service_zip_list, service_area_notes,
+              tech_stack, presence_score
          FROM businesses
         WHERE dispatch_token = $1
           AND status != 'inactive'
@@ -3533,6 +3539,37 @@ router.get('/inbox', async (req, res) => {
       },
       top_queries:  topQueries,
       surge_menu:   surgeMenu,
+      // W5+H presence fields
+      phone:                  biz.phone                  || null,
+      website:                biz.website                || null,
+      city:                   biz.city                   || null,
+      notification_phone:     biz.notification_phone     || null,
+      notify_sms:             biz.notify_sms             || false,
+      notify_email:           biz.notify_email           || false,
+      owner_name:             biz.owner_name             || null,
+      owner_email:            biz.owner_email            || null,
+      owner_phone:            biz.owner_phone            || null,
+      year_established:       biz.year_established       || null,
+      license_number:         biz.license_number         || null,
+      tagline:                biz.tagline                || null,
+      why_choose_us:          biz.why_choose_us          || null,
+      specialties_text:       biz.specialties_text       || null,
+      photo_url:              biz.photo_url              || null,
+      booking_url:            biz.booking_url            || null,
+      booking_system:         biz.booking_system         || null,
+      accepts_walkins:        biz.accepts_walkins        ?? true,
+      lead_time_hours:        biz.lead_time_hours        || null,
+      same_day_available:     biz.same_day_available     || false,
+      accepts_rfq:            biz.accepts_rfq            || false,
+      accepts_appointments:   biz.accepts_appointments   || false,
+      accepts_reservations:   biz.accepts_reservations   || false,
+      accepts_walkin_orders:  biz.accepts_walkin_orders  ?? true,
+      payment_methods:        biz.payment_methods        || [],
+      service_radius_miles:   biz.service_radius_miles   || null,
+      service_zip_list:       biz.service_zip_list       || [],
+      service_area_notes:     biz.service_area_notes     || null,
+      tech_stack:             biz.tech_stack             || [],
+      presence_score:         biz.presence_score         || 0,
     });
   } catch (err) {
     console.error('[inbox GET]', err.message);
@@ -4003,6 +4040,289 @@ router.post('/inbox/pos', express.json(), async (req, res) => {
     res.json({ ok: true, pos_type });
   } catch (err) {
     console.error('[inbox/pos POST]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PATCH /api/local-intel/inbox/w5h — save all W5+H presence fields in one call ──────────
+// Body: { token, ...any W5+H field }
+// Computes presence_score after save. Only updates fields that are provided.
+router.patch('/inbox/w5h', express.json(), async (req, res) => {
+  const { token, ...fields } = req.body || {};
+  if (!token) return res.status(401).json({ error: 'token required' });
+  try {
+    const [biz] = await db.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+
+    // Allowed W5+H fields — whitelist to prevent injection
+    const ALLOWED = [
+      // WHO
+      'owner_name','owner_email','owner_phone','year_established','license_number',
+      // WHAT (description handled by /inbox/services)
+      'tagline','why_choose_us','specialties_text','photo_url',
+      // WHERE
+      'service_radius_miles','service_zip_list','service_area_notes',
+      // WHEN
+      'booking_url','booking_system','accepts_walkins','lead_time_hours','same_day_available',
+      // HOW
+      'accepts_rfq','accepts_appointments','accepts_reservations','accepts_walkin_orders',
+      'payment_methods',
+      // Tech stack
+      'tech_stack',
+    ];
+
+    const setClauses = [];
+    const params = [];
+    for (const key of ALLOWED) {
+      if (key in fields) {
+        params.push(fields[key]);
+        const val = (key === 'tech_stack' || key === 'payment_methods' || key === 'service_zip_list')
+          ? `$${params.length}::jsonb`
+          : `$${params.length}`;
+        // jsonb arrays need casting
+        if (key === 'tech_stack') {
+          setClauses.push(`tech_stack = $${params.length}::jsonb`);
+        } else if (key === 'payment_methods' || key === 'service_zip_list') {
+          // text[] — cast via explicit array
+          params[params.length - 1] = Array.isArray(fields[key]) ? fields[key] : [];
+          setClauses.push(`${key} = $${params.length}`);
+        } else {
+          setClauses.push(`${key} = $${params.length}`);
+        }
+      }
+    }
+
+    if (!setClauses.length) return res.status(400).json({ error: 'no valid fields provided' });
+
+    params.push(biz.business_id);
+    await db.query(
+      `UPDATE businesses SET ${setClauses.join(', ')}, presence_updated_at = NOW() WHERE business_id = $${params.length}`,
+      params
+    );
+
+    // Recompute presence_score — each dimension max ~17pts
+    const [fresh] = await db.query(
+      `SELECT name, address, zip, category, hours_json, services_json, services_text,
+              owner_name, tagline, why_choose_us, booking_url, accepts_rfq, accepts_appointments,
+              accepts_reservations, wallet, photo_url, tech_stack, payment_methods
+       FROM businesses WHERE business_id = $1`,
+      [biz.business_id]
+    );
+
+    let score = 0;
+    // WHO (0-17): name + address = always set (10), owner_name (5), photo (2)
+    if (fresh.name && fresh.address) score += 10;
+    if (fresh.owner_name) score += 5;
+    if (fresh.photo_url)  score += 2;
+    // WHAT (0-17): services_json or services_text (10), category (5), tagline (2)
+    if (fresh.services_json || fresh.services_text) score += 10;
+    if (fresh.category) score += 5;
+    if (fresh.tagline)  score += 2;
+    // WHERE (0-17): address+zip always present (10), booking_url/service_radius (5), payment_methods (2)
+    if (fresh.zip) score += 10;
+    if (fresh.booking_url || (fresh.payment_methods && fresh.payment_methods.length)) score += 5;
+    if (fresh.payment_methods && fresh.payment_methods.length) score += 2;
+    // WHEN (0-17): hours_json (10), booking_url (5), accepts_* set (2)
+    if (fresh.hours_json) score += 10;
+    if (fresh.booking_url) score += 5;
+    if (fresh.accepts_rfq || fresh.accepts_appointments || fresh.accepts_reservations) score += 2;
+    // WHY (0-17): why_choose_us (10), tagline already counted, wallet (5), photo already counted
+    if (fresh.why_choose_us) score += 10;
+    if (fresh.wallet) score += 5;
+    // HOW (0-15): at least one accepts_* (8), tech_stack entries (5), wallet (already), payment_methods (2)
+    if (fresh.accepts_rfq || fresh.accepts_appointments || fresh.accepts_reservations || fresh.accepts_walkin_orders) score += 8;
+    if (fresh.tech_stack && (Array.isArray(fresh.tech_stack) ? fresh.tech_stack.length : Object.keys(fresh.tech_stack||{}).length)) score += 5;
+
+    score = Math.min(100, score);
+    await db.query(`UPDATE businesses SET presence_score = $1 WHERE business_id = $2`, [score, biz.business_id]);
+
+    console.log(`[inbox/w5h] saved ${setClauses.length} fields for ${biz.business_id}, score=${score}`);
+    res.json({ ok: true, presence_score: score });
+  } catch (err) {
+    console.error('[inbox/w5h PATCH]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/local-intel/inbox/appointment-request ───────────────────────────
+// Customer submits an appointment or reservation request for a specific business.
+// Saves to appointment_requests table + emails the business via Resend (no wallet required).
+// Body: { business_id, request_type, customer_name, customer_email, customer_phone,
+//         description, preferred_time, party_size, zip, source }
+router.post('/inbox/appointment-request', express.json(), async (req, res) => {
+  const { business_id, request_type = 'appointment', customer_name, customer_email,
+          customer_phone, description, preferred_time, party_size, zip, source = 'web' } = req.body || {};
+  if (!business_id) return res.status(400).json({ error: 'business_id required' });
+  if (!customer_email && !customer_phone) return res.status(400).json({ error: 'customer email or phone required' });
+  try {
+    // Ensure table exists (migration 062 handles it on deploy; this is a safety net)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS appointment_requests (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        business_id UUID NOT NULL,
+        request_type TEXT NOT NULL DEFAULT 'appointment',
+        customer_name TEXT, customer_email TEXT, customer_phone TEXT,
+        category TEXT, description TEXT, preferred_time TEXT, party_size INT, zip TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        notified_at TIMESTAMPTZ, response_text TEXT, responded_at TIMESTAMPTZ,
+        appointment_id UUID, source TEXT DEFAULT 'web',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    const [biz] = await db.query(
+      `SELECT business_id, name, category,
+              COALESCE(notification_email, contact_email) AS notify_to,
+              dispatch_token
+       FROM businesses WHERE business_id = $1 AND status != 'inactive' LIMIT 1`,
+      [business_id]
+    );
+    if (!biz) return res.status(404).json({ error: 'business not found' });
+
+    // Insert request
+    const [req_row] = await db.query(
+      `INSERT INTO appointment_requests
+         (business_id, request_type, customer_name, customer_email, customer_phone,
+          category, description, preferred_time, party_size, zip, source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING id`,
+      [business_id, request_type, customer_name||null, customer_email||null, customer_phone||null,
+       biz.category||null, description||null, preferred_time||null, party_size||null, zip||null, source]
+    );
+
+    // Email business via Resend (no wallet required — this is the gap fix)
+    let notified = false;
+    if (biz.notify_to && process.env.RESEND_API_KEY) {
+      const typeLabel  = request_type === 'reservation' ? 'Reservation Request' : 'Appointment Request';
+      const dashUrl    = biz.dispatch_token
+        ? `https://www.thelocalintel.com/inbox.html?token=${biz.dispatch_token}`
+        : 'https://www.thelocalintel.com/inbox.html';
+      const customerLine = [customer_name, customer_email, customer_phone].filter(Boolean).join(' · ');
+      const { Resend } = require('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      await resend.emails.send({
+        from:     'LocalIntel <jobs@thelocalintel.com>',
+        to:       biz.notify_to,
+        reply_to: customer_email || 'jobs@thelocalintel.com',
+        subject:  `New ${typeLabel}: ${biz.name}`,
+        html: `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;">
+  <p style="font-size:18px;font-weight:700;color:#111827;margin-bottom:4px;">LocalIntel</p>
+  <p style="font-size:13px;color:#6B7280;margin-bottom:24px;">New ${typeLabel.toLowerCase()} for ${biz.name}</p>
+  <table style="width:100%;border-collapse:collapse;font-size:14px;">
+    <tr><td style="padding:8px 0;color:#6B7280;width:120px;">From</td><td style="padding:8px 0;color:#111827;font-weight:600;">${customerLine || 'Anonymous'}</td></tr>
+    ${preferred_time ? `<tr><td style="padding:8px 0;color:#6B7280;">Requested time</td><td style="padding:8px 0;color:#111827;">${preferred_time}</td></tr>` : ''}
+    ${party_size ? `<tr><td style="padding:8px 0;color:#6B7280;">Party size</td><td style="padding:8px 0;color:#111827;">${party_size}</td></tr>` : ''}
+    ${description ? `<tr><td style="padding:8px 0;color:#6B7280;">Details</td><td style="padding:8px 0;color:#111827;">${description}</td></tr>` : ''}
+  </table>
+  <p style="margin:28px 0;">
+    <a href="${dashUrl}" style="background:#16A34A;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">View in Dashboard &rarr;</a>
+  </p>
+  <p style="font-size:12px;color:#9CA3AF;">Reply to this email to respond directly to the customer.</p>
+</div>`,
+      }).then(() => { notified = true; }).catch(e => console.warn('[appt-request] email warn:', e.message));
+
+      if (notified) {
+        await db.query(
+          `UPDATE appointment_requests SET status = 'notified', notified_at = NOW() WHERE id = $1`,
+          [req_row.id]
+        );
+      }
+    }
+
+    console.log(`[appt-request] ${request_type} for ${biz.name} — notified=${notified}`);
+    res.json({
+      ok: true,
+      request_id: req_row.id,
+      notified,
+      message: request_type === 'reservation'
+        ? `Reservation request sent to ${biz.name}. They'll reply to confirm.`
+        : `Appointment request sent to ${biz.name}. They'll reply to confirm.`,
+    });
+  } catch (err) {
+    console.error('[inbox/appointment-request]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/local-intel/presence/:business_id — clean W5+H projection for agents ──
+// Public endpoint — no auth required. Returns structured presence profile.
+router.get('/presence/:business_id', async (req, res) => {
+  try {
+    const [biz] = await db.query(
+      `SELECT business_id, name, address, city, zip, phone, website, category, category_group,
+              description, services_text, services_json, tags, hours_json, hours,
+              owner_name, tagline, why_choose_us, specialties_text, photo_url,
+              booking_url, booking_system, accepts_walkins, lead_time_hours, same_day_available,
+              accepts_rfq, accepts_appointments, accepts_reservations, accepts_walkin_orders,
+              payment_methods, service_radius_miles, service_zip_list, service_area_notes,
+              wallet, lat, lon, claimed_at, sunbiz_id, sunbiz_doc_number, presence_score
+       FROM businesses
+       WHERE business_id = $1 AND status != 'inactive'
+       LIMIT 1`,
+      [req.params.business_id]
+    );
+    if (!biz) return res.status(404).json({ error: 'not found' });
+
+    const sj = biz.services_json || {};
+    res.json({
+      business_id: biz.business_id,
+      presence_score: biz.presence_score || 0,
+      claimed: !!biz.claimed_at,
+      who: {
+        name:             biz.name,
+        owner_name:       biz.owner_name       || null,
+        sunbiz_id:        biz.sunbiz_id || biz.sunbiz_doc_number || null,
+        phone:            biz.phone            || null,
+        website:          biz.website          || null,
+        photo_url:        biz.photo_url        || null,
+      },
+      what: {
+        category:         biz.category         || null,
+        category_group:   biz.category_group   || null,
+        description:      biz.services_text || biz.description || sj.what_we_do || null,
+        tags:             biz.tags             || [],
+        specialties:      biz.specialties_text || (Array.isArray(sj.specialties) ? sj.specialties.join(', ') : null),
+        services:         sj.service_list      || null,
+      },
+      where: {
+        address:          biz.address          || null,
+        city:             biz.city             || null,
+        zip:              biz.zip              || null,
+        lat:              biz.lat              || null,
+        lon:              biz.lon              || null,
+        service_radius_miles: biz.service_radius_miles || sj.service_radius || null,
+        service_zips:     biz.service_zip_list || (sj.service_area ? sj.service_area.split(',').map(s=>s.trim()) : []),
+        service_area_notes: biz.service_area_notes || null,
+      },
+      when: {
+        hours_json:       biz.hours_json       || null,
+        hours_text:       biz.hours            || null,
+        booking_url:      biz.booking_url      || null,
+        booking_system:   biz.booking_system   || null,
+        accepts_walkins:  biz.accepts_walkins  ?? true,
+        lead_time_hours:  biz.lead_time_hours  || null,
+        same_day_available: biz.same_day_available || false,
+        response_time:    sj.response_time     || null,
+      },
+      why: {
+        tagline:          biz.tagline          || null,
+        why_choose_us:    biz.why_choose_us    || null,
+        specialties:      biz.specialties_text || null,
+      },
+      how: {
+        accepts_rfq:           biz.accepts_rfq           || false,
+        accepts_appointments:  biz.accepts_appointments  || false,
+        accepts_reservations:  biz.accepts_reservations  || false,
+        accepts_walkin_orders: biz.accepts_walkin_orders ?? true,
+        payment_methods:       biz.payment_methods       || [],
+        wallet_address:        biz.wallet                || null,
+      },
+    });
+  } catch (err) {
+    console.error('[presence GET]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -10113,6 +10433,37 @@ router.post('/admin/seed-business', express.json(), async (req, res) => {
 
 // ── GET /api/local-intel/admin/dispatch-token/:business_id ──────────────────
 // Returns dispatch_token for any business — admin testing bypass, no email needed.
+// ── GET /api/local-intel/admin/test-businesses — list all TEST businesses with inbox URLs
+router.get('/admin/test-businesses', async (req, res) => {
+  if (req.headers['x-admin-token'] !== 'localintel-migrate-2026')
+    return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const rows = await db.query(
+      `SELECT business_id, name, category, zip, dispatch_token,
+              claimed_at IS NOT NULL as claimed, presence_score
+       FROM businesses
+       WHERE name ILIKE '%[TEST]%' AND zip = '32082'
+       ORDER BY category ASC`,
+      []
+    );
+    const businesses = rows.map(r => ({
+      name:          r.name,
+      category:      r.category,
+      business_id:   r.business_id,
+      claimed:       r.claimed,
+      presence_score: r.presence_score,
+      dispatch_token: r.dispatch_token,
+      inbox_url: r.dispatch_token
+        ? `https://www.thelocalintel.com/inbox.html?token=${r.dispatch_token}&setup=1`
+        : null,
+    }));
+    res.json({ ok: true, count: businesses.length, businesses });
+  } catch (err) {
+    console.error('[admin/test-businesses]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/admin/dispatch-token/:business_id', async (req, res) => {
   if (req.headers['x-admin-token'] !== 'localintel-migrate-2026')
     return res.status(401).json({ error: 'unauthorized' });

@@ -8084,6 +8084,17 @@ server.listen(PORT, '0.0.0.0', async () => {
     console.error('[seed] require failed (non-fatal):', e.message);
   }
 
+  // Seed test businesses (one per category) — idempotent, safe on every deploy
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const { seedTestBusinesses } = require('./scripts/seedTestBusinesses');
+      const db = require('./lib/db');
+      seedTestBusinesses(db).catch(e => console.warn('[seedTestBiz] warn:', e.message));
+    } catch (e) {
+      console.warn('[seedTestBiz] require failed (non-fatal):', e.message);
+    }
+  }
+
   // Start dispatch watchdog — monitors RFQ timeouts + auto-retry
   if (process.env.LOCAL_INTEL_DB_URL) {
     try {
