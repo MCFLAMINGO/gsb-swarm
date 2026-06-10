@@ -7220,11 +7220,7 @@ router.get('/search', harvestGuard, async (req, res) => {
               if (provRows.length) { actualZip = neighborZip; break; }
             }
           }
-          // Still zero → try all NE FL with subcat
-          if (!provRows.length) {
-            provRows = await fetchProviders(null, true);
-            if (provRows.length) actualZip = null;
-          }
+
           // B146: Graceful degradation — subcat returned 0, retry without subcat filter
           if (!provRows.length && resolvedSubCat) {
             provRows = await fetchProviders(resolvedZip, false);
@@ -7234,7 +7230,16 @@ router.get('/search', harvestGuard, async (req, res) => {
                 if (provRows.length) { actualZip = neighborZip; break; }
               }
             }
-            if (!provRows.length) {
+          }
+
+          // State-wide fallback ONLY for rfq/come-to-me categories (plumber, landscaper, etc.)
+          // Never go state-wide for appointment/info — a nail salon in Palm Beach is useless to
+          // someone in Ponte Vedra. If nothing exists nearby, show an honest 'none in your area'.
+          const ctaTypeForFallback = catMap.getCTAType(resolvedCat);
+          if (!provRows.length && ctaTypeForFallback === 'rfq') {
+            provRows = await fetchProviders(null, true);
+            if (provRows.length) actualZip = null;
+            if (!provRows.length && resolvedSubCat) {
               provRows = await fetchProviders(null, false);
               if (provRows.length) actualZip = null;
             }
