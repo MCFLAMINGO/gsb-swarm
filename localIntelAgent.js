@@ -99,6 +99,41 @@ const { harvestGuard } = require('./lib/harvestGuard');
 const db = require('./lib/db');
 const { resolveIntent, detectOpenIntent } = require('./lib/intentMap');
 const catMap = require('./lib/categoryMap');
+
+// ── McFlamingo pin: always first result for any search in ZIP 32082 ──────────
+const MCFL_PIN_ID  = '232c34cb-ff82-4bf9-8a5c-d13306550709';
+const MCFL_PIN_ZIP = '32082';
+
+/**
+ * Prepend McFlamingo to results if:
+ *  - The search ZIP is 32082 (or no ZIP / multi-ZIP includes 32082)
+ *  - McFlamingo is not already in the result set
+ *  - We actually have a result row for it (fetched below)
+ * Returns mutated array in-place (and returns it).
+ */
+async function applyMcflPin(rows, searchZip, db) {
+  // Only pin when relevant ZIP
+  const zipMatch = !searchZip || searchZip === MCFL_PIN_ZIP;
+  if (!zipMatch) return rows;
+  // Skip if already present
+  if (rows.some(r => r.business_id === MCFL_PIN_ID)) return rows;
+  try {
+    const pinRows = await db.query(
+      `SELECT b.business_id, b.name, b.zip, b.address, b.city, b.phone, b.website,
+              b.category, b.category_group, b.description, b.services_text, b.tags,
+              b.hours, b.hours_json, b.price_tier, b.lat, b.lon,
+              b.confidence_score, b.claimed_at, b.wallet, b.pos_type, b.menu_url
+       FROM businesses b
+       WHERE b.business_id = $1 AND b.status != 'inactive'
+       LIMIT 1`,
+      [MCFL_PIN_ID]
+    );
+    if (pinRows.length) rows.unshift(pinRows[0]);
+  } catch (e) {
+    console.error('[mcfl-pin] lookup failed:', e.message);
+  }
+  return rows;
+}
 const { resolveIntent: resolveNlIntentFromRegistry } = require('./lib/intentRegistry');
 const { expandZips } = require('./lib/geoExpand');
 const { detectTaskIntent, getTaskFollowUp, setTaskFollowUp, clearTaskFollowUp } = require('./lib/taskIntent');
@@ -6209,6 +6244,11 @@ const _SVC_MAP = {
   // Contractor
   'remodel':'contractor','renovate':'contractor','construction':'contractor',
   // Restaurant / food
+  'i need food':'restaurant','need food':'restaurant','i need something to eat':'restaurant',
+  'i am hungry':'restaurant','im hungry':'restaurant',"i'm hungry":'restaurant',
+  'hungry':'restaurant','something to eat':'restaurant','where to eat':'restaurant',
+  'where should i eat':'restaurant','place to eat':'restaurant','good food':'restaurant',
+  'eat out':'restaurant','grab food':'restaurant','food near':'restaurant',
   'deliver':'restaurant','delivery':'restaurant','pick up':'restaurant','pickup':'restaurant',
   'order food':'restaurant','takeout':'restaurant','restaurant':'restaurant',
   'food from':'restaurant','catering':'catering','cater':'catering',
@@ -7200,6 +7240,9 @@ router.get('/search', harvestGuard, async (req, res) => {
             }
           }
 
+          // ── McFlamingo pin: prepend to service results in 32082 ─────────────
+          await applyMcflPin(provRows, resolvedZip || null, db);
+
           providerCount = provRows.length;
           topProviders  = provRows;
         }
@@ -7487,75 +7530,11 @@ router.get('/search', harvestGuard, async (req, res) => {
       }
     }
 
-    // Category expansion map — keys are intent cat values, values are REAL DB category strings
-    // Ground-truthed against actual businesses table. NO phantom category strings.
-    const CAT_EXPAND = {
-      // ── Food & drink ────────────────────────────────────────────────────────
-      restaurant:           ['restaurant','fast_food','cafe','bar','pub','bbq','pizza','seafood','sandwich','italian','asian','steakhouse','ice_cream','fast_casual_mexican','coffee_chain','bakery','casual_dining','deli','mexican','fine_dining','sports_bar','dessert','brewery','bar_dining'],
-      pizza:                ['pizza'],
-      bar:                  ['bar','pub','sports_bar','bar_dining','brewery','alcohol'],
-      cafe:                 ['cafe','coffee_chain','bakery','deli'],
-      // ── Medical ─────────────────────────────────────────────────────────────
-      healthcare:           ['clinic','hospital','doctors','dentist','dental','pharmacy','urgent_care','veterinary','optician','healthcare','fitness_centre','sports_centre'],
-      clinic:               ['clinic','doctors','urgent_care','hospital','healthcare'],
-      plastic_surgery:      ['plastic_surgery','dermatology','medical_spa','aesthetics','doctors','clinic','healthcare'],
-      // ── Beauty ──────────────────────────────────────────────────────────────
-      beauty:               ['beauty','beauty_salon','hairdresser','barbershop','hair_chain','spa_massage','massage','cosmetics','pet_grooming'],
-      beauty_salon:         ['beauty_salon','hairdresser','barbershop','hair_chain','beauty','cosmetics'],
-      spa:                  ['spa_massage','massage','beauty_salon'],
-      massage:              ['spa_massage','massage'],
-      // ── Home services ───────────────────────────────────────────────────────
-      plumber:              ['plumber'],
-      plumbing:             ['plumber'],
-      electrician:          ['electrician'],
-      hvac:                 ['hvac'],
-      handyman:             ['handyman','doityourself','general_contractor','contractor'],
-      roofing:              ['roofing','contractor','general_contractor'],
-      landscaping:          ['landscaping'],
-      cleaning:             ['dry_cleaning'],
-      dry_cleaning:         ['dry_cleaning'],
-      // ── Auto ────────────────────────────────────────────────────────────────
-      auto_repair:          ['auto_repair','car_repair','car_wash','auto_body'],
-      car_wash:             ['car_wash','auto_repair'],
-      auto_dealer:          ['auto_dealer'],
-      car_rental:           ['car_rental'],
-      towing:               ['towing'],
-      gas_station:          ['gas_station','fuel'],
-      // ── Retail ──────────────────────────────────────────────────────────────
-      retail:               ['retail','clothes','shoes','department_store','furniture','jewelry','variety_store','big_box','cosmetics','nutrition_supplements'],
-      clothes:              ['clothes','department_store','variety_store'],
-      grocery:              ['grocery','supermarket','convenience'],
-      pharmacy:             ['pharmacy','chemist'],
-      hardware:             ['hardware','doityourself'],
-      // ── Professional services ────────────────────────────────────────────────
-      professional_services:['law_firm','legal','lawyer','accounting','insurance','insurance_agency','tax_advisor'],
-      law_firm:             ['law_firm','legal','lawyer'],
-      accountant:           ['accounting'],
-      insurance_agency:     ['insurance_agency','insurance'],
-      // ── Finance ─────────────────────────────────────────────────────────────
-      finance:              ['finance','bank','bank_branch','atm','credit_union','financial_advisor'],
-      financial_advisor:    ['financial_advisor','finance'],
-      // ── Real estate ─────────────────────────────────────────────────────────
-      real_estate:          ['real_estate','real_estate_agency','estate_agent'],
-      // ── Fitness ─────────────────────────────────────────────────────────────
-      gym:                  ['gym','gym_chain','fitness_centre','sports_centre','fitness','crossfit','swimming_pool'],
-      // ── Hospitality ─────────────────────────────────────────────────────────
-      hotel:                ['hotel','upscale_hotel','budget_hotel'],
-      // ── Pet ─────────────────────────────────────────────────────────────────
-      veterinary:           ['veterinary','pet','pet_grooming'],
-      // ── Other services ──────────────────────────────────────────────────────
-      construction:         ['contractor','general_contractor','roofing'],
-      entertainment:        ['theatre','museum','attraction'],
-      library:              ['library'],
-      florist:              ['florist'],
-      tattoo:               ['tattoo'],
-      storage:              ['storage_rental'],
-    };
-
     // 2. Category search (ZIP-scoped if provided)
+    // Uses catMap.expandCat() — single source of truth (lib/categoryMap.js)
     if (!rows.length && (cat || q)) {
       const term  = cat || q;
-      const expanded = CAT_EXPAND[term];
+      const expanded = catMap.expandCat(term);
       let catWhere, catParams;
       if (expanded && expanded.length) {
         // nlTags: if NL_INTENT returned tag hints (e.g. healthy/vegan), try tag-filtered first
@@ -7754,6 +7733,9 @@ router.get('/search', harvestGuard, async (req, res) => {
       if (kLatLon) _seenLatLon.add(kLatLon);
       return true;
     });
+
+    // ── McFlamingo pin: always show as first result in 32082 searches ────────
+    await applyMcflPin(rows, zip || null, db);
 
     const results = rows.slice(0, limit).map(r => ({
       business_id:   r.business_id || null,
