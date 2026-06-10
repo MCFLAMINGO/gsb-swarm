@@ -7017,10 +7017,55 @@ router.get('/search', harvestGuard, async (req, res) => {
             }
           }
         }
-        const resolvedCat    = svcDetect.category;
+        let resolvedCat    = svcDetect.category;
         const resolvedSubCat  = svcDetect.subCategory || null;   // B146
         const resolvedSubLabel= svcDetect.subLabel    || null;   // B146
         const isNarrowing     = svcDetect.isNarrowing || false;  // B146
+
+        // ── LLM semantic fallback — when regex/keyword intent detection draws a blank,
+        // ask Haiku to map the raw query to one of our known CAT_EXPAND keys.
+        // Fast, cheap (one short prompt), and prevents unnecessary dead-ends.
+        if (!resolvedCat && raw && raw.trim().length > 1) {
+          try {
+            const _validCats = [
+              'restaurant','pizza','bar','cafe','healthcare','clinic','plastic_surgery',
+              'beauty','beauty_salon','spa','massage','plumber','electrician','hvac',
+              'handyman','roofing','landscaping','cleaning','dry_cleaning','pest_control',
+              'locksmith','painting','auto_repair','car_wash','towing','gas_station',
+              'retail','clothes','grocery','pharmacy','convenience','hardware','alcohol',
+              'law_firm','accountant','insurance_agency','finance','bank','real_estate',
+              'gym','hotel','veterinary','florist','tattoo','storage','jewelry','task',
+              'dentist','dental','optician','entertainment',
+            ].join(', ');
+            const _llmRes = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+                'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+                'anthropic-version': '2023-06-01',
+              },
+              body: JSON.stringify({
+                model: 'claude-haiku-4-5',
+                max_tokens: 20,
+                messages: [{
+                  role: 'user',
+                  content: `Map this user query to exactly ONE category from the list. Reply with only the category key, nothing else. If nothing fits reply null.\n\nQuery: "${(raw||'').slice(0,120)}"\n\nCategories: ${_validCats}`,
+                }],
+              }),
+              signal: AbortSignal.timeout(4000),
+            });
+            if (_llmRes.ok) {
+              const _llmJ = await _llmRes.json();
+              const _llmCat = (_llmJ?.content?.[0]?.text || '').trim().toLowerCase().replace(/[^a-z_]/g, '');
+              if (_llmCat && _llmCat !== 'null' && _llmCat.length > 1) {
+                resolvedCat = _llmCat;
+                console.log(`[svc-detect] LLM fallback resolved "${raw}" → ${resolvedCat}`);
+              }
+            }
+          } catch (_llmErr) {
+            console.warn('[svc-detect] LLM fallback failed (non-fatal):', _llmErr.message);
+          }
+        }
 
         // ── Provider lookup with automatic neighbor expansion on zero results ──
         // B70: concept-aware ranking via zip_signals JOIN.
