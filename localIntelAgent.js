@@ -7023,8 +7023,18 @@ router.get('/search', harvestGuard, async (req, res) => {
         const isNarrowing     = svcDetect.isNarrowing || false;  // B146
 
         // ── LLM semantic fallback — when regex/keyword intent detection draws a blank,
-        // ask Haiku to map the raw query to one of our known CAT_EXPAND keys.
-        // Fast, cheap (one short prompt), and prevents unnecessary dead-ends.
+        // First check the learned intent cache (healed from previous LLM resolutions).
+        // If still nothing, ask Haiku — then record the mapping so next time is instant.
+        if (!resolvedCat && raw && raw.trim().length > 1) {
+          try {
+            const _li = require('./lib/learnedIntents');
+            const _learned = _li.lookup(raw);
+            if (_learned) {
+              resolvedCat = _learned;
+              console.log(`[svc-detect] learned cache hit: "${raw}" → ${resolvedCat}`);
+            }
+          } catch (_liErr) { /* non-fatal */ }
+        }
         if (!resolvedCat && raw && raw.trim().length > 1) {
           try {
             const _validCats = [
@@ -7060,6 +7070,8 @@ router.get('/search', harvestGuard, async (req, res) => {
               if (_llmCat && _llmCat !== 'null' && _llmCat.length > 1) {
                 resolvedCat = _llmCat;
                 console.log(`[svc-detect] LLM fallback resolved "${raw}" → ${resolvedCat}`);
+                // Heal the gap — record so next identical query skips the LLM entirely
+                require('./lib/learnedIntents').record(raw, resolvedCat, 'llm_fallback').catch(() => {});
               }
             }
           } catch (_llmErr) {

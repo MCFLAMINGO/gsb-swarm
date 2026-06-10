@@ -8065,6 +8065,17 @@ app.get('/api/local-intel/confirmed-jobs', async (req, res) => {
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`[gsb-dashboard] Listening on port ${PORT}`);
 
+  // Load learned intent mappings into memory — self-healing gap filler
+  if (process.env.LOCAL_INTEL_DB_URL) {
+    try {
+      const learnedIntents = require('./lib/learnedIntents');
+      await learnedIntents.load();
+      learnedIntents.startAutoRefresh();
+    } catch (e) {
+      console.warn('[gsb-dashboard] learnedIntents load failed (non-fatal):', e.message);
+    }
+  }
+
   // Auto-run idempotent seeds (B19/B21) — fire-and-forget, never blocks boot
   try {
     const { runSeeds } = require('./lib/runSeeds');
