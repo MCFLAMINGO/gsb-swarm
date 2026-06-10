@@ -1028,6 +1028,8 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip, service
 
     // 1. Match businesses in ZIP whose category or description mentions the
     //    requested service. LIMIT 5 keeps SMS volume reasonable.
+    // OPTED-IN GATE: only claimed businesses receive SMS job requests.
+    // Unclaimed listings have never consented to be contacted.
     const businesses = await db.query(
       `SELECT business_id AS id, name, phone, zip, category, wallet, description
          FROM businesses
@@ -1035,6 +1037,9 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip, service
           AND (category ILIKE $2 OR description ILIKE $2)
           AND phone IS NOT NULL
           AND status != 'inactive'
+          AND wallet IS NOT NULL
+          AND notify_sms = TRUE
+        ORDER BY confidence_score DESC
         LIMIT 5`,
       [targetZips, `%${nlIntent.category}%`]
     );
@@ -7120,9 +7125,8 @@ router.get('/search', harvestGuard, async (req, res) => {
               description:  raw,
             });
             jobCode = code;
-            // Fire broadcast non-blocking
-            rfqBroadcast.broadcastJob({ jobId, code, callerName: null, category: resolvedCat, zip: resolvedZip, description: raw })
-              .catch(e => console.error('[search svc-req] broadcastJob error:', e.message));
+            // NO broadcastJob() call — web search never triggers SMS.
+            // Businesses notified only after user confirms via form (paid/opted-in).
           } catch (rfqErr) {
             console.error('[search svc-req] RFQ create error:', rfqErr.message);
           }
