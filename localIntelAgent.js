@@ -700,9 +700,15 @@ function buildMatchReason(biz, intent, query) {
   return parts.slice(0, 3).join(' · ') || null;
 }
 
-// Phase 4 — sort results: open first, then claimed (wallet), then confidence.
-function sortResults(rows) {
+// Phase 4 — sort results: category match first, then open, then claimed (wallet), then confidence.
+// Category match is the highest signal — a wallet business in the wrong category must not
+// float above an on-category result (e.g. McFlamingo on a "plastic surgeon" query).
+function sortResults(rows, queryGroup) {
   rows.sort((a, b) => {
+    // Category relevance — penalise results whose group doesn't match the query group
+    const aCatMatch = !queryGroup || !a.group || a.group === queryGroup ? 1 : 0;
+    const bCatMatch = !queryGroup || !b.group || b.group === queryGroup ? 1 : 0;
+    if (bCatMatch !== aCatMatch) return bCatMatch - aCatMatch;
     const aHours = _parseHours(a.hours);
     const bHours = _parseHours(b.hours);
     const aOpen = aHours && isOpenNow(aHours) === true ? 1 : 0;
@@ -1662,7 +1668,7 @@ router.post('/', async (req, res) => {
           ).catch(err => { console.error('[B19] name search error:', err.message); return []; });
         }
         if (_b19Rows && _b19Rows.length > 0) {
-          const _b19Sorted = sortResults(_b19Rows.slice());
+          const _b19Sorted = sortResults(_b19Rows.slice(), effectiveGroup || nlIntent?.group);
           let _b19Enriched = _b19Sorted.map(r => {
             const out = { ...r };
             if (r.pos_type === 'other' && r.wallet) {
@@ -1829,7 +1835,7 @@ router.post('/', async (req, res) => {
           }
 
           if (phase2Rows && phase2Rows.length > 0) {
-            const sorted = sortResults(phase2Rows.slice());
+            const sorted = sortResults(phase2Rows.slice(), effectiveGroup || nlIntent?.group);
             let enriched = sorted.map(r => {
               const out = { ...r };
               if (r.pos_type === 'other' && r.wallet) {
@@ -6181,6 +6187,12 @@ const _SVC_MAP = {
   'psychiatrist':'healthcare','psychiatry':'healthcare','counseling':'healthcare',
   'mental health':'healthcare','physical therapy':'healthcare','pt ':'healthcare',
   'cardiologist':'healthcare','orthopedic':'healthcare','surgeon':'healthcare',
+  'plastic surgeon':'healthcare','plastic surgery':'healthcare','cosmetic surgeon':'healthcare',
+  'cosmetic surgery':'healthcare','facial plastic':'healthcare','facelift':'healthcare',
+  'rhinoplasty':'healthcare','breast augmentation':'healthcare','liposuction':'healthcare',
+  'bbl':'healthcare','tummy tuck':'healthcare','botox':'healthcare','filler':'healthcare',
+  'aesthetics':'healthcare','medical spa':'healthcare','medspa':'healthcare',
+  'dermatologist':'healthcare','skin care':'healthcare','reconstructive':'healthcare',
   'specialist':'healthcare','primary care':'healthcare','family doctor':'healthcare',
   'health':'healthcare','nurse':'healthcare','prescription':'healthcare',
   'pharmacy':'pharmacy','drug store':'pharmacy',
