@@ -6252,17 +6252,47 @@ const _SVC_MAP = {
   // Beauty / wellness
   'haircut':'beauty','barber':'beauty','salon':'beauty','nail':'beauty',
   'massage':'wellness','spa':'wellness',
+  'hair done':'beauty','hair did':'beauty','hair styled':'beauty',
+  'hair ':'beauty','nails done':'beauty','nails did':'beauty',
+  'blowout':'beauty','color my hair':'beauty','highlights':'beauty',
   // Security
   'security system':'security','alarm':'security','camera install':'security',
+  // Pharmacy / convenience products
+  'deodor':'pharmacy','deodar':'pharmacy','deodrant':'pharmacy',
+  'toothbrush':'pharmacy','toothpaste':'pharmacy','tooth brush':'pharmacy',
+  'shampoo':'pharmacy','conditioner':'pharmacy','body wash':'pharmacy',
+  'lotion':'pharmacy','razor':'pharmacy','band aid':'pharmacy',
+  'tylenol':'pharmacy','advil':'pharmacy','ibuprofen':'pharmacy',
+  'cough':'pharmacy','cold meds':'pharmacy','allergy meds':'pharmacy',
+  'toilet paper':'convenience','paper towel':'convenience',
+  'doritos':'convenience','chips':'convenience','snack':'convenience',
+  'candy':'convenience','gum':'convenience','soda':'convenience',
+  'beer ':'alcohol','wine ':'alcohol','vodka':'alcohol','whiskey':'alcohol',
+  'tequila':'alcohol','rum ':'alcohol','liquor':'alcohol','booze':'alcohol',
+  'six pack':'alcohol','case of beer':'alcohol','bottle of wine':'alcohol',
+  'atm':'bank','cash machine':'bank','need cash':'bank',
+  'locksmith':'locksmith','locked out':'locksmith','lock out':'locksmith',
+  'pest control':'pest_control','exterminator':'pest_control',
+  'roach':'pest_control','cockroach':'pest_control','termite':'pest_control',
+  'dry clean':'dry_cleaning',
+  'concert hall':'bar','live music':'bar','music venue':'bar',
+  'diamond':'jewelry','necklace':'jewelry','engagement ring':'jewelry',
+  'suit ':'clothes','tailor':'clothes',
+  'ethiopian':'restaurant','indian food':'restaurant','thai food':'restaurant',
+  'sushi':'restaurant','ramen':'restaurant','pho':'restaurant',
+  'chinese food':'restaurant','italian food':'restaurant',
+  'fish market':'restaurant','seafood':'restaurant',
 };
 // Phrases that signal "I want a service done" (not a business name search)
 const _REQUEST_PHRASES = [
   'i need','i want','i have a','fix my','fix the','repair my','repair the',
   'find me a','find me an','get me a','get me an','looking for a','looking for an',
-  'need a','need an','need someone','need help','help me','can someone',
-  'who can','who does','where can i','how do i','my [a-z]+ is broken',
+  'need a','need an','need some','need someone','need help','help me','can someone',
+  'who can','who does','where can i','where do i','how do i','my [a-z]+ is broken',
   'my [a-z]+ is leaking','my [a-z]+ is not working','broken','not working',
   'clogged','flooded','flooring replaced','replace my','replace the',
+  'looking to get','trying to find','tryna find','tryna get','gotta get',
+  'can i get','can i find','can i buy','where is a','where is the',
 ];
 const _REQUEST_RE = new RegExp(_REQUEST_PHRASES.join('|'), 'i');
 
