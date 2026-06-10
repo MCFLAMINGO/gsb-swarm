@@ -27,6 +27,7 @@ const SPENDING_FILE = path.join(DATA_DIR, 'spendingZones.json');
 
 // ── Re-use detection helpers from inferenceCache ──────────────────────────────
 const { detectVertical, detectZip } = require('./inferenceCache');
+const catMap = require('../lib/categoryMap');
 
 // ── Region expansions → multiple ZIPs ────────────────────────────────────────
 // When user says "Northeast Florida" without a specific ZIP, expand to top ZIPs
@@ -605,7 +606,25 @@ function classifyIntent(query, nlHints = {}) {
     };
   }
 
-  // 3) Fallback — full-text search
+  // 3) categoryMap fallback — single source of truth covers voice/SMS/web/MCP
+  const cmResult = catMap.resolve(q);
+  if (cmResult) {
+    const categories = cmResult.expanded || [cmResult.cat];
+    const hour = new Date().getHours();
+    const lateNightCats = categories.includes('bar') || categories.includes('liquor_store');
+    const needsOpenNow = _NEEDS_OPEN_RE.test(q) || (lateNightCats && hour >= 21);
+    return {
+      type: 'CATEGORY_SEARCH',
+      categories,
+      cuisine: hintCuisine,
+      cuisines: [],
+      needsOpenNow,
+      matchedKeyword: cmResult.cat,
+      raw,
+    };
+  }
+
+  // 4) Fallback — full-text search
   return { type: 'TEXT_SEARCH', cuisine: hintCuisine, raw };
 }
 

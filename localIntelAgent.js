@@ -98,6 +98,7 @@ const { createApiKeyMiddleware } = require('./lib/apiKeyMiddleware');
 const { harvestGuard } = require('./lib/harvestGuard');
 const db = require('./lib/db');
 const { resolveIntent, detectOpenIntent } = require('./lib/intentMap');
+const catMap = require('./lib/categoryMap');
 const { resolveIntent: resolveNlIntentFromRegistry } = require('./lib/intentRegistry');
 const { expandZips } = require('./lib/geoExpand');
 const { detectTaskIntent, getTaskFollowUp, setTaskFollowUp, clearTaskFollowUp } = require('./lib/taskIntent');
@@ -6287,17 +6288,8 @@ const _SVC_MAP = {
   'fish market':'restaurant','seafood':'restaurant',
 };
 // Phrases that signal "I want a service done" (not a business name search)
-const _REQUEST_PHRASES = [
-  'i need','i want','i have a','fix my','fix the','repair my','repair the',
-  'find me a','find me an','get me a','get me an','looking for a','looking for an',
-  'need a','need an','need some','need someone','need help','help me','can someone',
-  'who can','who does','where can i','where do i','how do i','my [a-z]+ is broken',
-  'my [a-z]+ is leaking','my [a-z]+ is not working','broken','not working',
-  'clogged','flooded','flooring replaced','replace my','replace the',
-  'looking to get','trying to find','tryna find','tryna get','gotta get',
-  'can i get','can i find','can i buy','where is a','where is the',
-];
-const _REQUEST_RE = new RegExp(_REQUEST_PHRASES.join('|'), 'i');
+// _REQUEST_PHRASES / _REQUEST_RE — now delegated to categoryMap (single source of truth)
+// catMap.isServiceRequest(query) and catMap.resolve(query) used in detectServiceRequest below
 
 function detectServiceRequest(raw, threadCtx) {
   const lower = raw.toLowerCase();
@@ -6320,7 +6312,9 @@ function detectServiceRequest(raw, threadCtx) {
   // B146: Pure narrowing turn — user says "for a mammogram" with no request phrase.
   // Treat as a service request if the thread already has a matching category.
   const priorCat = threadCtx?.lastIntent || null;
-  if (!_REQUEST_RE.test(lower) && subCategory) {
+  // isServiceRequest from categoryMap is the single source of truth for request detection
+  const isReq = catMap.isServiceRequest(raw);
+  if (!isReq && subCategory) {
     // Narrowing follow-up is valid when the subcat's parent matches prior category
     // OR we have any prior service context at all.
     if (priorCat || subcatOverrideCategory) {
@@ -6335,14 +6329,20 @@ function detectServiceRequest(raw, threadCtx) {
     return { isRequest: false, category: null, subCategory: null, subLabel: null };
   }
 
-  const isRequest = _REQUEST_RE.test(lower);
-  if (!isRequest) return { isRequest: false, category: null, subCategory: null, subLabel: null };
+  if (!isReq) return { isRequest: false, category: null, subCategory: null, subLabel: null };
 
-  // Full request — find broad category from _SVC_MAP
+  // Full request — resolve category via categoryMap (single source of truth)
+  // Falls back to legacy _SVC_MAP for any edge cases not yet in categoryMap
   let category = subcatOverrideCategory || null;
   if (!category) {
-    for (const [kw, cat] of Object.entries(_SVC_MAP)) {
-      if (lower.includes(kw)) { category = cat; break; }
+    const resolved = catMap.resolve(raw);
+    if (resolved) {
+      category = resolved.cat;
+    } else {
+      // Legacy _SVC_MAP fallback (for subcats/niche keywords not in categoryMap yet)
+      for (const [kw, cat] of Object.entries(_SVC_MAP)) {
+        if (lower.includes(kw)) { category = cat; break; }
+      }
     }
   }
   return { isRequest: true, category, subCategory, subLabel, isNarrowing: false };
@@ -7132,44 +7132,8 @@ router.get('/search', harvestGuard, async (req, res) => {
             // Build params: $1=cat, $2=zip (opt), $3=subcat tsquery (opt)
             // Use CAT_EXPAND for exact category matching — prevents ILIKE '%beauty%'
             // from matching unrelated categories that contain the word as a substring.
-            const _SVC_CAT_EXPAND = {
-              beauty:        ['beauty','beauty_salon','hairdresser','barbershop','hair_chain','spa_massage','massage','cosmetics'],
-              beauty_salon:  ['beauty_salon','hairdresser','barbershop','hair_chain','beauty','cosmetics'],
-              wellness:      ['spa_massage','massage','beauty_salon','gym','fitness_centre'],
-              spa:           ['spa_massage','massage','beauty_salon'],
-              massage:       ['spa_massage','massage'],
-              healthcare:    ['clinic','hospital','doctors','dentist','dental','pharmacy','urgent_care','veterinary','healthcare'],
-              clinic:        ['clinic','doctors','urgent_care','hospital','healthcare'],
-              restaurant:    ['restaurant','fast_food','cafe','bar','pizza','seafood','casual_dining','deli','fine_dining','sports_bar','brewery','fast_casual_mexican'],
-              pizza:         ['pizza','restaurant','fast_food'],
-              bar:           ['bar','pub','sports_bar','brewery','alcohol'],
-              cafe:          ['cafe','bakery','deli'],
-              grocery:       ['grocery','supermarket','convenience'],
-              pharmacy:      ['pharmacy','chemist'],
-              convenience:   ['convenience','grocery'],
-              retail:        ['retail','clothes','shoes','department_store','furniture','jewelry','variety_store'],
-              clothes:       ['clothes','department_store','variety_store'],
-              auto_repair:   ['auto_repair','car_repair','auto_body'],
-              auto_dealer:   ['auto_dealer'],
-              gym:           ['gym','gym_chain','fitness_centre','sports_centre'],
-              hotel:         ['hotel','upscale_hotel','budget_hotel'],
-              real_estate:   ['real_estate','real_estate_agency','estate_agent'],
-              law_firm:      ['law_firm','legal','lawyer'],
-              financial:     ['financial_advisor','bank','credit_union','accounting'],
-              finance:       ['financial_advisor','bank','credit_union','accounting'],
-              bank:          ['bank','bank_branch','credit_union'],
-              veterinary:    ['veterinary','pet','pet_grooming'],
-              alcohol:       ['alcohol','liquor_store','wine'],
-              locksmith:     ['locksmith'],
-              pest_control:  ['pest_control'],
-              painting:      ['painting'],
-              dry_cleaning:  ['dry_cleaning'],
-              jewelry:       ['jewelry'],
-              florist:       ['florist'],
-              tattoo:        ['tattoo'],
-              storage:       ['storage_rental'],
-            };
-            const _expandedCats = _SVC_CAT_EXPAND[resolvedCat];
+            // expandCat from categoryMap — single source of truth for DB category expansion
+            const _expandedCats = catMap.expandCat(resolvedCat);
             let catWhereClause, catParams;
             if (_expandedCats && _expandedCats.length) {
               catWhereClause = `b.category = ANY($1::text[])`;
