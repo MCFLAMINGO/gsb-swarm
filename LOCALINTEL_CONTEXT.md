@@ -31,6 +31,7 @@
 | [twilio-voice.md](docs/twilio-voice.md) | SMS + voice layer, voiceIntake, conversation threading, call logs |
 | [payments.md](docs/payments.md) | Tempo, pathUSD, payment model, viem, wallets |
 | [roadmap.md](docs/roadmap.md) | Official roadmap, north star, pending setup, strategic direction |
+| [presence-protocol.md](docs/presence-protocol.md) | **FOUNDATIONAL** — W5+H presence model, two-sided architecture, the core problem LocalIntel solves, cheapest-path principle, appointment/transaction completion model |
 
 ## Active B-Series
 See [session-log.md](docs/session-log.md) for full history.
