@@ -10464,6 +10464,34 @@ router.get('/admin/test-businesses', async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/admin/seed-test-businesses — re-run seeder on demand
+router.post('/admin/seed-test-businesses', async (req, res) => {
+  if (req.headers['x-admin-token'] !== 'localintel-migrate-2026')
+    return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const { seedTestBusinesses } = require('./scripts/seedTestBusinesses');
+    await seedTestBusinesses(db);
+    // Return fresh list
+    const rows = await db.query(
+      `SELECT business_id, name, category, dispatch_token,
+              claimed_at IS NOT NULL as claimed, presence_score
+       FROM businesses WHERE name ILIKE '%[TEST]%' AND zip = '32082'
+       ORDER BY category ASC`, []
+    );
+    const businesses = rows.map(r => ({
+      name: r.name, category: r.category, business_id: r.business_id,
+      claimed: r.claimed, presence_score: r.presence_score,
+      inbox_url: r.dispatch_token
+        ? `https://www.thelocalintel.com/inbox.html?token=${r.dispatch_token}&setup=1`
+        : null,
+    }));
+    res.json({ ok: true, seeded: true, count: businesses.length, businesses });
+  } catch (err) {
+    console.error('[admin/seed-test-businesses]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/admin/dispatch-token/:business_id', async (req, res) => {
   if (req.headers['x-admin-token'] !== 'localintel-migrate-2026')
     return res.status(401).json({ error: 'unauthorized' });
