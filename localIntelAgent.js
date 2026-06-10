@@ -7347,7 +7347,8 @@ router.get('/search', harvestGuard, async (req, res) => {
     // Category expansion map — dropdown slug → all DB category values
     const CAT_EXPAND = {
       restaurant:           ['restaurant','fast_food','cafe','bar','pub','bbq','pizza','seafood','sandwich','italian','asian','steakhouse','food_court','ice_cream','fast_casual_mexican','upscale_dining','barbecue_restaurant','coffee_chain','bakery','juice_bar','smoothie','wings','sushi','thai','mediterranean','greek','indian','chinese','mexican','burger','brunch','breakfast','diner','tapas','wine_bar','brewery','gastropub'],
-      healthcare:           ['clinic','hospital','doctor','dentist','dental','pharmacy','urgent_care','therapist','veterinary','optometrist','chiropractor'],
+      healthcare:           ['clinic','hospital','doctor','dentist','dental','pharmacy','urgent_care','therapist','veterinary','optometrist','chiropractor','plastic_surgery','cosmetic_surgery','medical_spa','med_spa','medspa','dermatology','aesthetics','aesthetic_clinic','skin_clinic','plastic_surgeon','dermatologist'],
+      plastic_surgery:      ['plastic_surgery','cosmetic_surgery','medical_spa','med_spa','medspa','aesthetics','aesthetic_clinic','dermatology','skin_clinic','plastic_surgeon','dermatologist'],
       retail:               ['retail','clothes','shoes','electronics','grocery','supermarket','convenience','hardware_store','nutrition_supplements'],
       construction:         ['construction','contractor','builder','roofing','flooring','general_contractor'],
       professional_services:['law_firm','legal','accountant','consulting','marketing','insurance','insurance_agency'],
@@ -7355,6 +7356,7 @@ router.get('/search', harvestGuard, async (req, res) => {
       cleaning:             ['cleaning','maid_service','janitorial','dry_cleaning'],
       hvac:                 ['hvac','heating','cooling','air_conditioning'],
       plumber:              ['plumber','plumbing'],
+      plumbing:             ['plumber','plumbing'],
       electrician:          ['electrician','electrical'],
       real_estate:          ['real_estate','real_estate_agency','estate_agent','property_management'],
       finance:              ['finance','bank','bank_branch','atm','financial','mortgage','credit_union','investment'],
@@ -7457,8 +7459,10 @@ router.get('/search', harvestGuard, async (req, res) => {
       }
     }
 
-    // 3. ZIP-only browse
-    if (!rows.length && zip) {
+    // 3. ZIP-only browse — only fires when no category intent was detected
+    // If cat is set, the user had a specific category in mind; returning random ZIP
+    // businesses is worse than returning nothing (causes wrong-category results).
+    if (!rows.length && zip && !cat) {
       rows = await db.query(
         BASE_SELECT + ` AND b.zip = $1 ORDER BY ${RANKED_ORDER} LIMIT $2`,
         [zip, limit]
