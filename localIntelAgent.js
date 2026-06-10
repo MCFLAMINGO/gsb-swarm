@@ -7309,8 +7309,8 @@ router.get('/search', harvestGuard, async (req, res) => {
               (topWeb   ? `${topPhone ? ' or' : ''} at ${topWeb}` : '') + '.'
             : '';
           srNarrative =
-            `${intro} — notified them about your request${jobCode ? ' (Job ' + jobCode + ')' : ''}.${directContact} ` +
-            `Or leave your email/phone below and we'll connect you.`;
+            `${intro}${jobCode ? ' — request logged as Job ' + jobCode + '.' : '.'}${directContact} ` +
+            `Leave your contact info below and we'll connect you directly.`;
         } else if (resolvedCat) {
           const noResultIntro = resolvedSubLabel
             ? `No verified ${catLabel} providers found${resolvedZip ? ' in ' + resolvedZip + ' or nearby ZIPs' : ''} yet`
