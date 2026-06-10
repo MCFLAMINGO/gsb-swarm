@@ -6212,6 +6212,9 @@ const _SVC_MAP = {
   'order food':'restaurant','takeout':'restaurant','restaurant':'restaurant',
   'food from':'restaurant','catering':'catering','cater':'catering',
   // Pest / auto / IT
+  'pizza':'pizza','slice':'pizza','calzone':'pizza',
+  'buy a car':'auto_dealer','buy car':'auto_dealer','used car':'auto_dealer','new car':'auto_dealer',
+  'car dealership':'auto_dealer','auto dealer':'auto_dealer','car lot':'auto_dealer',
   'mechanic':'auto','oil change':'auto','car wash':'auto','tire':'auto',
   'computer repair':'it_support','wifi':'it_support','tech support':'it_support',
   // Healthcare
@@ -7127,7 +7130,55 @@ router.get('/search', harvestGuard, async (req, res) => {
           const fetchProviders = async (z, useSubcat = true) => {
             const useSub = useSubcat && resolvedSubCat;
             // Build params: $1=cat, $2=zip (opt), $3=subcat tsquery (opt)
-            const params = [`%${resolvedCat}%`];
+            // Use CAT_EXPAND for exact category matching — prevents ILIKE '%beauty%'
+            // from matching unrelated categories that contain the word as a substring.
+            const _SVC_CAT_EXPAND = {
+              beauty:        ['beauty','beauty_salon','hairdresser','barbershop','hair_chain','spa_massage','massage','cosmetics'],
+              beauty_salon:  ['beauty_salon','hairdresser','barbershop','hair_chain','beauty','cosmetics'],
+              wellness:      ['spa_massage','massage','beauty_salon','gym','fitness_centre'],
+              spa:           ['spa_massage','massage','beauty_salon'],
+              massage:       ['spa_massage','massage'],
+              healthcare:    ['clinic','hospital','doctors','dentist','dental','pharmacy','urgent_care','veterinary','healthcare'],
+              clinic:        ['clinic','doctors','urgent_care','hospital','healthcare'],
+              restaurant:    ['restaurant','fast_food','cafe','bar','pizza','seafood','casual_dining','deli','fine_dining','sports_bar','brewery','fast_casual_mexican'],
+              pizza:         ['pizza','restaurant','fast_food'],
+              bar:           ['bar','pub','sports_bar','brewery','alcohol'],
+              cafe:          ['cafe','bakery','deli'],
+              grocery:       ['grocery','supermarket','convenience'],
+              pharmacy:      ['pharmacy','chemist'],
+              convenience:   ['convenience','grocery'],
+              retail:        ['retail','clothes','shoes','department_store','furniture','jewelry','variety_store'],
+              clothes:       ['clothes','department_store','variety_store'],
+              auto_repair:   ['auto_repair','car_repair','auto_body'],
+              auto_dealer:   ['auto_dealer'],
+              gym:           ['gym','gym_chain','fitness_centre','sports_centre'],
+              hotel:         ['hotel','upscale_hotel','budget_hotel'],
+              real_estate:   ['real_estate','real_estate_agency','estate_agent'],
+              law_firm:      ['law_firm','legal','lawyer'],
+              financial:     ['financial_advisor','bank','credit_union','accounting'],
+              finance:       ['financial_advisor','bank','credit_union','accounting'],
+              bank:          ['bank','bank_branch','credit_union'],
+              veterinary:    ['veterinary','pet','pet_grooming'],
+              alcohol:       ['alcohol','liquor_store','wine'],
+              locksmith:     ['locksmith'],
+              pest_control:  ['pest_control'],
+              painting:      ['painting'],
+              dry_cleaning:  ['dry_cleaning'],
+              jewelry:       ['jewelry'],
+              florist:       ['florist'],
+              tattoo:        ['tattoo'],
+              storage:       ['storage_rental'],
+            };
+            const _expandedCats = _SVC_CAT_EXPAND[resolvedCat];
+            let catWhereClause, catParams;
+            if (_expandedCats && _expandedCats.length) {
+              catWhereClause = `b.category = ANY($1::text[])`;
+              catParams = [_expandedCats];
+            } else {
+              catWhereClause = `(b.category ILIKE $1 OR b.category_group ILIKE $1)`;
+              catParams = [`%${resolvedCat}%`];
+            }
+            const params = [...catParams];
             let paramIdx = 2;
             const zipClauseLocal = z ? ` AND b.zip = $${paramIdx++}` : '';
             if (z) params.push(z);
@@ -7145,7 +7196,7 @@ router.get('/search', harvestGuard, async (req, res) => {
               SVC_PROVIDER_QUERY + ` FROM businesses b
                LEFT JOIN zip_signals zs ON zs.zip = b.zip
                WHERE b.status != 'inactive'
-                 AND (b.category ILIKE $1 OR b.category_group ILIKE $1)${zipClauseLocal}${subcatClauseLocal}
+                 AND ${catWhereClause}${zipClauseLocal}${subcatClauseLocal}
                ORDER BY ${_svcRanked}
                LIMIT $${params.length}`, params
             );
