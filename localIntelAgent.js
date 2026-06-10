@@ -7268,10 +7268,17 @@ router.get('/search', harvestGuard, async (req, res) => {
         let jobCode = null;
 
         // ── Broadcast RFQ to all matching providers ──────────────────────────────
-        // Web searches don't have a callerPhone, so we don't know who to call back.
-        // We create the job anyway (for tracking) but skip the outbound callback.
-        // The caller can see job status at thelocalintel.com/jobs/[code]
-        if (resolvedCat) {
+        // ── Determine CTA type ──────────────────────────────────────────────────────
+        // rfq         → provider travels to customer (plumber, hvac, landscaping, etc.)
+        // appointment → customer travels to provider for a booking (beauty, medical, gym)
+        // reservation → customer travels for dining / lodging
+        // info        → retail / bank / legal — just show results, no CTA prompt
+        const ctaType   = catMap.getCTAType(resolvedCat);
+        const ctaPrompt = catMap.CTA_PROMPTS[ctaType] || null;
+
+        // Only log a job record for rfq-type requests
+        // broadcastJob() fires only AFTER user confirms the bid prompt (separate endpoint)
+        if (resolvedCat && ctaType === 'rfq') {
           try {
             const rfqBroadcast = require('./lib/rfqBroadcast');
             const { jobId, code } = await rfqBroadcast.createJob({
@@ -7282,8 +7289,6 @@ router.get('/search', harvestGuard, async (req, res) => {
               description:  raw,
             });
             jobCode = code;
-            // NO broadcastJob() call — web search never triggers SMS.
-            // Businesses notified only after user confirms via form (paid/opted-in).
           } catch (rfqErr) {
             console.error('[search svc-req] RFQ create error:', rfqErr.message);
           }
@@ -7308,9 +7313,13 @@ router.get('/search', harvestGuard, async (req, res) => {
               (topPhone ? ` at ${topPhone}` : '') +
               (topWeb   ? `${topPhone ? ' or' : ''} at ${topWeb}` : '') + '.'
             : '';
+          // CTA-aware narrative: rfq gets bid prompt, appointment gets schedule prompt,
+          // reservation gets reserve prompt, info just shows results
+          const ctaTail = ctaPrompt
+            ? ` ${ctaPrompt}`
+            : ` Leave your contact info below and we\'ll connect you directly.`;
           srNarrative =
-            `${intro}${jobCode ? ' — request logged as Job ' + jobCode + '.' : '.'}${directContact} ` +
-            `Leave your contact info below and we'll connect you directly.`;
+            `${intro}${jobCode ? ' — request logged as Job ' + jobCode + '.' : '.'}${directContact}${ctaTail}`;
         } else if (resolvedCat) {
           const noResultIntro = resolvedSubLabel
             ? `No verified ${catLabel} providers found${resolvedZip ? ' in ' + resolvedZip + ' or nearby ZIPs' : ''} yet`
@@ -7351,9 +7360,11 @@ router.get('/search', harvestGuard, async (req, res) => {
           sub_label:    resolvedSubLabel || null,  // B146
           is_narrowing: isNarrowing,               // B146
           job_code:     jobCode,
+          cta_type:     ctaType    || 'info',   // rfq | appointment | reservation | info
+          cta_prompt:   ctaPrompt  || null,      // human-readable CTA question for the frontend
           total:        providerCount,
           narrative:    srNarrative,
-          contact_prompt: true,  // frontend: show email/phone collection widget
+          contact_prompt: ctaType !== 'info',  // show contact widget for actionable CTAs
           results:    topProviders.map(r => ({
             name:       r.name,
             zip:        r.zip,
