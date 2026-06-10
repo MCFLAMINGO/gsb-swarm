@@ -6258,6 +6258,8 @@ const _SVC_MAP = {
   'massage':'wellness','spa':'wellness',
   'hair done':'beauty','hair did':'beauty','hair styled':'beauty',
   'hair ':'beauty','nails done':'beauty','nails did':'beauty',
+  'haricut':'beauty','hair cut':'beauty','need a cut':'beauty',
+  'get a cut':'beauty','need a trim':'beauty','get a trim':'beauty',
   'blowout':'beauty','color my hair':'beauty','highlights':'beauty',
   // Security
   'security system':'security','alarm':'security','camera install':'security',
@@ -6273,7 +6275,10 @@ const _SVC_MAP = {
   'candy':'convenience','gum':'convenience','soda':'convenience',
   'beer ':'alcohol','wine ':'alcohol','vodka':'alcohol','whiskey':'alcohol',
   'tequila':'alcohol','rum ':'alcohol','liquor':'alcohol','booze':'alcohol',
-  'six pack':'alcohol','case of beer':'alcohol','bottle of wine':'alcohol',
+  'six pack':'alcohol','case of beer':'alcohol','gallon of beer':'alcohol',
+  'bottle of wine':'alcohol','buy beer':'alcohol','buy wine':'alcohol',
+  'buy vodka':'alcohol','buy booze':'alcohol','buy liquor':'alcohol',
+  'grab a beer':'alcohol','pick up beer':'alcohol','get some beer':'alcohol',
   'atm':'bank','cash machine':'bank','need cash':'bank',
   'locksmith':'locksmith','locked out':'locksmith','lock out':'locksmith',
   'pest control':'pest_control','exterminator':'pest_control',
@@ -6543,7 +6548,7 @@ function detectOrderItemIntent(raw) {
   }
   // Guard: reject non-food item queries even when a business name is present.
   // "I need my back fire door fixed at McFlamingo" should NOT trigger order flow.
-  const NON_FOOD_FULL_RE = /\b(?:fixed|repair(?:ed)?|install(?:ed)?|replac(?:ed)?|clean(?:ed)?|paint(?:ed)?|built?|constructed?|renovated?|restor(?:ed)?|inspect(?:ed)?|servic(?:ed)?|maintain(?:ed)?|upgrad(?:ed)?|door|window|roof|wall|floor|ceiling|pipe|drain|wir(?:e|ing)|outlet|breaker|hvac|ac\s+unit|furnace|gutter|shingle|fence|deck|driveway|sidewalk|bathroom|kitchen\s+remodel|haircut|hair\s+cut|manicure|pedicure|massage|facial|wax|blowout|dental|teeth|oil\s+change|tire|alignment|brake|transmission|tow|locksmith|prescription|refill|vaccine|injection|room|hotel|flight|ticket|seat|parking|storage|unit|locker|beach\s+chair|beach\s+umbrella|kayak|paddleboard|surfboard|drill|power\s+tool|hardware|lumber|furniture|mattress|sofa|couch|clothing|apparel|shirt|pants|shoes|boots|jacket|sunscreen|sunblock|cleats|jersey|uniform|equipment|gear|supplies|supplies)\b/i;
+  const NON_FOOD_FULL_RE = /\b(?:fixed|repair(?:ed)?|install(?:ed)?|replac(?:ed)?|clean(?:ed)?|paint(?:ed)?|built?|constructed?|renovated?|restor(?:ed)?|inspect(?:ed)?|servic(?:ed)?|maintain(?:ed)?|upgrad(?:ed)?|door|window|roof|wall|floor|ceiling|pipe|drain|wir(?:e|ing)|outlet|breaker|hvac|ac\s+unit|furnace|gutter|shingle|fence|deck|driveway|sidewalk|bathroom|kitchen\s+remodel|haric|haircut|hair\s+cut|a\s+cut|need\s+a\s+cut|manicure|pedicure|massage|facial|wax|blowout|dental|teeth|oil\s+change|tire|alignment|brake|transmission|tow|locksmith|prescription|refill|vaccine|injection|room|hotel|flight|ticket|seat|parking|storage|unit|locker|beach\s+chair|beach\s+umbrella|kayak|paddleboard|surfboard|drill|power\s+tool|hardware|lumber|furniture|mattress|sofa|couch|clothing|apparel|shirt|pants|shoes|boots|jacket|sunscreen|sunblock|cleats|jersey|uniform|equipment|gear|supplies|supplies)\b/i;
   if (NON_FOOD_FULL_RE.test(itemQuery)) return { isOrderItem: false, itemQuery: null, bizName: null };
   return { isOrderItem: true, itemQuery, bizName };
 }
@@ -6581,7 +6586,7 @@ function detectOrderItemPartial(raw) {
 
   // Guard: reject clearly non-food phrases — real estate, services, info requests, etc.
   // "rent a property", "find a landscaper", "know where", "book a table", etc.
-  const NON_FOOD_RE = /\b(?:rent|lease|buy|purchase|book(?:\s+a\s+(?:flight|hotel|venue))?|property|condo|apartment|house|home|land|real\s*estate|landscap|plumb|electr|construct|repair|install|service(?:s)?|hire|find\s+a|search\s+for|know\s+where|tell\s+me|show\s+me|recommend\s+a|suggest\s+a|looking\s+for\s+a\s+(?:home|house|property|place\s+to\s+live)|move|relocat|invest|hotel|vacation|travel|flight|airbnb|vrbo|haircut|hair\s+cut|hair\s+style|blowout|manicure|pedicure|nail|massage|facial|wax|barbershop|salon|spa|gym|workout|yoga|pilates|crossfit|fitness|dentist|dental|doctor|urgent\s+care|prescription|pharmacy|lawyer|attorney|accountant|insurance|mechanic|oil\s+change|car\s+wash|tire|tow|locksmith|pest\s+control|pool\s+service|landscap|irrigation|gutter|roofing|flooring|drywall|painting|fence|deck|remodel|renovation|beach\s+chair|beach\s+umbrella|beach\s+gear|beach\s+supply|outdoor\s+gear|camping\s+gear|sporting\s+goods|kayak|paddleboard|surfboard|fishing\s+gear|bike|bicycle|scooter|drill|power\s+tool|hardware|lumber|screwdriver|wrench|ladder|chainsaw|lawn\s+mower|leaf\s+blower|pressure\s+washer|furniture|mattress|sofa|couch|desk|chair|lamp|shelf|closet|mirror|clothing|apparel|shirt|pants|dress|shoes|sneakers|boots|jacket|coat|hat|sunglasses|swimsuit|flip\s+flops|sunscreen|sunblock|lotion|deodorant|shampoo|soap|toothpaste|toilet\s+paper|paper\s+towel|laundry|detergent|batteries|lightbulb|extension\s+cord|phone\s+charger|laptop|computer|printer|tv|television|speaker|headphones|camera|gift\s+card|flowers|florist|balloon|decoration)\b/i;
+  const NON_FOOD_RE = /\b(?:rent|lease|buy|purchase|book(?:\s+a\s+(?:flight|hotel|venue))?|property|condo|apartment|house|home|land|real\s*estate|landscap|plumb|electr|construct|repair|install|service(?:s)?|hire|find\s+a|search\s+for|know\s+where|tell\s+me|show\s+me|recommend\s+a|suggest\s+a|looking\s+for\s+a\s+(?:home|house|property|place\s+to\s+live)|move|relocat|invest|hotel|vacation|travel|flight|airbnb|vrbo|haric|haircut|hair\s+cut|hair\s+style|blowout|a\s+cut\b|need\s+a\s+cut|manicure|pedicure|nail|massage|facial|wax|barbershop|salon|spa|gym|workout|yoga|pilates|crossfit|fitness|dentist|dental|doctor|urgent\s+care|prescription|pharmacy|lawyer|attorney|accountant|insurance|mechanic|oil\s+change|car\s+wash|tire|tow|locksmith|pest\s+control|pool\s+service|landscap|irrigation|gutter|roofing|flooring|drywall|painting|fence|deck|remodel|renovation|beach\s+chair|beach\s+umbrella|beach\s+gear|beach\s+supply|outdoor\s+gear|camping\s+gear|sporting\s+goods|kayak|paddleboard|surfboard|fishing\s+gear|bike|bicycle|scooter|drill|power\s+tool|hardware|lumber|screwdriver|wrench|ladder|chainsaw|lawn\s+mower|leaf\s+blower|pressure\s+washer|furniture|mattress|sofa|couch|desk|chair|lamp|shelf|closet|mirror|clothing|apparel|shirt|pants|dress|shoes|sneakers|boots|jacket|coat|hat|sunglasses|swimsuit|flip\s+flops|sunscreen|sunblock|lotion|deodorant|shampoo|soap|toothpaste|toilet\s+paper|paper\s+towel|laundry|detergent|batteries|lightbulb|extension\s+cord|phone\s+charger|laptop|computer|printer|tv|television|speaker|headphones|camera|gift\s+card|flowers|florist|balloon|decoration)\b/i;
   if (NON_FOOD_RE.test(itemQuery)) return { isPartial: false, itemQuery: null };
 
   return { isPartial: true, itemQuery };
