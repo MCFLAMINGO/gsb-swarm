@@ -7344,44 +7344,69 @@ router.get('/search', harvestGuard, async (req, res) => {
       }
     }
 
-    // Category expansion map — dropdown slug → all DB category values
+    // Category expansion map — keys are intent cat values, values are REAL DB category strings
+    // Ground-truthed against actual businesses table. NO phantom category strings.
     const CAT_EXPAND = {
-      restaurant:           ['restaurant','fast_food','cafe','bar','pub','bbq','pizza','seafood','sandwich','italian','asian','steakhouse','food_court','ice_cream','fast_casual_mexican','upscale_dining','barbecue_restaurant','coffee_chain','bakery','juice_bar','smoothie','wings','sushi','thai','mediterranean','greek','indian','chinese','mexican','burger','brunch','breakfast','diner','tapas','wine_bar','brewery','gastropub'],
-      healthcare:           ['clinic','hospital','doctor','dentist','dental','pharmacy','urgent_care','therapist','veterinary','optometrist','chiropractor','plastic_surgery','cosmetic_surgery','medical_spa','med_spa','medspa','dermatology','aesthetics','aesthetic_clinic','skin_clinic','plastic_surgeon','dermatologist'],
-      plastic_surgery:      ['plastic_surgery','cosmetic_surgery','medical_spa','med_spa','medspa','aesthetics','aesthetic_clinic','dermatology','skin_clinic','plastic_surgeon','dermatologist'],
-      retail:               ['retail','clothes','shoes','electronics','grocery','supermarket','convenience','hardware_store','nutrition_supplements'],
-      construction:         ['construction','contractor','builder','roofing','flooring','general_contractor'],
-      professional_services:['law_firm','legal','accountant','consulting','marketing','insurance','insurance_agency'],
-      landscaping:          ['landscaping','lawn_care','tree_service','irrigation','lawn','mowing','gardening'],
-      cleaning:             ['cleaning','maid_service','janitorial','dry_cleaning'],
-      hvac:                 ['hvac','heating','cooling','air_conditioning'],
-      plumber:              ['plumber','plumbing'],
-      plumbing:             ['plumber','plumbing'],
-      electrician:          ['electrician','electrical'],
-      real_estate:          ['real_estate','real_estate_agency','estate_agent','property_management'],
-      finance:              ['finance','bank','bank_branch','atm','financial','mortgage','credit_union','investment'],
-      auto_repair:          ['auto_repair','car_wash','car_repair','tire_shop','auto_parts','mechanic'],
-      beauty:               ['beauty','hair_salon','barbershop','nail_salon','spa','hair_chain'],
-      beauty_salon:         ['beauty_salon','barbershop','hair_salon','nail_salon','beauty','hair_chain'],
-      education:            ['school','college','university','tutoring','childcare','daycare'],
+      // ── Food & drink ────────────────────────────────────────────────────────
+      restaurant:           ['restaurant','fast_food','cafe','bar','pub','bbq','pizza','seafood','sandwich','italian','asian','steakhouse','ice_cream','fast_casual_mexican','coffee_chain','bakery','casual_dining','deli','mexican','fine_dining','sports_bar','dessert','brewery','bar_dining'],
       pizza:                ['pizza'],
-      bar:                  ['bar','pub','wine_bar','brewery','gastropub'],
-      cafe:                 ['cafe','coffee_chain','bakery'],
-      gym:                  ['gym_chain','fitness_centre','yoga','crossfit'],
-      entertainment:        ['concert_hall','music_venue','theatre','theater','amphitheatre','amphitheater','performing_arts','event_venue','community_centre','community_center','stadium','arena','nightclub','comedy_club','entertainment'],
-      library:              ['library','public_library'],
-      veterinary:           ['veterinary','pet_store','animal_hospital'],
-      towing:               ['towing','roadside_assistance'],
-      gas_station:          ['gas_station','fuel','petrol_station'],
-      pharmacy:             ['pharmacy','chemist','drugstore'],
-      clinic:               ['clinic','doctor','urgent_care','medical_clinic','primary_care'],
-      financial_advisor:    ['financial_advisor','finance','wealth_management'],
+      bar:                  ['bar','pub','sports_bar','bar_dining','brewery','alcohol'],
+      cafe:                 ['cafe','coffee_chain','bakery','deli'],
+      // ── Medical ─────────────────────────────────────────────────────────────
+      healthcare:           ['clinic','hospital','doctors','dentist','dental','pharmacy','urgent_care','veterinary','optician','healthcare','fitness_centre','sports_centre'],
+      clinic:               ['clinic','doctors','urgent_care','hospital','healthcare'],
+      plastic_surgery:      ['plastic_surgery','dermatology','medical_spa','aesthetics','doctors','clinic','healthcare'],
+      // ── Beauty ──────────────────────────────────────────────────────────────
+      beauty:               ['beauty','beauty_salon','hairdresser','barbershop','hair_chain','spa_massage','massage','cosmetics','pet_grooming'],
+      beauty_salon:         ['beauty_salon','hairdresser','barbershop','hair_chain','beauty','cosmetics'],
+      spa:                  ['spa_massage','massage','beauty_salon'],
+      massage:              ['spa_massage','massage'],
+      // ── Home services ───────────────────────────────────────────────────────
+      plumber:              ['plumber'],
+      plumbing:             ['plumber'],
+      electrician:          ['electrician'],
+      hvac:                 ['hvac'],
+      handyman:             ['handyman','doityourself','general_contractor','contractor'],
+      roofing:              ['roofing','contractor','general_contractor'],
+      landscaping:          ['landscaping'],
+      cleaning:             ['dry_cleaning'],
+      dry_cleaning:         ['dry_cleaning'],
+      // ── Auto ────────────────────────────────────────────────────────────────
+      auto_repair:          ['auto_repair','car_repair','car_wash','auto_body'],
+      car_wash:             ['car_wash','auto_repair'],
+      auto_dealer:          ['auto_dealer'],
+      car_rental:           ['car_rental'],
+      towing:               ['towing'],
+      gas_station:          ['gas_station','fuel'],
+      // ── Retail ──────────────────────────────────────────────────────────────
+      retail:               ['retail','clothes','shoes','department_store','furniture','jewelry','variety_store','big_box','cosmetics','nutrition_supplements'],
+      clothes:              ['clothes','department_store','variety_store'],
+      grocery:              ['grocery','supermarket','convenience'],
+      pharmacy:             ['pharmacy','chemist'],
+      hardware:             ['hardware','doityourself'],
+      // ── Professional services ────────────────────────────────────────────────
+      professional_services:['law_firm','legal','lawyer','accounting','insurance','insurance_agency','tax_advisor'],
+      law_firm:             ['law_firm','legal','lawyer'],
+      accountant:           ['accounting'],
       insurance_agency:     ['insurance_agency','insurance'],
-      grocery:              ['grocery','supermarket','food_store'],
-      hotel:                ['hotel','upscale_hotel','motel','inn'],
-      handyman:             ['handyman','home_repair','general_contractor'],
-      dry_cleaning:         ['dry_cleaning','laundromat','laundry'],
-      clothes:              ['clothes','clothing','apparel','retail'],
+      // ── Finance ─────────────────────────────────────────────────────────────
+      finance:              ['finance','bank','bank_branch','atm','credit_union','financial_advisor'],
+      financial_advisor:    ['financial_advisor','finance'],
+      // ── Real estate ─────────────────────────────────────────────────────────
+      real_estate:          ['real_estate','real_estate_agency','estate_agent'],
+      // ── Fitness ─────────────────────────────────────────────────────────────
+      gym:                  ['gym','gym_chain','fitness_centre','sports_centre','fitness','crossfit','swimming_pool'],
+      // ── Hospitality ─────────────────────────────────────────────────────────
+      hotel:                ['hotel','upscale_hotel','budget_hotel'],
+      // ── Pet ─────────────────────────────────────────────────────────────────
+      veterinary:           ['veterinary','pet','pet_grooming'],
+      // ── Other services ──────────────────────────────────────────────────────
+      construction:         ['contractor','general_contractor','roofing'],
+      entertainment:        ['theatre','museum','attraction'],
+      library:              ['library'],
+      florist:              ['florist'],
+      tattoo:               ['tattoo'],
+      storage:              ['storage_rental'],
     };
 
     // 2. Category search (ZIP-scoped if provided)

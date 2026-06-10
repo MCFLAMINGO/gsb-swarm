@@ -408,100 +408,87 @@ function route(query) {
 // Deterministic keyword → category map for the consumer search bar. Zero LLM.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ALL values are REAL DB category strings (ground-truthed against businesses table)
 const KEYWORD_CATEGORY_MAP = {
-  // Drinks & alcohol
-  whiskey: ['bar','liquor_store'], bourbon: ['bar','liquor_store'],
-  cocktail: ['bar'], cocktails: ['bar'], beer: ['bar','liquor_store'],
-  wine: ['bar','liquor_store','restaurant'], spirits: ['bar','liquor_store'],
-  liquor: ['liquor_store','bar'], alcohol: ['liquor_store','bar'],
+  // ─ Drinks & alcohol ─────────────────────────────────────────────────────
+  whiskey: ['bar','alcohol'], bourbon: ['bar','alcohol'],
+  cocktail: ['bar'], cocktails: ['bar'], beer: ['bar','alcohol'],
+  wine: ['bar','alcohol','restaurant'], spirits: ['bar','alcohol'],
+  liquor: ['alcohol','bar'], alcohol: ['alcohol','bar'],
   drinks: ['bar','cafe','restaurant'], nightcap: ['bar'],
-  // Coffee
+  // ─ Coffee ────────────────────────────────────────────────────────────
   coffee: ['cafe','coffee_chain'], espresso: ['cafe'], latte: ['cafe'],
   cappuccino: ['cafe'], 'cold brew': ['cafe'],
-  // Food — general
+  // ─ Food ───────────────────────────────────────────────────────────────
   food: ['restaurant','fast_food','cafe'], eat: ['restaurant','fast_food'],
   lunch: ['restaurant','fast_food','cafe'], dinner: ['restaurant'],
   breakfast: ['cafe','restaurant'], brunch: ['cafe','restaurant'],
   snack: ['cafe','convenience','fast_food'],
-  // Food — specific
-  pizza: ['restaurant','fast_food'], burger: ['restaurant','fast_food'],
+  pizza: ['pizza','restaurant'], burger: ['restaurant','fast_food'],
   burgers: ['restaurant','fast_food'], tacos: ['restaurant','fast_food'],
-  sushi: ['restaurant'], chinese: ['restaurant'], thai: ['restaurant'],
-  indian: ['restaurant'], italian: ['restaurant'], mexican: ['restaurant'],
-  seafood: ['restaurant'], bbq: ['restaurant'], barbecue: ['restaurant'],
-  wings: ['restaurant','fast_food'], sandwich: ['restaurant','fast_food','cafe'],
+  sushi: ['asian','restaurant'], chinese: ['asian','restaurant'], thai: ['asian','restaurant'],
+  indian: ['restaurant'], italian: ['italian','restaurant'], mexican: ['mexican','restaurant'],
+  seafood: ['seafood','restaurant'], bbq: ['bbq','restaurant'], barbecue: ['bbq','restaurant'],
+  wings: ['restaurant','fast_food'], sandwich: ['sandwich','restaurant','fast_food','cafe'],
   salad: ['restaurant','cafe'], soup: ['restaurant','cafe'],
-  // Groceries & convenience
+  // ─ Grocery & convenience ────────────────────────────────────────────
   groceries: ['grocery','supermarket'], grocery: ['grocery','supermarket'],
   milk: ['grocery','convenience'], bread: ['grocery','convenience'],
   eggs: ['grocery','convenience'], snacks: ['grocery','convenience'],
-  'toilet paper': ['grocery','convenience'], 'paper towels': ['grocery','convenience'],
-  'laundry detergent': ['grocery','supermarket'], cleaning: ['grocery','convenience'],
   toiletries: ['grocery','pharmacy','convenience'],
   'buy groceries': ['grocery','supermarket'], 'pick up groceries': ['grocery','supermarket'],
-  'need milk': ['grocery','convenience'], 'need eggs': ['grocery','convenience'],
-  'get milk': ['grocery','convenience'], 'get eggs': ['grocery','convenience'],
-  'case of water': ['grocery','convenience'], 'water delivery': ['grocery','convenience'],
-  'bottled water': ['grocery','convenience'], 'bulk water': ['grocery','convenience'],
-  'sports drink': ['grocery','convenience'], 'gatorade': ['grocery','convenience'],
-  'beverage delivery': ['grocery','convenience'],
-  // Pharmacy & health
-  pharmacy: ['pharmacy'], prescription: ['pharmacy'], meds: ['pharmacy'],
-  medicine: ['pharmacy'], vitamins: ['pharmacy','grocery'],
-  bandaids: ['pharmacy'], firstaid: ['pharmacy'],
-  // Hardware & home repair
-  hardware: ['hardware'], tools: ['hardware'], lumber: ['hardware'],
-  plumbing: ['plumber','plumbing','hardware'], drywall: ['hardware'],
-  paint: ['hardware'], lightbulb: ['hardware','grocery','convenience'],
-  batteries: ['hardware','grocery','convenience'], drill: ['hardware'],
-  screws: ['hardware'], 'nails': ['hardware'],
-  'beach chair': ['retail','outdoor'], 'beach umbrella': ['retail','outdoor'],
-  'beach gear': ['retail','outdoor'], 'outdoor gear': ['retail','outdoor'],
-  'sporting goods': ['retail','outdoor'], 'camping gear': ['retail','outdoor'],
-  'kayak': ['retail','outdoor'], 'paddleboard': ['retail','outdoor'],
-  'surfboard': ['retail','outdoor'], 'fishing gear': ['retail','outdoor'],
-  'fishing rod': ['retail','outdoor'], 'bike shop': ['retail','outdoor'],
-  'bicycle': ['retail','outdoor'], 'pool float': ['retail','outdoor'],
-  'electric drill': ['hardware'], 'power tool': ['hardware'],
-  'lawn mower': ['hardware','outdoor'], 'leaf blower': ['hardware','outdoor'],
-  'pressure washer': ['hardware'], 'extension cord': ['hardware','grocery'],
-  'lightbulb': ['hardware','grocery'], 'batteries': ['hardware','grocery'],
-  'furniture': ['retail'], 'mattress': ['retail'], 'sofa': ['retail'],
-  // Auto
-  gas: ['gas_station'], gasoline: ['gas_station'], fuel: ['gas_station'],
-  'oil change': ['automotive','car_repair'], tires: ['automotive','car_repair'],
-  mechanic: ['car_repair','automotive'], carwash: ['car_wash'],
-  // Pet
+  // ─ Pharmacy ───────────────────────────────────────────────────────────
+  pharmacy: ['pharmacy','chemist'], prescription: ['pharmacy','chemist'],
+  meds: ['pharmacy'], medicine: ['pharmacy'], vitamins: ['pharmacy','grocery'],
+  // ─ Hardware & home repair ────────────────────────────────────────────
+  hardware: ['hardware','doityourself'], tools: ['hardware','doityourself'],
+  lumber: ['hardware'], plumbing: ['plumber','hardware'], drywall: ['hardware'],
+  paint: ['hardware'], drill: ['hardware'], screws: ['hardware'],
+  'lawn mower': ['hardware'], 'pressure washer': ['hardware'],
+  'furniture': ['retail','furniture'], 'mattress': ['retail','furniture'], 'sofa': ['retail','furniture'],
+  // ─ Retail & outdoor ────────────────────────────────────────────────────
+  'beach chair': ['retail'], 'beach gear': ['retail'], 'outdoor gear': ['retail'],
+  'sporting goods': ['retail'], 'bike shop': ['retail'], 'bicycle': ['retail'],
+  // ─ Auto ─────────────────────────────────────────────────────────────────
+  gas: ['gas_station','fuel'], gasoline: ['gas_station','fuel'], fuel: ['gas_station','fuel'],
+  'oil change': ['auto_repair','car_repair'], tires: ['auto_repair','car_repair'],
+  mechanic: ['car_repair','auto_repair'], carwash: ['car_wash'],
+  // ─ Pet ──────────────────────────────────────────────────────────────────
   'dog food': ['pet','veterinary'], 'cat food': ['pet','veterinary'],
   'pet food': ['pet','veterinary'], 'pet supplies': ['pet'],
   vet: ['veterinary'], veterinary: ['veterinary'],
-  // Beauty & wellness
-  haircut: ['hairdresser','beauty'], salon: ['beauty','hairdresser'],
-  spa: ['wellness','beauty'], massage: ['wellness'],
-  'haircut near me': ['hairdresser','beauty'], 'get a haircut': ['hairdresser','beauty'],
-  'hair salon': ['beauty','hairdresser'], 'barber': ['hairdresser','beauty'],
-  'nail salon': ['beauty'], 'nail spa': ['beauty'], 'day spa': ['wellness','beauty'],
-  'facial': ['beauty','wellness'], 'wax': ['beauty'], 'blowout': ['beauty','hairdresser'],
-  'botox': ['medical_spa','med_spa','plastic_surgery','aesthetics','beauty'], 'filler': ['medical_spa','med_spa','plastic_surgery','aesthetics','beauty'],
-  'lip filler': ['medical_spa','med_spa','aesthetics','beauty'], 'rhinoplasty': ['plastic_surgery','cosmetic_surgery'],
-  'breast implant': ['plastic_surgery','cosmetic_surgery'], 'cosmetic surgery': ['plastic_surgery','cosmetic_surgery'],
-  'plastic surgery': ['plastic_surgery','cosmetic_surgery'], 'plastic surgeon': ['plastic_surgery','cosmetic_surgery'],
-  'liposuction': ['plastic_surgery','cosmetic_surgery'], 'tummy tuck': ['plastic_surgery','cosmetic_surgery'],
-  'medspa': ['medical_spa','med_spa','medspa','aesthetics','beauty'], 'med spa': ['medical_spa','med_spa','medspa','aesthetics','beauty'],
-  'dermatologist': ['dermatology','dermatologist','skin_clinic'], 'dermatology': ['dermatology','dermatologist','skin_clinic'],
-  'skin clinic': ['skin_clinic','dermatology','medical_spa','beauty'], 'coolsculpting': ['medical_spa','med_spa','aesthetics','plastic_surgery'],
-  'laser treatment': ['medical_spa','med_spa','aesthetics','dermatology'], 'laser hair': ['medical_spa','med_spa','aesthetics'],
-  // Laundry
-  laundry: ['laundry'], 'dry cleaning': ['laundry'], drycleaning: ['laundry'],
-  // Bank & ATM
-  atm: ['bank'], cash: ['bank'], bank: ['bank'],
-  // Florist
+  // ─ Beauty & wellness ─────────────────────────────────────────────────
+  haircut: ['hairdresser','beauty_salon','beauty'], salon: ['beauty_salon','hairdresser','beauty'],
+  spa: ['spa_massage','beauty_salon'], massage: ['spa_massage','massage'],
+  'haircut near me': ['hairdresser','beauty_salon'], 'get a haircut': ['hairdresser','beauty_salon'],
+  'hair salon': ['hairdresser','beauty_salon','hair_chain'], 'barber': ['barbershop','hairdresser'],
+  'nail salon': ['beauty_salon','beauty'], 'nail spa': ['beauty_salon'], 'day spa': ['spa_massage','beauty_salon'],
+  'facial': ['beauty_salon','spa_massage'], 'wax': ['beauty_salon'], 'blowout': ['hairdresser','beauty_salon'],
+  // ─ Cosmetic / plastic surgery — REAL DB category strings ─────────────────────────
+  'botox': ['medical_spa','aesthetics','dermatology'], 'filler': ['medical_spa','aesthetics'],
+  'lip filler': ['medical_spa','aesthetics'], 'rhinoplasty': ['plastic_surgery','doctors'],
+  'breast implant': ['plastic_surgery','doctors'], 'cosmetic surgery': ['plastic_surgery','doctors'],
+  'plastic surgery': ['plastic_surgery','doctors'], 'plastic surgeon': ['plastic_surgery','doctors'],
+  'liposuction': ['plastic_surgery','doctors'], 'tummy tuck': ['plastic_surgery','doctors'],
+  'medspa': ['medical_spa','aesthetics'], 'med spa': ['medical_spa','aesthetics'],
+  'dermatologist': ['dermatology'], 'dermatology': ['dermatology'],
+  'coolsculpting': ['medical_spa','aesthetics'], 'laser treatment': ['medical_spa','aesthetics'],
+  'laser hair': ['medical_spa','aesthetics'],
+  // ─ Laundry ────────────────────────────────────────────────────────────────
+  laundry: ['dry_cleaning'], 'dry cleaning': ['dry_cleaning'], drycleaning: ['dry_cleaning'],
+  // ─ Bank & ATM ──────────────────────────────────────────────────────────
+  atm: ['atm','bank'], cash: ['bank','atm'], bank: ['bank','bank_branch'],
+  // ─ Florist ───────────────────────────────────────────────────────────────
   flowers: ['florist'], florist: ['florist'],
-  // Fitness
-  gym: ['fitness','fitness_centre'], workout: ['fitness','fitness_centre'],
-  // Urgent home
+  // ─ Fitness ───────────────────────────────────────────────────────────────
+  gym: ['gym','gym_chain','fitness_centre','fitness'], workout: ['gym_chain','fitness_centre','fitness'],
+  // ─ Urgent home services ──────────────────────────────────────────────
   plumber: ['plumber'], electrician: ['electrician'], hvac: ['hvac'],
-  locksmith: ['locksmith'],
+  roofing: ['roofing'], handyman: ['handyman','doityourself'],
+  // ─ Professional ────────────────────────────────────────────────────────
+  lawyer: ['law_firm','legal','lawyer'], attorney: ['law_firm','legal','lawyer'],
+  accountant: ['accounting'], 'tax prep': ['tax_advisor','accounting'],
+  insurance: ['insurance','insurance_agency'],
 };
 
 // Pre-compute keyword list sorted by length desc so multi-word keys win
