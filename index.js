@@ -107,16 +107,13 @@ function spawnWorker({ name, file }) {
 
 (async () => {
   // ── Boot: connection budget enforcement ──────────────────────────────
-  // Count worker processes × DB_POOL_MAX to ensure we stay under Railway cap.
-  // If math fails, log loudly and continue — do NOT silently proceed.
-  const RAILWAY_PG_CAP   = 25;
-  const WORKER_POOL      = 1;  // DB_POOL_MAX per data worker
-  const MCP_POOL         = 1;  // localIntelMCP (shares main process pool)
-  const DASHBOARD_POOL   = 0;  // dashboard-server (shares main process pool)
-  const MAIN_POOL        = 6;  // main process pool (search/MCP/routing/admin — raised from 4 after timeout)
-  // Count DB workers across BOTH index.js list AND dashboard-server LOCAL_INTEL_WORKERS.
-  // Deduplicate by file path — a worker file only runs once even if listed in both.
-  // Exclude localIntelMCP.js (counted separately as MCP_POOL).
+  // Architecture: all DB traffic routes through PgBouncer (transaction pooling).
+  // Workers connect to PgBouncer — PgBouncer holds a fixed server-side pool to Postgres.
+  // The relevant cap is PgBouncer's DEFAULT_POOL_SIZE (real Postgres connections it holds),
+  // NOT worker count × pool size. Workers can have unlimited client-side connections to
+  // PgBouncer — they only consume a real Postgres connection for the duration of a query.
+  //
+  // What we log here is informational only — worker count for observability.
   const usesDb = (file) => {
     try {
       const src = require('fs').readFileSync(require('path').join(__dirname, file), 'utf8');
@@ -130,24 +127,20 @@ function spawnWorker({ name, file }) {
     const dashSrc = require('fs').readFileSync(require('path').join(__dirname, 'dashboard-server.js'), 'utf8');
     const match = dashSrc.match(/const LOCAL_INTEL_WORKERS\s*=\s*\[([\s\S]*?)\];/);
     if (match) {
-      // Only count uncommented worker entries
       const activeLines = match[1].split('\n').filter(l => !l.trim().startsWith('//'));
       const lines = activeLines.join('\n').match(/\{\s*name:[^}]+file:\s*'([^']+)'/g) || [];
       dashWorkerFiles = lines.map(l => { const m = l.match(/file:\s*'([^']+)'/); return m ? m[1] : null; }).filter(Boolean);
     }
   } catch (_) {}
-  // Merge both lists, deduplicate, exclude MCP (counted separately)
   const allWorkerFiles = [...new Set([
     ...workers.map(w => w.file),
     ...dashWorkerFiles,
   ])].filter(f => f !== 'localIntelMCP.js');
   const DB_WORKERS = allWorkerFiles.filter(usesDb).length;
-  const TOTAL_CONNS = DB_WORKERS * WORKER_POOL + MCP_POOL + DASHBOARD_POOL + MAIN_POOL;
-  if (TOTAL_CONNS > RAILWAY_PG_CAP) {
-    console.warn(`[SWARM] ⚠️  CONNECTION BUDGET WARNING: estimated ${TOTAL_CONNS} conns > cap ${RAILWAY_PG_CAP} — monitor for pool timeouts`);
-  } else {
-    console.log(`[SWARM] ✅ Connection budget: ${DB_WORKERS} DB workers×${WORKER_POOL} + MCP×${MCP_POOL} + dash×${DASHBOARD_POOL} + main×${MAIN_POOL} = ${TOTAL_CONNS}/${RAILWAY_PG_CAP}`);
-  }
+  // PgBouncer is the connection multiplexer — workers connect to PgBouncer, not directly to Postgres.
+  // No cap warning needed: PgBouncer handles fan-out. Log worker count for observability only.
+  console.log(`[SWARM] ✅ ${DB_WORKERS} DB workers via PgBouncer (transaction pooling — no direct Postgres cap concern)`);
+  // NOTE: If you ever bypass PgBouncer (e.g. direct turntable.proxy URL), re-enable cap math above.
 
   // ── Boot: run DB migrations FIRST — before dashboard/workers spawn ─────────
   // Migrations must run before anything else touches the DB. Running from the
