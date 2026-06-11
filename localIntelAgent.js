@@ -4319,6 +4319,12 @@ router.get('/presence/:business_id', async (req, res) => {
         accepts_walkin_orders: biz.accepts_walkin_orders ?? true,
         payment_methods:       biz.payment_methods       || [],
         wallet_address:        biz.wallet                || null,
+        // action_url: wallet surge route takes priority over booking_url.
+        // Agents and search cards use this to know where to send the customer.
+        action_url: biz.wallet
+          ? `https://gsb-swarm-production.up.railway.app/api/local-intel/rfq` // agent-routed via wallet
+          : (biz.booking_url || biz.website || null),
+        action_type: biz.wallet ? 'agent_wallet' : (biz.booking_url ? 'booking_url' : 'website'),
       },
     });
   } catch (err) {
