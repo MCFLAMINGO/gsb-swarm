@@ -311,11 +311,14 @@ function scheduleNightly() {
   console.log('[intelligenceAggWorker] Scheduled nightly at 2am Eastern');
 
   function msUntil2am() {
+    // Target 2am Eastern (UTC-4 EDT / UTC-5 EST).
+    // Railway containers run in UTC — add 4h offset so this fires at 06:00 UTC
+    // instead of 02:00 UTC (which is 10pm Eastern and fires ~2min after a late-night deploy).
     const now = new Date();
-    const next2am = new Date(now);
-    next2am.setHours(2, 0, 0, 0);
-    if (next2am <= now) next2am.setDate(next2am.getDate() + 1);
-    return next2am - now;
+    const next2amUTC = new Date(now);
+    next2amUTC.setUTCHours(6, 0, 0, 0); // 06:00 UTC = 02:00 EDT
+    if (next2amUTC <= now) next2amUTC.setUTCDate(next2amUTC.getUTCDate() + 1);
+    return next2amUTC - now;
   }
 
   setTimeout(function tick() {
