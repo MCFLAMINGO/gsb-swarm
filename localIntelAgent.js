@@ -4333,6 +4333,334 @@ router.get('/presence/:business_id', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// REQUESTS DASHBOARD — unified RFQ + appointment_requests for a business
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── GET /api/local-intel/inbox/requests — fetch pending + recent requests ────
+// Auth: dispatch_token query param
+// Returns: { rfqs: [], appointments: [], total_pending: N }
+router.get('/inbox/requests', async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(401).json({ error: 'token required' });
+  try {
+    const [biz] = await db.query(
+      `SELECT business_id, name FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(403).json({ error: 'invalid token' });
+    const bid = biz.business_id;
+
+    // RFQs broadcast to this business — last 90 days
+    const rfqs = await db.query(
+      `SELECT r.rfq_id, r.job_type, r.category, r.description, r.budget_usd,
+              r.deadline_at, r.status, r.created_at, r.magic_token,
+              r.customer_email, r.customer_phone,
+              b.business_id AS bid_id, b.quote_usd, b.bid_status, b.bid_at, b.response_text AS bid_note
+       FROM rfq_jobs r
+       LEFT JOIN rfq_bids b ON b.rfq_id = r.rfq_id AND b.business_id = $1
+       WHERE r.rfq_id IN (
+         SELECT rfq_id FROM rfq_broadcast_log WHERE business_id = $1
+       )
+       AND r.created_at > NOW() - INTERVAL '90 days'
+       ORDER BY r.created_at DESC
+       LIMIT 50`,
+      [bid]
+    );
+
+    // Appointment + reservation requests
+    const appts = await db.query(
+      `SELECT id, request_type, customer_name, customer_email, customer_phone,
+              description, preferred_time, party_size, status,
+              response_text, responded_at, appointment_id, source, created_at, notified_at
+       FROM appointment_requests
+       WHERE business_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [bid]
+    );
+
+    const pending_rfqs  = rfqs.filter(r => !r.bid_id && r.status === 'open').length;
+    const pending_appts = appts.filter(a => a.status === 'pending' || a.status === 'notified').length;
+
+    res.json({
+      rfqs:           rfqs,
+      appointments:   appts,
+      total_pending:  pending_rfqs + pending_appts,
+    });
+  } catch (err) {
+    console.error('[inbox/requests GET]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/local-intel/inbox/requests/rfq/:rfq_id/respond ─────────────────
+// Business accepts/quotes/declines an RFQ
+// Body: { token, action: 'bid'|'decline', quote_usd, note, availability_text }
+router.post('/inbox/requests/rfq/:rfq_id/respond', express.json(), async (req, res) => {
+  const { rfq_id } = req.params;
+  const { token, action, quote_usd, note, availability_text } = req.body || {};
+  if (!token) return res.status(401).json({ error: 'token required' });
+  if (!['bid','decline'].includes(action)) return res.status(400).json({ error: 'action must be bid or decline' });
+  try {
+    const [biz] = await db.query(
+      `SELECT business_id, name, notification_email FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(403).json({ error: 'invalid token' });
+
+    const [rfq] = await db.query(
+      `SELECT rfq_id, magic_token, customer_email, customer_phone, description,
+              category, status, notify_email
+       FROM rfq_jobs WHERE rfq_id = $1`,
+      [rfq_id]
+    );
+    if (!rfq) return res.status(404).json({ error: 'rfq not found' });
+    if (rfq.status === 'booked') return res.status(409).json({ error: 'rfq already booked' });
+
+    if (action === 'bid') {
+      // Upsert bid
+      await db.query(
+        `INSERT INTO rfq_bids (rfq_id, business_id, quote_usd, response_text, availability_text, bid_status, bid_at)
+         VALUES ($1,$2,$3,$4,$5,'open',NOW())
+         ON CONFLICT (rfq_id, business_id)
+         DO UPDATE SET quote_usd=$3, response_text=$4, availability_text=$5, bid_status='open', bid_at=NOW()`,
+        [rfq_id, biz.business_id, quote_usd||null, note||null, availability_text||null]
+      );
+
+      // Email customer that a bid came in
+      if ((rfq.customer_email || rfq.notify_email) && process.env.RESEND_API_KEY) {
+        const { Resend } = require('resend');
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        const rfqUrl = `https://www.thelocalintel.com/rfq.html?token=${rfq.magic_token}`;
+        const priceStr = quote_usd ? `$${Number(quote_usd).toLocaleString()}` : 'Quote TBD';
+        await resend.emails.send({
+          from: 'LocalIntel <jobs@thelocalintel.com>',
+          to:   rfq.customer_email || rfq.notify_email,
+          subject: `${biz.name} submitted a bid on your job`,
+          html: `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;">
+  <p style="font-size:18px;font-weight:700;color:#111827;margin-bottom:4px;">LocalIntel</p>
+  <p style="font-size:14px;color:#374151;margin-bottom:20px;"><strong>${biz.name}</strong> bid <strong>${priceStr}</strong> on your job.</p>
+  ${note ? `<p style="font-size:14px;color:#374151;margin-bottom:20px;">&ldquo;${note}&rdquo;</p>` : ''}
+  ${availability_text ? `<p style="font-size:13px;color:#6B7280;">Available: ${availability_text}</p>` : ''}
+  <p style="margin:28px 0;">
+    <a href="${rfqUrl}" style="background:#16A34A;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">View all bids &rarr;</a>
+  </p>
+</div>`,
+        }).catch(e => console.warn('[rfq-bid] email warn:', e.message));
+      }
+
+      console.log(`[inbox/requests] ${biz.name} bid $${quote_usd||'?'} on rfq ${rfq_id}`);
+      res.json({ ok: true, action: 'bid', message: 'Bid submitted. Customer has been notified.' });
+
+    } else {
+      // Decline — mark in bid log
+      await db.query(
+        `INSERT INTO rfq_bids (rfq_id, business_id, bid_status, response_text, bid_at)
+         VALUES ($1,$2,'declined',$3,NOW())
+         ON CONFLICT (rfq_id, business_id)
+         DO UPDATE SET bid_status='declined', response_text=$3, bid_at=NOW()`,
+        [rfq_id, biz.business_id, note||null]
+      );
+      console.log(`[inbox/requests] ${biz.name} declined rfq ${rfq_id}`);
+      res.json({ ok: true, action: 'decline', message: 'Job declined.' });
+    }
+  } catch (err) {
+    console.error('[inbox/requests/rfq/respond]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/local-intel/inbox/requests/appointment/:id/respond ──────────────
+// Business confirms/declines an appointment_request
+// Body: { token, action: 'confirm'|'decline', scheduled_for, response_text }
+router.post('/inbox/requests/appointment/:id/respond', express.json(), async (req, res) => {
+  const { id } = req.params;
+  const { token, action, scheduled_for, response_text } = req.body || {};
+  if (!token) return res.status(401).json({ error: 'token required' });
+  if (!['confirm','decline'].includes(action)) return res.status(400).json({ error: 'action must be confirm or decline' });
+  try {
+    const [biz] = await db.query(
+      `SELECT business_id, name FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(403).json({ error: 'invalid token' });
+
+    const [appt_req] = await db.query(
+      `SELECT * FROM appointment_requests WHERE id = $1 AND business_id = $2`,
+      [id, biz.business_id]
+    );
+    if (!appt_req) return res.status(404).json({ error: 'request not found' });
+
+    if (action === 'confirm') {
+      // Create appointments record
+      let appt_id = null;
+      const scheduledTs = scheduled_for ? new Date(scheduled_for) : null;
+      const [appt] = await db.query(
+        `INSERT INTO appointments
+           (business_id, category, description, customer_name, customer_email, customer_phone,
+            preferred_time_text, scheduled_for, status, transaction_type, request_context, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'confirmed',$9,$10,NOW(),NOW())
+         RETURNING id`,
+        [
+          biz.business_id,
+          appt_req.category || null,
+          appt_req.description || null,
+          appt_req.customer_name || null,
+          appt_req.customer_email || null,
+          appt_req.customer_phone || null,
+          appt_req.preferred_time || null,
+          scheduledTs,
+          appt_req.request_type || 'appointment',
+          appt_req.description || null,
+        ]
+      ).catch(async () => {
+        // appointments table might not have preferred_time_text yet — try without
+        return db.query(
+          `INSERT INTO appointments
+             (business_id, category, description, customer_name, customer_email, customer_phone,
+              scheduled_for, status, transaction_type, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'confirmed',$8,NOW(),NOW())
+           RETURNING id`,
+          [biz.business_id, appt_req.category||null, appt_req.description||null,
+           appt_req.customer_name||null, appt_req.customer_email||null, appt_req.customer_phone||null,
+           scheduledTs, appt_req.request_type||'appointment']
+        );
+      });
+      appt_id = appt.id;
+
+      // Update request status
+      await db.query(
+        `UPDATE appointment_requests
+         SET status='confirmed', response_text=$1, responded_at=NOW(), appointment_id=$2
+         WHERE id=$3`,
+        [response_text||null, appt_id, id]
+      );
+
+      // Email customer confirmation + ICS link
+      if (appt_req.customer_email && process.env.RESEND_API_KEY) {
+        const { Resend } = require('resend');
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        const icsUrl = `https://gsb-swarm-production.up.railway.app/api/local-intel/inbox/requests/appointment/${appt_id}/calendar.ics`;
+        const timeStr = scheduledTs
+          ? scheduledTs.toLocaleString('en-US', { weekday:'long', month:'long', day:'numeric', hour:'numeric', minute:'2-digit', timeZone:'America/New_York' })
+          : (appt_req.preferred_time || 'Time to be confirmed');
+        await resend.emails.send({
+          from: 'LocalIntel <jobs@thelocalintel.com>',
+          to:   appt_req.customer_email,
+          subject: `Confirmed: ${appt_req.request_type === 'reservation' ? 'Reservation' : 'Appointment'} at ${biz.name}`,
+          html: `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;">
+  <p style="font-size:18px;font-weight:700;color:#111827;margin-bottom:4px;">LocalIntel</p>
+  <p style="font-size:14px;color:#16A34A;font-weight:600;margin-bottom:20px;">Your ${appt_req.request_type === 'reservation' ? 'reservation' : 'appointment'} is confirmed.</p>
+  <table style="width:100%;border-collapse:collapse;font-size:14px;">
+    <tr><td style="padding:8px 0;color:#6B7280;width:120px;">Business</td><td style="padding:8px 0;color:#111827;font-weight:600;">${biz.name}</td></tr>
+    <tr><td style="padding:8px 0;color:#6B7280;">When</td><td style="padding:8px 0;color:#111827;">${timeStr}</td></tr>
+    ${response_text ? `<tr><td style="padding:8px 0;color:#6B7280;">Note</td><td style="padding:8px 0;color:#111827;">${response_text}</td></tr>` : ''}
+  </table>
+  <p style="margin:28px 0;">
+    <a href="${icsUrl}" style="background:#1D4ED8;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">Add to Calendar &rarr;</a>
+  </p>
+  <p style="font-size:12px;color:#9CA3AF;">Works with Apple Calendar, Google Calendar, and Outlook.</p>
+</div>`,
+        }).catch(e => console.warn('[appt-confirm] email warn:', e.message));
+      }
+
+      console.log(`[inbox/requests] ${biz.name} confirmed appt ${appt_id}`);
+      res.json({
+        ok: true,
+        action: 'confirm',
+        appointment_id: appt_id,
+        calendar_url: `https://gsb-swarm-production.up.railway.app/api/local-intel/inbox/requests/appointment/${appt_id}/calendar.ics`,
+        message: 'Appointment confirmed. Customer has been notified.',
+      });
+
+    } else {
+      await db.query(
+        `UPDATE appointment_requests
+         SET status='declined', response_text=$1, responded_at=NOW()
+         WHERE id=$2`,
+        [response_text||null, id]
+      );
+
+      // Email customer decline
+      if (appt_req.customer_email && process.env.RESEND_API_KEY) {
+        const { Resend } = require('resend');
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        await resend.emails.send({
+          from: 'LocalIntel <jobs@thelocalintel.com>',
+          to:   appt_req.customer_email,
+          subject: `Update from ${biz.name} on your request`,
+          html: `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;">
+  <p style="font-size:18px;font-weight:700;color:#111827;margin-bottom:4px;">LocalIntel</p>
+  <p style="font-size:14px;color:#374151;margin-bottom:20px;">${biz.name} is unable to accommodate your request at this time.</p>
+  ${response_text ? `<p style="font-size:14px;color:#374151;">&ldquo;${response_text}&rdquo;</p>` : ''}
+  <p style="margin-top:28px;font-size:13px;color:#6B7280;"><a href="https://www.thelocalintel.com/search.html" style="color:#16A34A;">Search for another provider &rarr;</a></p>
+</div>`,
+        }).catch(e => console.warn('[appt-decline] email warn:', e.message));
+      }
+
+      console.log(`[inbox/requests] ${biz.name} declined appt_req ${id}`);
+      res.json({ ok: true, action: 'decline', message: 'Request declined. Customer has been notified.' });
+    }
+  } catch (err) {
+    console.error('[inbox/requests/appointment/respond]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/local-intel/inbox/requests/appointment/:id/calendar.ics ──────────
+// Returns an .ics file for the confirmed appointment — works with Apple, Google, Outlook
+router.get('/inbox/requests/appointment/:id/calendar.ics', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [appt] = await db.query(
+      `SELECT a.id, a.scheduled_for, a.duration_minutes, a.description, a.transaction_type,
+              a.customer_name, a.customer_email,
+              b.name AS biz_name, b.address, b.city, b.zip, b.phone
+       FROM appointments a
+       JOIN businesses b ON b.business_id = a.business_id
+       WHERE a.id = $1`,
+      [id]
+    );
+    if (!appt) return res.status(404).json({ error: 'appointment not found' });
+
+    const start  = appt.scheduled_for ? new Date(appt.scheduled_for) : new Date();
+    const dur    = appt.duration_minutes || 60;
+    const end    = new Date(start.getTime() + dur * 60000);
+    const fmt    = (d) => d.toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,'');
+    const loc    = [appt.address, appt.city, 'FL', appt.zip].filter(Boolean).join(', ');
+    const desc   = appt.description || (appt.transaction_type === 'reservation' ? 'Reservation' : 'Appointment');
+    const typeLabel = appt.transaction_type === 'reservation' ? 'Reservation' : 'Appointment';
+
+    const ics = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//LocalIntel//LocalIntel//EN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'BEGIN:VEVENT',
+      `UID:localintel-${appt.id}@thelocalintel.com`,
+      `DTSTAMP:${fmt(new Date())}Z`,
+      `DTSTART:${fmt(start)}Z`,
+      `DTEND:${fmt(end)}Z`,
+      `SUMMARY:${typeLabel} at ${appt.biz_name}`,
+      `DESCRIPTION:${desc.replace(/\n/g,'\\n')}`,
+      loc ? `LOCATION:${loc}` : '',
+      appt.phone ? `URL:tel:${appt.phone.replace(/\D/g,'')}` : '',
+      'STATUS:CONFIRMED',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].filter(Boolean).join('\r\n');
+
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="localintel-${typeLabel.toLowerCase()}.ics"`);
+    res.send(ics);
+  } catch (err) {
+    console.error('[calendar.ics]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /api/local-intel/push/vapid-public-key — return VAPID public key for subscription ──
 router.get('/push/vapid-public-key', (req, res) => {
   const key = process.env.VAPID_PUBLIC_KEY;
