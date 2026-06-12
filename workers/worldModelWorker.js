@@ -298,6 +298,8 @@ module.exports = async function worldModelWorker(db, logEvent) {
 
     if (written % 100 === 0) {
       console.log(`[worldModelWorker] progress: ${written}/${activeZips.length} ZIPs written`);
+      // Yield the DB connection every 100 ZIPs — lets other processes query
+      await new Promise(r => setTimeout(r, 200));
     }
   }
 

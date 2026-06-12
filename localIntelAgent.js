@@ -122,7 +122,8 @@ async function applyMcflPin(rows, searchZip, db) {
       `SELECT b.business_id, b.name, b.zip, b.address, b.city, b.phone, b.website,
               b.category, b.category_group, b.description, b.services_text, b.tags,
               b.hours, b.hours_json, b.price_tier, b.lat, b.lon,
-              b.confidence_score, b.claimed_at, b.wallet, b.pos_type, b.menu_url
+              b.confidence_score, b.claimed_at, b.wallet,
+              b.pos_config->>'pos_type' AS pos_type, b.menu_url
        FROM businesses b
        WHERE b.business_id = $1 AND b.status != 'inactive'
        LIMIT 1`,

@@ -47,7 +47,7 @@ const TTL = {
 };
 
 // ── Learned signal hot-reload (from Postgres router_patches) ─────────────────
-const LEARNED_RELOAD_MS = 5 * 60 * 1000;
+const LEARNED_RELOAD_MS = 30 * 60 * 1000; // 30min — was 5min, was hammering DB across multiple worker processes
 let _learnedSignals  = {};
 let _lastLearnedLoad = 0;
 
