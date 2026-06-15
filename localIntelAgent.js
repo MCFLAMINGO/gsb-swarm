@@ -4199,7 +4199,7 @@ router.post('/inbox/appointment-request', express.json(), async (req, res) => {
     if (biz.notify_to && process.env.RESEND_API_KEY) {
       const typeLabel  = request_type === 'reservation' ? 'Reservation Request' : 'Appointment Request';
       const dashUrl    = biz.dispatch_token
-        ? `https://www.thelocalintel.com/inbox.html?token=${biz.dispatch_token}`
+        ? `https://www.thelocalintel.com/inbox.html?token=${biz.dispatch_token}&tab=requests`
         : 'https://www.thelocalintel.com/inbox.html';
       const customerLine = [customer_name, customer_email, customer_phone].filter(Boolean).join(' · ');
       const { Resend } = require('resend');
