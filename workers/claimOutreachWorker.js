@@ -27,11 +27,12 @@ const CLAIM_BASE_URL         = process.env.CLAIM_BASE_URL || 'https://www.theloc
 // ── Safety guard ────────────────────────────────────────────────────────────
 // Set CLAIM_OUTREACH_LIVE=true in Railway env to actually send.
 // Until then, all sends are simulated — no Twilio or Resend calls made.
-const LIVE_MODE = process.env.CLAIM_OUTREACH_LIVE === 'true';
+// LIVE_MODE is read dynamically inside functions so admin endpoint env injection works
+const getLiveMode = () => process.env.CLAIM_OUTREACH_LIVE === 'true';
 
 // ── Twilio (copied pattern from localIntelAgent.js sendRfqSms) ──────────────
 async function sendOutreachSms(toE164Phone, body) {
-  if (!LIVE_MODE) {
+  if (!getLiveMode()) {
     console.log(`[claim-outreach] DRY RUN SMS → ${toE164Phone}: ${body.slice(0, 60)}...`);
     return { sent: true, sid: 'dry_run' };
   }
@@ -65,7 +66,7 @@ function toE164(raw) {
 
 // ── Resend (email) ──────────────────────────────────────────────────────────
 async function sendOutreachEmail(toEmail, subject, html) {
-  if (!LIVE_MODE) {
+  if (!getLiveMode()) {
     console.log(`[claim-outreach] DRY RUN EMAIL → ${toEmail}: ${subject.slice(0, 60)}...`);
     return { sent: true, id: 'dry_run' };
   }
@@ -233,7 +234,7 @@ async function ensureTable() {
 
 async function run() {
   console.log('[claim-outreach] START');
-  if (!LIVE_MODE) {
+  if (!getLiveMode()) {
     console.log('[claim-outreach] ⚠️  DRY RUN MODE — set CLAIM_OUTREACH_LIVE=true in Railway env to send real messages');
   }
 
