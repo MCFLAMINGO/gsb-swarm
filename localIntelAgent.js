@@ -9390,37 +9390,6 @@ router.post('/admin/business/:id/claim', express.json(), async (req, res) => {
 });
 
 // GET /api/local-intel/admin/stats — platform-wide summary
-// GET /api/local-intel/platform-stats — public aggregate counts, no PII
-router.get('/platform-stats', async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  try {
-    const [biz] = await db.query(`
-      SELECT
-        COUNT(*)                                                        AS total_active,
-        COUNT(notification_email)                                       AS notification_email,
-        COUNT(contact_email)                                            AS contact_email,
-        COUNT(COALESCE(notification_email, contact_email))              AS either_email,
-        COUNT(phone)                                                    AS has_phone,
-        COUNT(*) FILTER (WHERE claimed_at IS NOT NULL)                  AS claimed
-      FROM businesses WHERE status != 'inactive'
-    `);
-    const [usage] = await db.query(`
-      SELECT
-        (SELECT COUNT(*) FROM rfq_jobs)                                 AS rfq_jobs_total,
-        (SELECT COUNT(*) FROM rfq_jobs WHERE created_at > NOW() - INTERVAL '7 days') AS rfq_jobs_7d,
-        (SELECT COUNT(DISTINCT caller_phone) FROM rfq_jobs
-           WHERE caller_phone NOT IN ('web-search','unknown',''))       AS unique_callers,
-        (SELECT COUNT(*) FROM conversation_threads)                     AS threads_total,
-        (SELECT COUNT(*) FROM conversation_threads
-           WHERE created_at > NOW() - INTERVAL '7 days')               AS threads_7d
-    `);
-    const [dbsize] = await db.query(`SELECT pg_size_pretty(pg_database_size(current_database())) AS db_size, pg_database_size(current_database()) AS db_bytes`);
-    return res.json({ ok: true, businesses: biz, usage, db: dbsize });
-  } catch (e) {
-    return res.status(500).json({ error: e.message });
-  }
-});
-
 // keep old path as alias
 router.get('/email-stats', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
