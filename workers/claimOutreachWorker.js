@@ -109,27 +109,87 @@ function buildSmsBody(biz) {
 }
 
 function buildEmailHtml(biz) {
-  const ctaUrl   = `${CLAIM_BASE_URL}?biz=${biz.business_id}`;
-  const ctaLabel = 'Claim your free profile →';
-  const catLabel = biz.category ? biz.category.replace(/_/g, ' ') : 'local services';
-  const zipStr   = biz.zip ? ` in ${biz.zip}` : '';
-  return `
-<div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
-  <p style="font-size:16px">Hi <strong>${escapeHtml(biz.name)}</strong>,</p>
-  <p>Your business is already listed on <strong>LocalIntel</strong> — Florida's local commerce network built for the AI agent economy.</p>
-  <p>Customers and AI agents are searching for <strong>${escapeHtml(catLabel)}${zipStr}</strong> right now.
-  When someone requests your service, LocalIntel routes it directly to your inbox —
-  no middleman, no commission on search. You and the customer connect directly.</p>
-  <p style="margin:24px 0">
-    <a href="${ctaUrl}" style="background:#16A34A;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block">${ctaLabel}</a>
-  </p>
-  <p style="font-size:13px;color:#555">LocalIntel is free for businesses. Join the AI agent economy — let customers and their agents find you.</p>
-  <p style="font-size:12px;color:#999;margin-top:32px">
-    — The LocalIntel Team &nbsp;|&nbsp; <a href="https://www.thelocalintel.com" style="color:#999">thelocalintel.com</a><br/>
-    You're listed for ${escapeHtml(catLabel)} services${zipStr}.<br/>
-    <a href="https://www.thelocalintel.com/unsubscribe?biz=${biz.business_id}" style="color:#999">Unsubscribe</a>
-  </p>
-</div>`;
+  const ctaUrl    = `${CLAIM_BASE_URL}?biz=${biz.business_id}`;
+  const catLabel  = biz.category ? biz.category.replace(/_/g, ' ') : 'local services';
+  const cityZip   = [biz.city, biz.zip].filter(Boolean).join(', ');
+  const locationLine = cityZip ? `${catLabel} · ${cityZip}` : catLabel;
+
+  // Phrases that feel real and specific to what LocalIntel does
+  const categorySearches = {
+    restaurant:    'a restaurant nearby',
+    cafe:          'a coffee shop or cafe',
+    dental:        'a dentist',
+    electrician:   'a licensed electrician',
+    gym:           'a gym or fitness studio',
+    hairdresser:   'a hair salon',
+    handyman:      'a handyman',
+    landscaping:   'a landscaping or lawn service',
+    legal:         'a local attorney',
+    nail_salon:    'a nail salon',
+    plumber:       'a plumber',
+    real_estate:   'a real estate agent',
+  };
+  const searchPhrase = categorySearches[biz.category] || `a ${catLabel}`;
+
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f9fafb;">
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:32px 16px;">
+
+  <!-- Header -->
+  <div style="margin-bottom:32px;">
+    <span style="font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#16A34A;">LocalIntel</span>
+  </div>
+
+  <!-- Body -->
+  <div style="background:#fff;border-radius:12px;padding:32px;border:1px solid #e5e7eb;">
+
+    <p style="font-size:22px;font-weight:700;color:#111827;margin:0 0 12px;">Your business is on LocalIntel</p>
+
+    <p style="font-size:15px;color:#374151;line-height:1.6;margin:0 0 20px;">
+      People near ${escapeHtml(cityZip || 'you')} are already searching for <strong>${escapeHtml(searchPhrase)}</strong>.
+      <strong>${escapeHtml(biz.name)}</strong> is listed — but your profile isn’t claimed yet,
+      so you’re missing the requests coming your way.
+    </p>
+
+    <!-- Listing preview -->
+    <div style="background:#f9fafb;border-radius:8px;padding:16px;margin-bottom:24px;border:1px solid #e5e7eb;">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9CA3AF;margin-bottom:8px;">Your current listing</div>
+      <div style="font-size:15px;font-weight:700;color:#111827;">${escapeHtml(biz.name)}</div>
+      <div style="font-size:13px;color:#6B7280;margin-top:2px;">${escapeHtml(locationLine)}</div>
+    </div>
+
+    <p style="font-size:14px;color:#374151;line-height:1.6;margin:0 0 8px;">
+      Claiming takes 2 minutes. Once you do:
+    </p>
+    <ul style="font-size:14px;color:#374151;line-height:1.8;margin:0 0 24px;padding-left:20px;">
+      <li>Job requests and reservations land in your inbox</li>
+      <li>Customers see your hours, services, and how to book</li>
+      <li>AI agents route qualified leads directly to you</li>
+      <li>No commission on search — you keep the relationship</li>
+    </ul>
+
+    <a href="${ctaUrl}"
+       style="display:inline-block;background:#16A34A;color:#fff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;">
+      Claim ${escapeHtml(biz.name)} →
+    </a>
+
+    <p style="font-size:13px;color:#9CA3AF;margin-top:20px;margin-bottom:0;">Free for businesses. Always.</p>
+  </div>
+
+  <!-- Footer -->
+  <div style="margin-top:24px;text-align:center;">
+    <p style="font-size:12px;color:#9CA3AF;margin:0;">
+      <a href="https://www.thelocalintel.com" style="color:#9CA3AF;text-decoration:none;">thelocalintel.com</a>
+      &nbsp;·&nbsp;
+      <a href="https://www.thelocalintel.com/unsubscribe?biz=${biz.business_id}" style="color:#9CA3AF;text-decoration:none;">Unsubscribe</a>
+    </p>
+  </div>
+
+</div>
+</body>
+</html>`;
 }
 
 function escapeHtml(s) {

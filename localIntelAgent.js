@@ -9561,6 +9561,96 @@ router.get('/claim-stats', async (req, res) => {
   }
 });
 
+// ── GET /api/local-intel/admin/outreach-stats — funnel: candidates → sent → claimed ──
+router.get('/admin/outreach-stats', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (req.headers['x-admin-token'] !== 'localintel-migrate-2026') return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const [candidates] = await db.query(`
+      SELECT COUNT(*) AS n FROM businesses
+      WHERE claimed_at IS NULL AND status != 'inactive' AND contact_email IS NOT NULL
+        AND contact_email ~ '^[^@]+@[^@]+[.][^@]{2,}$'
+        AND contact_email NOT LIKE 'http%'
+        AND split_part(contact_email,'@',1) !~ '^[0-9]+$'
+    `);
+    const [sent] = await db.query(`
+      SELECT
+        COUNT(*)                                               AS total_sent,
+        COUNT(*) FILTER (WHERE error IS NULL)                  AS delivered,
+        COUNT(*) FILTER (WHERE error IS NOT NULL)              AS failed,
+        COUNT(DISTINCT business_id)                            AS unique_businesses,
+        MIN(sent_at)                                           AS first_sent,
+        MAX(sent_at)                                           AS last_sent
+      FROM claim_outreach WHERE channel = 'email'
+    `);
+    const [conversions] = await db.query(`
+      SELECT COUNT(DISTINCT b.business_id) AS claimed_after_outreach
+      FROM businesses b
+      JOIN claim_outreach co ON co.business_id = b.business_id
+      WHERE b.claimed_at IS NOT NULL AND co.error IS NULL AND b.claimed_at > co.sent_at
+    `);
+    const [unclaimed] = await db.query(`
+      SELECT COUNT(*) AS n FROM businesses WHERE claimed_at IS NULL AND status != 'inactive'
+    `);
+    const [claimed] = await db.query(`
+      SELECT COUNT(*) AS n FROM businesses WHERE claimed_at IS NOT NULL
+    `);
+    res.json({
+      ok: true,
+      candidates:            Number(candidates.n),
+      unclaimed_total:       Number(unclaimed.n),
+      claimed_total:         Number(claimed.n),
+      emails_delivered:      Number(sent.delivered),
+      emails_failed:         Number(sent.failed),
+      emails_total_sent:     Number(sent.total_sent),
+      unique_contacted:      Number(sent.unique_businesses),
+      claimed_after_outreach:Number(conversions.claimed_after_outreach),
+      conversion_rate:       sent.delivered > 0
+        ? ((conversions.claimed_after_outreach / sent.delivered) * 100).toFixed(1) + '%'
+        : 'n/a',
+      first_sent:            sent.first_sent,
+      last_sent:             sent.last_sent,
+    });
+  } catch (e) {
+    console.error('[admin/outreach-stats]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /api/local-intel/admin/send-claim-outreach — trigger outreach batch ──
+// Body: { batch_limit?: number, test_email?: string, dry_run?: boolean }
+router.post('/admin/send-claim-outreach', express.json(), async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (req.headers['x-admin-token'] !== 'localintel-migrate-2026') return res.status(401).json({ error: 'unauthorized' });
+  const { batch_limit = 200, test_email, dry_run = false } = req.body || {};
+  try {
+    const { run } = require('./workers/claimOutreachWorker');
+    // Inject env overrides for this run
+    const origLive      = process.env.CLAIM_OUTREACH_LIVE;
+    const origBatch     = process.env.OUTREACH_BATCH_LIMIT;
+    const origTestEmail = process.env.TEST_EMAIL;
+    process.env.CLAIM_OUTREACH_LIVE     = dry_run ? 'false' : 'true';
+    process.env.OUTREACH_BATCH_LIMIT    = String(Math.min(Number(batch_limit), 500));
+    if (test_email) process.env.TEST_EMAIL = test_email;
+    else delete process.env.TEST_EMAIL;
+    console.log(`[admin/send-claim-outreach] triggered — batch:${batch_limit} dry_run:${dry_run} test_email:${test_email||'none'}`);
+    // Run async — respond immediately so request doesn't timeout
+    res.json({ ok: true, message: `Outreach started — batch_limit:${batch_limit}, dry_run:${dry_run}, test_email:${test_email||'live'}. Check Railway logs for progress.` });
+    run()
+      .then(() => {
+        process.env.CLAIM_OUTREACH_LIVE  = origLive  || 'false';
+        process.env.OUTREACH_BATCH_LIMIT = origBatch || '500';
+        if (origTestEmail) process.env.TEST_EMAIL = origTestEmail;
+        else delete process.env.TEST_EMAIL;
+        console.log('[admin/send-claim-outreach] batch complete');
+      })
+      .catch(e => console.error('[admin/send-claim-outreach] batch error:', e.message));
+  } catch (e) {
+    console.error('[admin/send-claim-outreach]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/admin/stats', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   const role = adminAuth(req, res);
