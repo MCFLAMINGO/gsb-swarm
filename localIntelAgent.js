@@ -9530,6 +9530,22 @@ router.get('/claim-stats', async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/admin/refresh-sectors — re-run sector_breakdown normalization ──
+// Fixes category_group alias drift without waiting for full oracle cycle.
+router.post('/admin/refresh-sectors', async (req, res) => {
+  if (req.headers['x-admin-token'] !== 'localintel-migrate-2026') return res.status(401).json({ error: 'unauthorized' });
+  res.json({ ok: true, message: 'Sector refresh started — check Railway logs for progress.' });
+  setImmediate(async () => {
+    try {
+      const { run } = require('./workers/refreshOracleSectors');
+      await run({ silent: false });
+      console.log('[admin/refresh-sectors] Done');
+    } catch(e) {
+      console.error('[admin/refresh-sectors] FAILED:', e.message);
+    }
+  });
+});
+
 // ── GET /api/local-intel/admin/outreach-stats — funnel: candidates → sent → claimed ──
 router.get('/admin/outreach-stats', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');

@@ -75,11 +75,51 @@ async function run({ silent = false } = {}) {
     GROUP BY zip, category_group
   `);
 
-  // Build map: zip → { sector: count }
+  // ── Group alias normalization ─────────────────────────────────────────────
+  // category_group has drift from multiple data sources — normalize aliases
+  // to canonical sector keys before counting so nothing gets lost.
+  const GROUP_ALIAS = {
+    // food variants
+    'food_drink':          'food',
+    'dining':              'food',
+    'restaurant':          'food',
+    // health variants
+    'medical_health':      'health',
+    'medical':             'health',
+    'healthcare':          'health',
+    'clinic':              'health',
+    // fitness variants
+    'fitness_recreation':  'fitness',
+    'recreation':          'fitness',
+    // beauty variants
+    'beauty_wellness':     'beauty',
+    'wellness':            'beauty',
+    // services variants
+    'professional_services': 'services',
+    'professional':        'services',
+    'home_services':       'services',
+    'general':             'services',
+    // construction variants
+    'trades':              'construction',
+    'home_improvement':    'construction',
+    // finance variants
+    'financial':           'finance',
+    'financial_services':  'finance',
+    // legal variants
+    'law':                 'legal',
+    'attorney':            'legal',
+    // retail variants
+    'shopping':            'retail',
+    'consumer_goods':      'retail',
+  };
+
+  // Build map: zip → { sector: count } — collapsing aliases into canonical keys
   const zipSectors = {};
   for (const r of countRows) {
+    if (!r.category_group) continue; // skip null groups
+    const canonical = GROUP_ALIAS[r.category_group] || r.category_group;
     if (!zipSectors[r.zip]) zipSectors[r.zip] = {};
-    zipSectors[r.zip][r.category_group] = parseInt(r.cnt);
+    zipSectors[r.zip][canonical] = (zipSectors[r.zip][canonical] || 0) + parseInt(r.cnt);
   }
   log(`[refreshOracleSectors] Sector counts for ${Object.keys(zipSectors).length} ZIPs`);
 
