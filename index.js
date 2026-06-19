@@ -109,7 +109,7 @@ function spawnWorker({ name, file }) {
   // ── Boot: connection budget enforcement ──────────────────────────────
   // Count worker processes × DB_POOL_MAX to ensure we stay under Railway cap.
   // If math fails, log loudly and continue — do NOT silently proceed.
-  const RAILWAY_PG_CAP   = 25;
+  const RAILWAY_PG_CAP   = 200; // PgBouncer DEFAULT_POOL_SIZE=200 on Railway Pro (500 max connections)
   const WORKER_POOL      = 1;  // DB_POOL_MAX per data worker
   const MCP_POOL         = 1;  // localIntelMCP (shares main process pool)
   const DASHBOARD_POOL   = 0;  // dashboard-server (shares main process pool)
@@ -216,7 +216,7 @@ function spawnWorker({ name, file }) {
 function spawnDashboard() {
   const dashPath = path.join(__dirname, 'dashboard-server.js');
   const proc = fork(dashPath, [], {
-    env: { ...process.env, PORT: '8080', DB_POOL_MAX: '2' },  // dashboard reads only; budget: 18×1 + MCP×2 + dash×2 + main×3 = 25
+    env: { ...process.env, PORT: '8080', DB_POOL_MAX: '2' },  // dashboard reads only; PgBouncer pool=200 handles all concurrent slots
     stdio: 'inherit',
   });
   proc.on('exit', (code) => {
@@ -231,7 +231,7 @@ let dashProc = spawnDashboard();
 
 // ── LocalIntel MCP server ───────────────────────────────────────────────
 // HTTP server — needs DB_POOL_MAX=2 for concurrent MCP tool calls
-// Budget: 18 data workers×1 + MCP×2 + dashboard×3 = 23 ≤ 25 cap
+// Budget: 21 data workers×1 + MCP×2 + dashboard×2 + main×2 ≪ 200 PgBouncer pool cap
 function spawnMCP() {
   const mcpPath = path.join(__dirname, 'localIntelMCP.js');
   const proc = fork(mcpPath, [], {
