@@ -199,6 +199,16 @@ function spawnWorker({ name, file }) {
     console.warn('[SWARM] Neighbor map failed to start (non-fatal):', e.message);
   }
 
+  // ── Boot: notification dispatcher — drains notification_queue every 30s ───────────
+  // Email via Resend. Free tier: 50 emails/month/business at no cost.
+  // Beyond that: wallet required. SMS: always wallet-gated (Twilio).
+  try {
+    const { start: startNotifyDispatch } = require('./workers/notificationDispatchWorker');
+    startNotifyDispatch();
+  } catch (e) {
+    console.warn('[SWARM] notificationDispatch failed to start (non-fatal):', e.message);
+  }
+
   // ── Boot: seed order_form for all businesses (idempotent, skips already-seeded) ──
   // Adds column if missing, then populates category-template forms for every business.
   // Per-unit write pattern — safe to redeploy mid-run.

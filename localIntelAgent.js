@@ -4494,13 +4494,29 @@ router.get('/inbox/requests', async (req, res) => {
       [bid]
     );
 
-    const pending_rfqs  = rfqs.filter(r => !r.bid_id && r.status === 'open').length;
-    const pending_appts = appts.filter(a => a.status === 'pending' || a.status === 'notified').length;
+    // Form intakes — submitted via POST /intake (agent or human order forms)
+    const intakes = await db.query(
+      `SELECT id, job_code, customer_name, customer_email, customer_phone,
+              category, description, location_address, scheduled_for,
+              transaction_type, status, amount_usd, notes,
+              request_context, created_at, updated_at
+       FROM appointments
+       WHERE business_id = $1
+         AND transaction_type = 'form_intake'
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [bid]
+    );
+
+    const pending_rfqs    = rfqs.filter(r => !r.bid_id && r.status === 'open').length;
+    const pending_appts   = appts.filter(a => a.status === 'pending' || a.status === 'notified').length;
+    const pending_intakes = intakes.filter(i => i.status === 'pending').length;
 
     res.json({
       rfqs:           rfqs,
       appointments:   appts,
-      total_pending:  pending_rfqs + pending_appts,
+      intakes:        intakes,   // form submissions (agent + human)
+      total_pending:  pending_rfqs + pending_appts + pending_intakes,
     });
   } catch (err) {
     console.error('[inbox/requests GET]', err.message);
@@ -4718,6 +4734,89 @@ router.post('/inbox/requests/appointment/:id/respond', express.json(), async (re
     }
   } catch (err) {
     console.error('[inbox/requests/appointment/respond]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/local-intel/inbox/requests/intake/:id/respond ────────────────────
+// Business accepts or declines a form intake submission.
+// Body: { token, action: 'accept'|'decline', note, scheduled_for }
+// On accept: status → 'confirmed', optionally sets scheduled_for
+// On decline: status → 'declined'
+// Both: queues customer notification via notification_queue
+router.post('/inbox/requests/intake/:id/respond', express.json(), async (req, res) => {
+  const { id } = req.params;
+  const { token, action, note, scheduled_for } = req.body || {};
+  if (!token) return res.status(401).json({ error: 'token required' });
+  if (!['accept', 'decline'].includes(action)) return res.status(400).json({ error: 'action must be accept or decline' });
+  try {
+    const [biz] = await db.query(
+      `SELECT business_id, name FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(403).json({ error: 'invalid token' });
+
+    const [intake] = await db.query(
+      `SELECT id, job_code, customer_name, customer_email, customer_phone,
+              category, description, status, business_id
+       FROM appointments WHERE id = $1 AND transaction_type = 'form_intake' LIMIT 1`,
+      [id]
+    );
+    if (!intake) return res.status(404).json({ error: 'intake not found' });
+    if (intake.business_id !== biz.business_id) return res.status(403).json({ error: 'not your intake' });
+
+    const newStatus = action === 'accept' ? 'confirmed' : 'declined';
+    await db.query(
+      `UPDATE appointments
+       SET status = $1, notes = COALESCE($2, notes),
+           scheduled_for = COALESCE($3::timestamptz, scheduled_for),
+           updated_at = NOW()
+       WHERE id = $4`,
+      [newStatus, note || null, scheduled_for || null, id]
+    );
+
+    // Notify customer if we have their email
+    if (intake.customer_email) {
+      const subject = action === 'accept'
+        ? `${biz.name} confirmed your request (${intake.job_code})`
+        : `Update on your request to ${biz.name} (${intake.job_code})`;
+      const bodyHtml = action === 'accept'
+        ? `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px">
+            <p style="font-size:18px;font-weight:700">Your request has been accepted</p>
+            <p><strong>${biz.name}</strong> confirmed your request for <em>${intake.description || intake.category}</em>.</p>
+            ${scheduled_for ? `<p>Scheduled for: <strong>${new Date(scheduled_for).toLocaleString()}</strong></p>` : ''}
+            ${note ? `<p>Note from business: ${note}</p>` : ''}
+            <p style="color:#6b7280;font-size:12px">Job code: ${intake.job_code}</p>
+           </div>`
+        : `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px">
+            <p style="font-size:18px;font-weight:700">Update on your request</p>
+            <p><strong>${biz.name}</strong> is unable to fulfill your request at this time.</p>
+            ${note ? `<p>Message: ${note}</p>` : ''}
+            <p style="color:#6b7280;font-size:12px">Job code: ${intake.job_code}</p>
+           </div>`;
+
+      await db.query(
+        `INSERT INTO notification_queue (business_id, channel, subject, payload, status, attempts, created_at)
+         VALUES ($1, 'email', $2, $3, 'pending', 0, NOW())`,
+        [
+          biz.business_id,
+          subject,
+          JSON.stringify({
+            to: intake.customer_email,
+            customer_name: intake.customer_name,
+            html: bodyHtml,
+            intake_id: id,
+            job_code: intake.job_code,
+            action,
+          }),
+        ]
+      );
+    }
+
+    console.log(`[inbox/intake] ${biz.name} ${action}ed intake ${id} (${intake.job_code})`);
+    res.json({ ok: true, status: newStatus, job_code: intake.job_code });
+  } catch (err) {
+    console.error('[inbox/intake/respond]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
