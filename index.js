@@ -63,8 +63,8 @@ console.log(`
 `);
 
 const processes = [];
-const STAGGER_DELAY_MS = 3000;  // 3s between each worker — spreads boot-burst below 25-conn Railway cap
-const BOOT_DELAY_MS    = 15000; // 15s head-start for main server pool before first worker
+const STAGGER_DELAY_MS = 15000; // 15s between index.js workers — spreads boot burst
+const BOOT_DELAY_MS    = 20000; // 20s head-start for main server pool before first worker
 
 function spawnWorker({ name, file }) {
   const workerPath = path.join(__dirname, file);
@@ -259,7 +259,7 @@ app.use('/api/raiders', raidersRouter);
 // Cap the main-process pool to 3 — admin endpoints (run-trade-signals, reset-heartbeat) do
 // multiple sequential queries; pool=2 caused timeouts under any concurrency.
 // MUST be set before require() so lib/db.js picks it up at pool creation time.
-if (!process.env.DB_POOL_MAX) process.env.DB_POOL_MAX = '3';
+if (!process.env.DB_POOL_MAX) process.env.DB_POOL_MAX = '2'; // main process: 2 slots (down from 3) to reserve more for search traffic
 const localIntelRouter = require('./localIntelAgent');
 app.use('/api/local-intel', localIntelRouter);
 

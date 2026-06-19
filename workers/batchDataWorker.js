@@ -31,6 +31,10 @@ const MACRO_WORKERS = [
   { name: 'FCC Broadband',      file: 'fccBroadbandWorker.js' },
   { name: 'School Enrollment',  file: 'schoolEnrollmentWorker.js' },
   { name: 'World Model',        file: 'worldModelWorker.js' },
+  // Backfill workers — low urgency, share 1 sequential slot instead of owning dedicated slots
+  { name: 'Geocoding',          file: 'geocodingWorker.js'          },
+  { name: 'Category Reclass',   file: 'categoryReclassWorker.js'    },
+  { name: 'Router Learning',    file: 'routerLearningWorker.js'     },
 ];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));

@@ -7833,9 +7833,8 @@ app.use((req, res, next) => {
   // lodesWorker, irsSoiWorker, fccBroadbandWorker, schoolEnrollmentWorker
   // ↑ all moved into batchDataWorker — share 1 connection slot, run sequentially every 6h
   { name: 'Business Signal Worker',        file: 'workers/businessSignalWorker.js' },  // B65 — 24h freshness; derives claimed/wallet/task/closure rates → zip_signals
-  { name: 'Geocoding Worker',              file: 'workers/geocodingWorker.js'       },  // fills lat/lon for 389K businesses — Census batch API, free, no key
-  { name: 'Category Reclass Worker',       file: 'workers/categoryReclassWorker.js' },  // re-enabled — PgBouncer handles conn cap
-  { name: 'Router Learning Worker',        file: 'workers/routerLearningWorker.js'  },  // re-enabled — PgBouncer handles conn cap
+  // Geocoding, CategoryReclass, RouterLearning moved to batchDataWorker sequential queue
+  // to free 3 dedicated connection slots for search traffic (pool budget fix)
   ];
 
   function spawnLocalIntelWorker(w, attempt = 0) {
@@ -7874,7 +7873,9 @@ app.use((req, res, next) => {
   // Stagger worker boot by 4s each — 34 workers × 4s = 2:16 total spread.
   // Prevents all workers hitting DB pool simultaneously at boot (was causing
   // 26+ concurrent connection attempts against the 25-connection cap).
-  const WORKER_BOOT_STAGGER_MS = 4000;
+  // 30s stagger — with 21 workers this spreads boot burst over ~10 min instead of 84s.
+  // Prevents all workers hitting DB simultaneously on deploy and starving search queries.
+  const WORKER_BOOT_STAGGER_MS = 30000;
   LOCAL_INTEL_WORKERS.forEach((w, i) => {
     setTimeout(() => spawnLocalIntelWorker(w), i * WORKER_BOOT_STAGGER_MS);
   });
