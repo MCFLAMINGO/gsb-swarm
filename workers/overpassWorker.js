@@ -160,7 +160,7 @@ async function promoteOsmToBusinesses(zip, pois) {
 // hot loop can skip them up-front (the contract: ASK Postgres first).
 const OSM_FRESH_DAYS = 90; // re-fetch OSM POIs every 90 days
 async function getFreshZipSetFromBusinesses() {
-  if (!process.env.LOCAL_INTEL_DB_URL) return new Set();
+  if (!process.env.LOCAL_INTEL_DB_URL) return null; // null = unknown, skip all
   try {
     // Fresh = osm_updated_at exists and is < 90 days old
     const rows = await db.query(
@@ -171,8 +171,8 @@ async function getFreshZipSetFromBusinesses() {
     );
     return new Set(rows.map(r => r.zip));
   } catch (e) {
-    console.warn('[overpass] fresh-zip lookup failed:', e.message);
-    return new Set();
+    console.warn('[overpass] fresh-zip lookup failed (DB may be busy) — skipping pass to protect pool:', e.message);
+    return null; // null = DB not ready, bail out entirely
   }
 }
 
@@ -467,6 +467,10 @@ async function runPass() {
   const zips = getZipsByPriority();  // sorted by population desc
   // Step 1 of the contract: ASK Postgres what's already done before we start.
   const freshZipSet = FULL_REFRESH ? new Set() : await getFreshZipSetFromBusinesses();
+  if (freshZipSet === null) {
+    console.warn('[overpass] DB not ready — aborting pass to protect connection pool');
+    return;
+  }
   console.log(
     `[overpass] Starting pass — ${zips.length} FL ZIPs ` +
     `(skip set: ${freshZipSet.size}, FULL_REFRESH=${FULL_REFRESH})`
@@ -479,7 +483,11 @@ async function runPass() {
     const result = await processZip(entry.zip, freshZipSet);
     if (result.skipped) { skipped++; }
     else if (result.error) { errors++; }
-    else { done++; }
+    else {
+      done++;
+      // Yield DB pool every ZIP after a write — prevents pool starvation on bulk passes
+      await sleep(500);
+    }
     await sleep(RATE_MS);
   }
 
