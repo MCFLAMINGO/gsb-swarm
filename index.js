@@ -199,6 +199,16 @@ function spawnWorker({ name, file }) {
     console.warn('[SWARM] Neighbor map failed to start (non-fatal):', e.message);
   }
 
+  // ── Boot: seed order_form for all businesses (idempotent, skips already-seeded) ──
+  // Adds column if missing, then populates category-template forms for every business.
+  // Per-unit write pattern — safe to redeploy mid-run.
+  try {
+    const { run: seedOrderForms } = require('./workers/orderFormSeedWorker');
+    seedOrderForms().catch(e => console.warn('[SWARM] orderFormSeed error (non-fatal):', e.message));
+  } catch (e) {
+    console.warn('[SWARM] orderFormSeed failed to start (non-fatal):', e.message);
+  }
+
   // ── Boot: patch ACS columns in zip_intelligence from spendingZones.json ──────────────
   // Reads spendingZones.json (source of truth) → patches wfh_pct, affluence_pct,
   // retiree_index, new_build_pct, vacancy_rate_pct, median_home_value in PG.

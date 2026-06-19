@@ -4335,6 +4335,119 @@ router.get('/presence/:business_id', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// INTAKE — public form submission endpoint (agent or human)
+// POST /api/local-intel/intake
+// Body: {
+//   business_id,          // required — target business
+//   fields: { ... },      // required — form field key/value pairs
+//   source: 'agent'|'human',  // who submitted
+//   agent_character_id,   // optional — Dusty character ID (agent fills)
+//   client_profile,       // optional — agent-provided client data
+// }
+// Writes to appointments table (transaction_type = 'form_intake')
+// Queues notification to business via notification_queue
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/intake', express.json(), async (req, res) => {
+  const { business_id, fields = {}, source = 'human', agent_character_id, client_profile } = req.body || {};
+  if (!business_id) return res.status(400).json({ error: 'business_id required' });
+  if (!fields || typeof fields !== 'object') return res.status(400).json({ error: 'fields object required' });
+
+  try {
+    // Load business — verify it exists and get notification prefs
+    const [biz] = await db.query(
+      `SELECT business_id, name, category, notification_email, notification_phone,
+              notify_email, notify_sms, wallet, order_form
+       FROM businesses WHERE business_id = $1 AND status != 'inactive' LIMIT 1`,
+      [business_id]
+    );
+    if (!biz) return res.status(404).json({ error: 'business not found' });
+
+    // Build appointment record from submitted fields
+    const customerName  = fields.customer_name  || client_profile?.full_name  || null;
+    const customerEmail = fields.customer_email || client_profile?.email       || null;
+    const customerPhone = fields.customer_phone || client_profile?.phone       || null;
+    const description   = fields.description    || fields.request_type         || Object.entries(fields)
+      .filter(([k]) => !['customer_name','customer_email','customer_phone'].includes(k))
+      .map(([k, v]) => `${k}: ${v}`).join('; ');
+    const scheduledFor  = fields.preferred_date
+      ? new Date(fields.preferred_date + (fields.preferred_time ? `T${fields.preferred_time}` : 'T09:00:00')).toISOString()
+      : null;
+    const amountUsd     = fields.budget ? parseFloat(fields.budget) : null;
+
+    const apptId = require('crypto').randomUUID();
+    const jobCode = 'INT-' + Date.now().toString(36).toUpperCase();
+
+    await db.query(
+      `INSERT INTO appointments
+         (id, job_code, business_id, customer_name, customer_email, customer_phone,
+          category, description, location_address, scheduled_for,
+          request_context, transaction_type, status, payment_method, amount_usd,
+          notes, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW(),NOW())`,
+      [
+        apptId, jobCode, business_id,
+        customerName, customerEmail, customerPhone,
+        biz.category,
+        description,
+        fields.property_address || fields.service_address || fields.delivery_address || null,
+        scheduledFor,
+        JSON.stringify({ source, agent_character_id: agent_character_id || null, raw_fields: fields, client_profile: client_profile || null }),
+        'form_intake',
+        'pending',
+        null,
+        amountUsd,
+        fields.notes || null,
+      ]
+    );
+
+    // Queue notification to business — channel determined by their prefs.
+    // SMS only fires if business has wallet (they pay for Twilio) OR notify_sms already enabled.
+    // Email is free (Resend free tier) — always queue if they have a notification_email.
+    const notifyChannels = [];
+    if (biz.notify_email && biz.notification_email) notifyChannels.push('email');
+    if (biz.notify_sms && biz.notification_phone && biz.wallet) notifyChannels.push('sms');
+    // Fallback: even if notify_email is false, queue email if we have an address — business can opt-out later
+    if (!notifyChannels.includes('email') && biz.notification_email) notifyChannels.push('email');
+
+    const formTitle = biz.order_form?.title || 'Order request';
+    const subjectLine = `New ${formTitle.toLowerCase()} from ${customerName || 'a customer'}`;
+    const notifyPayload = {
+      intake_id:   apptId,
+      job_code:    jobCode,
+      business:    biz.name,
+      customer:    { name: customerName, email: customerEmail, phone: customerPhone },
+      fields,
+      source,
+      submitted_at: new Date().toISOString(),
+    };
+
+    for (const channel of notifyChannels) {
+      await db.query(
+        `INSERT INTO notification_queue (business_id, channel, subject, payload, status, attempts, created_at)
+         VALUES ($1, $2, $3, $4, 'pending', 0, NOW())`,
+        [business_id, channel, subjectLine, JSON.stringify(notifyPayload)]
+      );
+    }
+
+    console.log(`[intake] ${source} submitted form for ${biz.name} (${business_id}) — job ${jobCode} — notifying: ${notifyChannels.join(',') || 'none'}`);
+
+    return res.json({
+      ok: true,
+      intake_id: apptId,
+      job_code:  jobCode,
+      business:  biz.name,
+      status:    'pending',
+      notified_channels: notifyChannels,
+      message: `Your request has been submitted to ${biz.name}. Job code: ${jobCode}`,
+    });
+
+  } catch (err) {
+    console.error('[intake POST]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // REQUESTS DASHBOARD — unified RFQ + appointment_requests for a business
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -8087,7 +8200,9 @@ router.get('/search', harvestGuard, async (req, res) => {
     const BASE_SELECT = `SELECT b.business_id, b.name, b.zip, b.address, b.city, b.phone, b.website, b.category, b.category_group,
       b.description, b.tags, b.hours, b.hours_json, b.price_tier, b.services_text,
       b.lat, b.lon, b.confidence_score, b.claimed_at, b.wallet, b.status,
-      b.pos_config->>'pos_type' AS pos_type, b.menu_url
+      b.pos_config->>'pos_type' AS pos_type, b.menu_url,
+      b.booking_url, b.notify_sms, b.notify_email, b.notification_phone, b.notification_email,
+      b.order_form
       FROM businesses b
       LEFT JOIN zip_signals zs ON zs.zip = b.zip
       WHERE b.status != 'inactive'
@@ -8251,6 +8366,8 @@ router.get('/search', harvestGuard, async (req, res) => {
                 b.description, b.tags, b.hours, b.hours_json, b.price_tier, b.services_text,
                 b.lat, b.lon, b.confidence_score, b.claimed_at, b.wallet, b.status,
                 b.pos_config->>'pos_type' AS pos_type, b.menu_url,
+                b.booking_url, b.notify_sms, b.notify_email, b.notification_phone, b.notification_email,
+                b.order_form,
                 ts_rank(b.search_vector, to_tsquery('english', $1)) AS _rank
                FROM businesses b
                LEFT JOIN zip_signals zs ON zs.zip = b.zip
@@ -8399,30 +8516,49 @@ router.get('/search', harvestGuard, async (req, res) => {
     // ── McFlamingo pin: always show as first result in 32082 searches ────────
     await applyMcflPin(rows, zip || null, db);
 
-    const results = rows.slice(0, limit).map(r => ({
-      business_id:   r.business_id || null,
-      name:          r.name,
-      zip:           r.zip,
-      address:       r.address       || '',
-      city:          r.city          || '',
-      phone:         r.phone         || '',
-      website:       r.website       || '',
-      category:      r.category      || 'business',
-      group:         r.category_group || 'services',
-      description:   r.description   || '',
-      services_text: r.services_text || '',
-      tags:          r.tags          || [],
-      hours:         r.hours         || '',
-      hours_json:    r.hours_json    || null,
-      price_tier:    r.price_tier    || null,
-      lat:           r.lat  != null ? parseFloat(r.lat)  : null,
-      lon:           r.lon  != null ? parseFloat(r.lon)  : null,
-      confidence:    r.confidence_score ? parseFloat(r.confidence_score) * 100 : 50,
-      claimed:       !!r.claimed_at,
-      wallet:        r.wallet || null,
-      pos_type:      r.pos_type || null,
-      menu_url:      r.menu_url || null,
-    }));
+    const results = rows.slice(0, limit).map(r => {
+      // rail_tier: tells agent/UI exactly what action is available for this business.
+      // surge/x402 = direct agentic payment; form = intake form (agent can auto-fill);
+      // phone = call to order; rfq = broadcast and wait; none = directory only.
+      const railTier = r.wallet ? 'surge'
+        : (r.order_form ? 'form')
+        : (r.phone     ? 'phone')
+        : 'rfq';
+      return {
+        business_id:   r.business_id || null,
+        name:          r.name,
+        zip:           r.zip,
+        address:       r.address       || '',
+        city:          r.city          || '',
+        phone:         r.phone         || '',
+        website:       r.website       || '',
+        category:      r.category      || 'business',
+        group:         r.category_group || 'services',
+        description:   r.description   || '',
+        services_text: r.services_text || '',
+        tags:          r.tags          || [],
+        hours:         r.hours         || '',
+        hours_json:    r.hours_json    || null,
+        price_tier:    r.price_tier    || null,
+        lat:           r.lat  != null ? parseFloat(r.lat)  : null,
+        lon:           r.lon  != null ? parseFloat(r.lon)  : null,
+        confidence:    r.confidence_score ? parseFloat(r.confidence_score) * 100 : 50,
+        claimed:       !!r.claimed_at,
+        wallet:        r.wallet || null,
+        pos_type:      r.pos_type || null,
+        menu_url:      r.menu_url || null,
+        // Phase D — agent action layer
+        rail_tier:     railTier,
+        order_form:    r.order_form   || null,
+        booking_url:   r.booking_url  || null,
+        intake_url:    r.business_id  ? `https://gsb-swarm-production.up.railway.app/api/local-intel/intake` : null,
+        can_notify:    !!(r.notify_email || r.notify_sms),
+        notification_channels: [
+          ...(r.notify_email ? ['email'] : []),
+          ...(r.notify_sms   ? ['sms']   : []),
+        ],
+      };
+    });
 
     // ── Narrative: "what is X" / "tell me about X" intent ──────────────────
     // Only when 1-2 results and query has about-intent — deterministic, no LLM
