@@ -158,10 +158,31 @@ async function promoteOsmToBusinesses(zip, pois) {
 // Check Postgres for freshness before re-fetching from Overpass.
 // Returns the set of ZIPs already covered by recent overpass data so the
 // hot loop can skip them up-front (the contract: ASK Postgres first).
+//
+// IMPORTANT: returns null (→ abort pass) in two cases:
+//   1. DB unreachable / query timeout
+//   2. zip_signals has zero OSM rows — cold deploy with no data yet.
+//      An empty Set would incorrectly treat all 1,013 ZIPs as unprocessed
+//      and kick off a full back-to-back sweep that gorges PgBouncer backend
+//      connections for hours. When we have no baseline at all, defer the
+//      first pass to the scheduled 24h loop instead of running immediately.
 const OSM_FRESH_DAYS = 90; // re-fetch OSM POIs every 90 days
 async function getFreshZipSetFromBusinesses() {
   if (!process.env.LOCAL_INTEL_DB_URL) return null; // null = unknown, skip all
   try {
+    // Check total zip_signals rows with any OSM data — if zero, DB is cold.
+    const countRow = await db.queryOne(
+      `SELECT COUNT(*) AS cnt FROM zip_signals WHERE osm_updated_at IS NOT NULL`
+    );
+    const totalOsmRows = parseInt(countRow?.cnt || '0', 10);
+    if (totalOsmRows === 0) {
+      // Cold deploy: zip_signals has no OSM history yet. An empty Set would
+      // launch a full 1,013-ZIP sweep immediately and hold all PgBouncer
+      // backend connections for hours. Return null so runPass() bails out
+      // and the first real pass happens on the scheduled 24h loop instead.
+      console.warn('[overpass] zip_signals has 0 OSM rows — cold deploy detected, deferring first pass to 24h loop to protect connection pool');
+      return null;
+    }
     // Fresh = osm_updated_at exists and is < 90 days old
     const rows = await db.query(
       `SELECT zip FROM zip_signals
@@ -508,6 +529,17 @@ async function runPass() {
   const hb = require('../lib/workerHeartbeat');
   const FRESH_MS = LOOP_SLEEP_H * 60 * 60 * 1000;
   console.log('[overpass] Worker started');
+
+  // Boot-stagger: all workers start simultaneously on a fresh deploy and
+  // race for PgBouncer backend connections. Delay the overpass worker
+  // (heaviest DB user) so heartbeat/search/oracle paths get through first.
+  // Skip delay if OVERPASS_NO_BOOT_DELAY=true (e.g. manual one-off runs).
+  if (process.env.OVERPASS_NO_BOOT_DELAY !== 'true') {
+    const BOOT_DELAY_MS = 45 * 1000; // 45 s
+    console.log(`[overpass] Boot-stagger: waiting ${BOOT_DELAY_MS / 1000}s before touching DB`);
+    await sleep(BOOT_DELAY_MS);
+  }
+
   if (await hb.isFresh('overpassWorker', FRESH_MS)) {
     console.log(`[overpass] Fresh — skipping pass`);
   } else {
@@ -517,3 +549,4 @@ async function runPass() {
   console.log('[overpass] Sleeping 24h');
   process.exit(0);
 })();
+
