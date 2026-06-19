@@ -103,10 +103,11 @@ async function runOnce() {
   const t0 = Date.now();
   console.log(`[task-seed] Starting — target ZIPs: ${TARGET_ZIPS.join(',')}`);
 
-  let skipFilter = '';
-  if (!FULL_REFRESH) {
-    skipFilter = ` AND b.business_id NOT IN (SELECT DISTINCT business_id FROM business_tasks)`;
-  }
+  // NOT EXISTS is index-safe (uses business_tasks_business_id_idx).
+  // NOT IN with a subquery does a full seq scan + materialize on 3M rows — catastrophic at scale.
+  const skipFilter = FULL_REFRESH
+    ? ''
+    : ` AND NOT EXISTS (SELECT 1 FROM business_tasks bt WHERE bt.business_id = b.business_id)`;
 
   const rows = await db.query(
     `SELECT b.business_id, b.category
