@@ -136,7 +136,7 @@ async function applyMcflPin(rows, searchZip, db) {
   return rows;
 }
 const { resolveIntent: resolveNlIntentFromRegistry } = require('./lib/intentRegistry');
-const { expandZips } = require('./lib/geoExpand');
+const { expandZips, getNearbyZips } = require('./lib/geoExpand');
 const { detectTaskIntent, getTaskFollowUp, setTaskFollowUp, clearTaskFollowUp } = require('./lib/taskIntent');
 const { isOpenNow } = require('./workers/hoursParseWorker');
 const { classifyIntent } = require('./workers/intentRouter');
@@ -8115,13 +8115,14 @@ router.get('/search', harvestGuard, async (req, res) => {
     // Skip name search when NL_INTENT already resolved a category — go straight to cat search
     const skipNameSearch = !!cat && !aboutName;
     if (q && !skipNameSearch) {
-      // Geo-guard: if no ZIP supplied, restrict to TARGET_ZIPS (our coverage area)
-      // Only widen to statewide FL if still nothing found
-      const zipWhere    = zip ? ` AND b.zip = $2 `                  : ` AND b.zip = ANY($2) `;
-      const zipParam    = zip ? zip                                : TARGET_ZIPS;
+      // Geo-guard: when ZIP supplied, search that ZIP + surrounding ZIPs (15-mile radius).
+      // When no ZIP, fall back to TARGET_ZIPS (our full FL coverage area).
+      // Exact-ZIP results always sort first via CASE boost.
+      const searchArea  = zip ? getNearbyZips(zip) : TARGET_ZIPS;
+      const zipBoost    = zip ? ` CASE WHEN b.zip = '${zip}' THEN 0 ELSE 1 END, ` : '';
       rows = await db.query(
-        BASE_SELECT + zipWhere + ` AND (b.name ILIKE $1 OR b.services_text ILIKE $1 OR b.description ILIKE $1) ORDER BY ${RANKED_ORDER} LIMIT $3`,
-        [`%${q}%`, zipParam, limit * 2]
+        BASE_SELECT + ` AND b.zip = ANY($2) AND (b.name ILIKE $1 OR b.services_text ILIKE $1 OR b.description ILIKE $1) ORDER BY ${zipBoost}${RANKED_ORDER} LIMIT $3`,
+        [`%${q}%`, searchArea, limit * 2]
       );
 
       // Widen to all FL only if coverage-area search returned nothing
@@ -8201,45 +8202,35 @@ router.get('/search', harvestGuard, async (req, res) => {
       }
     }
 
-    // 2. Category search (ZIP-scoped if provided)
+    // 2. Category search (ZIP + nearby ZIPs when ZIP supplied)
     // Uses catMap.expandCat() — single source of truth (lib/categoryMap.js)
     if (!rows.length && (cat || q)) {
       const term  = cat || q;
       const expanded = catMap.expandCat(term);
+      // Nearby expansion: use 15-mile neighbor set when ZIP supplied, else full coverage area.
+      const catArea   = zip ? getNearbyZips(zip) : TARGET_ZIPS;
+      const catBoost  = zip ? ` CASE WHEN b.zip = '${zip}' THEN 0 ELSE 1 END, ` : '';
       let catWhere, catParams;
       if (expanded && expanded.length) {
         // nlTags: if NL_INTENT returned tag hints (e.g. healthy/vegan), try tag-filtered first
         if (nlTags && nlTags.length) {
           const tagRows = await db.query(
-            BASE_SELECT +
-            (zip ? ` AND b.category = ANY($1) AND b.zip = $2 AND b.tags && $3 ORDER BY ${RANKED_ORDER} LIMIT $4`
-                 : ` AND b.category = ANY($1) AND b.zip = ANY($2) AND b.tags && $3 ORDER BY ${RANKED_ORDER} LIMIT $4`),
-            zip ? [expanded, zip, nlTags, limit] : [expanded, TARGET_ZIPS, nlTags, limit]
+            BASE_SELECT + ` AND b.category = ANY($1) AND b.zip = ANY($2) AND b.tags && $3 ORDER BY ${catBoost}${RANKED_ORDER} LIMIT $4`,
+            [expanded, catArea, nlTags, limit]
           );
           if (tagRows.length) rows = tagRows;
         }
         // Fall through to unfiltered cat search if tag-filtered returned nothing
         if (!rows.length) {
-          if (zip) {
-            catWhere  = ` AND b.category = ANY($1) AND b.zip = $2 ORDER BY ${RANKED_ORDER} LIMIT $3`;
-            catParams = [expanded, zip, limit];
-          } else {
-            // Geo-guard: restrict to TARGET_ZIPS coverage area
-            catWhere  = ` AND b.category = ANY($1) AND b.zip = ANY($2) ORDER BY ${RANKED_ORDER} LIMIT $3`;
-            catParams = [expanded, TARGET_ZIPS, limit];
-          }
+          catWhere  = ` AND b.category = ANY($1) AND b.zip = ANY($2) ORDER BY ${catBoost}${RANKED_ORDER} LIMIT $3`;
+          catParams = [expanded, catArea, limit];
           rows = await db.query(BASE_SELECT + catWhere, catParams);
         }
       } else {
-        const params = zip
-          ? [`%${term}%`, zip, limit]
-          : [`%${term}%`, TARGET_ZIPS, limit];
-        const zipClause = zip ? ' AND b.zip = $2' : ' AND b.zip = ANY($2)';
-        const lim = '$3';
         rows = await db.query(
-          BASE_SELECT + ` AND (b.category ILIKE $1 OR b.category_group ILIKE $1 OR b.name ILIKE $1)${zipClause}
-          ORDER BY ${RANKED_ORDER} LIMIT ${lim}`,
-          params
+          BASE_SELECT + ` AND (b.category ILIKE $1 OR b.category_group ILIKE $1 OR b.name ILIKE $1) AND b.zip = ANY($2)
+          ORDER BY ${catBoost}${RANKED_ORDER} LIMIT $3`,
+          [`%${term}%`, catArea, limit]
         );
       }
 
@@ -8252,8 +8243,8 @@ router.get('/search', harvestGuard, async (req, res) => {
           .map(t => t.replace(/[^a-zA-Z0-9]/g, '') + ':*')
           .join(' & ');
         if (tsQuery) {
-          const tsZipClause = zip ? ' AND b.zip = $2' : ' AND b.zip = ANY($2)';
-          const tsZipParam  = zip ? zip : TARGET_ZIPS;
+          const tsZipClause = ' AND b.zip = ANY($2)';
+          const tsZipParam  = catArea;
           try {
             rows = await db.query(
               `SELECT b.business_id, b.name, b.zip, b.address, b.city, b.phone, b.website, b.category, b.category_group,

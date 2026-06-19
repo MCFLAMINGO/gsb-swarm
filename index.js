@@ -189,6 +189,16 @@ function spawnWorker({ name, file }) {
   }
 
 
+  // ── Boot: preload ZIP neighbor map for nearby-search expansion ────────────
+  // Builds haversine 15-mile neighbor map from fl_zip_geo (all 1,473 FL ZIPs).
+  // One-time ~2s build, cached in memory. getNearbyZips(zip) resolves instantly.
+  try {
+    const { loadNeighborMap } = require('./lib/geoExpand');
+    loadNeighborMap().catch(e => console.warn('[SWARM] Neighbor map load error (non-fatal):', e.message));
+  } catch (e) {
+    console.warn('[SWARM] Neighbor map failed to start (non-fatal):', e.message);
+  }
+
   // ── Boot: patch ACS columns in zip_intelligence from spendingZones.json ──────────────
   // Reads spendingZones.json (source of truth) → patches wfh_pct, affluence_pct,
   // retiree_index, new_build_pct, vacancy_rate_pct, median_home_value in PG.
