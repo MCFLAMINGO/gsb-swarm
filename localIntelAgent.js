@@ -8520,10 +8520,7 @@ router.get('/search', harvestGuard, async (req, res) => {
       // rail_tier: tells agent/UI exactly what action is available for this business.
       // surge/x402 = direct agentic payment; form = intake form (agent can auto-fill);
       // phone = call to order; rfq = broadcast and wait; none = directory only.
-      const railTier = r.wallet ? 'surge'
-        : (r.order_form ? 'form')
-        : (r.phone     ? 'phone')
-        : 'rfq';
+      const railTier = r.wallet ? 'surge' : r.order_form ? 'form' : r.phone ? 'phone' : 'rfq';
       return {
         business_id:   r.business_id || null,
         name:          r.name,
