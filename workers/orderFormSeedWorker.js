@@ -16,18 +16,22 @@ const { getTemplateForCategory } = require('../lib/orderFormTemplates');
 const BATCH = 500; // rows per round
 
 async function ensureColumn() {
+  // Check information_schema FIRST — never issue ALTER TABLE if column exists.
+  // ALTER TABLE takes AccessExclusiveLock and will block every query on businesses
+  // for its entire duration. On a 615k-row table under live load this is catastrophic.
   const exists = await db.query(`
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'businesses' AND column_name = 'order_form'
   `);
-  if (!exists.length) {
-    console.log('[orderFormSeed] Adding order_form column to businesses...');
-    await db.query(`ALTER TABLE businesses ADD COLUMN order_form JSONB`);
-    await db.query(`CREATE INDEX IF NOT EXISTS idx_businesses_order_form ON businesses USING gin (order_form) WHERE order_form IS NOT NULL`);
-    console.log('[orderFormSeed] Column + index added.');
-  } else {
-    console.log('[orderFormSeed] order_form column already exists, skipping ALTER.');
+  if (exists.length) {
+    console.log('[orderFormSeed] order_form column already exists — skipping ALTER TABLE.');
+    return;
   }
+  console.log('[orderFormSeed] Adding order_form column to businesses...');
+  await db.query(`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS order_form JSONB`);
+  // Index creation is non-blocking (CREATE INDEX IF NOT EXISTS never locks writes)
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_businesses_order_form ON businesses USING gin (order_form) WHERE order_form IS NOT NULL`);
+  console.log('[orderFormSeed] Column + index added.');
 }
 
 async function seedBatch(offset) {
