@@ -215,6 +215,14 @@ function spawnWorker({ name, file }) {
   try {
     const { run: seedOrderForms } = require('./workers/orderFormSeedWorker');
     seedOrderForms().catch(e => console.warn('[SWARM] orderFormSeed error (non-fatal):', e.message));
+
+    // Surge split audit — backfills missing split_address on existing Surge merchants, runs weekly
+    const { scheduleWeeklyAudit } = require('./workers/surgeAuditWorker');
+    scheduleWeeklyAudit();
+
+    // Daily rail report — 8am Eastern email summary of fees + rail distribution
+    const { scheduleDailyReport } = require('./workers/railReportWorker');
+    scheduleDailyReport();
   } catch (e) {
     console.warn('[SWARM] orderFormSeed failed to start (non-fatal):', e.message);
   }
