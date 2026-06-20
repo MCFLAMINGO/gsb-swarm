@@ -104,17 +104,36 @@ const catMap = require('./lib/categoryMap');
 const MCFL_PIN_ID  = '232c34cb-ff82-4bf9-8a5c-d13306550709';
 const MCFL_PIN_ZIP = '32082';
 
+// Food/restaurant categories where McFlamingo pin is relevant
+const MCFL_FOOD_CATS = new Set([
+  'restaurant','restaurants','fast_food','casual_dining','fine_dining','cafe','coffee_chain',
+  'bakery','pizza','bar','pub','sports_bar','brewery','bar_dining','seafood','mexican','bbq',
+  'steakhouse','sandwich','fast_casual_mexican','deli','ice_cream','dessert','food','dining',
+  'catering','meal','meals','brunch','lunch','dinner','breakfast','eat','eating','cuisine',
+]);
+
 /**
  * Prepend McFlamingo to results if:
  *  - The search ZIP is 32082 (or no ZIP / multi-ZIP includes 32082)
  *  - McFlamingo is not already in the result set
  *  - We actually have a result row for it (fetched below)
+ *  - The search is food/restaurant related (don't surface McFlamingo for plumber searches)
  * Returns mutated array in-place (and returns it).
  */
-async function applyMcflPin(rows, searchZip, db) {
+async function applyMcflPin(rows, searchZip, db, detectedCat) {
   // Only pin when relevant ZIP
   const zipMatch = !searchZip || searchZip === MCFL_PIN_ZIP;
   if (!zipMatch) return rows;
+
+  // Only pin for food/restaurant category searches or unfiltered ZIP browse
+  if (detectedCat) {
+    const catLower = detectedCat.toLowerCase();
+    const isFoodSearch = MCFL_FOOD_CATS.has(catLower) ||
+      catLower.includes('food') || catLower.includes('eat') ||
+      catLower.includes('restaurant') || catLower.includes('dining') ||
+      catLower.includes('cafe') || catLower.includes('catering');
+    if (!isFoodSearch) return rows;
+  }
   // Skip if already present
   if (rows.some(r => r.business_id === MCFL_PIN_ID)) return rows;
   try {
@@ -8120,7 +8139,7 @@ router.get('/search', harvestGuard, async (req, res) => {
           }
 
           // ── McFlamingo pin: prepend to service results in 32082 ─────────────
-          await applyMcflPin(provRows, resolvedZip || null, db);
+          await applyMcflPin(provRows, resolvedZip || null, db, resolvedCat || null);
 
           providerCount = provRows.length;
           topProviders  = provRows;
@@ -8619,8 +8638,8 @@ router.get('/search', harvestGuard, async (req, res) => {
       return true;
     });
 
-    // ── McFlamingo pin: always show as first result in 32082 searches ────────
-    await applyMcflPin(rows, zip || null, db);
+    // ── McFlamingo pin: only show as first result for food/restaurant searches in 32082 ────────
+    await applyMcflPin(rows, zip || null, db, cat || null);
 
     const results = rows.slice(0, limit).map(r => {
       // rail_tier: tells agent/UI exactly what action is available for this business.
@@ -8832,6 +8851,38 @@ router.get('/search', harvestGuard, async (req, res) => {
       }).catch(() => {});
     }
 
+    // ── Category narrative — build when no about-intent narrative was built ──────
+    // Fires for NL queries like "I need a landscaper" that resolve to a category
+    // but don't match about-intent. Gives the searcher a human confirmation.
+    if (!narrative && results.length > 0 && cat) {
+      const catLabel = cat.replace(/_/g, ' ');
+      const topName  = results[0]?.name;
+      const topPhone = results[0]?.phone;
+      const topWeb   = results[0]?.website;
+      const count    = results.length;
+      const areaStr  = zip ? ` in ${zip}` : ' nearby';
+      const isRfqCat = ['plumber','plumbing','electrician','hvac','handyman','roofing','landscaping',
+        'painting','pest_control','locksmith','flooring','pool_service','moving',
+        'general_contractor','contractor','concrete','cleaning','catering'].includes(cat);
+
+      let lead = `Found ${count} ${catLabel} provider${count !== 1 ? 's' : ''}${areaStr}.`;
+      if (topName) {
+        lead += ` ${topName} is a top match`;
+        if (topPhone) lead += ` — reach them at ${topPhone}`;
+        if (topWeb && !topPhone) lead += ` — ${topWeb}`;
+        lead += '.';
+      }
+      if (isRfqCat) {
+        lead += ' Request a quote and we\'ll notify them of your job.';
+      }
+      narrative = lead;
+    }
+    if (!narrative && results.length === 0 && (q || cat)) {
+      const term = cat ? cat.replace(/_/g, ' ') : q;
+      const areaStr = zip ? ` in ${zip}` : ' in this area';
+      narrative = `No results found for "${term}"${areaStr}. Try a different search or call (904) 506-7476 for help.`;
+    }
+
     return res.json({
       ok:            true,
       total:         results.length,
@@ -8840,6 +8891,7 @@ router.get('/search', harvestGuard, async (req, res) => {
       zip:           zip || null,
       category:      cat || null,
       detected_cat:  cat || null,   // echoes NL-detected category for UI
+      intent:        cat || (results.length > 0 ? 'business_search' : 'no_results'),
       nl_tags:       nlTags || [],  // tag hints used for filtering
       latency_ms:    Date.now() - t0,
       narrative,
