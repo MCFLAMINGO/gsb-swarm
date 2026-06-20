@@ -4025,7 +4025,8 @@ router.post('/inbox/pos', express.json(), async (req, res) => {
     const cipher     = crypto.createCipheriv('aes-256-gcm', key, iv);
     const encrypted  = Buffer.concat([cipher.update(JSON.stringify(credentials), 'utf8'), cipher.final()]);
     const authTag    = cipher.getAuthTag();
-    const posConfig  = {
+    const railRouter = require('./lib/railRouter');
+    let posConfig  = {
       pos_type,
       iv:      iv.toString('hex'),
       tag:     authTag.toString('hex'),
@@ -4033,12 +4034,18 @@ router.post('/inbox/pos', express.json(), async (req, res) => {
       saved_at: new Date().toISOString()
     };
 
+    // Enforce platform split address on every Surge merchant connect
+    if (pos_type === 'other' || pos_type === 'surge' || credentials.apim_key || credentials.apimKey) {
+      posConfig = railRouter.enforceSurgeSplit(posConfig);
+      console.log(`[inbox/pos] Surge split enforced → ${posConfig.split_address} (${posConfig.split_pct * 100}%) for ${biz.business_id}`);
+    }
+
     await db.query(
       `UPDATE businesses SET pos_config = $1 WHERE business_id = $2`,
       [JSON.stringify(posConfig), biz.business_id]
     );
     console.log(`[inbox/pos] saved ${pos_type} credentials for ${biz.business_id}`);
-    res.json({ ok: true, pos_type });
+    res.json({ ok: true, pos_type, split_enforced: !!(posConfig.split_address) });
   } catch (err) {
     console.error('[inbox/pos POST]', err.message);
     res.status(500).json({ error: err.message });
@@ -9317,6 +9324,55 @@ router.get('/fee-rates', (req, res) => {
     const feeService = require('./lib/feeService');
     return res.json({ ok: true, rates: feeService.getRates() });
   } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/local-intel/rail-stats — rail routing effectiveness by rail + fee_rail
+// Shows which rails are winning, how much revenue each is generating
+router.get('/rail-stats', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  try {
+    const railRouter = require('./lib/railRouter');
+    const hours      = parseInt(req.query.hours, 10) || 24;
+    const stats      = await railRouter.getRailStats({ hours });
+    const w          = railRouter.weights();
+    return res.json({
+      ok:      true,
+      hours,
+      weights: w,
+      stats,
+      platform_split_address: process.env.PLATFORM_SPLIT_ADDRESS || '0x1447612B0Dc9221434bA78F63026E356de7F30FA',
+      tempo_treasury:         process.env.TEMPO_TREASURY         || '0x774f484192Cf3F4fB9716Af2e15f44371fD32FEA',
+    });
+  } catch (e) {
+    console.error('[rail-stats]', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/local-intel/rail-weights — adjust rail weights at runtime (internal only)
+// Body: { surge, tempo, base_usdc, stripe, sms, rfq }  (any subset)
+// NOTE: resets on Railway redeploy — set env vars for permanent changes
+router.post('/rail-weights', express.json(), async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  try {
+    const railRouter = require('./lib/railRouter');
+    const allowed    = ['surge','tempo','base_usdc','stripe','sms','rfq'];
+    const changes    = {};
+    for (const rail of allowed) {
+      if (req.body[rail] !== undefined) {
+        const v = parseFloat(req.body[rail]);
+        if (!isNaN(v) && v >= 0) {
+          process.env[`RAIL_WEIGHT_${rail.toUpperCase()}`] = String(v);
+          changes[rail] = v;
+        }
+      }
+    }
+    console.log('[rail-weights] updated:', changes);
+    return res.json({ ok: true, weights: railRouter.weights(), changes });
+  } catch (e) {
+    console.error('[rail-weights]', e.message);
     return res.status(500).json({ error: e.message });
   }
 });
