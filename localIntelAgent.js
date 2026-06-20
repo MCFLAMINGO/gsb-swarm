@@ -8254,6 +8254,8 @@ router.get('/search', harvestGuard, async (req, res) => {
           query:        raw,
           zip:          resolvedZip,
           category:     resolvedCat,
+          detected_cat: resolvedCat || null,   // echoed for UI chip display
+          intent:       resolvedCat || 'service_request',
           sub_category: resolvedSubCat  || null,  // B146
           sub_label:    resolvedSubLabel || null,  // B146
           is_narrowing: isNarrowing,               // B146
@@ -8277,6 +8279,7 @@ router.get('/search', harvestGuard, async (req, res) => {
             confidence: r.confidence_score ? parseFloat(r.confidence_score) * 100 : 50,
             claimed:    !!r.claimed_at,
             wallet:     r.wallet || null,
+            rail_tier:  r.wallet ? 'surge' : r.order_form ? 'form' : r.phone ? 'phone' : 'rfq',
           })),
           latency_ms: Date.now() - t0,
         });
