@@ -8063,15 +8063,26 @@ router.get('/search', harvestGuard, async (req, res) => {
         // Carry ZIP forward when user didn't supply one
         if (!zip && _webThreadCtx.zip) zip = _webThreadCtx.zip;
         // Carry category forward ONLY for sub-category narrowing within the same vertical.
-        // If the new query has its own detectable vertical, do NOT inherit the previous category
-        // (e.g. landscaper search → nails search should not carry 'landscaping' forward).
+        // Guards (in priority order):
+        //  1. If intentMap already resolves a category from the raw query, never carry forward —
+        //     the query has a clear intent of its own (e.g. "hotel near me" after a restaurant search).
+        //  2. If detectVertical returns a different vertical, do not carry.
+        //  3. Only carry when the new query has no resolvable intent AND same/unknown vertical.
         if (!cat && _webThreadCtx.lastIntent) {
-          const { detectVertical } = require('./workers/inferenceCache');
-          const newVertical = detectVertical(raw);
-          const prevVertical = detectVertical(_webThreadCtx.lastIntent || '');
-          // Only carry if same vertical or new query has no detectable vertical of its own
-          if (!newVertical || newVertical === prevVertical) {
-            cat = _webThreadCtx.lastIntent;
+          // Guard 1: does intentMap already know what this query wants?
+          const _nlCheck = resolveIntent(raw);
+          const _nlCat   = (!_nlCheck.deflect && _nlCheck.cat) ? _nlCheck.cat : null;
+          if (_nlCat) {
+            // Query has its own clear intent — use it, do not inherit thread category
+            cat = _nlCat;
+          } else {
+            // Guard 2: vertical check
+            const { detectVertical } = require('./workers/inferenceCache');
+            const newVertical  = detectVertical(raw);
+            const prevVertical = detectVertical(_webThreadCtx.lastIntent || '');
+            if (!newVertical || newVertical === prevVertical) {
+              cat = _webThreadCtx.lastIntent;
+            }
           }
         }
       }
