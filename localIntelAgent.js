@@ -9925,6 +9925,47 @@ router.post('/admin/business/:id/claim', express.json(), async (req, res) => {
   }
 });
 
+// GET /api/local-intel/admin/learned-intents — view + manage learned_intent_map
+router.get('/admin/learned-intents', async (req, res) => {
+  try {
+    const rows = await db.query(
+      `SELECT query_normal, category, hit_count, last_seen, source
+         FROM learned_intent_map
+        ORDER BY last_seen DESC
+        LIMIT 200`
+    );
+    return res.json({ ok: true, count: rows.length, entries: rows });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/local-intel/admin/learned-intents — purge bad entries
+// Body: { query?: string } — deletes one entry; omit to clear ALL invalid (compound) entries
+router.delete('/admin/learned-intents', express.json(), async (req, res) => {
+  try {
+    const { query } = req.body || {};
+    let deleted;
+    if (query) {
+      deleted = await db.query(
+        `DELETE FROM learned_intent_map WHERE query_normal = $1 RETURNING query_normal, category`,
+        [query.toLowerCase().trim()]
+      );
+    } else {
+      // Purge all compound 'cat:subcat' entries that should never have been written
+      deleted = await db.query(
+        `DELETE FROM learned_intent_map WHERE category LIKE '%:%' RETURNING query_normal, category`
+      );
+    }
+    // Reload in-memory cache
+    const li = require('./lib/learnedIntents');
+    if (li.load) li.load().catch(() => {});
+    return res.json({ ok: true, deleted: deleted.length, entries: deleted });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/local-intel/admin/stats — platform-wide summary
 // keep old path as alias
 router.get('/email-stats', async (req, res) => {
