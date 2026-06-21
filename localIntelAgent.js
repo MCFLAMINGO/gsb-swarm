@@ -8057,7 +8057,8 @@ router.get('/search', harvestGuard, async (req, res) => {
         const _svcConcept = detectConcept(raw || resolvedCat || '') || 'GENERAL';
         const _svcRanked  = buildConceptOrderBy(_svcConcept, 'zs', 'b');
         const SVC_PROVIDER_QUERY = `SELECT b.business_id, b.name, b.zip, b.address, b.city, b.phone, b.website, b.category, b.lat, b.lon,
-                    b.confidence_score, b.claimed_at, b.wallet, b.order_form`;
+                    b.confidence_score, b.claimed_at, b.wallet, b.order_form,
+                    b.booking_url, b.menu_url, b.accepts_reservations, b.accepts_appointments, b.accepts_rfq`;
         let providerCount = 0;
         let topProviders  = [];
         let actualZip     = resolvedZip; // may change to a neighbor ZIP
@@ -8280,21 +8281,26 @@ router.get('/search', harvestGuard, async (req, res) => {
           narrative:    srNarrative,
           contact_prompt: ctaType === 'rfq' || ctaType === 'appointment',  // reservation = direct to business, not agent-mediated
           results:    topProviders.map(r => ({
-            business_id: r.business_id || null,
-            name:       r.name,
-            zip:        r.zip,
-            address:    r.address  || '',
-            city:       r.city     || '',
-            phone:      r.phone    || '',
-            website:    r.website  || '',
-            category:   r.category || 'business',
-            group:      r.category_group || 'services',
-            lat:        r.lat  != null ? parseFloat(r.lat)  : null,
-            lon:        r.lon  != null ? parseFloat(r.lon)  : null,
-            confidence: r.confidence_score ? parseFloat(r.confidence_score) * 100 : 50,
-            claimed:    !!r.claimed_at,
-            wallet:     r.wallet || null,
-            rail_tier:  r.wallet ? 'surge' : r.order_form ? 'form' : r.phone ? 'phone' : 'rfq',
+            business_id:           r.business_id || null,
+            name:                  r.name,
+            zip:                   r.zip,
+            address:               r.address  || '',
+            city:                  r.city     || '',
+            phone:                 r.phone    || '',
+            website:               r.website  || '',
+            category:              r.category || 'business',
+            group:                 r.category_group || 'services',
+            lat:                   r.lat  != null ? parseFloat(r.lat)  : null,
+            lon:                   r.lon  != null ? parseFloat(r.lon)  : null,
+            confidence:            r.confidence_score ? parseFloat(r.confidence_score) * 100 : 50,
+            claimed:               !!r.claimed_at,
+            wallet:                r.wallet || null,
+            booking_url:           r.booking_url || null,
+            menu_url:              r.menu_url || null,
+            accepts_reservations:  r.accepts_reservations === true,
+            accepts_appointments:  r.accepts_appointments === true,
+            accepts_rfq:           r.accepts_rfq === true,
+            rail_tier:             r.wallet ? 'surge' : r.order_form ? 'form' : r.phone ? 'phone' : 'rfq',
           })),
           latency_ms: Date.now() - t0,
         });
@@ -8345,7 +8351,7 @@ router.get('/search', harvestGuard, async (req, res) => {
       b.lat, b.lon, b.confidence_score, b.claimed_at, b.wallet, b.status,
       b.pos_config->>'pos_type' AS pos_type, b.menu_url,
       b.booking_url, b.notify_sms, b.notify_email, b.notification_phone, b.notification_email,
-      b.order_form
+      b.order_form, b.accepts_reservations, b.accepts_appointments, b.accepts_rfq
       FROM businesses b
       LEFT JOIN zip_signals zs ON zs.zip = b.zip
       WHERE b.status != 'inactive'
@@ -8697,6 +8703,9 @@ router.get('/search', harvestGuard, async (req, res) => {
           ...(r.notify_email ? ['email'] : []),
           ...(r.notify_sms   ? ['sms']   : []),
         ],
+        accepts_reservations:  r.accepts_reservations === true,
+        accepts_appointments:  r.accepts_appointments === true,
+        accepts_rfq:           r.accepts_rfq === true,
       };
     });
 
