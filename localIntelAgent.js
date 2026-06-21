@@ -5248,6 +5248,40 @@ router.get('/.well-known/mcp/server-card.json', (req, res) => {
       { name: 'local_intel_retail',    description: 'Retail market intelligence: store categories, spending capture, consumer profile, undersupplied niches.', inputSchema: { type: 'object', required: ['query', 'zip'], properties: { query: { type: 'string', description: 'Natural language question about retail market' }, zip: { type: 'string', description: 'ZIP code' } } } },
       { name: 'local_intel_construction', description: 'Construction and home services intelligence: active permits, contractor density, population growth driving demand.', inputSchema: { type: 'object', required: ['query', 'zip'], properties: { query: { type: 'string', description: 'Natural language question about construction market' }, zip: { type: 'string', description: 'ZIP code' } } } },
       { name: 'local_intel_restaurant', description: 'Restaurant and food service market intelligence: saturation scores, price-tier gaps, capture rates, corridor analysis, tidal momentum. Trained on 100 restaurant prompts.', inputSchema: { type: 'object', required: ['query', 'zip'], properties: { query: { type: 'string', description: 'Natural language question about restaurant market' }, zip: { type: 'string', description: 'ZIP code' } } } },
+      // ── Agentic Task Tools (dispatch + close the loop) ────────────────────────
+      { name: 'local_intel_route_task',
+        description: 'AGENTIC. Dispatch a task/job to the best available verified business in a ZIP. ' +
+          'Finds the top rail match (surge/form/phone/rfq), creates a job record, and returns the job_id + routing decision. ' +
+          'Use after local_intel_search to close the loop from discovery → dispatch. ' +
+          'Platform fee: $0.25 flat + 1.5% of budget_usd on confirmed completion.',
+        inputSchema: { type: 'object', required: ['task', 'zip'],
+          properties: {
+            task:         { type: 'string', description: 'Natural language task description', examples: ['Fix leaking pipe at 123 Ocean Way', 'Lawn mowing weekly service'] },
+            zip:          { type: 'string', description: 'ZIP code for the job' },
+            category:     { type: 'string', description: 'Business category (optional — auto-detected from task if omitted)', examples: ['plumber', 'landscaping', 'hvac'] },
+            budget_usd:   { type: 'number', description: 'Optional job budget in USD' },
+            poster_wallet:{ type: 'string', description: 'Optional wallet address of the poster (for on-chain payment)' },
+            poster_email: { type: 'string', description: 'Optional contact email for the poster' },
+          } } },
+      { name: 'local_intel_schedule_job',
+        description: 'AGENTIC. Schedule a specific time slot for a job that has been routed via local_intel_route_task. ' +
+          'Requires a job_id from route_task. Updates the job with a preferred_time and sends a scheduling notification to the business.',
+        inputSchema: { type: 'object', required: ['job_id', 'preferred_time'],
+          properties: {
+            job_id:         { type: 'string', description: 'Job UUID from local_intel_route_task' },
+            preferred_time: { type: 'string', description: 'ISO 8601 datetime or natural language time (e.g. "tomorrow 2pm", "2026-06-25T14:00:00")' },
+            notes:          { type: 'string', description: 'Optional additional scheduling notes' },
+          } } },
+      { name: 'local_intel_confirm_completion',
+        description: 'AGENTIC. Mark a dispatched job as completed and trigger platform fee collection. ' +
+          'Requires the acceptor_wallet that accepted the job. ' +
+          'On success: fee is logged (charged if ROUTING_ENABLED=true), proof stored on-chain via fee_events.',
+        inputSchema: { type: 'object', required: ['job_id', 'acceptor_wallet'],
+          properties: {
+            job_id:          { type: 'string', description: 'Job UUID from local_intel_route_task' },
+            acceptor_wallet: { type: 'string', description: 'Wallet address of the business that completed the job' },
+            proof:           { type: 'string', description: 'Optional proof URL (photo, transaction hash, completion receipt)' },
+          } } },
     ],
     resources: [],
     prompts: [
@@ -5458,6 +5492,124 @@ router.post('/mcp', express.json(), harvestGuard, apiKeyMiddleware, async (req, 
       };
       console.log('[mcp] intent', JSON.stringify(_intent));
     }
+    // ── Agentic task tools — intercepted here (write ops, not proxied to port 3004) ──────
+    if (body.method === 'tools/call' && body.params) {
+      const _toolName = body.params.name;
+      const _args     = body.params.arguments || {};
+
+      // local_intel_route_task — find best match + create job record
+      if (_toolName === 'local_intel_route_task') {
+        try {
+          const { resolveIntent } = require('./lib/intentMap');
+          const { selectRail }    = require('./lib/railRouter');
+          const _cat = _args.category || resolveIntent(_args.task || '')?.cat || null;
+          // Find top verified business in ZIP for this category
+          const _rows = _cat
+            ? await db.query(
+                `SELECT business_id, name, phone, wallet, order_form, category
+                   FROM businesses
+                  WHERE zip = $1 AND category = $2 AND status != 'inactive'
+                  ORDER BY (claimed_at IS NOT NULL) DESC, confidence_score DESC
+                  LIMIT 1`,
+                [_args.zip, _cat])
+            : await db.query(
+                `SELECT business_id, name, phone, wallet, order_form, category
+                   FROM businesses
+                  WHERE zip = $1 AND status != 'inactive' AND claimed_at IS NOT NULL
+                  ORDER BY confidence_score DESC LIMIT 1`,
+                [_args.zip]);
+          const _biz = _rows[0] || null;
+          const _rail = _biz ? selectRail(_biz, { type: 'task', amount_usd: _args.budget_usd || 0 }) : null;
+          // Create job record
+          const _job = await db.query(
+            `INSERT INTO jobs (title, description, project_type, zip, budget_usd, poster_wallet, poster_email, meta)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) RETURNING id, title, status, created_at`,
+            [_args.task, _args.task, _cat||'general', _args.zip,
+             _args.budget_usd||null, _args.poster_wallet||null, _args.poster_email||null,
+             JSON.stringify({ rail: _rail?.rail||'rfq', business_id: _biz?.business_id||null, category: _cat })]
+          );
+          return res.json({ jsonrpc:'2.0', id: body.id,
+            result: { content: [{ type:'text', text: JSON.stringify({
+              ok: true,
+              job_id:   _job[0].id,
+              job_status: _job[0].status,
+              routed_to:  _biz ? { name: _biz.name, business_id: _biz.business_id, category: _biz.category } : null,
+              rail:       _rail?.rail || 'rfq',
+              rail_reason: _rail?.reason || 'no_match',
+              fee_policy: '$0.25 flat + 1.5% of budget on confirmed completion',
+              next_step:  `Call local_intel_schedule_job with job_id=${_job[0].id} to set a time`,
+            })}] } });
+        } catch(e) {
+          return res.json({ jsonrpc:'2.0', id: body.id,
+            error: { code:-32603, message:'route_task failed: '+e.message } });
+        }
+      }
+
+      // local_intel_schedule_job — add preferred_time to existing job
+      if (_toolName === 'local_intel_schedule_job') {
+        try {
+          const _updated = await db.query(
+            `UPDATE jobs SET meta = COALESCE(meta,'{}') || $1::jsonb
+              WHERE id = $2 AND status NOT IN ('completed','cancelled')
+              RETURNING id, title, status, meta`,
+            [JSON.stringify({ preferred_time: _args.preferred_time, schedule_notes: _args.notes||null }),
+             _args.job_id]
+          );
+          if (!_updated.length) return res.json({ jsonrpc:'2.0', id: body.id,
+            error: { code:-32602, message:'job_id not found or already closed' } });
+          return res.json({ jsonrpc:'2.0', id: body.id,
+            result: { content: [{ type:'text', text: JSON.stringify({
+              ok: true,
+              job_id:         _updated[0].id,
+              preferred_time: _args.preferred_time,
+              next_step:      'Business will be notified. Call local_intel_confirm_completion when the job is done.',
+            })}] } });
+        } catch(e) {
+          return res.json({ jsonrpc:'2.0', id: body.id,
+            error: { code:-32603, message:'schedule_job failed: '+e.message } });
+        }
+      }
+
+      // local_intel_confirm_completion — mark job done + collect platform fee
+      if (_toolName === 'local_intel_confirm_completion') {
+        try {
+          const { logFee, computeRfqFee } = require('./lib/feeService');
+          const _completed = await db.query(
+            `UPDATE jobs SET status='completed', proof=$1, completed_at=NOW()
+              WHERE id=$2 AND acceptor_wallet=$3 AND status='accepted'
+              RETURNING id, title, status, budget_usd, meta`,
+            [_args.proof||null, _args.job_id, _args.acceptor_wallet]
+          );
+          if (!_completed.length) return res.json({ jsonrpc:'2.0', id: body.id,
+            error: { code:-32602, message:'job_id not found, not in accepted state, or wrong acceptor_wallet' } });
+          const _j = _completed[0];
+          const _bizId = (_j.meta?.business_id) || null;
+          const { total } = computeRfqFee(_j.budget_usd || 0);
+          const _fee = await logFee({
+            event_type:  'job_complete',
+            business_id: _bizId,
+            rfq_id:      _j.id,
+            amount_usd:  total,
+            quote_usd:   _j.budget_usd || 0,
+            meta: { source:'mcp', tool:'local_intel_confirm_completion', rail: _j.meta?.rail||'rfq' },
+          });
+          return res.json({ jsonrpc:'2.0', id: body.id,
+            result: { content: [{ type:'text', text: JSON.stringify({
+              ok: true,
+              job_id:      _j.id,
+              status:      'completed',
+              fee_charged: _fee.amount_usd,
+              fee_status:  _fee.status,
+              fee_event_id: _fee.event_id,
+            })}] } });
+        } catch(e) {
+          return res.json({ jsonrpc:'2.0', id: body.id,
+            error: { code:-32603, message:'confirm_completion failed: '+e.message } });
+        }
+      }
+    }
+    // ── end agentic task tools ────────────────────────────────────────────
+
     // Forward mode from ?mode=agent query param OR from body params._meta.mode
     const _postMode = req.query.mode || body?.params?._meta?.mode || undefined;
     if (_postMode && body.params) {
@@ -6821,7 +6973,33 @@ router.post('/job/complete', express.json(), async (req, res) => {
       [proof||null, job_id, acceptor_wallet]
     );
     if (rows.length === 0) return res.status(409).json({ error: 'Job not found, already completed, or wrong wallet' });
-    res.json({ ok: true, job: rows[0] });
+    const _j = rows[0];
+    // ── Platform fee on confirmed completion ────────────────────────────────
+    // Fee model: $0.25 flat + 1.5% of budget_usd (from feeService)
+    // Status logged regardless; charged only if ROUTING_ENABLED=true + wallet present
+    let feeResult = null;
+    try {
+      const { logFee, computeRfqFee } = require('./lib/feeService');
+      const _bizId  = _j.meta?.business_id || null;
+      const _budget = _j.budget_usd ? parseFloat(_j.budget_usd) : 0;
+      const { total } = computeRfqFee(_budget);
+      feeResult = await logFee({
+        event_type:  'job_complete',
+        business_id: _bizId,
+        rfq_id:      _j.id,
+        amount_usd:  total,
+        quote_usd:   _budget,
+        meta: { source: 'rest', endpoint: '/job/complete', acceptor_wallet },
+      });
+    } catch (feeErr) {
+      console.warn('[job/complete] fee log error (non-fatal):', feeErr.message);
+    }
+    res.json({
+      ok:          true,
+      job:         _j,
+      fee_charged: feeResult?.amount_usd  || 0,
+      fee_status:  feeResult?.status      || 'skipped',
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -10120,6 +10298,138 @@ router.get('/platform-stats', async (req, res) => {
     return res.json(_platformStatsCache);
   } catch (err) {
     console.error('[platform-stats]', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/local-intel/sitemap.xml ────────────────────────────────────────
+// Dynamic sitemap: all live ZIP pages + category search pages (top 50 ZIPs × 18 cats)
+// 6-hour in-memory cache. Consumed by Google / Bing crawlers.
+let _sitemapCache     = null;
+let _sitemapCachedAt  = 0;
+const SITEMAP_TTL_MS  = 6 * 60 * 60 * 1000;
+const SITEMAP_CATS = [
+  'restaurant','plumber','hvac','electrician','landscaper',
+  'roofer','painter','cleaner','mechanic','dentist',
+  'lawyer','realtor','gym','beauty','pet','childcare',
+  'handyman','movers'
+];
+router.get('/sitemap.xml', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (_sitemapCache && (now - _sitemapCachedAt) < SITEMAP_TTL_MS) {
+      res.setHeader('Content-Type', 'application/xml');
+      res.setHeader('Cache-Control', 'public, max-age=21600');
+      return res.send(_sitemapCache);
+    }
+    const db = require('./lib/db');
+    const zipRows = await db.query(
+      `SELECT DISTINCT zip FROM businesses
+       WHERE status != 'inactive' AND zip ~ '^[0-9]{5}$'
+       ORDER BY zip`
+    );
+    const zips = zipRows.map(r => r.zip);
+    const BASE = 'https://www.thelocalintel.com';
+    const today = new Date().toISOString().split('T')[0];
+    const urls = [];
+    // Core static pages
+    for (const page of ['', '/about', '/faq', '/claim']) {
+      urls.push(`<url><loc>${BASE}${page}</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>`);
+    }
+    // ZIP pages
+    for (const zip of zips) {
+      urls.push(`<url><loc>${BASE}/zip/${zip}</loc><lastmod>${today}</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>`);
+    }
+    // Category search pages — top 50 ZIPs × 18 cats
+    const top50 = zips.slice(0, 50);
+    for (const zip of top50) {
+      for (const cat of SITEMAP_CATS) {
+        urls.push(`<url><loc>${BASE}/search?q=${encodeURIComponent(cat)}&zip=${zip}</loc><changefreq>weekly</changefreq><priority>0.5</priority></url>`);
+      }
+    }
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.join('\n')}
+</urlset>`;
+    _sitemapCache    = xml;
+    _sitemapCachedAt = now;
+    res.setHeader('Content-Type', 'application/xml');
+    res.setHeader('Cache-Control', 'public, max-age=21600');
+    return res.send(xml);
+  } catch (err) {
+    console.error('[sitemap]', err.message);
+    return res.status(500).send('<?xml version="1.0"?><urlset/>');
+  }
+});
+
+// ── GET /api/local-intel/reputation/:business_id ─────────────────────────────
+// Reputation signals: response_rate, completion_rate, appt_confirm_rate,
+// avg_response_hrs, trust_score (0-100 composite). Cached 30 min per biz.
+const _repCache = new Map();
+const REP_TTL_MS = 30 * 60 * 1000;
+router.get('/reputation/:business_id', async (req, res) => {
+  try {
+    const { business_id } = req.params;
+    const now = Date.now();
+    if (_repCache.has(business_id)) {
+      const cached = _repCache.get(business_id);
+      if (now - cached.ts < REP_TTL_MS) return res.json(cached.data);
+    }
+    const db = require('./lib/db');
+    // response_rate — RFQs responded to in last 90d
+    const rfqRows = await db.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE status IN ('responded','accepted','completed')) AS responded,
+         COUNT(*) AS total
+       FROM rfq_responses
+       WHERE business_id = $1
+         AND created_at >= NOW() - INTERVAL '90 days'`,
+      [business_id]
+    );
+    const rfq = rfqRows[0] || { responded: 0, total: 0 };
+    const response_rate = rfq.total > 0 ? Math.round((rfq.responded / rfq.total) * 100) : null;
+    // completion_rate — accepted jobs completed (jobs.meta->>'business_id')
+    const jobRows = await db.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+         COUNT(*) FILTER (WHERE status IN ('accepted','completed')) AS accepted
+       FROM jobs
+       WHERE meta->>'business_id' = $1`,
+      [business_id]
+    );
+    const jobs = jobRows[0] || { completed: 0, accepted: 0 };
+    const completion_rate = jobs.accepted > 0 ? Math.round((jobs.completed / jobs.accepted) * 100) : null;
+    // appt_confirm_rate
+    const apptRows = await db.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE status IN ('confirmed','completed')) AS confirmed,
+         COUNT(*) AS total
+       FROM appointments
+       WHERE business_id = $1`,
+      [business_id]
+    );
+    const appt = apptRows[0] || { confirmed: 0, total: 0 };
+    const appt_confirm_rate = appt.total > 0 ? Math.round((appt.confirmed / appt.total) * 100) : null;
+    // avg_response_hrs — median hours from rfq created_at to accepted_at
+    const avgRows = await db.query(
+      `SELECT ROUND(
+         EXTRACT(EPOCH FROM PERCENTILE_CONT(0.5) WITHIN GROUP
+           (ORDER BY (accepted_at - created_at)))
+         / 3600, 1
+       ) AS median_hrs
+       FROM rfq_responses
+       WHERE business_id = $1 AND accepted_at IS NOT NULL`,
+      [business_id]
+    );
+    const avg_response_hrs = avgRows[0]?.median_hrs ?? null;
+    // trust_score — composite 0-100
+    const signals = [response_rate, completion_rate, appt_confirm_rate].filter(v => v !== null);
+    const trust_score = signals.length > 0 ? Math.round(signals.reduce((a,b) => a+b, 0) / signals.length) : null;
+    const data = { business_id, response_rate, completion_rate, appt_confirm_rate, avg_response_hrs, trust_score, computed_at: new Date().toISOString() };
+    _repCache.set(business_id, { ts: now, data });
+    return res.json(data);
+  } catch (err) {
+    console.error('[reputation]', err.message);
     return res.status(500).json({ error: err.message });
   }
 });
