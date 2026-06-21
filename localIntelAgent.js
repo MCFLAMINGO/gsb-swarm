@@ -7295,6 +7295,34 @@ router.post('/admin/pipeline/reclassify', express.json(), async (req, res) => {
   });
 });
 
+// POST /api/local-intel/admin/pipeline/category-repair
+// Triggers the two-pass category repair worker:
+//   Pass 1 — deterministic name rules against all 614k rows
+//   Pass 2 — LLM batch (Haiku) for remaining 'business'/'LocalBusiness' rows
+// Query params: pass=1|2|all  zip=32082,32081  dry_run=true
+router.post('/admin/pipeline/category-repair', express.json(), async (req, res) => {
+  const secret = req.headers['x-pipeline-secret'] || req.body?.secret;
+  if (process.env.PIPELINE_SECRET && secret !== process.env.PIPELINE_SECRET) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const pass    = req.query.pass    || req.body?.pass    || 'all';
+  const zipOnly = req.query.zip     || req.body?.zip     || null;
+  const dryRun  = req.query.dry_run || req.body?.dry_run || 'false';
+  res.json({ status: 'category repair started', pass, zip_only: zipOnly, dry_run: dryRun, ts: new Date().toISOString() });
+  setImmediate(async () => {
+    try {
+      process.env.REPAIR_PASS     = pass;
+      process.env.REPAIR_DRY_RUN = dryRun;
+      if (zipOnly) process.env.REPAIR_ZIP_ONLY = zipOnly;
+      const { run } = require('./workers/categoryRepairWorker');
+      await run();
+      console.log('[category-repair] complete');
+    } catch (err) {
+      console.error('[category-repair] FATAL:', err.message);
+    }
+  });
+});
+
 // GET /api/local-intel/admin/pipeline/runs — view pipeline history + health trend
 router.get('/admin/pipeline/runs', async (req, res) => {
   try {
