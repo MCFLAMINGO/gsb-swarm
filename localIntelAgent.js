@@ -6859,124 +6859,342 @@ router.get('/register/info', (req, res) => {
 });
 
 // ── Jobs table auto-create ────────────────────────────────────────────────────
-// McFlamingo back door + booths = job #1 test case
-// All jobs are ZIP-routed. Accepting agent declares their wallet. Completion requires proof.
+// All jobs are ZIP-routed. Accepting driver declares their wallet.
+// 5-min accept lock prevents two drivers claiming simultaneously — expired
+// locks release the job back to 'open' on the next /job/feed call.
+// Fee fires on customer /job/confirm, NOT on driver /job/complete.
 async function ensureJobsTable() {
   if (!process.env.LOCAL_INTEL_DB_URL) return;
   try {
     const db = require('./lib/db');
     await db.query(`
       CREATE TABLE IF NOT EXISTS jobs (
-        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        title         TEXT NOT NULL,
-        description   TEXT,
-        project_type  TEXT,
-        zip           TEXT,
-        budget_usd    NUMERIC(12,2),
-        poster_wallet TEXT,
-        poster_email  TEXT,
-        acceptor_wallet TEXT,
-        status        TEXT NOT NULL DEFAULT 'open',
-        proof         TEXT,
-        created_at    TIMESTAMPTZ DEFAULT NOW(),
-        accepted_at   TIMESTAMPTZ,
-        completed_at  TIMESTAMPTZ,
-        meta          JSONB
+        id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        title               TEXT NOT NULL,
+        description         TEXT,
+        project_type        TEXT,
+        zip                 TEXT,
+        budget_usd          NUMERIC(12,2),
+        poster_wallet       TEXT,
+        poster_email        TEXT,
+        poster_phone        TEXT,
+        delivery_address    TEXT,
+        acceptor_wallet     TEXT,
+        driver_phone        TEXT,
+        driver_notify_ch    TEXT DEFAULT 'sms',
+        status              TEXT NOT NULL DEFAULT 'open',
+        accept_expires_at   TIMESTAMPTZ,
+        confirm_token       TEXT,
+        confirmed_at        TIMESTAMPTZ,
+        proof               TEXT,
+        created_at          TIMESTAMPTZ DEFAULT NOW(),
+        accepted_at         TIMESTAMPTZ,
+        completed_at        TIMESTAMPTZ,
+        meta                JSONB
       )
     `);
+    // Guard: safely add new columns to existing tables on redeploy
+    const newCols = [
+      ['delivery_address',  'TEXT'],
+      ['driver_phone',      'TEXT'],
+      ['driver_notify_ch',  "TEXT DEFAULT 'sms'"],
+      ['accept_expires_at', 'TIMESTAMPTZ'],
+      ['confirm_token',     'TEXT'],
+      ['confirmed_at',      'TIMESTAMPTZ'],
+      ['poster_phone',      'TEXT'],
+    ];
+    for (const [col, type] of newCols) {
+      const exists = await db.query(
+        `SELECT 1 FROM information_schema.columns
+         WHERE table_name='jobs' AND column_name=$1`,
+        [col]
+      );
+      if (exists.length === 0) {
+        await db.query(`ALTER TABLE jobs ADD COLUMN ${col} ${type}`).catch(e =>
+          console.warn('[jobs] ALTER TABLE add', col, e.message)
+        );
+      }
+    }
   } catch (e) {
     console.error('[localIntelAgent] ensureJobsTable failed:', e.message);
   }
 }
 ensureJobsTable();
 
+// ── Job helpers ───────────────────────────────────────────────────────────────
+
+// Build map deep-links from a plain address string.
+// All three links open the address directly in the respective nav app.
+function buildMapLinks(address) {
+  if (!address) return {};
+  const enc = encodeURIComponent(address);
+  return {
+    google_maps: `https://www.google.com/maps/search/?api=1&query=${enc}`,
+    apple_maps:  `https://maps.apple.com/?q=${enc}`,
+    waze:        `https://waze.com/ul?q=${enc}&navigate=yes`,
+  };
+}
+
+// Send a driver notification via their preferred channel.
+// channel: 'sms' | 'whatsapp' | 'telegram'
+// WhatsApp uses Twilio sandbox — same SID/token, 'whatsapp:+1...' as to/from.
+// Telegram requires TELEGRAM_BOT_TOKEN + driver's telegram_chat_id in meta.
+async function notifyDriver(channel, phone, telegramChatId, body) {
+  const {
+    TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER,
+    TWILIO_WHATSAPP_FROM, TELEGRAM_BOT_TOKEN,
+  } = process.env;
+  channel = channel || 'sms';
+
+  if (channel === 'telegram') {
+    if (!TELEGRAM_BOT_TOKEN || !telegramChatId) {
+      console.warn('[job/notify] Telegram not configured or no chat_id');
+      return { sent: false, reason: 'telegram_not_configured' };
+    }
+    try {
+      const https = require('https');
+      const payload = JSON.stringify({
+        chat_id: telegramChatId, text: body, parse_mode: 'HTML',
+      });
+      await new Promise((resolve, reject) => {
+        const req = https.request(
+          {
+            hostname: 'api.telegram.org',
+            path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+          },
+          res => { res.on('data', resolve); res.on('error', reject); }
+        );
+        req.on('error', reject);
+        req.write(payload);
+        req.end();
+      });
+      return { sent: true, channel: 'telegram' };
+    } catch (e) {
+      console.warn('[job/notify] Telegram send failed:', e.message);
+      return { sent: false, reason: e.message };
+    }
+  }
+
+  // SMS or WhatsApp — both use Twilio
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+    console.warn('[job/notify] Twilio not configured');
+    return { sent: false, reason: 'twilio_not_configured' };
+  }
+  let tw;
+  try { tw = require('twilio')(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN); }
+  catch (e) { return { sent: false, reason: 'twilio_module_missing' }; }
+
+  const toNum = toE164(phone);
+  if (!toNum) return { sent: false, reason: 'invalid_phone' };
+
+  if (channel === 'whatsapp') {
+    const fromWa = TWILIO_WHATSAPP_FROM || `whatsapp:${TWILIO_FROM_NUMBER}`;
+    const msg = await tw.messages.create({ body, from: fromWa, to: `whatsapp:${toNum}` });
+    return { sent: true, sid: msg.sid, channel: 'whatsapp' };
+  }
+
+  // default: sms
+  const msg = await tw.messages.create({ body, from: TWILIO_FROM_NUMBER, to: toNum });
+  return { sent: true, sid: msg.sid, channel: 'sms' };
+}
+
 // POST /job/create — create a new job posting
+// New: delivery_address, poster_phone, confirm_token (for customer confirmation gate).
+// On create: immediately broadcasts to drivers registered in the same ZIP
+// (businesses with category='delivery' and notify_sms=true).
 router.post('/job/create', express.json(), async (req, res) => {
   if (!process.env.LOCAL_INTEL_DB_URL) return res.status(503).json({ error: 'no_db' });
-  const { title, description, project_type, zip, budget_usd, poster_wallet, poster_email, meta } = req.body || {};
+  const {
+    title, description, project_type, zip, budget_usd,
+    poster_wallet, poster_email, poster_phone, delivery_address, meta,
+  } = req.body || {};
   if (!title) return res.status(400).json({ error: 'title is required' });
+  const _confirmToken = require('crypto').randomBytes(16).toString('hex');
   try {
     const db = require('./lib/db');
     const rows = await db.query(
-      `INSERT INTO jobs (title, description, project_type, zip, budget_usd, poster_wallet, poster_email, meta)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
-       RETURNING id, title, status, created_at`,
-      [title, description||null, project_type||null, zip||null,
-       budget_usd||null, poster_wallet||null, poster_email||null,
-       meta ? JSON.stringify(meta) : null]
+      `INSERT INTO jobs
+         (title, description, project_type, zip, budget_usd,
+          poster_wallet, poster_email, poster_phone, delivery_address,
+          confirm_token, meta)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
+       RETURNING id, title, status, delivery_address, confirm_token, created_at`,
+      [
+        title, description || null, project_type || null, zip || null,
+        budget_usd || null, poster_wallet || null, poster_email || null,
+        poster_phone || null, delivery_address || null,
+        _confirmToken,
+        meta ? JSON.stringify(meta) : null,
+      ]
     );
-    res.json({ ok: true, job: rows[0] });
+    const job  = rows[0];
+    const maps = buildMapLinks(delivery_address);
+
+    // Broadcast to drivers registered in this ZIP (async — does not block response)
+    if (zip) {
+      setImmediate(async () => {
+        try {
+          const drivers = await db.query(
+            `SELECT phone, meta FROM businesses
+             WHERE zip=$1 AND category='delivery' AND notify_sms=true AND phone IS NOT NULL`,
+            [zip]
+          );
+          for (const d of drivers) {
+            const ch    = d.meta?.driver_notify_ch || 'sms';
+            const tgId  = d.meta?.telegram_chat_id || null;
+            const addrLine = delivery_address ? `\nDrop-off: ${delivery_address}` : '';
+            const navLine  = maps.google_maps
+              ? `\nNavigate: ${maps.google_maps}`
+              : '';
+            const body =
+              `🚗 New ${project_type || 'delivery'} job in ${zip}!\n` +
+              `${title}${addrLine}${navLine}\n` +
+              `Budget: $${budget_usd || '?'}\n` +
+              `Claim it: https://www.thelocalintel.com/jobs/${job.id}`;
+            notifyDriver(ch, d.phone, tgId, body).catch(e =>
+              console.warn('[job/create] driver notify failed:', e.message)
+            );
+          }
+        } catch (e) {
+          console.warn('[job/create] driver broadcast failed:', e.message);
+        }
+      });
+    }
+
+    res.json({ ok: true, job: { ...job, maps } });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
 // GET /job/feed — list open jobs (filter by zip or project_type)
+// Expired accept locks (accept_expires_at < NOW()) are released back to 'open'
+// inline — no separate cron required.
 router.get('/job/feed', async (req, res) => {
   if (!process.env.LOCAL_INTEL_DB_URL) return res.status(503).json({ error: 'no_db' });
   const { zip, project_type, limit = 20 } = req.query;
   try {
     const db = require('./lib/db');
+    // Release expired accept locks so the job becomes claimable again
+    await db.query(
+      `UPDATE jobs
+       SET status='open', acceptor_wallet=NULL, accepted_at=NULL, accept_expires_at=NULL
+       WHERE status='accepted' AND accept_expires_at IS NOT NULL AND accept_expires_at < NOW()`
+    );
     const conditions = ["status = 'open'"];
     const vals = [];
     if (zip)          { vals.push(zip);          conditions.push(`zip = $${vals.length}`); }
     if (project_type) { vals.push(project_type); conditions.push(`project_type = $${vals.length}`); }
-    vals.push(Math.min(Number(limit)||20, 100));
+    vals.push(Math.min(Number(limit) || 20, 100));
     const rows = await db.query(
       `SELECT id, title, description, project_type, zip, budget_usd,
-              poster_wallet, status, created_at, meta
+              delivery_address, poster_wallet, status, created_at, meta
        FROM jobs
        WHERE ${conditions.join(' AND ')}
        ORDER BY created_at DESC
        LIMIT $${vals.length}`,
       vals
     );
-    res.json({ ok: true, jobs: rows, count: rows.length });
+    const jobs = rows.map(j => ({ ...j, maps: buildMapLinks(j.delivery_address) }));
+    res.json({ ok: true, jobs, count: jobs.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// POST /job/accept — claim a job (agent declares their wallet)
+// POST /job/accept — driver claims a job
+// Atomically locks the job for 5 minutes (accept_expires_at).
+// If driver doesn't complete before expiry, next /job/feed call releases it.
+// driver_notify_ch: 'sms' | 'whatsapp' | 'telegram'  (default: 'sms')
 router.post('/job/accept', express.json(), async (req, res) => {
   if (!process.env.LOCAL_INTEL_DB_URL) return res.status(503).json({ error: 'no_db' });
-  const { job_id, acceptor_wallet } = req.body || {};
-  if (!job_id || !acceptor_wallet) return res.status(400).json({ error: 'job_id + acceptor_wallet required' });
+  const { job_id, acceptor_wallet, driver_phone, driver_notify_ch } = req.body || {};
+  if (!job_id || !acceptor_wallet) {
+    return res.status(400).json({ error: 'job_id + acceptor_wallet required' });
+  }
   try {
     const db = require('./lib/db');
+    // Release stale lock on this specific job before attempting accept
+    await db.query(
+      `UPDATE jobs
+       SET status='open', acceptor_wallet=NULL, accepted_at=NULL, accept_expires_at=NULL
+       WHERE id=$1 AND status='accepted' AND accept_expires_at < NOW()`,
+      [job_id]
+    );
     const rows = await db.query(
       `UPDATE jobs
-       SET status='accepted', acceptor_wallet=$1, accepted_at=NOW()
-       WHERE id=$2 AND status='open'
-       RETURNING id, title, status, acceptor_wallet, accepted_at`,
-      [acceptor_wallet, job_id]
+       SET status='accepted',
+           acceptor_wallet=$1,
+           driver_phone=$2,
+           driver_notify_ch=$3,
+           accepted_at=NOW(),
+           accept_expires_at=NOW() + INTERVAL '5 minutes'
+       WHERE id=$4 AND status='open'
+       RETURNING id, title, description, project_type, zip, budget_usd,
+                 delivery_address, status, acceptor_wallet, accepted_at,
+                 accept_expires_at, meta`,
+      [acceptor_wallet, driver_phone || null, driver_notify_ch || 'sms', job_id]
     );
     if (rows.length === 0) return res.status(409).json({ error: 'Job not found or already taken' });
-    res.json({ ok: true, job: rows[0] });
+    const job  = rows[0];
+    const maps = buildMapLinks(job.delivery_address);
+
+    // Immediately send driver full job details + all three navigation deep-links
+    if (driver_phone) {
+      const addrLine = job.delivery_address ? `\nDrop-off: ${job.delivery_address}` : '';
+      const navLines = maps.google_maps
+        ? `\n📍 Google Maps: ${maps.google_maps}\n🍎 Apple Maps: ${maps.apple_maps}\n🚗 Waze: ${maps.waze}`
+        : '';
+      const body =
+        `✅ Job locked — you have 5 min before it releases.\n` +
+        `Job: ${job.title}${addrLine}${navLines}\n` +
+        `Budget: $${job.budget_usd || '?'}\n` +
+        `Mark delivered: https://www.thelocalintel.com/jobs/${job.id}/complete`;
+      notifyDriver(driver_notify_ch || 'sms', driver_phone, null, body).catch(e =>
+        console.warn('[job/accept] driver notify failed:', e.message)
+      );
+    }
+
+    res.json({
+      ok:         true,
+      job:        { ...job, maps },
+      expires_at: job.accept_expires_at,
+      note:       'Job locked for 5 minutes. POST /job/complete when delivered.',
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// POST /job/complete — mark a job done + attach proof (tx_hash, url, note, etc.)
-router.post('/job/complete', express.json(), async (req, res) => {
+// POST /job/confirm — customer confirms receipt, releases fee to driver
+// Requires confirm_token (returned on /job/create) OR poster_wallet.
+// This is the ONLY path that fires the platform fee — driver cannot self-confirm.
+router.post('/job/confirm', express.json(), async (req, res) => {
   if (!process.env.LOCAL_INTEL_DB_URL) return res.status(503).json({ error: 'no_db' });
-  const { job_id, acceptor_wallet, proof } = req.body || {};
-  if (!job_id || !acceptor_wallet) return res.status(400).json({ error: 'job_id + acceptor_wallet required' });
+  const { job_id, confirm_token, poster_wallet } = req.body || {};
+  if (!job_id || (!confirm_token && !poster_wallet)) {
+    return res.status(400).json({ error: 'job_id + confirm_token or poster_wallet required' });
+  }
   try {
-    const db = require('./lib/db');
-    const rows = await db.query(
+    const db     = require('./lib/db');
+    const cond   = confirm_token ? 'confirm_token=$2' : 'poster_wallet=$2';
+    const val    = confirm_token || poster_wallet;
+    const rows   = await db.query(
       `UPDATE jobs
-       SET status='completed', proof=$1, completed_at=NOW()
-       WHERE id=$2 AND acceptor_wallet=$3 AND status='accepted'
-       RETURNING id, title, status, proof, completed_at, budget_usd, meta`,
-      [proof||null, job_id, acceptor_wallet]
+       SET status='confirmed', confirmed_at=NOW()
+       WHERE id=$1 AND ${cond} AND status IN ('accepted','completed')
+       RETURNING id, title, status, confirmed_at, budget_usd, acceptor_wallet, meta`,
+      [job_id, val]
     );
-    if (rows.length === 0) return res.status(409).json({ error: 'Job not found, already completed, or wrong wallet' });
+    if (rows.length === 0) {
+      return res.status(409).json({
+        error: 'Job not found, wrong token/wallet, or not in accepted/completed state',
+      });
+    }
     const _j = rows[0];
-    // ── Platform fee on confirmed completion ────────────────────────────────
-    // Fee model: $0.25 flat + 1.5% of budget_usd (from feeService)
-    // Status logged regardless; charged only if ROUTING_ENABLED=true + wallet present
+    // Platform fee fires here — gated on customer confirmation
     let feeResult = null;
     try {
       const { logFee, computeRfqFee } = require('./lib/feeService');
@@ -6989,21 +7207,68 @@ router.post('/job/complete', express.json(), async (req, res) => {
         rfq_id:      _j.id,
         amount_usd:  total,
         quote_usd:   _budget,
-        meta: { source: 'rest', endpoint: '/job/complete', acceptor_wallet },
+        meta: { source: 'rest', endpoint: '/job/confirm', acceptor_wallet: _j.acceptor_wallet },
       });
     } catch (feeErr) {
-      console.warn('[job/complete] fee log error (non-fatal):', feeErr.message);
+      console.warn('[job/confirm] fee log error (non-fatal):', feeErr.message);
     }
     res.json({
       ok:          true,
       job:         _j,
-      fee_charged: feeResult?.amount_usd  || 0,
-      fee_status:  feeResult?.status      || 'skipped',
+      fee_charged: feeResult?.amount_usd || 0,
+      fee_status:  feeResult?.status     || 'skipped',
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
+
+// POST /job/complete — driver marks job delivered + attaches proof
+// Does NOT fire fee. Sends customer an SMS asking them to confirm receipt.
+// Fee fires when customer calls /job/confirm.
+router.post('/job/complete', express.json(), async (req, res) => {
+  if (!process.env.LOCAL_INTEL_DB_URL) return res.status(503).json({ error: 'no_db' });
+  const { job_id, acceptor_wallet, proof } = req.body || {};
+  if (!job_id || !acceptor_wallet) return res.status(400).json({ error: 'job_id + acceptor_wallet required' });
+  try {
+    const db   = require('./lib/db');
+    const rows = await db.query(
+      `UPDATE jobs
+       SET status='completed', proof=$1, completed_at=NOW()
+       WHERE id=$2 AND acceptor_wallet=$3 AND status='accepted'
+       RETURNING id, title, status, proof, completed_at, budget_usd,
+                 delivery_address, poster_phone, confirm_token, meta`,
+      [proof || null, job_id, acceptor_wallet]
+    );
+    if (rows.length === 0) {
+      return res.status(409).json({ error: 'Job not found, already completed, or wrong wallet' });
+    }
+    const _j   = rows[0];
+    const maps = buildMapLinks(_j.delivery_address);
+
+    // Notify customer to confirm — fee is gated on their tap/reply
+    if (_j.poster_phone) {
+      const confirmUrl =
+        `https://www.thelocalintel.com/jobs/${_j.id}/confirm?token=${_j.confirm_token}`;
+      const body =
+        `Your delivery is complete! Tap to confirm receipt and release payment:\n` +
+        `${confirmUrl}\n` +
+        `Or reply CONFIRM to release.`;
+      sendRfqSms(toE164(_j.poster_phone), body).catch(e =>
+        console.warn('[job/complete] customer confirm SMS failed:', e.message)
+      );
+    }
+
+    res.json({
+      ok:   true,
+      job:  { ..._j, maps },
+      note: 'Marked complete. Fee releases when customer confirms via /job/confirm.',
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 
 // ─── PIPELINE CRON ENDPOINT ──────────────────────────────────────────────────
 // POST /api/local-intel/admin/pipeline/reclassify
