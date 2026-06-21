@@ -943,14 +943,14 @@ function buildNarrative(results, nlIntent, meta) {
     if (taskClass === 'RFQ') {
       const cat = category ?? group;
       if ((meta?.businesses_notified ?? 0) > 0) {
-        return `We notified ${meta.businesses_notified} ${cat}(s) in your area about your request. You'll hear back shortly.`;
+        return `Sent to ${meta.businesses_notified} ${cat}${meta.businesses_notified !== 1 ? 's' : ''} near you — you'll hear back shortly.`;
       }
-      return `We don't have ${cat}s in our network for this area yet — we're working on it.`;
+      return `No ${cat}s in our network for that area yet — we're on it.`;
     }
 
     if (count === 0) {
-      if (meta?.gap) return `No results found yet — we've flagged this as a gap in our network and we're on it.`;
-      return `No results found for that search in your area.`;
+      if (meta?.gap) return `Nothing found yet — flagged as a gap and we're working on it.`;
+      return `Nothing came up for that near you.`;
     }
 
     const timePhrase = temporal === 'open_now'   ? ', open right now'
@@ -975,19 +975,19 @@ function buildNarrative(results, nlIntent, meta) {
         .map(s => String(s).toLowerCase());
       const topMatchesCuisine = fields.some(f => f.includes(cuisineLc));
       if (topMatchesCuisine) {
-        return `Found ${count} ${cuisine} restaurant${count !== 1 ? 's' : ''}${timePhrase} near you${howPhrase}.`;
+        return `${count} ${cuisine} spot${count !== 1 ? 's' : ''}${timePhrase} near you.`;
       }
       // Top result doesn't match the cuisine — fall through to a neutral
       // narrative rather than claiming N "<cuisine> restaurants".
     }
     if (category) {
-      return `Found ${count} ${category}${count !== 1 ? 's' : ''}${timePhrase} near you${howPhrase}.`;
+      return `${count} ${category}${count !== 1 ? 's' : ''}${timePhrase} near you.`;
     }
     const groupLabel = group === 'food' ? 'restaurant'
       : group === 'bar' ? 'bar'
       : group === 'health' ? 'health provider'
       : 'business';
-    return `Found ${count} ${groupLabel}${count !== 1 ? 's' : ''}${timePhrase} near you${howPhrase}.`;
+    return `${count} ${groupLabel}${count !== 1 ? 's' : ''}${timePhrase} near you.`;
   } catch (_) {
     return null;
   }
@@ -8388,8 +8388,8 @@ router.get('/search', harvestGuard, async (req, res) => {
             : ' in Northeast Florida';
           // B146: narrowing turn gets a different opener
           const intro = isNarrowing
-            ? `Narrowed to ${providerCount} ${catLabel} provider${providerCount > 1 ? 's' : ''}${areaStr}`
-            : `Found ${providerCount} verified ${catLabel} provider${providerCount > 1 ? 's' : ''}${areaStr}`;
+            ? `Got it — narrowed to ${providerCount} ${catLabel}${providerCount > 1 ? 's' : ''}${areaStr}`
+            : `${providerCount} ${catLabel}${providerCount > 1 ? 's' : ''} near you${areaStr}`;
           // Browsable categories (restaurant, cafe, beauty) show a set — don't spotlight one business.
           // Service categories (plumber, hvac, electrician) highlight the top match.
           const _isBrowsableCat = ['restaurant','fast_food','casual_dining','fine_dining',
@@ -8399,9 +8399,9 @@ router.get('/search', harvestGuard, async (req, res) => {
 
           // B150: direct contact inline — only for service categories with a clear top match
           const directContact = (!_isBrowsableCat && (topPhone || topWeb))
-            ? ` You can reach ${topName} directly` +
-              (topPhone ? ` at ${topPhone}` : '') +
-              (topWeb   ? `${topPhone ? ' or' : ''} at ${topWeb}` : '') + '.'
+            ? ` Top match is ${topName}` +
+              (topPhone ? ` — ${topPhone}` : '') +
+              (topWeb   ? `${topPhone ? ' or ' : ' — '}${topWeb}` : '') + '.'
             : '';
 
           // CTA tail: rfq/appointment get a prompt; reservation/browsable just show results
@@ -8410,18 +8410,19 @@ router.get('/search', harvestGuard, async (req, res) => {
             : '';
 
           srNarrative =
-            `${intro}${jobCode ? ' — request logged as Job ' + jobCode + '.' : '.'}${directContact}${ctaTail}`;
+            `${intro}${jobCode ? ` — logged as Job ${jobCode}.` : '.'}${directContact}${ctaTail}`;
         } else if (resolvedCat) {
           const noResultIntro = resolvedSubLabel
             ? `No verified ${catLabel} providers found${resolvedZip ? ' in ' + resolvedZip + ' or nearby ZIPs' : ''} yet`
             : `No verified ${catLabel} provider${resolvedZip ? ' in ' + resolvedZip + ' or nearby ZIPs' : ''} yet`;
           srNarrative =
-            `${noResultIntro}${jobCode ? ' — but we logged your request as Job ' + jobCode + '.' : '.'} ` +
-            `Leave your contact info below and we'll reach out when one becomes available.`;
+            `Nothing in our network for that yet${resolvedZip ? ' near ' + resolvedZip : ''}` +
+            `${jobCode ? ` — logged as Job ${jobCode}.` : '.'} ` +
+            `Drop your info below and we'll match you when someone becomes available.`;
         } else {
           srNarrative =
-            `We heard your request but couldn't match it to a service category yet. ` +
-            `Leave your email or phone number and describe what you need — we'll route it to the right provider.`;
+            `Not sure what category that falls under — describe what you need and drop your contact info. ` +
+            `We'll get it to the right person.`;
         }
 
         // B146: store this turn in conversation thread so next query can narrow further
@@ -8546,7 +8547,7 @@ router.get('/search', harvestGuard, async (req, res) => {
       return res.json({
         ok: true, total: 0, returned: 0, results: [],
         type: 'out_of_scope',
-        narrative: "That's a bit outside my lane — I'm built for finding local Florida businesses. Try asking me for a restaurant, landscaper, doctor, or any service you need nearby.",
+        narrative: "That one's outside my lane — I handle local Florida businesses. Try asking for a restaurant, landscaper, doctor, or any service near you.",
         notable_businesses: [], latency_ms: Date.now() - t0,
       });
     }
@@ -8637,7 +8638,7 @@ router.get('/search', harvestGuard, async (req, res) => {
             intent: null,
             type: 'name_not_found',
             answer: `I couldn't find '${q}' near you. Try a different name or describe what you need.`,
-            narrative: `I couldn't find '${q}' near you. Try a different name or describe what you need.`,
+            narrative: `Nothing came up for "${q}" near you. Try describing what you need instead of a business name.`,
             notable_businesses: [], latency_ms: Date.now() - t0,
           });
         }
@@ -9085,7 +9086,7 @@ router.get('/search', harvestGuard, async (req, res) => {
     if (!narrative && results.length === 0 && (q || cat)) {
       const term = cat ? cat.replace(/_/g, ' ') : q;
       const areaStr = zip ? ` in ${zip}` : ' in this area';
-      narrative = `No results found for "${term}"${areaStr}. Try a different search or call (904) 506-7476 for help.`;
+      narrative = `No results for "${term}"${areaStr}. Try describing what you need — or call (904) 506-7476 and we'll help.`;
     }
 
     return res.json({
