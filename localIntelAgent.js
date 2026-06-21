@@ -8211,17 +8211,25 @@ router.get('/search', harvestGuard, async (req, res) => {
           const intro = isNarrowing
             ? `Narrowed to ${providerCount} ${catLabel} provider${providerCount > 1 ? 's' : ''}${areaStr}`
             : `Found ${providerCount} verified ${catLabel} provider${providerCount > 1 ? 's' : ''}${areaStr}`;
-          // B150: direct contact info inline — human can call right now without waiting
-          const directContact = topPhone || topWeb
+          // Browsable categories (restaurant, cafe, beauty) show a set — don't spotlight one business.
+          // Service categories (plumber, hvac, electrician) highlight the top match.
+          const _isBrowsableCat = ['restaurant','fast_food','casual_dining','fine_dining',
+            'deli','seafood','mexican','bbq','steakhouse','sandwich','bar_dining',
+            'fast_casual_mexican','cafe','pizza','beauty','hair','barbershop',
+          ].includes(resolvedCat);
+
+          // B150: direct contact inline — only for service categories with a clear top match
+          const directContact = (!_isBrowsableCat && (topPhone || topWeb))
             ? ` You can reach ${topName} directly` +
               (topPhone ? ` at ${topPhone}` : '') +
               (topWeb   ? `${topPhone ? ' or' : ''} at ${topWeb}` : '') + '.'
             : '';
-          // CTA-aware narrative: rfq gets bid prompt, appointment gets schedule prompt,
-          // reservation gets reserve prompt, info just shows results
-          const ctaTail = ctaPrompt
+
+          // CTA tail: rfq/appointment get a prompt; reservation/browsable just show results
+          const ctaTail = (ctaType === 'rfq' || ctaType === 'appointment') && ctaPrompt
             ? ` ${ctaPrompt}`
-            : ` Leave your contact info below and we\'ll connect you directly.`;
+            : '';
+
           srNarrative =
             `${intro}${jobCode ? ' — request logged as Job ' + jobCode + '.' : '.'}${directContact}${ctaTail}`;
         } else if (resolvedCat) {
