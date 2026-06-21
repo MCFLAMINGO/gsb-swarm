@@ -8270,7 +8270,7 @@ router.get('/search', harvestGuard, async (req, res) => {
           cta_prompt:   ctaPrompt  || null,      // human-readable CTA question for the frontend
           total:        providerCount,
           narrative:    srNarrative,
-          contact_prompt: ctaType !== 'info',  // show contact widget for actionable CTAs
+          contact_prompt: ctaType === 'rfq' || ctaType === 'appointment',  // reservation = direct to business, not agent-mediated
           results:    topProviders.map(r => ({
             business_id: r.business_id || null,
             name:       r.name,
