@@ -8056,8 +8056,8 @@ router.get('/search', harvestGuard, async (req, res) => {
         // narrow results to providers that mention the specialty.
         const _svcConcept = detectConcept(raw || resolvedCat || '') || 'GENERAL';
         const _svcRanked  = buildConceptOrderBy(_svcConcept, 'zs', 'b');
-        const SVC_PROVIDER_QUERY = `SELECT b.name, b.zip, b.address, b.city, b.phone, b.website, b.category, b.lat, b.lon,
-                    b.confidence_score, b.claimed_at, b.wallet`;
+        const SVC_PROVIDER_QUERY = `SELECT b.business_id, b.name, b.zip, b.address, b.city, b.phone, b.website, b.category, b.lat, b.lon,
+                    b.confidence_score, b.claimed_at, b.wallet, b.order_form`;
         let providerCount = 0;
         let topProviders  = [];
         let actualZip     = resolvedZip; // may change to a neighbor ZIP
@@ -8093,7 +8093,13 @@ router.get('/search', harvestGuard, async (req, res) => {
               const kw = resolvedSubLabel || resolvedSubCat;
               params.push(kw, `%${kw}%`, `%${kw}%`);
             }
-            params.push(5);
+            // Browsable categories (food, cafe, beauty) get a bigger card deck
+            const _isBrowsable = ['restaurant','fast_food','casual_dining','fine_dining',
+              'deli','seafood','mexican','bbq','steakhouse','sandwich','bar_dining',
+              'fast_casual_mexican','cafe','pizza','beauty','hair','barbershop',
+            ].includes(resolvedCat);
+            const _svcLimit = _isBrowsable ? 12 : 5;
+            params.push(_svcLimit);
             return db.query(
               SVC_PROVIDER_QUERY + ` FROM businesses b
                LEFT JOIN zip_signals zs ON zs.zip = b.zip
@@ -8266,6 +8272,7 @@ router.get('/search', harvestGuard, async (req, res) => {
           narrative:    srNarrative,
           contact_prompt: ctaType !== 'info',  // show contact widget for actionable CTAs
           results:    topProviders.map(r => ({
+            business_id: r.business_id || null,
             name:       r.name,
             zip:        r.zip,
             address:    r.address  || '',
