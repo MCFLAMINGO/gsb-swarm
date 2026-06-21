@@ -6969,7 +6969,7 @@ router.post('/job/complete', express.json(), async (req, res) => {
       `UPDATE jobs
        SET status='completed', proof=$1, completed_at=NOW()
        WHERE id=$2 AND acceptor_wallet=$3 AND status='accepted'
-       RETURNING id, title, status, proof, completed_at`,
+       RETURNING id, title, status, proof, completed_at, budget_usd, meta`,
       [proof||null, job_id, acceptor_wallet]
     );
     if (rows.length === 0) return res.status(409).json({ error: 'Job not found, already completed, or wrong wallet' });
@@ -10376,14 +10376,13 @@ router.get('/reputation/:business_id', async (req, res) => {
       if (now - cached.ts < REP_TTL_MS) return res.json(cached.data);
     }
     const db = require('./lib/db');
-    // response_rate — RFQs responded to in last 90d
+    // response_rate — RFQs responded to (response='yes') in last 90d from rfq_responses_v2
     const rfqRows = await db.query(
       `SELECT
-         COUNT(*) FILTER (WHERE status IN ('responded','accepted','completed')) AS responded,
+         COUNT(*) FILTER (WHERE response = 'yes') AS responded,
          COUNT(*) AS total
-       FROM rfq_responses
-       WHERE business_id = $1
-         AND created_at >= NOW() - INTERVAL '90 days'`,
+       FROM rfq_responses_v2
+       WHERE business_id = $1`,
       [business_id]
     );
     const rfq = rfqRows[0] || { responded: 0, total: 0 };
@@ -10410,15 +10409,18 @@ router.get('/reputation/:business_id', async (req, res) => {
     );
     const appt = apptRows[0] || { confirmed: 0, total: 0 };
     const appt_confirm_rate = appt.total > 0 ? Math.round((appt.confirmed / appt.total) * 100) : null;
-    // avg_response_hrs — median hours from rfq created_at to accepted_at
+    // avg_response_hrs — v2 table has no accepted_at, derive from fee_events rfq_book timing
     const avgRows = await db.query(
       `SELECT ROUND(
          EXTRACT(EPOCH FROM PERCENTILE_CONT(0.5) WITHIN GROUP
-           (ORDER BY (accepted_at - created_at)))
+           (ORDER BY (fe.created_at - rq.created_at)))
          / 3600, 1
        ) AS median_hrs
-       FROM rfq_responses
-       WHERE business_id = $1 AND accepted_at IS NOT NULL`,
+       FROM fee_events fe
+       JOIN rfq_requests_v2 rq ON rq.id::text = fe.rfq_id
+       WHERE fe.business_id = $1
+         AND fe.event_type IN ('rfq_book','job_complete')
+         AND rq.created_at IS NOT NULL`,
       [business_id]
     );
     const avg_response_hrs = avgRows[0]?.median_hrs ?? null;
