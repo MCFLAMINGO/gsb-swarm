@@ -285,6 +285,179 @@ const RULES = [
   { p: /india\s*(?:restaurant|cuisine|kitchen|grill|bistro)|gateway\s*to\s*india|taste\s*of\s*india/i, category: 'asian', group: 'food' },
   { p: /studio\s*(?:plus|suites?|apartments?)/i,                                      category: 'apartment_complex', group: 'real_estate' },
 
+  // ── GAP-FILL RULES (added from miss-log analysis 2026-06-21) ─────────────────
+  // These patterns appeared frequently in the misses report and were not caught
+  // by any prior rule. Ordered specific → broad within each group.
+
+  // HOMEOWNERS / CONDO ASSOCIATIONS — very common in FL zips, never consumer-facing
+  { p: /homeowners?\s*association|homeowners?\s*assoc|condominium\s*association|owners?\s*association|community\s*association|\bhoa\b/i, category: 'property_services', group: 'services' },
+
+  // HOLDING COMPANIES — numbered-address LLCs and explicit holding entities
+  { p: /^\d{3,5}\s+[a-z]+.*(?:llc|inc|corp)\s*$/i,                                    category: 'holding_company',   group: 'services' },
+  { p: /holdings?\s*(?:llc|inc|corp|group|co\.?)?\s*$/i,                              category: 'holding_company',   group: 'services' },
+
+  // VACATION / SHORT-TERM RENTAL management
+  { p: /vacation\s*(?:rental|management|homes?|properties)|beach\s*(?:rental|vacations)|island\s*(?:rental|vacation)|resort\s*rental/i, category: 'vacation_rental', group: 'hospitality' },
+  { p: /(?:amelia|ponte\s*vedra|nocatee|jax\s*beach).*(?:rental|vacation|beach\s*house)/i, category: 'vacation_rental', group: 'hospitality' },
+
+  // CHIROPRACTIC — full word not always present
+  { p: /chiro(?:practic|practor)?\b/i,                                                  category: 'chiropractic',      group: 'health' },
+
+  // MENTAL HEALTH / THERAPY — counseling, LMFT, LCSW, therapist solo practices
+  { p: /counseling|lmft\b|lcsw\b|licensed\s*(?:clinical|mental)|behavioral\s*(?:health|wellness)|psychotherapy|talk\s*therapy/i, category: 'mental_health', group: 'health' },
+  { p: /psychiatr(?:y|ist|ic)|psychology|psychologist/i,                               category: 'mental_health',     group: 'health' },
+
+  // DOULA / MIDWIFE / PELVIC HEALTH — missed entirely by old rules
+  { p: /doula\b|midwif|pelvic\s*(?:health|floor|pt)/i,                                 category: 'clinic',            group: 'health' },
+
+  // APPRAISAL — real estate appraisers
+  { p: /appraisal\s*(?:service|group|associates?)|appraiser\b/i,                       category: 'real_estate',       group: 'real_estate' },
+
+  // TITLE COMPANY
+  { p: /title\s*(?:company|group|agency|services?|closing)|\btitle\b.*(?:co\.?|closing)/i, category: 'title_company', group: 'real_estate' },
+
+  // LIQUOR STORE
+  { p: /liquor\s*(?:store|shop|mart|outlet)|wine\s*(?:shop|store|merchant)|spirits\s*(?:shop|store)/i, category: 'liquor_store', group: 'retail' },
+
+  // FLORIST
+  { p: /florist|flower\s*(?:shop|studio|boutique|market)|floral\s*(?:design|studio|boutique)/i, category: 'florist', group: 'retail' },
+
+  // JEWELRY
+  { p: /jewelry|jewellery|jeweler|gemstone\s*(?:store|shop)|diamond\s*(?:store|boutique)/i, category: 'jewelry',    group: 'retail' },
+
+  // ART GALLERY / STUDIO
+  { p: /art\s*(?:gallery|studio|centre|center)|gallery\b(?!.*(?:mall|shopping))/i,    category: 'art_gallery',       group: 'retail' },
+
+  // FISHING CHARTER / BOAT TOURS — gap: old rule was only "charter boat|fishing charter"
+  { p: /fishing\s*(?:guide|trip|adventure|excursion)|sportfishing|deep\s*sea\s*fish/i, category: 'charter',          group: 'services' },
+  { p: /sail(?:ing)?\s*(?:charter|tour|excursion|adventure|school)/i,                  category: 'charter',           group: 'services' },
+
+  // BIKE RENTAL / OUTDOOR TOUR
+  { p: /bike\s*(?:rental|tour|shop|adventure)|bicycle\s*(?:rental|shop|tour)/i,        category: 'entertainment',     group: 'entertainment' },
+  { p: /outdoor\s*(?:adventure|tour|excursion|activities)|eco\s*tour/i,                category: 'entertainment',     group: 'entertainment' },
+
+  // MUSEUM / HISTORY — Amelia Island Museum of History etc.
+  { p: /museum\s*of|history\s*(?:museum|center|centre)|historical\s*(?:society|museum)/i, category: 'entertainment', group: 'entertainment' },
+
+  // AVIATION / FLYING CLUBS
+  { p: /aviation\s*(?:llc|inc|services?|club|school)|flying\s*club|flight\s*(?:school|training|academy)|pilot\s*training/i, category: 'transport', group: 'services' },
+
+  // TREE SERVICE — more specific than arborist (already in landscaping rule)
+  { p: /tree\s*(?:service|care|trimming|removal|surgery|cutting)|palm\s*trimming|stump\s*(?:grind|removal)/i, category: 'landscaping', group: 'construction' },
+
+  // PAINTING — broader catch ("painting LLC", "painting inc", "colors", "coat")
+  { p: /\bpaint(?:ing|er)?\b(?!.*(?:nail|mani|pedi))/i,                                category: 'painting',          group: 'construction' },
+
+  // PRESSURE WASHING — "gleaming exteriors", "clean coat" type names
+  { p: /\bexteriors?\b|exterior\s*(?:clean|wash|service)|soft\s*wash|roof\s*clean|house\s*wash/i, category: 'pressure_washing', group: 'construction' },
+
+  // PAVER / HARDSCAPE
+  { p: /paver\s*(?:repair|install|cleaning|sealing|company)|hardscape|patio\s*(?:install|paver)|driveway\s*paver/i, category: 'concrete', group: 'construction' },
+
+  // SHUTTER / HURRICANE PROTECTION
+  { p: /shutter\s*(?:company|install|service)|hurricane\s*(?:shutter|protect|panel|impact\s*window)/i, category: 'window_door', group: 'construction' },
+
+  // FOAM / COATINGS — roofing/insulation sub-type
+  { p: /spray\s*foam|foam\s*(?:insulation|roofing|coating)|polyurethane\s*foam/i,      category: 'insulation',        group: 'construction' },
+
+  // GUNSMITH / FIREARMS
+  { p: /gunsmith|firearms?\s*(?:dealer|sales|shop|llc)|gun\s*(?:shop|store|range)|shooting\s*range/i, category: 'retail', group: 'retail' },
+
+  // SHIPPING / COURIER
+  { p: /shipping\s*(?:company|llc|service)|courier\s*(?:service|company)|parcel\s*(?:delivery|service)|freight\s*(?:broker|agent)/i, category: 'shipping', group: 'services' },
+
+  // BOOKKEEPING / ACCOUNTING (not CPA firm — solo practitioners, consultants)
+  { p: /bookkeep(?:ing|er)|cloud\s*accounting|tax\s*consult|cpa\b|certified\s*public\s*account/i, category: 'accounting', group: 'professional' },
+
+  // CFO / BUSINESS ADVISORY
+  { p: /cfo\s*(?:advisory|services?|consulting)|fractional\s*cfo|business\s*(?:advisory|consult(?:ing|ant))|management\s*consult/i, category: 'financial_advisor', group: 'banking' },
+
+  // NONPROFIT / CHARITY / FOUNDATION
+  { p: /foundation\s*(?:inc|for|of)|charitable\s*(?:fund|trust|organization)|nonprofit\b|non-profit\b|501c/i, category: 'nonprofit', group: 'civic' },
+  { p: /rotary\s*club|lions\s*club|kiwanis|american\s*legion|veterans\s*(?:of\s*foreign\s*wars|auxiliary)/i, category: 'nonprofit', group: 'civic' },
+
+  // MEDIA / PODCAST / CONTENT CREATION
+  { p: /media\s*(?:llc|group|company|productions?|studio)|podcast\s*(?:studio|network)|content\s*(?:creation|creator|studio)/i, category: 'marketing_agency', group: 'professional' },
+
+  // TRAVEL AGENCY
+  { p: /travel\s*(?:agency|agent|group|co\b|consultant|advisor)|vacation\s*planner/i,  category: 'transport',         group: 'services' },
+
+  // CONCIERGE / PROPERTY MGMT SERVICES (not HOA)
+  { p: /concierge\s*(?:service|management|properties?)|property\s*(?:service|care|maintenance)|resort\s*service/i, category: 'property_services', group: 'services' },
+
+  // EVENT VENUE / PARTY RENTALS
+  { p: /event\s*venue|party\s*(?:rental|venue|planning|event)|bounce\s*house|inflatable\s*(?:rental|fun)|wedding\s*venue/i, category: 'event_venue', group: 'hospitality' },
+
+  // CATERING (standalone)
+  { p: /catering\s*(?:company|service|co\b)|caterer\b|personal\s*chef|private\s*chef/i, category: 'catering',         group: 'food' },
+
+  // ESTHETICS / SKIN CARE — FB Skin & Wellness, naturely esthetics etc.
+  { p: /esthetic(?:ian|s)?\b|skin\s*(?:care|studio|spa|bar|lab|wellness)|facial\s*(?:spa|studio|bar)|dermaplaning/i, category: 'aesthetics', group: 'health' },
+
+  // NAIL / WAXING
+  { p: /wax(?:ing)?\s*(?:studio|bar|salon)|sugaring|lash\s*(?:studio|bar|extensions)|brow\s*(?:studio|bar)/i, category: 'nail_salon', group: 'beauty' },
+
+  // PERSONAL TRAINING
+  { p: /personal\s*train(?:er|ing)|fitness\s*coach|strength\s*(?:train|coach)|athletic\s*train/i, category: 'gym', group: 'fitness' },
+
+  // NUTRITION / DIETITIAN
+  { p: /dietitian|nutritionist|nutrition\s*coach|weight\s*loss\s*(?:center|clinic|coach)/i, category: 'clinic',          group: 'health' },
+
+  // PEST / CRITTER CONTROL — broader than orkin/massey
+  { p: /critter\s*control|wildlife\s*(?:removal|control|management)|animal\s*(?:removal|control|trapping)/i, category: 'pest_control', group: 'construction' },
+
+  // HAULING / JUNK REMOVAL
+  { p: /junk\s*(?:removal|hauling)|trash\s*(?:hauling|removal)|debris\s*(?:removal|hauling)|dumpster\s*(?:rental|service)/i, category: 'property_services', group: 'services' },
+
+  // CAR WASH (standalone)
+  { p: /car\s*wash|auto\s*detail(?:ing)?\s*(?:studio|center|mobile)|mobile\s*detail(?:ing)?/i, category: 'car_wash', group: 'auto' },
+
+  // BACKFLOW TESTING — plumbing sub-type
+  { p: /backflow\b/i,                                                                    category: 'plumber',           group: 'construction' },
+
+  // LEAK DETECTION
+  { p: /leak\s*detection|water\s*leak\s*(?:repair|service)|pipe\s*leak/i,              category: 'plumber',           group: 'construction' },
+
+  // WELL / PUMP SERVICE
+  { p: /well\s*(?:pump|drilling|service|repair|install)|pump\s*(?:service|repair|install|well)/i, category: 'plumber', group: 'construction' },
+
+  // DEMOLITION
+  { p: /demolition\s*(?:company|contractor|service)|demo\s*(?:contractor|service)|structural\s*demo/i, category: 'general_contractor', group: 'construction' },
+
+  // RESTORATION — water/fire/mold damage
+  { p: /restoration\s*(?:company|service|specialist)|water\s*damage\s*(?:repair|restore)|fire\s*damage\s*restore|mold\s*(?:remediation|removal)/i, category: 'general_contractor', group: 'construction' },
+
+  // ENGINEERING / ARCHITECTURE — solo practitioners
+  { p: /engineering\s*(?:services?|group|pllc|llc)|structural\s*engineer|civil\s*engineer|mechanical\s*engineer/i, category: 'architecture', group: 'real_estate' },
+  { p: /architect(?:ure)?\s*(?:studio|firm|group|pllc|llc)|design\s*build\s*(?:firm|studio)/i, category: 'architecture', group: 'real_estate' },
+
+  // HOME STAGING
+  { p: /home\s*stag(?:ing|er)|staging\s*company|home\s*furnishing\s*(?:stag|rental)/i, category: 'interior_design',   group: 'construction' },
+
+  // COACHING (life/business/executive — not fitness)
+  { p: /(?:life|executive|business|leadership|career|success|mindset)\s*coach(?:ing)?/i, category: 'staffing',         group: 'professional' },
+
+  // HR / STAFFING CONSULTING
+  { p: /hr\s*(?:consult|partner|solution|service)|human\s*resources?\s*(?:consult|partner)/i, category: 'staffing',    group: 'professional' },
+
+  // INSURANCE CONSULTING (not carrier — brokers, adjusters)
+  { p: /insurance\s*consult|public\s*adjuster|claims?\s*adjuster|claim\s*consult/i,   category: 'insurance',         group: 'banking' },
+
+  // SEAFOOD MARKET (not restaurant — retail fish)
+  { p: /seafood\s*market|fish\s*market|fishmonger/i,                                   category: 'grocery',           group: 'grocery' },
+
+  // BREWERY / DISTILLERY — broader catch
+  { p: /distillery|winery\b|wine\s*(?:tasting|tour)|meadery/i,                         category: 'brewery',           group: 'food' },
+
+  // FOOD TRUCK / MOBILE FOOD
+  { p: /food\s*truck|mobile\s*(?:food|kitchen|eatery)|pop-?up\s*(?:kitchen|restaurant)/i, category: 'restaurant',     group: 'food' },
+
+  // TIMBER / LOGGING / AGRICULTURE
+  { p: /timber\s*(?:company|llc|inc|harvesting)|logging\b|tree\s*farm|cattle\s*farm|horse\s*farm|equine\b/i, category: 'property_services', group: 'services' },
+
+  // NONPROFIT – civic / community outreach (broad safety net before LLC catch-all)
+  { p: /outreach\s*(?:inc|ministries|foundation|program)|community\s*outreach/i,       category: 'nonprofit',         group: 'civic' },
+
 ];
 
 // ─── PIPELINE FUNCTION ────────────────────────────────────────────────────────
