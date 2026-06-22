@@ -7368,7 +7368,7 @@ router.get('/admin/pipeline/category-repair/misses', async (req, res) => {
          COUNT(*) FILTER (WHERE llm_assigned IS NOT NULL)::int AS llm_resolved,
          COUNT(*) FILTER (WHERE llm_assigned IS NULL)::int     AS pending_llm,
          array_agg(DISTINCT llm_assigned) FILTER (WHERE llm_assigned IS NOT NULL) AS llm_decisions,
-         array_agg(name ORDER BY name LIMIT 8)           AS sample_names
+         (array_agg(name ORDER BY name))[1:8]             AS sample_names
        FROM category_repair_misses
        ${where}
        GROUP BY closest_rule_pattern, closest_rule_would_set
