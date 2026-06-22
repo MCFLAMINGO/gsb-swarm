@@ -11,6 +11,11 @@
  *   and fixes known cross-category mismatches (Country Club Real Estate →
  *   real_estate). Batches of 2,000. ~5 min total.
  *
+ *   MISS LOGGING: when a business is still in 'business'/'LocalBusiness'/
+ *   'uncategorized' after Pass 1 runs, we record it in category_repair_misses
+ *   with the closest matching rule (by token overlap) so engineers can see
+ *   which name patterns need new rules.
+ *
  * PASS 2 — LLM batch (Haiku, batches of 80 names)
  *   Targets rows STILL in 'business'/'LocalBusiness'/'uncategorized' AFTER
  *   Pass 1. Every row is a real registered Florida business — the name alone
@@ -18,6 +23,8 @@
  *   No suppression. No filtering by phone/address — Sunbiz registrations
  *   frequently omit contact info at import time; the name is the truth.
  *   Target ZIPs processed first. Self-throttles 50ms/batch.
+ *   Updates category_repair_misses.llm_assigned so we can see what the LLM
+ *   decided and compare against the rule that should have fired.
  *
  * WORKER CONTRACT:
  *   START → read Postgres → WORK only what needs fixing → write per-unit → END
@@ -141,20 +148,123 @@ function deriveGroup(cat) {
   return 'services';
 }
 
+// ── Ensure category_repair_misses table exists ────────────────────────────────
+async function ensureMissesTable() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS category_repair_misses (
+      id                   BIGSERIAL PRIMARY KEY,
+      business_id          UUID        NOT NULL,
+      name                 TEXT        NOT NULL,
+      zip                  TEXT,
+      prior_category       TEXT,
+      closest_rule_pattern TEXT,
+      closest_rule_would_set TEXT,
+      llm_assigned         TEXT,
+      created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (business_id)
+    )
+  `);
+  // Index for the misses report query
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_crm_closest_rule
+      ON category_repair_misses (closest_rule_pattern)
+      WHERE closest_rule_pattern IS NOT NULL
+  `);
+}
+
+// ── Find the closest rule that partially matched (token overlap) ──────────────
+// We tokenize the business name and test each rule's source string against
+// each token. The rule with the most token hits wins, even if the full regex
+// didn't fire. This tells engineers WHICH pattern came closest so they know
+// what to tweak.
+//
+// Returns { pattern: string, wouldSet: string } | null
+function closestRule(name) {
+  if (!RULES.length) return null;
+
+  const nameTokens = name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length > 2);  // skip short stop-words
+
+  if (!nameTokens.length) return null;
+
+  let bestScore  = 0;
+  let bestRule   = null;
+
+  for (const rule of RULES) {
+    // Pull the regex source and split into meaningful tokens
+    const ruleSource = rule.p.source
+      .toLowerCase()
+      .replace(/[\\^$.*+?()[\]{}|]/g, ' ')  // strip regex metacharacters
+      .split(/\s+/)
+      .filter(t => t.length > 2);
+
+    if (!ruleSource.length) continue;
+
+    // Count how many rule tokens appear in the name tokens
+    let score = 0;
+    for (const rt of ruleSource) {
+      if (nameTokens.some(nt => nt.includes(rt) || rt.includes(nt))) {
+        score++;
+      }
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestRule  = rule;
+    }
+  }
+
+  // Only report a hit if at least one token overlapped
+  if (!bestRule || bestScore === 0) return null;
+
+  return {
+    pattern:  bestRule.p.source.slice(0, 120),  // cap length for DB storage
+    wouldSet: bestRule.category,
+  };
+}
+
 // ── PASS 1: deterministic ─────────────────────────────────────────────────────
 async function pass1() {
   console.log('\n[Pass 1] Deterministic reclassification — all 614k active rows...');
   if (!RULES.length) {
     console.warn('[Pass 1] No rules loaded — skipping');
-    return { scanned: 0, updated: 0 };
+    return { scanned: 0, updated: 0, misses: 0 };
   }
 
   const BATCH = 2000;
-  let offset = 0, totalScanned = 0, totalUpdated = 0;
+  let offset = 0, totalScanned = 0, totalUpdated = 0, totalMisses = 0;
+
+  // Miss buffer — flush per batch to avoid huge single inserts
+  const missBuf = [];
+
+  const flushMisses = async () => {
+    if (!missBuf.length || DRY_RUN) return;
+    // Upsert: if we've already seen this business from a prior run, update the pattern
+    await db.query(
+      `INSERT INTO category_repair_misses
+         (business_id, name, zip, prior_category, closest_rule_pattern, closest_rule_would_set, llm_assigned, created_at)
+       SELECT m.business_id, m.name, m.zip, m.prior_category,
+              m.closest_rule_pattern, m.closest_rule_would_set, NULL, NOW()
+       FROM jsonb_to_recordset($1::jsonb) AS m(
+         business_id uuid, name text, zip text, prior_category text,
+         closest_rule_pattern text, closest_rule_would_set text
+       )
+       ON CONFLICT (business_id) DO UPDATE
+         SET closest_rule_pattern   = EXCLUDED.closest_rule_pattern,
+             closest_rule_would_set = EXCLUDED.closest_rule_would_set,
+             prior_category         = EXCLUDED.prior_category,
+             created_at             = NOW()`,
+      [JSON.stringify(missBuf)]
+    );
+    missBuf.length = 0;
+  };
 
   while (true) {
     const rows = await db.query(
-      `SELECT business_id, name, category, category_group
+      `SELECT business_id, name, category, category_group, zip
        FROM businesses
        WHERE status = 'active'
        ORDER BY business_id
@@ -183,13 +293,29 @@ async function pass1() {
       if (matched) continue;
 
       // General rules
+      let ruleHit = false;
       for (const rule of RULES) {
         if (rule.p.test(name)) {
           if (biz.category !== rule.category || biz.category_group !== rule.group) {
             updates.push({ id: biz.business_id, cat: rule.category, grp: rule.group });
           }
+          ruleHit = true;
           break;
         }
+      }
+
+      // Miss: still in a bad category and no rule fired → find closest rule and log it
+      if (!ruleHit && ['business', 'LocalBusiness', 'uncategorized'].includes(biz.category)) {
+        const closest = closestRule(name);
+        missBuf.push({
+          business_id:             biz.business_id,
+          name,
+          zip:                     biz.zip || null,
+          prior_category:          biz.category,
+          closest_rule_pattern:    closest ? closest.pattern  : null,
+          closest_rule_would_set:  closest ? closest.wouldSet : null,
+        });
+        totalMisses++;
       }
     }
 
@@ -210,8 +336,11 @@ async function pass1() {
       );
     }
 
+    // Flush miss buffer every batch
+    await flushMisses();
+
     totalUpdated += updates.length;
-    process.stdout.write(`\r[Pass 1] scanned: ${totalScanned.toLocaleString()} | updated: ${totalUpdated.toLocaleString()}`);
+    process.stdout.write(`\r[Pass 1] scanned: ${totalScanned.toLocaleString()} | updated: ${totalUpdated.toLocaleString()} | misses logged: ${totalMisses.toLocaleString()}`);
     offset += BATCH;
   }
 
@@ -223,8 +352,8 @@ async function pass1() {
     );
   }
 
-  console.log(`\n[Pass 1] Done — scanned: ${totalScanned.toLocaleString()} | updated: ${totalUpdated.toLocaleString()}`);
-  return { scanned: totalScanned, updated: totalUpdated };
+  console.log(`\n[Pass 1] Done — scanned: ${totalScanned.toLocaleString()} | updated: ${totalUpdated.toLocaleString()} | misses logged: ${totalMisses.toLocaleString()}`);
+  return { scanned: totalScanned, updated: totalUpdated, misses: totalMisses };
 }
 
 // ── PASS 2: LLM batch ─────────────────────────────────────────────────────────
@@ -327,7 +456,7 @@ ${nameList}`;
         continue;
       }
 
-      // Write back per-unit (worker contract)
+      // Write back per-unit (worker contract) + update miss log
       for (let j = 0; j < batch.length; j++) {
         const biz = batch[j];
         let   cat = (categories[j] || '').trim().toLowerCase().replace(/\s+/g, '_');
@@ -342,6 +471,13 @@ ${nameList}`;
                WHERE business_id = $1`,
               [biz.business_id]
             );
+            // Record LLM decision in miss log (if the row was there)
+            await db.query(
+              `UPDATE category_repair_misses
+               SET llm_assigned = 'holding_company'
+               WHERE business_id = $1`,
+              [biz.business_id]
+            ).catch(() => {});  // non-fatal if row wasn't a miss
           }
           suppressed++;
           continue;
@@ -371,6 +507,14 @@ ${nameList}`;
              WHERE business_id = $3`,
             [cat, group, biz.business_id]
           );
+          // Update miss log with what the LLM decided — so engineers can see
+          // "closest rule would have set X, but LLM decided Y" pattern
+          await db.query(
+            `UPDATE category_repair_misses
+             SET llm_assigned = $1
+             WHERE business_id = $2`,
+            [cat, biz.business_id]
+          ).catch(() => {});  // non-fatal if row wasn't a miss
         }
         classified++;
       }
@@ -406,6 +550,13 @@ async function run() {
   const t0 = Date.now();
   console.log(`[categoryRepairWorker] start — pass: ${RUN_PASS} | dry_run: ${DRY_RUN} | zips: ${ZIP_ONLY || 'all'}`);
 
+  // Ensure miss-log table exists before any pass runs
+  try {
+    await ensureMissesTable();
+  } catch (e) {
+    console.warn('[categoryRepairWorker] ensureMissesTable failed (non-fatal):', e.message);
+  }
+
   const results = {};
 
   if (RUN_PASS === 'all' || RUN_PASS === '1') {
@@ -424,12 +575,13 @@ async function run() {
     await db.query(
       `INSERT INTO pipeline_runs
          (pipeline, started_at, finished_at, total_scanned, matched, unmatched, notes)
-       VALUES ($1, $2, NOW(), $3, $4, 0, $5)`,
+       VALUES ($1, $2, NOW(), $3, $4, $5, $6)`,
       [
         'categoryRepairWorker',
         new Date(t0),
         (results.pass1?.scanned || 0),
         (results.pass1?.updated || 0) + (results.pass2?.classified || 0),
+        (results.pass1?.misses  || 0),
         JSON.stringify({ dry_run: DRY_RUN, pass: RUN_PASS, elapsed_s: elapsed, ...results }),
       ]
     );

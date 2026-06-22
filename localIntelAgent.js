@@ -7323,6 +7323,79 @@ router.post('/admin/pipeline/category-repair', express.json(), async (req, res) 
   });
 });
 
+// GET /api/local-intel/admin/pipeline/category-repair/misses
+// Returns name patterns that Pass 1 rules couldn't classify, grouped by frequency.
+// Use this to write new deterministic rules and shrink LLM dependency over time.
+// Query params:
+//   limit=N            — top N patterns (default 100)
+//   zip=32082,32081    — filter to specific ZIPs
+//   no_llm=true        — only rows where LLM hasn't decided yet
+//   closest_rule=X     — filter to a specific closest_rule_pattern (partial match)
+router.get('/admin/pipeline/category-repair/misses', async (req, res) => {
+  try {
+    const db     = require('./lib/db');
+    const limit  = Math.min(parseInt(req.query.limit  || '100', 10), 1000);
+    const zipRaw = req.query.zip;
+    const noLlm  = req.query.no_llm === 'true';
+    const ruleFilter = req.query.closest_rule ? req.query.closest_rule.trim() : null;
+
+    const conditions = [];
+    const params     = [];
+
+    if (zipRaw) {
+      const zips = zipRaw.split(',').map(z => z.trim()).filter(Boolean);
+      params.push(zips);
+      conditions.push(`zip = ANY($${params.length}::text[])`);
+    }
+    if (noLlm) {
+      conditions.push('llm_assigned IS NULL');
+    }
+    if (ruleFilter) {
+      params.push(`%${ruleFilter}%`);
+      conditions.push(`closest_rule_pattern ILIKE $${params.length}`);
+    }
+
+    const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+
+    // Top name patterns grouped by closest_rule_would_set + closest_rule_pattern
+    // so engineers can see "plumber rule almost fired 847 times" at a glance
+    params.push(limit);
+    const grouped = await db.query(
+      `SELECT
+         closest_rule_pattern,
+         closest_rule_would_set,
+         COUNT(*)::int                                    AS miss_count,
+         COUNT(*) FILTER (WHERE llm_assigned IS NOT NULL)::int AS llm_resolved,
+         COUNT(*) FILTER (WHERE llm_assigned IS NULL)::int     AS pending_llm,
+         array_agg(DISTINCT llm_assigned) FILTER (WHERE llm_assigned IS NOT NULL) AS llm_decisions,
+         array_agg(name ORDER BY name LIMIT 8)           AS sample_names
+       FROM category_repair_misses
+       ${where}
+       GROUP BY closest_rule_pattern, closest_rule_would_set
+       ORDER BY miss_count DESC
+       LIMIT $${params.length}`,
+      params
+    );
+
+    // Total miss count for context
+    const totals = await db.query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE llm_assigned IS NOT NULL)::int AS llm_resolved,
+              COUNT(*) FILTER (WHERE llm_assigned IS NULL)::int     AS pending_llm
+       FROM category_repair_misses`
+    );
+
+    res.json({
+      summary: totals[0] || { total: 0, llm_resolved: 0, pending_llm: 0 },
+      patterns: grouped,
+      hint: 'Use closest_rule_pattern + sample_names to write new Pass 1 rules. Once a rule fires, those rows disappear from this report.',
+    });
+  } catch (err) {
+    console.error('[category-repair/misses]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/local-intel/admin/pipeline/runs — view pipeline history + health trend
 router.get('/admin/pipeline/runs', async (req, res) => {
   try {
