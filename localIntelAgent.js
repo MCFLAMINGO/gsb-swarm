@@ -8703,6 +8703,42 @@ router.get('/search', harvestGuard, async (req, res) => {
           // ── McFlamingo pin: prepend to service results in 32082 ─────────────
           await applyMcflPin(provRows, resolvedZip || null, db, resolvedCat || null);
 
+          // ── service_tags: surface blank-slate B2B businesses by tag match ──────
+          // agent_routable=FALSE means: show as listing, route to contact_email only.
+          // We append these AFTER the normal results so ranked providers come first.
+          if (raw && raw.trim().length > 1) {
+            try {
+              const rawWords = raw.toLowerCase().split(/\s+/);
+              // Build an OR of ilike-style matches against each word in the query
+              // against the service_tags text[] column. We use unnest + ilike for simplicity.
+              const tagRows = await db.query(
+                `SELECT b.business_id, b.name, b.zip, b.address, b.city, b.phone,
+                        b.website, b.category, b.lat, b.lon, b.confidence_score,
+                        b.claimed_at, b.wallet, b.contact_email, b.sla_message,
+                        b.agent_routable, b.routing_type
+                   FROM businesses b
+                  WHERE b.status != 'inactive'
+                    AND b.service_tags IS NOT NULL
+                    AND EXISTS (
+                      SELECT 1 FROM unnest(b.service_tags) AS t
+                       WHERE $1 ILIKE '%' || t || '%' OR t ILIKE '%' || $1 || '%'
+                    )
+                    AND b.business_id != ALL($2::uuid[])
+                  ORDER BY (b.claimed_at IS NOT NULL) DESC, b.confidence_score DESC
+                  LIMIT 5`,
+                [raw.trim(),
+                 provRows.map(r => r.business_id).filter(Boolean).length
+                   ? provRows.map(r => r.business_id).filter(Boolean)
+                   : ['00000000-0000-0000-0000-000000000000']]
+              );
+              if (tagRows.length) {
+                provRows.push(...tagRows.map(r => ({ ...r, _from_service_tags: true })));
+              }
+            } catch (_tagErr) {
+              console.warn('[service_tags] lookup failed (non-fatal):', _tagErr.message);
+            }
+          }
+
           providerCount = provRows.length;
           topProviders  = provRows;
         }
@@ -8857,6 +8893,11 @@ router.get('/search', harvestGuard, async (req, res) => {
             accepts_appointments:  r.accepts_appointments === true,
             accepts_rfq:           r.accepts_rfq === true,
             rail_tier:             r.wallet ? 'surge' : r.order_form ? 'form' : r.phone ? 'phone' : 'rfq',
+            // Blank-slate B2B fields (agent_routable=FALSE) — frontend shows email CTA
+            agent_routable:        r.agent_routable === true,
+            contact_email:         r.contact_email  || null,
+            sla_message:           r.sla_message    || null,
+            from_service_tags:     r._from_service_tags === true,
           })),
           latency_ms: Date.now() - t0,
         });
