@@ -8672,14 +8672,25 @@ router.get('/search', harvestGuard, async (req, res) => {
         if (!resolvedCat && raw && raw.trim().length > 1) {
           try {
             const _validCats = [
-              'restaurant','pizza','bar','cafe','healthcare','clinic','plastic_surgery',
-              'beauty','beauty_salon','spa','massage','plumber','electrician','hvac',
-              'handyman','roofing','landscaping','cleaning','dry_cleaning','pest_control',
-              'locksmith','painting','auto_repair','car_wash','towing','gas_station',
-              'retail','clothes','grocery','pharmacy','convenience','hardware','alcohol',
+              // Food & dining
+              'restaurant','breakfast','brunch','pizza','bar','cafe','bakery',
+              'sandwich','deli','fast_food','seafood','mexican','bbq','steakhouse',
+              'bar_dining','fast_casual_mexican','dessert','ice_cream','catering',
+              // Health
+              'healthcare','clinic','dentist','dental','plastic_surgery',
+              'optician','veterinary','pharmacy','gym',
+              // Beauty
+              'beauty','beauty_salon','spa','massage',
+              // Home services
+              'plumber','electrician','hvac','handyman','roofing','landscaping',
+              'cleaning','dry_cleaning','pest_control','locksmith','painting',
+              // Auto
+              'auto_repair','car_wash','towing','gas_station',
+              // Retail & finance
+              'retail','clothes','grocery','convenience','hardware','alcohol',
               'law_firm','accountant','insurance_agency','finance','bank','real_estate',
-              'gym','hotel','veterinary','florist','tattoo','storage','jewelry','task',
-              'dentist','dental','optician','entertainment',
+              // Other
+              'hotel','florist','tattoo','storage','jewelry','entertainment','task',
             ].join(', ');
             const _llmRes = await fetch('https://api.anthropic.com/v1/messages', {
               method: 'POST',
