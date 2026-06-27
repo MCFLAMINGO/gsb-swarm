@@ -3841,7 +3841,9 @@ router.get('/surge/menu/:id', async (req, res) => {
 
 // ── POST /api/local-intel/surge/order — place order + send SMS payment link ──
 router.post('/surge/order', express.json(), async (req, res) => {
-  const { business_id, sunbiz_id, customer_phone, order_text, jurisdiction_code } = req.body || {};
+  const { business_id, sunbiz_id, customer_phone, order_text, jurisdiction_code, zip } = req.body || {};
+  const callerId  = req.headers['x-agent-id'] || (req.headers['x-api-key'] || '').slice(0, 8) || req.ip || 'anon';
+  const sessionZip = zip || null;
   const lookupId = business_id || sunbiz_id;
   if (!lookupId)   return res.status(400).json({ error: 'business_id or sunbiz_id required' });
   if (!order_text) return res.status(400).json({ error: 'order_text required' });
@@ -3850,8 +3852,8 @@ router.post('/surge/order', express.json(), async (req, res) => {
     const isUuid = /^[0-9a-f-]{36}$/.test(lookupId);
     const [biz]  = await db.query(
       isUuid
-        ? `SELECT business_id FROM businesses WHERE business_id = $1 LIMIT 1`
-        : `SELECT business_id FROM businesses WHERE sunbiz_id = $1 OR sunbiz_doc_number = $1 LIMIT 1`,
+        ? `SELECT business_id, name FROM businesses WHERE business_id = $1 LIMIT 1`
+        : `SELECT business_id, name FROM businesses WHERE sunbiz_id = $1 OR sunbiz_doc_number = $1 LIMIT 1`,
       [lookupId]
     );
     if (!biz) return res.status(404).json({ error: 'business not found' });
@@ -3862,6 +3864,30 @@ router.post('/surge/order', express.json(), async (req, res) => {
       orderText:       order_text,
       jurisdictionCode: jurisdiction_code || 'US-FL',
     });
+
+    // ── Store order so webhook can route confirmation back to caller ───────────
+    if (result.ok && result.receiptId) {
+      db.query(
+        `INSERT INTO surge_orders
+           (receipt_id, business_id, business_name, caller_id, customer_phone,
+            session_zip, order_summary, total_usd, pay_url, status, sms_sent)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10)
+         ON CONFLICT (receipt_id) DO NOTHING`,
+        [
+          result.receiptId,
+          biz.business_id,
+          biz.name || null,
+          callerId,
+          customer_phone || null,
+          sessionZip,
+          result.summary  || order_text,
+          result.total    || null,
+          result.payUrl   || null,
+          result.sms?.sent === true,
+        ]
+      ).catch(e => console.error('[surge/order] surge_orders insert failed:', e.message));
+    }
+
     res.json(result);
   } catch (err) {
     console.error('[surge/order]', err.message);
@@ -3871,35 +3897,117 @@ router.post('/surge/order', express.json(), async (req, res) => {
 
 // ── POST /api/local-intel/surge/webhook — receive Surge payment status events ──
 router.post('/surge/webhook', express.raw({ type: '*/*' }), async (req, res) => {
+  // Always ACK 200 immediately — Surge will retry on non-200.
+  res.status(200).json({ ok: true });
   try {
     const deliveryId = req.headers['x-basaltsurge-delivery'];
-    const signature  = req.headers['x-basaltsurge-signature'];
     const rawBody    = req.body?.toString('utf8') || '';
     const payload    = JSON.parse(rawBody);
     const receiptId  = payload.receiptId || payload.id;
     const status     = payload.status;
 
     console.log(`[surge/webhook] delivery=${deliveryId} status=${status} receiptId=${receiptId}`);
+    if (!receiptId) return;
 
-    // TODO: look up order by receiptId, verify signature, update rfq_bookings, release escrow on paid
-    // For now: log and acknowledge
     const db = require('./lib/db');
-    await db.query(
-      `INSERT INTO rfq_gaps (raw_text, source, created_at)
-       VALUES ($1, 'surge_webhook', NOW())
-       ON CONFLICT DO NOTHING`,
-      [JSON.stringify({ receiptId, status, deliveryId })]
-    ).catch(() => {});
 
-    if (status === 'paid' || status === 'checkout_success') {
-      console.log(`[surge/webhook] PAYMENT CONFIRMED for receipt ${receiptId}`);
-      // TODO: release escrow, notify business, update booking status
+    // ── Look up the order we stored at place-time ────────────────────────
+    const [order] = await db.query(
+      `SELECT * FROM surge_orders WHERE receipt_id = $1 LIMIT 1`,
+      [receiptId]
+    );
+
+    const isPaid = status === 'paid' || status === 'checkout_success';
+
+    // Update status in surge_orders regardless
+    await db.query(
+      `UPDATE surge_orders
+       SET status = $1, confirmed_at = CASE WHEN $2 THEN NOW() ELSE confirmed_at END,
+           raw_webhook = $3
+       WHERE receipt_id = $4`,
+      [status, isPaid, JSON.stringify(payload), receiptId]
+    ).catch(e => console.error('[surge/webhook] update failed:', e.message));
+
+    if (!isPaid || !order) return;
+
+    // ── Confirmed payment — push back to conversation thread ─────────────
+    const { appendTurn } = require('./lib/conversationThread');
+    const confirmMsg = [
+      `✅ Order confirmed at ${order.business_name || 'the business'}.`,
+      order.order_summary ? `Items: ${order.order_summary}` : null,
+      order.total_usd    ? `Total: $${Number(order.total_usd).toFixed(2)}` : null,
+      order.pay_url      ? `Receipt: ${order.pay_url}` : null,
+    ].filter(Boolean).join('\n');
+
+    // Append into the caller's conversation thread so any
+    // subsequent query/agent context sees the confirmed order.
+    appendTurn({
+      callerId:     order.caller_id,
+      channel:      'surge',
+      role:         'system',
+      content:      confirmMsg,
+      zip:          order.session_zip,
+      businessId:   order.business_id,
+      businessName: order.business_name,
+      resolvesVia:  'surge_confirmed',
+    });
+
+    // ── SMS the customer if we have their phone and haven't yet ──────────
+    if (order.customer_phone) {
+      const sid   = process.env.TWILIO_ACCOUNT_SID;
+      const token = process.env.TWILIO_AUTH_TOKEN;
+      const from  = process.env.TWILIO_FROM_NUMBER || '+19045067476';
+      if (sid && token) {
+        const smsBody = [
+          `✅ Payment confirmed! Your order from ${order.business_name || 'the business'} is on its way.`,
+          order.order_summary || null,
+          order.pay_url ? `Receipt: ${order.pay_url}` : null,
+        ].filter(Boolean).join('\n');
+        fetch(
+          `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`,
+          {
+            method:  'POST',
+            headers: {
+              'Authorization': 'Basic ' + Buffer.from(`${sid}:${token}`).toString('base64'),
+              'Content-Type':  'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({ To: order.customer_phone, From: from, Body: smsBody }).toString(),
+          }
+        )
+        .then(r => r.json())
+        .then(r => {
+          if (!r.error_code) {
+            db.query(`UPDATE surge_orders SET sms_sent = TRUE WHERE receipt_id = $1`, [receiptId]).catch(() => {});
+            console.log(`[surge/webhook] confirmation SMS sent to ${order.customer_phone}`);
+          } else {
+            console.error('[surge/webhook] SMS error:', r.message);
+          }
+        })
+        .catch(e => console.error('[surge/webhook] SMS fetch error:', e.message));
+      }
     }
 
-    res.status(200).json({ ok: true });
+    console.log(`[surge/webhook] ✅ confirmed order ${receiptId} for caller ${order.caller_id}`);
   } catch (err) {
     console.error('[surge/webhook]', err.message);
-    res.status(200).json({ ok: true }); // always 200 to Surge
+  }
+});
+
+// ── GET /api/local-intel/surge/order/:receiptId — agent polls for order status ──
+router.get('/surge/order/:receiptId', async (req, res) => {
+  try {
+    const db = require('./lib/db');
+    const [order] = await db.query(
+      `SELECT receipt_id, business_name, order_summary, total_usd, pay_url,
+              status, confirmed_at, sms_sent, created_at
+       FROM surge_orders WHERE receipt_id = $1 LIMIT 1`,
+      [req.params.receiptId]
+    );
+    if (!order) return res.status(404).json({ error: 'order not found' });
+    res.json(order);
+  } catch (err) {
+    console.error('[surge/order/status]', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
