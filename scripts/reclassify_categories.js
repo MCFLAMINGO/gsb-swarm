@@ -18,8 +18,7 @@
 'use strict';
 const { Pool } = require('pg');
 const pool = new Pool({
-  connectionString: process.env.LOCAL_INTEL_DB_URL
-    // DB URL must be set via LOCAL_INTEL_DB_URL environment variable
+  connectionString: process.env.LOCAL_INTEL_DB_URL,
   ssl: { rejectUnauthorized: false },
 });
 
