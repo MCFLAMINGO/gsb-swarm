@@ -7416,18 +7416,28 @@ router.post('/admin/pipeline/category-repair', express.json(), async (req, res) 
   const pass    = req.query.pass    || req.body?.pass    || 'all';
   const zipOnly = req.query.zip     || req.body?.zip     || null;
   const dryRun  = req.query.dry_run || req.body?.dry_run || 'false';
-  res.json({ status: 'category repair started', pass, zip_only: zipOnly, dry_run: dryRun, ts: new Date().toISOString() });
-  setImmediate(async () => {
-    try {
-      process.env.REPAIR_PASS     = pass;
-      process.env.REPAIR_DRY_RUN = dryRun;
-      if (zipOnly) process.env.REPAIR_ZIP_ONLY = zipOnly;
-      const { run } = require('./workers/categoryRepairWorker');
-      await run();
-      console.log('[category-repair] complete');
-    } catch (err) {
-      console.error('[category-repair] FATAL:', err.message);
-    }
+  res.json({ status: 'category repair started', pass, zip_only: zipOnly || null, dry_run: dryRun, ts: new Date().toISOString() });
+  // Spawn as a child process — require() caches modules so re-triggering
+  // the same worker in the same process would no-op after the first call.
+  setImmediate(() => {
+    const { spawn } = require('child_process');
+    const env = {
+      ...process.env,
+      REPAIR_PASS:     pass,
+      REPAIR_DRY_RUN:  dryRun,
+      REPAIR_ZIP_ONLY: zipOnly || '',
+    };
+    const child = spawn(process.execPath,
+      [require('path').join(__dirname, 'workers/categoryRepairWorker.js')],
+      { env, stdio: 'inherit', detached: false }
+    );
+    child.on('exit', (code) => {
+      console.log(`[category-repair] worker exited with code ${code}`);
+    });
+    child.on('error', (err) => {
+      console.error('[category-repair] spawn error:', err.message);
+    });
+    console.log(`[category-repair] spawned worker PID ${child.pid} pass=${pass}`);
   });
 });
 
