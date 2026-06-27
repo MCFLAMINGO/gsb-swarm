@@ -60,6 +60,8 @@ const ZIP_ONLY = process.env.REPAIR_ZIP_ONLY
   ? process.env.REPAIR_ZIP_ONLY.split(',').map(z => z.trim())
   : null;
 
+const BATCH_LIMIT = process.env.REPAIR_BATCH_LIMIT ? parseInt(process.env.REPAIR_BATCH_LIMIT, 10) : Infinity;
+
 const TARGET_ZIPS = ['32082','32081','32250','32266','32233','32259','32034','32092','32084'];
 
 // ── Tier-upgrade + cross-category fixes ──────────────────────────────────────
@@ -342,10 +344,16 @@ async function pass1() {
     totalUpdated += updates.length;
     process.stdout.write(`\r[Pass 1] scanned: ${totalScanned.toLocaleString()} | updated: ${totalUpdated.toLocaleString()} | misses logged: ${totalMisses.toLocaleString()}`);
     offset += BATCH;
+
+    // Stop after REPAIR_BATCH_LIMIT rows updated per run
+    if (totalUpdated >= BATCH_LIMIT) {
+      console.log(`\n[Pass 1] BATCH_LIMIT ${BATCH_LIMIT.toLocaleString()} reached — stopping. Re-run to continue.`);
+      break;
+    }
   }
 
-  // Stamp all unstamped rows so the pipeline knows they've been attempted
-  if (!DRY_RUN) {
+  // Stamp unstamped rows only on a full (unlimited) run
+  if (!DRY_RUN && BATCH_LIMIT === Infinity) {
     await db.query(
       `UPDATE businesses SET classification_attempted_at = NOW()
        WHERE status = 'active' AND classification_attempted_at IS NULL`
@@ -548,7 +556,7 @@ async function run() {
   }
 
   const t0 = Date.now();
-  console.log(`[categoryRepairWorker] start — pass: ${RUN_PASS} | dry_run: ${DRY_RUN} | zips: ${ZIP_ONLY || 'all'}`);
+  console.log(`[categoryRepairWorker] start — pass: ${RUN_PASS} | dry_run: ${DRY_RUN} | zips: ${ZIP_ONLY || 'all'} | batch_limit: ${BATCH_LIMIT === Infinity ? 'unlimited' : BATCH_LIMIT.toLocaleString()}`);
 
   // Ensure miss-log table exists before any pass runs
   try {
