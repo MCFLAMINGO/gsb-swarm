@@ -536,6 +536,12 @@ ${nameList}`;
 
       await sleep(50); // throttle
 
+      // Stop after REPAIR_BATCH_LIMIT rows classified per run
+      if (classified + suppressed >= BATCH_LIMIT) {
+        console.log(`\n[Pass 2] BATCH_LIMIT ${BATCH_LIMIT.toLocaleString()} reached — stopping. Re-run to continue.`);
+        break;
+      }
+
     } catch (e) {
       console.warn(`\n[Pass 2] Batch ${i / BATCH_SIZE} exception: ${e.message}`);
       failed += batch.length;

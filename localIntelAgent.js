@@ -7413,19 +7413,21 @@ router.post('/admin/pipeline/category-repair', express.json(), async (req, res) 
   if (process.env.PIPELINE_SECRET && secret !== process.env.PIPELINE_SECRET) {
     return res.status(401).json({ error: 'unauthorized' });
   }
-  const pass    = req.query.pass    || req.body?.pass    || 'all';
-  const zipOnly = req.query.zip     || req.body?.zip     || null;
-  const dryRun  = req.query.dry_run || req.body?.dry_run || 'false';
-  res.json({ status: 'category repair started', pass, zip_only: zipOnly || null, dry_run: dryRun, ts: new Date().toISOString() });
+  const pass       = req.query.pass        || req.body?.pass        || 'all';
+  const zipOnly    = req.query.zip          || req.body?.zip          || null;
+  const dryRun     = req.query.dry_run      || req.body?.dry_run      || 'false';
+  const batchLimit = req.query.batch_limit  || req.body?.batch_limit  || '';
+  res.json({ status: 'category repair started', pass, zip_only: zipOnly || null, dry_run: dryRun, batch_limit: batchLimit || 'unlimited', ts: new Date().toISOString() });
   // Spawn as a child process — require() caches modules so re-triggering
   // the same worker in the same process would no-op after the first call.
   setImmediate(() => {
     const { spawn } = require('child_process');
     const env = {
       ...process.env,
-      REPAIR_PASS:     pass,
-      REPAIR_DRY_RUN:  dryRun,
-      REPAIR_ZIP_ONLY: zipOnly || '',
+      REPAIR_PASS:        pass,
+      REPAIR_DRY_RUN:     dryRun,
+      REPAIR_ZIP_ONLY:    zipOnly || '',
+      ...(batchLimit ? { REPAIR_BATCH_LIMIT: batchLimit } : {}),
     };
     const child = spawn(process.execPath,
       [require('path').join(__dirname, 'workers/categoryRepairWorker.js')],
