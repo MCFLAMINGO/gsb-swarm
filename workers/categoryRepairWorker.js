@@ -578,7 +578,7 @@ ${nameList}`;
         `\r[Pass 2] classified: ${classified.toLocaleString()} | suppressed: ${suppressed} | failed: ${failed} | batch ${batchNum}/${batchTotal}`
       );
 
-      await sleep(500); // throttle — 500ms prevents rate limits
+      await sleep(100); // throttle
 
       // Stop after REPAIR_BATCH_LIMIT rows classified per run
       if (classified + suppressed >= BATCH_LIMIT) {
