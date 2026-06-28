@@ -3839,6 +3839,60 @@ router.get('/surge/menu/:id', async (req, res) => {
   }
 });
 
+// ── POST /api/local-intel/customers/register — upsert customer, record SMS opt-in ──
+router.post('/customers/register', express.json(), async (req, res) => {
+  try {
+    const { phone, name, zip, email, sms_opt_in = true } = req.body || {};
+    if (!phone) return res.status(400).json({ error: 'phone required' });
+    const clean = phone.replace(/\D/g, '');
+    if (clean.length < 10) return res.status(400).json({ error: 'invalid phone' });
+    const normalized = '+1' + clean.slice(-10);
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
+
+    const [existing] = await db.query(
+      `SELECT customer_id, sms_opt_in FROM customers WHERE phone = $1`, [normalized]
+    );
+
+    if (existing) {
+      // Update — preserve opt-out if they previously opted out and now not explicitly opting in
+      const newOptIn = existing.sms_opt_in === false && sms_opt_in !== true ? false : Boolean(sms_opt_in);
+      await db.query(
+        `UPDATE customers SET name=COALESCE($1,name), zip=COALESCE($2,zip), email=COALESCE($3,email),
+         sms_opt_in=$4, updated_at=NOW() WHERE phone=$5`,
+        [name || null, zip || null, email || null, newOptIn, normalized]
+      );
+      return res.json({ customer_id: existing.customer_id, status: 'updated', phone: normalized, sms_opt_in: newOptIn });
+    }
+
+    const [row] = await db.query(
+      `INSERT INTO customers (phone, name, zip, email, sms_opt_in, opt_in_ip)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING customer_id`,
+      [normalized, name || null, zip || null, email || null, Boolean(sms_opt_in), ip]
+    );
+    res.json({ customer_id: row.customer_id, status: 'created', phone: normalized, sms_opt_in: Boolean(sms_opt_in) });
+  } catch (e) {
+    console.error('[customers/register]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/local-intel/customers/lookup?phone=xxx — check if registered ──
+router.get('/customers/lookup', async (req, res) => {
+  try {
+    const raw = (req.query.phone || '').replace(/\D/g, '');
+    if (!raw || raw.length < 10) return res.status(400).json({ error: 'invalid phone' });
+    const phone = '+1' + raw.slice(-10);
+    const [row] = await db.query(
+      `SELECT customer_id, name, zip, sms_opt_in, order_count, last_order_at FROM customers WHERE phone=$1`,
+      [phone]
+    );
+    if (!row) return res.json({ registered: false });
+    res.json({ registered: true, ...row });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── POST /api/local-intel/surge/order — place order + send SMS payment link ──
 router.post('/surge/order', express.json(), async (req, res) => {
   const { business_id, sunbiz_id, customer_phone, order_text, jurisdiction_code, zip } = req.body || {};
@@ -3886,6 +3940,19 @@ router.post('/surge/order', express.json(), async (req, res) => {
           result.sms?.sent === true,
         ]
       ).catch(e => console.error('[surge/order] surge_orders insert failed:', e.message));
+
+      // Bump order stats on customer record if phone is known
+      if (customer_phone) {
+        const cleanPhone = customer_phone.replace(/\D/g, '');
+        if (cleanPhone.length >= 10) {
+          const normalized = '+1' + cleanPhone.slice(-10);
+          db.query(
+            `UPDATE customers SET order_count = order_count + 1, last_order_at = NOW(),
+             last_zip = COALESCE($1, last_zip), updated_at = NOW() WHERE phone = $2`,
+            [sessionZip, normalized]
+          ).catch(e => console.error('[surge/order] customer update failed:', e.message));
+        }
+      }
     }
 
     res.json(result);
