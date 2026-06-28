@@ -373,7 +373,7 @@ async function pass2() {
     return { skipped: true };
   }
 
-  console.log('\n[Pass 2] LLM reclassification — remaining uncategorized rows...');
+  console.log(`\n[Pass 2] LLM reclassification — key present: ${apiKey ? 'YES (len=' + apiKey.length + ')' : 'NO'}`);
 
   // Build ZIP filter
   const zipFilter = ZIP_ONLY
@@ -442,8 +442,52 @@ ${nameList}`;
       });
 
       if (!resp.ok) {
-        const err = await resp.text();
-        console.warn(`\n[Pass 2] API error batch ${i / BATCH_SIZE}: ${resp.status} — ${err.slice(0, 100)}`);
+        const errText = await resp.text();
+        const status  = resp.status;
+        console.warn(`\n[Pass 2] API error batch ${Math.ceil(i/BATCH_SIZE)}: ${status} — ${errText.slice(0, 120)}`);
+        if (status === 429 || status === 529) {
+          // Rate limited — back off and retry this batch once
+          const retryAfter = parseInt(resp.headers.get('retry-after') || '60', 10);
+          console.warn(`\n[Pass 2] Rate limited — waiting ${retryAfter}s then retrying batch...`);
+          await sleep(retryAfter * 1000);
+          const retry = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+            body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] }),
+            signal: AbortSignal.timeout(30000),
+          });
+          if (!retry.ok) {
+            console.warn(`\n[Pass 2] Retry also failed (${retry.status}) — skipping batch`);
+            failed += batch.length;
+            await sleep(5000);
+            continue;
+          }
+          // Replace resp data with retry response
+          const retryData = await retry.json();
+          const retryRaw  = (retryData.content?.[0]?.text || '').trim()
+            .replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+          let retryCats;
+          try {
+            retryCats = JSON.parse(retryRaw);
+            if (!Array.isArray(retryCats) || retryCats.length !== batch.length) throw new Error('length mismatch');
+          } catch { failed += batch.length; continue; }
+          // Process retry results inline (duplicate the write-back loop)
+          for (let j = 0; j < batch.length; j++) {
+            const biz = batch[j];
+            let cat = (retryCats[j] || '').trim().toLowerCase().replace(/\s+/g, '_');
+            if (cat === 'holding_company') {
+              if (!DRY_RUN) await db.query(`UPDATE businesses SET status='suppressed', classification_attempted_at=NOW() WHERE business_id=$1`, [biz.business_id]);
+              suppressed++; continue;
+            }
+            if (!VALID_CATS.has(cat)) { const n = [...VALID_CATS].find(v => v !== 'holding_company' && (v.startsWith(cat)||cat.startsWith(v))); if (n) cat=n; else { failed++; continue; } }
+            const grp = deriveGroup(cat);
+            if (!DRY_RUN) await db.query(`UPDATE businesses SET category=$1,category_group=$2,classification_attempted_at=NOW(),confidence_score=0.75 WHERE business_id=$3`, [cat,grp,biz.business_id]);
+            classified++;
+          }
+          await sleep(2000);
+          continue;
+        }
+        // Non-rate-limit error
         failed += batch.length;
         await sleep(3000);
         continue;
@@ -534,7 +578,7 @@ ${nameList}`;
         `\r[Pass 2] classified: ${classified.toLocaleString()} | suppressed: ${suppressed} | failed: ${failed} | batch ${batchNum}/${batchTotal}`
       );
 
-      await sleep(50); // throttle
+      await sleep(500); // throttle — 500ms prevents rate limits
 
       // Stop after REPAIR_BATCH_LIMIT rows classified per run
       if (classified + suppressed >= BATCH_LIMIT) {
