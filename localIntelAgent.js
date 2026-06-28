@@ -7443,6 +7443,27 @@ router.post('/admin/pipeline/category-repair', express.json(), async (req, res) 
   });
 });
 
+// GET /api/local-intel/admin/pipeline/category-repair/llm-test
+// One-shot Haiku call to verify ANTHROPIC_API_KEY is working from Railway's process.
+router.get('/admin/pipeline/category-repair/llm-test', async (req, res) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.json({ ok: false, error: 'ANTHROPIC_API_KEY not set', keyLen: 0 });
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 32,
+        messages: [{ role: 'user', content: 'Reply with the single word: working' }] }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const data = await resp.json();
+    res.json({ ok: resp.ok, status: resp.status, keyLen: apiKey.length,
+      reply: data.content?.[0]?.text || null, error: data.error || null });
+  } catch (e) {
+    res.json({ ok: false, error: e.message, keyLen: apiKey.length });
+  }
+});
+
 // GET /api/local-intel/admin/pipeline/category-repair/misses
 // Returns name patterns that Pass 1 rules couldn't classify, grouped by frequency.
 // Use this to write new deterministic rules and shrink LLM dependency over time.
