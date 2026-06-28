@@ -1756,7 +1756,7 @@ async function ingestZBP(targetZips = FL_ZIP_SEED) {
       if (process.env.NODE_ENV !== 'production' || consecutiveFails <= 1) {
         console.warn(`[censusLayer] ZBP batch ${i}-${i+BATCH_SIZE} failed (${consecutiveFails}/${CIRCUIT_LIMIT}):`, e.message);
       }
-      if (i + BATCH_SIZE < pendingZips.length) await new Promise(r => setTimeout(r, 500));
+      if (i + BATCH_SIZE < pendingZips.length) await new Promise(r => setTimeout(r, 2000));
       continue;
     }
 
@@ -1838,8 +1838,8 @@ async function ingestZBP(targetZips = FL_ZIP_SEED) {
       totalIngested++;
     }
 
-    // Respect Census API rate limit between batches
-    if (i + BATCH_SIZE < pendingZips.length) await new Promise(r => setTimeout(r, 500));
+    // Respect Census API rate limit between batches — 2s keeps us well under their threshold
+    if (i + BATCH_SIZE < pendingZips.length) await new Promise(r => setTimeout(r, 2000));
   }
 
   console.log(`[censusLayer] ZBP: ingested ${totalIngested} ZIPs into census_layer`);
@@ -1964,7 +1964,7 @@ async function ingestCBP(targetZips = FL_ZIP_SEED) {
       }
 
       // Small delay between counties
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 2000));
 
     } catch (err) {
       console.error(`[censusLayer] CBP failed for ${name}:`, err.message);
@@ -2089,7 +2089,7 @@ async function ingestPDB(targetZips = FL_ZIP_SEED) {
       }
 
       console.log(`[censusLayer] PDB: ${name} — ${rows.length} tracts processed`);
-      await new Promise(r => setTimeout(r, 800));
+      await new Promise(r => setTimeout(r, 2000));
 
     } catch (err) {
       pdbConsecFails++;
