@@ -7464,6 +7464,21 @@ router.get('/admin/pipeline/category-repair/llm-test', async (req, res) => {
   }
 });
 
+// GET /api/local-intel/admin/pipeline/census-key-test
+router.get('/admin/pipeline/census-key-test', async (req, res) => {
+  const key = process.env.Census_Data_API;
+  if (!key) return res.json({ ok: false, error: 'Census_Data_API not set', keyLen: 0 });
+  try {
+    const url = `https://api.census.gov/data/2022/acs/acs5?get=NAME,B01003_001E&for=zip+code+tabulation+area:32082&key=${key}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    const text = await resp.text();
+    const ok = resp.ok && text.includes('32082');
+    res.json({ ok, status: resp.status, keyLen: key.length, sample: text.slice(0, 120) });
+  } catch (e) {
+    res.json({ ok: false, error: e.message, keyLen: key.length });
+  }
+});
+
 // GET /api/local-intel/admin/pipeline/category-repair/misses
 // Returns name patterns that Pass 1 rules couldn't classify, grouped by frequency.
 // Use this to write new deterministic rules and shrink LLM dependency over time.
