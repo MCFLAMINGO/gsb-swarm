@@ -269,6 +269,7 @@ async function pass1() {
       `SELECT business_id, name, category, category_group, zip
        FROM businesses
        WHERE status = 'active'
+         AND category IN ('business', 'LocalBusiness', 'uncategorized')
        ORDER BY business_id
        LIMIT $1 OFFSET $2`,
       [BATCH, offset]
