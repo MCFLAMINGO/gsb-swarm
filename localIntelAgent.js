@@ -1730,8 +1730,17 @@ router.post('/', async (req, res) => {
         // Safety valve: if multi-word query returns too many hits it’s likely
         // a category phrase — fall through to normal routing.
         const _b20TooMany = _b20WordCount >= 2 && _b20Rows.length >= 5;
-        if (_b20Rows && _b20Rows.length > 0 && !_b20TooMany) {
-          const _b20Enriched = _b20Rows.map(r => {
+        // Token guard: for multi-word queries, keep only businesses whose name
+        // contains ALL query tokens — prevents partial ILIKE matches (e.g. McFlamingo
+        // appearing for 'valley smoke' because description matched).
+        const _b20Tokens = _b20WordCount >= 2
+          ? _b20Name.toLowerCase().split(/\s+/).filter(t => t.length >= 3)
+          : null;
+        const _b20Filtered = _b20Tokens
+          ? _b20Rows.filter(r => _b20Tokens.every(tok => r.name.toLowerCase().includes(tok)))
+          : _b20Rows;
+        if (_b20Filtered && _b20Filtered.length > 0 && !_b20TooMany) {
+          const _b20Enriched = _b20Filtered.map(r => {
             const out = { ...r };
             delete out.pos_type;
             delete out.confidence_score;
