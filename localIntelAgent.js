@@ -1689,13 +1689,27 @@ router.post('/', async (req, res) => {
       : { taskClass: null, group: null, tags: null, cuisine: null, category: null, resolvesVia: 'search', temporalContext: null };
 
     // ── B20: DIRECT NAME LOOKUP — runs before ALL intent routing ─────────────
-    // If a query of 2+ words matches a business name in Postgres (statewide,
-    // not ZIP-scoped), return that listing immediately so owners can find and
-    // claim their own business. Falls through if no name hit.
-    if (query && !group && !category && String(query).trim().split(/\s+/).length >= 2) {
+    // If a query looks like a business name (not a natural language question),
+    // attempt a name match in Postgres first so owners can find + claim.
+    // Skips: NL question starters, single generic category words, food intent phrases.
+    const _b20NlStarters = /^(where|what|who|how|when|find|show|tell|give|i need|i want|looking for|can you|do you|any |best |near |good |top |cheap |open )/i;
+    const _b20CategoryWords = /^(restaurant|restaurants|food|pizza|burger|coffee|bar|bars|gym|hotel|doctor|dentist|lawyer|salon|spa|store|shop|pharmacy|gas|bank|plumber|contractor|landscap)/i;
+    const _b20QueryStr = String(query).trim();
+    const _b20WordCount = _b20QueryStr.split(/\s+/).length;
+    const _b20IsNlQuestion = _b20NlStarters.test(_b20QueryStr);
+    const _b20IsCategoryWord = _b20WordCount <= 2 && _b20CategoryWords.test(_b20QueryStr);
+    // Also run for single-word queries that aren’t generic category words (e.g. "mcdonalds")
+    const _b20ShouldRun = query && !group && !category && !_b20IsNlQuestion && !_b20IsCategoryWord
+      && (_b20WordCount >= 2 || (_b20WordCount === 1 && _b20QueryStr.length >= 5));
+    if (_b20ShouldRun) {
       try {
         const _b20Name = String(query).trim();
         const _b20Zips = zip ? [zip, ...TARGET_ZIPS] : TARGET_ZIPS;
+        // Single-word: exact prefix match ("mcdonalds" → "McDonald's ...").
+        // Multi-word: substring match but cap at 8 results — if >8 it’s probably
+        // a category phrase that slipped through, let normal routing handle it.
+        const _b20Pattern = _b20WordCount === 1 ? `${_b20Name}%` : `%${_b20Name}%`;
+        const _b20Limit   = _b20WordCount === 1 ? 8 : 5;
         const _b20Rows = await db.query(
           `SELECT business_id, name, address, city, zip, phone, website,
                   hours, category, category_group, tags, description, cuisine,
@@ -1709,11 +1723,14 @@ router.post('/', async (req, res) => {
               CASE WHEN zip = ANY($2::text[]) THEN 0 ELSE 1 END,
               (claimed_at IS NOT NULL) DESC,
               confidence_score DESC
-            LIMIT 5`,
-          [`%${_b20Name}%`, _b20Zips]
+            LIMIT $3`,
+          [_b20Pattern, _b20Zips, _b20Limit]
         ).catch(() => []);
 
-        if (_b20Rows && _b20Rows.length > 0) {
+        // Safety valve: if multi-word query returns too many hits it’s likely
+        // a category phrase — fall through to normal routing.
+        const _b20TooMany = _b20WordCount >= 2 && _b20Rows.length >= 5;
+        if (_b20Rows && _b20Rows.length > 0 && !_b20TooMany) {
           const _b20Enriched = _b20Rows.map(r => {
             const out = { ...r };
             delete out.pos_type;
