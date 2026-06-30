@@ -9286,7 +9286,10 @@ router.get('/search', harvestGuard, async (req, res) => {
     const _getGenericCat = /^(restaurant|food|pizza|burger|coffee|bar|gym|hotel|doctor|dentist|lawyer|salon|spa|store|shop|pharmacy|gas|bank|plumber|contractor|landscap)/i;
     const _getRawWords = raw.trim().split(/\s+/).length;
     const _looksLikeBrandName = raw.trim().length >= 4 && _getRawWords <= 3 && !_getNlStarters.test(raw) && !_getGenericCat.test(raw);
-    const skipNameSearch = !!cat && !aboutName && !_looksLikeBrandName;
+    // If query looks like a brand name, clear thread-carried category entirely —
+    // otherwise cat='bar' from prior search poisons both results and narrative.
+    if (_looksLikeBrandName) cat = null;
+    const skipNameSearch = !!cat && !aboutName;
     if (q && !skipNameSearch) {
       // Geo-guard: when ZIP supplied, search that ZIP + surrounding ZIPs (15-mile radius).
       // When no ZIP, fall back to TARGET_ZIPS (our full FL coverage area).
