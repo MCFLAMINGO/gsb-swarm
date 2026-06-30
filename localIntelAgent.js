@@ -9296,15 +9296,20 @@ router.get('/search', harvestGuard, async (req, res) => {
       // Exact-ZIP results always sort first via CASE boost.
       const searchArea  = zip ? getNearbyZips(zip) : TARGET_ZIPS;
       const zipBoost    = zip ? ` CASE WHEN b.zip = '${zip}' THEN 0 ELSE 1 END, ` : '';
+      // For brand name queries, search name only — not services_text/description
+      // This prevents unrelated businesses matching on those fields (e.g. McFlamingo on "publix")
+      const nameFieldClause = _looksLikeBrandName
+        ? `b.name ILIKE $1`
+        : `(b.name ILIKE $1 OR b.services_text ILIKE $1 OR b.description ILIKE $1)`;
       rows = await db.query(
-        BASE_SELECT + ` AND b.zip = ANY($2) AND (b.name ILIKE $1 OR b.services_text ILIKE $1 OR b.description ILIKE $1) ORDER BY ${zipBoost}${RANKED_ORDER} LIMIT $3`,
+        BASE_SELECT + ` AND b.zip = ANY($2) AND ${nameFieldClause} ORDER BY ${zipBoost}${RANKED_ORDER} LIMIT $3`,
         [`%${q}%`, searchArea, limit * 2]
       );
 
       // Widen to all FL only if coverage-area search returned nothing
       if (!rows.length) {
         rows = await db.query(
-          BASE_SELECT + ` AND b.zip BETWEEN '32004' AND '34997' AND (b.name ILIKE $1 OR b.services_text ILIKE $1 OR b.description ILIKE $1) ORDER BY ${RANKED_ORDER} LIMIT $2`,
+          BASE_SELECT + ` AND b.zip BETWEEN '32004' AND '34997' AND ${nameFieldClause} ORDER BY ${RANKED_ORDER} LIMIT $2`,
           [`%${q}%`, limit * 2]
         );
       }
@@ -9316,8 +9321,11 @@ router.get('/search', harvestGuard, async (req, res) => {
           .filter(t => t.length >= 4 && !PG_STOP.has(t))
           .sort((a,b) => b.length - a.length); // longest first = most specific
         for (const tok of tokens) {
+          const tokClause = _looksLikeBrandName
+            ? `b.name ILIKE $2`
+            : `(b.name ILIKE $2 OR b.services_text ILIKE $2 OR b.description ILIKE $2)`;
           const r = await db.query(
-            BASE_SELECT + ` AND b.zip = ANY($1) AND (b.name ILIKE $2 OR b.services_text ILIKE $2 OR b.description ILIKE $2) ORDER BY ${RANKED_ORDER} LIMIT $3`,
+            BASE_SELECT + ` AND b.zip = ANY($1) AND ${tokClause} ORDER BY ${RANKED_ORDER} LIMIT $3`,
             [TARGET_ZIPS, `%${tok}%`, limit * 2]
           );
           if (r.length) { rows = r; break; }
@@ -9476,7 +9484,8 @@ router.get('/search', harvestGuard, async (req, res) => {
     }
 
     // ── Tier 3: Wallet priority — re-apply after proximity sort (stable, preserves distance within each tier)
-    if (rows.length > 1) {
+    // SKIP for brand/name searches — wallet boost must not surface McFlamingo on top of Publix results
+    if (rows.length > 1 && !_looksLikeBrandName) {
       // Stable sort: wallet businesses float to top, distance order preserved within each tier
       const withWallet    = rows.filter(r => r.wallet);
       const withoutWallet = rows.filter(r => !r.wallet);
