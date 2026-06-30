@@ -9279,8 +9279,14 @@ router.get('/search', harvestGuard, async (req, res) => {
     let rows = [];
 
     // 1. Exact/partial name match
-    // Skip name search when NL_INTENT already resolved a category — go straight to cat search
-    const skipNameSearch = !!cat && !aboutName;
+    // Skip name search when NL_INTENT already resolved a category — go straight to cat search.
+    // EXCEPTION: if the raw query looks like a brand/business name (1-3 words, no NL starters,
+    // not a generic category word), always run name search regardless of thread-carried category.
+    const _getNlStarters = /^(where|what|who|how|when|find|show|tell|give|i need|i want|looking for|can you|do you|any |best |near |good |top |cheap |open )/i;
+    const _getGenericCat = /^(restaurant|food|pizza|burger|coffee|bar|gym|hotel|doctor|dentist|lawyer|salon|spa|store|shop|pharmacy|gas|bank|plumber|contractor|landscap)/i;
+    const _getRawWords = raw.trim().split(/\s+/).length;
+    const _looksLikeBrandName = raw.trim().length >= 4 && _getRawWords <= 3 && !_getNlStarters.test(raw) && !_getGenericCat.test(raw);
+    const skipNameSearch = !!cat && !aboutName && !_looksLikeBrandName;
     if (q && !skipNameSearch) {
       // Geo-guard: when ZIP supplied, search that ZIP + surrounding ZIPs (15-mile radius).
       // When no ZIP, fall back to TARGET_ZIPS (our full FL coverage area).
