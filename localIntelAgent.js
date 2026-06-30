@@ -1688,6 +1688,61 @@ router.post('/', async (req, res) => {
       ? resolveNlIntentFromRegistry(query)
       : { taskClass: null, group: null, tags: null, cuisine: null, category: null, resolvesVia: 'search', temporalContext: null };
 
+    // ── B20: DIRECT NAME LOOKUP — runs before ALL intent routing ─────────────
+    // If a query of 2+ words matches a business name in Postgres (statewide,
+    // not ZIP-scoped), return that listing immediately so owners can find and
+    // claim their own business. Falls through if no name hit.
+    if (query && !group && !category && String(query).trim().split(/\s+/).length >= 2) {
+      try {
+        const _b20Name = String(query).trim();
+        const _b20Zips = zip ? [zip, ...TARGET_ZIPS] : TARGET_ZIPS;
+        const _b20Rows = await db.query(
+          `SELECT business_id, name, address, city, zip, phone, website,
+                  hours, category, category_group, tags, description, cuisine,
+                  confidence_score AS confidence, confidence_score, lat, lon,
+                  sunbiz_doc_number, claimed_at IS NOT NULL AS claimed, wallet,
+                  pos_config->>'pos_type' AS pos_type, is_showcase
+             FROM businesses
+            WHERE status != 'inactive'
+              AND name ILIKE $1
+            ORDER BY
+              CASE WHEN zip = ANY($2::text[]) THEN 0 ELSE 1 END,
+              (claimed_at IS NOT NULL) DESC,
+              confidence_score DESC
+            LIMIT 5`,
+          [`%${_b20Name}%`, _b20Zips]
+        ).catch(() => []);
+
+        if (_b20Rows && _b20Rows.length > 0) {
+          const _b20Enriched = _b20Rows.map(r => {
+            const out = { ...r };
+            delete out.pos_type;
+            delete out.confidence_score;
+            return out;
+          });
+          recordResolution({
+            query, zip,
+            intent: { taskClass: 'NAME_SEARCH', group: null, cuisine: null },
+            businessId: _b20Enriched[0]?.business_id ?? null,
+            resolved: true, resolvedVia: 'name_search', resultCount: _b20Enriched.length, startTime
+          });
+          const _b20Msg = _b20Enriched.length === 1
+            ? `Found ${_b20Enriched[0].name} — ${_b20Enriched[0].claimed ? 'claimed listing' : 'unclaimed — is this yours?'}`
+            : `Found ${_b20Enriched.length} matching businesses for "${_b20Name}".`;
+          return res.json({
+            message: _b20Msg,
+            intent: 'name_search',
+            resolvedVia: 'name_search',
+            businesses: _b20Enriched,
+            resultCount: _b20Enriched.length
+          });
+        }
+      } catch (_b20Err) {
+        console.error('[B20] name pre-check error:', _b20Err.message);
+        // fall through to normal routing
+      }
+    }
+
     // ── B19: SHORT_NAME_FOOD_RE — short prefix + food place type ──────────────
     // Queries like "V pizza", "V's kitchen", "JJ tacos" should attempt a name
     // search FIRST (against businesses table) before falling through to the
