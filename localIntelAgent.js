@@ -9294,7 +9294,9 @@ router.get('/search', harvestGuard, async (req, res) => {
     const _getNlStarters = /^(where|what|who|how|when|find|show|tell|give|i need|i want|looking for|can you|do you|any |best |near |good |top |cheap |open )/i;
     const _getGenericCat = /^(restaurant|food|pizza|burger|coffee|bar|gym|hotel|doctor|dentist|lawyer|salon|spa|store|shop|pharmacy|gas|bank|plumber|contractor|landscap)/i;
     const _getRawWords = raw.trim().split(/\s+/).length;
-    const _looksLikeBrandName = raw.trim().length >= 4 && _getRawWords <= 3 && !_getNlStarters.test(raw) && !_getGenericCat.test(raw);
+    // Strip possessive/apostrophe suffixes for length check ("flo's" → "flos" = 4 chars)
+    const _rawAlpha = raw.trim().replace(/[''`]s?\s*$/i, '').trim();
+    const _looksLikeBrandName = _rawAlpha.length >= 4 && _getRawWords <= 3 && !_getNlStarters.test(raw) && !_getGenericCat.test(raw);
     // If query looks like a brand name, clear thread-carried category entirely —
     // otherwise cat='bar' from prior search poisons both results and narrative.
     if (_looksLikeBrandName) cat = null;
