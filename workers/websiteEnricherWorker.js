@@ -78,6 +78,29 @@ function extractMeta(html) {
   return { title, description };
 }
 
+// Spam/SEO-poison filter — rejects descriptions containing non-English gambling,
+// slot, or togel spam that has been injected into hijacked business websites.
+// Returns true if the description is safe to write to Postgres.
+const SPAM_PATTERNS = [
+  /togel/i,
+  /bandar\s*(togel|slot|judi)/i,
+  /judi\s*(slot|online|bola)/i,
+  /slot\s*(gacor|88|online|thailand)/i,
+  /slot88/i,
+  /merupakan\s*(situs|bandar|agen)/i,
+  /terpercaya/i,
+  /maxwin/i,
+  /jackpot\s*(x[0-9]+|server)/i,
+  /situs\s*(slot|togel|judi)/i,
+  /\b(sgp|hk|sdy)\s*(hari ini|keluaran|pengeluaran)/i,
+  /RTP\s*(tinggi|slot)/i,
+];
+
+function isSpamDescription(text) {
+  if (!text) return false;
+  return SPAM_PATTERNS.some(re => re.test(text));
+}
+
 // B66: Filter out junk emails (privacy@, noreply@, sentry@, vendor boilerplate)
 function isValidBusinessEmail(email) {
   if (!email || !email.includes('@')) return false;
@@ -315,6 +338,14 @@ async function runPass() {
           }
 
           if (!newDesc && !newCat) { skipped++; return; }
+
+          // Spam guard: reject descriptions containing Indonesian gambling/slot/togel
+          // SEO poison injected into hijacked business websites (224 records affected Jun 2026)
+          if (newDesc && isSpamDescription(newDesc)) {
+            console.warn(`[web-enricher] SPAM blocked for ${biz.name} (${biz.business_id}): "${newDesc.slice(0,80)}..."`);
+            skipped++;
+            return;
+          }
 
           await db.query(
             `UPDATE businesses SET
