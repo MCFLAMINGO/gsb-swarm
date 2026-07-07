@@ -3138,7 +3138,8 @@ router.get('/claim/lookup', async (req, res) => {
 // POST /api/local-intel/claim/start
 router.post('/claim/start', express.json(), async (req, res) => {
   const { business_id, contact_email, contact_phone, carrier,
-          notify_sms, notify_email, notify_push, notify_web, wallet } = req.body || {};
+          notify_sms, notify_email, notify_push, notify_web, wallet,
+          owner_language } = req.body || {};
   if (!business_id) return res.status(400).json({ error: 'business_id required' });
   if (!contact_email && !contact_phone) return res.status(400).json({ error: 'email or phone required' });
   try {
@@ -3157,22 +3158,26 @@ router.post('/claim/start', express.json(), async (req, res) => {
     const token    = String(Math.floor(100000 + Math.random() * 900000));
     const tokenExp = new Date(Date.now() + 30 * 60 * 1000);
 
+    const lang = (owner_language === 'es') ? 'es' : 'en';
     await db.query(
       `UPDATE businesses SET
          claim_token        = $1, claim_token_exp   = $2,
          notification_phone = $3, notification_email = $4,
          notify_sms = $5, notify_email = $6, notify_push = $7, notify_web = $8,
-         wallet = COALESCE($9, wallet)
+         wallet = COALESCE($9, wallet),
+         owner_language = $11
        WHERE business_id = $10`,
       [token, tokenExp, contact_phone||null, contact_email||null,
        !!notify_sms, !!notify_email, !!notify_push, !!notify_web,
-       wallet||null, business_id]
+       wallet||null, business_id, lang]
     );
 
     const verifyChannel = contact_email ? 'email' : 'sms';
     await nq.enqueue(business_id,
       `Your LocalIntel code: ${token}`,
-      { body: `Verification code: ${token}. Expires in 30 minutes.`, code: token, carrier: carrier||'verizon' },
+      { body: `Verification code: ${token}. Expires in 30 minutes.`,
+        body_es: `C\u00f3digo de verificaci\u00f3n: ${token}. Expira en 30 minutos.`,
+        code: token, carrier: carrier||'verizon' },
       [verifyChannel]
     );
     setImmediate(() => nq.processQueue(5).catch(e => console.error('[notify]', e.message)));
@@ -3258,7 +3263,10 @@ router.post('/claim/verify', express.json(), async (req, res) => {
     if (biz.notify_email) channels.push('email');
     await nq.enqueue(business_id,
       `Welcome to LocalIntel, ${biz.name}`,
-      { body: `Your listing is claimed. You'll receive market intelligence when agents query your area.`, cta_url: 'https://thelocalintel.com', cta_label: 'View Dashboard' },
+      { body: `Your listing is claimed. You'll receive market intelligence when agents query your area.`,
+        body_es: `Tu perfil est\u00e1 reclamado. Recibir\u00e1s inteligencia de mercado cuando los agentes consulten tu \u00e1rea.`,
+        subject_es: `Bienvenido a LocalIntel \u2014 ${biz.name}`,
+        cta_url: 'https://thelocalintel.com', cta_label: 'View Dashboard', cta_label_es: 'Ver panel' },
       channels
     );
     setImmediate(() => nq.processQueue(5).catch(() => {}));
@@ -4387,6 +4395,39 @@ router.post('/inbox/pos', express.json(), async (req, res) => {
     res.json({ ok: true, pos_type, split_enforced: !!(posConfig.split_address) });
   } catch (err) {
     console.error('[inbox/pos POST]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PATCH /api/local-intel/inbox/settings — save owner preferences (language, notifications) ──
+router.patch('/inbox/settings', express.json(), async (req, res) => {
+  const { token, owner_language, notify_sms, notify_email, notify_push } = req.body || {};
+  if (!token) return res.status(401).json({ error: 'token required' });
+  try {
+    const [biz] = await db.query(
+      `SELECT business_id FROM businesses WHERE dispatch_token = $1 AND status != 'inactive' LIMIT 1`,
+      [token]
+    );
+    if (!biz) return res.status(404).json({ error: 'business not found' });
+    const updates = [];
+    const vals = [];
+    let idx = 1;
+    if (owner_language !== undefined) {
+      const lang = owner_language === 'es' ? 'es' : 'en';
+      updates.push(`owner_language = $${idx++}`); vals.push(lang);
+    }
+    if (notify_sms !== undefined)   { updates.push(`notify_sms = $${idx++}`);   vals.push(!!notify_sms); }
+    if (notify_email !== undefined) { updates.push(`notify_email = $${idx++}`); vals.push(!!notify_email); }
+    if (notify_push !== undefined)  { updates.push(`notify_push = $${idx++}`);  vals.push(!!notify_push); }
+    if (!updates.length) return res.json({ ok: true, changed: 0 });
+    vals.push(biz.business_id);
+    await db.query(
+      `UPDATE businesses SET ${updates.join(', ')} WHERE business_id = $${idx}`,
+      vals
+    );
+    res.json({ ok: true, changed: updates.length });
+  } catch (err) {
+    console.error('[inbox/settings PATCH]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
