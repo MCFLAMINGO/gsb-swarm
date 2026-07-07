@@ -1144,107 +1144,41 @@ function toE164(raw) {
 async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip, serviceAddress) {
   const _start = Date.now();
   try {
-    const targetZips = (!zip || zip === 'all') ? TARGET_ZIPS : [zip];
+    const rfqService = require('./lib/rfqService');
 
-    // 1. Match businesses in ZIP whose category or description mentions the
-    //    requested service. LIMIT 5 keeps SMS volume reasonable.
-    // OPTED-IN GATE: only claimed businesses receive SMS job requests.
-    // Unclaimed listings have never consented to be contacted.
-    const businesses = await db.query(
-      `SELECT business_id AS id, name, phone, zip, category, wallet, dispatch_token,
-              COALESCE(notification_email, contact_email) AS email
-         FROM businesses
-        WHERE zip = ANY($1::text[])
-          AND (category ILIKE $2 OR description ILIKE $2)
-          AND status != 'inactive'
-          AND wallet IS NOT NULL
-          AND COALESCE(notification_email, contact_email) IS NOT NULL
-        ORDER BY confidence_score DESC
-        LIMIT 5`,
-      [targetZips, `%${nlIntent.category}%`]
-    );
-
-    // 2. Insert RFQ request row (status=open, businesses_notified=0 for now)
-    // B9: when a service address was extracted ("landscaper at 205 Odoms Mill Blvd"),
-    // embed it in the description so the bidder sees it in the dashboard view.
+    // Route through rfqService.createRfq — the canonical write path that
+    // inbox/requests GET already reads. This replaces the old direct insert
+    // into rfq_requests_v2 which was disconnected from the inbox view.
     const rfqDescription = serviceAddress
       ? `${userQuery} | service address: ${serviceAddress}`
       : userQuery;
-    const rfqRows = await db.query(
-      `INSERT INTO rfq_requests_v2
-         (customer_id, query, intent_group, category, zip, description, businesses_notified)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id`,
-      [
-        customerId ?? 'anonymous',
-        userQuery,
-        nlIntent.group,
-        nlIntent.category,
-        zip || (targetZips[0] || 'unknown'),
-        rfqDescription,
-        0
-      ]
-    );
-    const rfqId = rfqRows[0]?.id;
-    if (!rfqId) throw new Error('rfq insert returned no id');
 
-    // 3. Email alert fan-out via notificationQueue — never blocks on a single failure.
-    // LocalIntel never sends Twilio SMS to businesses; alert lands in their admin inbox.
-    // If the business has configured notify_sms on their own settings, notificationQueue
-    // handles that via carrier gateway independently.
-    const nq = require('./lib/notificationQueue');
-    let notified = 0;
-    for (const biz of businesses) {
-      try {
-        await db.query(
-          `INSERT INTO rfq_responses_v2
-             (rfq_id, business_id, business_name, business_phone, response)
-           VALUES ($1, $2, $3, $4, 'pending')`,
-          [rfqId, biz.id, biz.name, biz.phone || null]
-        );
+    const result = await rfqService.createRfq({
+      job_type:      'proposal',
+      category:      nlIntent.category || nlIntent.group || 'service',
+      zip:           zip || (TARGET_ZIPS[0] || 'unknown'),
+      description:   rfqDescription,
+      pickup_address: serviceAddress || null,
+      autonomy:      'human',
+      customer_phone: customerId && String(customerId).startsWith('+') ? customerId : null,
+      ref_tag:       'sms_nlp',
+    });
 
-        const catLabel  = nlIntent.category.replace(/_/g, ' ');
-        const addrPart  = serviceAddress ? ` at ${serviceAddress}` : '';
-        const zipPart   = zip ? ` (${zip})` : '';
-        const dashUrl   = biz.dispatch_token
-          ? `https://www.thelocalintel.com/inbox.html?token=${biz.dispatch_token}`
-          : `https://www.thelocalintel.com`;
-        await nq.enqueue(
-          biz.id,
-          `New Job Request: ${catLabel}${zipPart}`,
-          {
-            body:      `${catLabel}${addrPart}${zipPart}: "${userQuery}"`,
-            rfq_id:    rfqId,
-            cta_url:   dashUrl,
-            cta_label: 'View Job in Dashboard',
-          },
-          ['email']
-        );
-        notified++;
-      } catch (err) {
-        console.error(`[rfq] failed to notify ${biz.name}:`, err.message);
-      }
-    }
-
-    // 4. Update notified count
-    await db.query(
-      `UPDATE rfq_requests_v2 SET businesses_notified = $1 WHERE id = $2`,
-      [notified, rfqId]
-    ).catch(err => console.error('[rfq] update notified failed:', err.message));
-
-    // 5. Customer-facing message + optional SMS reply
+    const rfqId       = result.rfq_id;
+    const notified    = result.notified_count ?? 0;
+    const catLabel    = (nlIntent.category || nlIntent.group || 'provider').replace(/_/g, ' ');
     const customerMsg = notified > 0
-      ? `We found ${notified} ${nlIntent.category}(s) in your area and sent them your request. You'll hear back shortly. (RFQ-${rfqId})`
-      : `We don't have ${nlIntent.category}s in our network for ZIP ${zip || 'that area'} yet — we're working on it.`;
+      ? `We found ${notified} ${catLabel}(s) in your area and sent them your request. You'll hear back shortly. (RFQ-${rfqId})`
+      : `We don't have ${catLabel}s in our network for ZIP ${zip || 'that area'} yet — we're working on it.`;
 
     if (notified === 0) {
       logDeadEnd({
-        query: userQuery,
+        query:      userQuery,
         zip,
-        channel: req.body?.channel || (customerId && String(customerId).startsWith('+') ? 'twilio' : 'web'),
+        channel:    req.body?.channel || (customerId && String(customerId).startsWith('+') ? 'twilio' : 'web'),
         failReason: 'rfq_fail',
         intentPath: `rfq:${nlIntent?.category || nlIntent?.group || 'unknown'}`,
-        callerId: customerId || null,
+        callerId:   customerId || null,
       });
     }
 
@@ -1254,7 +1188,7 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip, service
       );
     }
 
-    // 6. Resolution history (RFQ counts as resolved when ≥1 notified)
+    // Resolution history
     db.query(
       `INSERT INTO resolution_history
          (query, intent_class, intent_group, cuisine, zip, business_id, resolved, resolved_via, result_count, response_ms)
@@ -1263,46 +1197,45 @@ async function handleRFQ(req, res, nlIntent, userQuery, customerId, zip, service
     ).catch(err => console.error('[rfq] resolution_history write failed:', err.message));
 
     const _rfqMeta = {
-      intent_class: 'RFQ',
-      intent_group: nlIntent.group,
-      resolves_via: 'rfq',
+      intent_class:        'RFQ',
+      intent_group:        nlIntent.group,
+      resolves_via:        'rfq',
       businesses_notified: notified,
     };
     _rfqMeta.narrative = buildNarrative([], nlIntent, { ..._rfqMeta, zip });
 
     maybeLogSms(req, {
       customerId,
-      query: userQuery,
+      query:           userQuery,
       zip,
-      intent: nlIntent?.category || nlIntent?.group || 'rfq',
-      resolvedVia: 'rfq',
+      intent:          nlIntent?.category || nlIntent?.group || 'rfq',
+      resolvedVia:     'rfq',
       responsePreview: customerMsg,
     });
 
-    // B41: Append turns (fire-and-forget)
     appendTurn({ callerId: customerId, channel: 'sms', role: 'user',   content: userQuery,   zip, intent: nlIntent?.category || nlIntent?.group || 'rfq' }).catch(() => {});
     appendTurn({ callerId: customerId, channel: 'sms', role: 'system', content: customerMsg, zip, rfqId, resolvesVia: 'rfq' }).catch(() => {});
 
     return res.json({
-      ok: true,
-      rfq_id: rfqId,
-      status: 'dispatched',
+      ok:                  true,
+      rfq_id:              rfqId,
+      status:              'dispatched',
       businesses_notified: notified,
-      category: nlIntent.category,
-      zip: zip || null,
-      message: customerMsg,
-      meta: _rfqMeta
+      category:            nlIntent.category,
+      zip:                 zip || null,
+      message:             customerMsg,
+      meta:                _rfqMeta,
     });
 
   } catch (err) {
     console.error('[rfq] handleRFQ error:', err.message);
     logDeadEnd({
-      query: userQuery,
+      query:      userQuery,
       zip,
-      channel: req.body?.channel || (customerId && String(customerId).startsWith('+') ? 'twilio' : 'web'),
+      channel:    req.body?.channel || (customerId && String(customerId).startsWith('+') ? 'twilio' : 'web'),
       failReason: 'rfq_fail',
       intentPath: `rfq:${nlIntent?.category || nlIntent?.group || 'unknown'}`,
-      callerId: customerId || null,
+      callerId:   customerId || null,
     });
     return res.status(500).json({ ok: false, error: 'RFQ dispatch failed', detail: err.message });
   }
@@ -4853,14 +4786,19 @@ router.get('/inbox/requests', async (req, res) => {
     const bid = biz.business_id;
 
     // RFQs broadcast to this business — last 90 days
+    // Canonical path: rfq_requests + rfq_broadcast_log + rfq_bids
+    // All three write paths (SMS NLP, web form, MCP) now converge here.
     const rfqs = await db.query(
-      `SELECT r.rfq_id, r.job_type, r.category, r.description, r.budget_usd,
+      `SELECT r.id         AS rfq_id,
+              r.job_type, r.category, r.description, r.budget_usd,
               r.deadline_at, r.status, r.created_at, r.magic_token,
               r.customer_email, r.customer_phone,
-              b.business_id AS bid_id, b.quote_usd, b.bid_status, b.bid_at, b.response_text AS bid_note
-       FROM rfq_jobs r
-       LEFT JOIN rfq_bids b ON b.rfq_id = r.rfq_id AND b.business_id = $1
-       WHERE r.rfq_id IN (
+              b.id        AS bid_id,
+              b.quote_usd, b.bid_status, b.bid_at,
+              b.response_text AS bid_note
+       FROM rfq_requests r
+       LEFT JOIN rfq_bids b ON b.rfq_id = r.id AND b.business_id = $1
+       WHERE r.id IN (
          SELECT rfq_id FROM rfq_broadcast_log WHERE business_id = $1
        )
        AND r.created_at > NOW() - INTERVAL '90 days'
@@ -4927,9 +4865,9 @@ router.post('/inbox/requests/rfq/:rfq_id/respond', express.json(), async (req, r
     if (!biz) return res.status(403).json({ error: 'invalid token' });
 
     const [rfq] = await db.query(
-      `SELECT rfq_id, magic_token, customer_email, customer_phone, description,
+      `SELECT id AS rfq_id, magic_token, customer_email, customer_phone, description,
               category, status, notify_email
-       FROM rfq_jobs WHERE rfq_id = $1`,
+       FROM rfq_requests WHERE id = $1`,
       [rfq_id]
     );
     if (!rfq) return res.status(404).json({ error: 'rfq not found' });
