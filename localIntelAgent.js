@@ -743,17 +743,40 @@ const _CATEGORY_LABELS = {
 function buildMatchReason(biz, intent, query) {
   const parts = [];
   const hours = _parseHours(biz.hours);
-  if (hours && isOpenNow(hours) === true) parts.push('Open now');
-  if (biz.category && biz.category !== 'LocalBusiness') {
-    parts.push(_CATEGORY_LABELS[biz.category] || biz.category);
-  }
+  const isOpen = hours && isOpenNow(hours) === true;
+  if (isOpen) parts.push('Open now');
+
+  // Price tier
+  const tierLabel = biz.price_tier === 'fine_dining' ? '$$$'
+    : biz.price_tier === 'upscale'   ? '$$'
+    : biz.price_tier === 'casual'    ? '$–$$'
+    : biz.price_tier === 'budget'    ? '$'
+    : null;
+  if (tierLabel) parts.push(tierLabel);
+
+  // Cuisine or category label
   if (biz.cuisine) {
     parts.push(biz.cuisine.charAt(0).toUpperCase() + biz.cuisine.slice(1));
+  } else if (biz.category && biz.category !== 'LocalBusiness') {
+    parts.push(_CATEGORY_LABELS[biz.category] || biz.category);
   }
-  if (biz.wallet) parts.push('✓ Accepts crypto');
+
+  // Claimed = direct action available
+  if (biz.claimed_at) parts.push('✓ Claimed');
+
+  // Out-of-ZIP signal — let user know it's a bit further
+  if (intent?.zip && biz.zip && biz.zip !== intent.zip) {
+    parts.push(`in ${biz.zip}`);
+  }
+
+  // Wallet (crypto) — only if not already showing Claimed
+  if (biz.wallet && !biz.claimed_at) parts.push('✓ Accepts crypto');
+
+  // Confidence / verified
   const conf = biz.confidence_score != null ? biz.confidence_score : biz.confidence;
-  if (conf != null && conf >= 0.8) parts.push('Verified');
-  return parts.slice(0, 3).join(' · ') || null;
+  if (conf != null && conf >= 0.85) parts.push('Verified');
+
+  return parts.slice(0, 4).join(' · ') || null;
 }
 
 // Phase 4 — sort results: category match first, then open, then claimed (wallet), then confidence.
@@ -938,56 +961,97 @@ function buildNarrative(results, nlIntent, meta) {
     const category = nlIntent?.category;
     const temporal = nlIntent?.temporalContext;
     const taskClass = nlIntent?.taskClass ?? 'DISCOVER';
-    const zip = meta?.zip ?? 'your area';
+    const zip      = meta?.zip ?? 'your area';
 
+    // ── RFQ path ──────────────────────────────────────────────────
     if (taskClass === 'RFQ') {
       const cat = category ?? group;
       if ((meta?.businesses_notified ?? 0) > 0) {
-        return `Sent to ${meta.businesses_notified} ${cat}${meta.businesses_notified !== 1 ? 's' : ''} near you — you'll hear back shortly.`;
+        return `Reached out to ${meta.businesses_notified} ${cat}${meta.businesses_notified !== 1 ? 's' : ''} near you — you’ll hear back shortly.`;
       }
-      return `No ${cat}s in our network for that area yet — we're on it.`;
+      return `No ${cat}s in our network for that area yet — flagged as a gap.`;
     }
 
+    // ── Zero results ────────────────────────────────────────────
     if (count === 0) {
-      if (meta?.gap) return `Nothing found yet — flagged as a gap and we're working on it.`;
-      return `Nothing came up for that near you.`;
+      if (meta?.gap) return `Nothing found nearby — flagged as a gap and we’re sourcing providers.`;
+      return `Nothing came up for that near you — try broadening your search.`;
     }
 
+    // ── Rich signal analysis from results ──────────────────────────
+    const claimedCount = results.filter(r => r.claimed_at).length;
+    const openCount    = results.filter(r => {
+      const h = _parseHours(r.hours); return h && isOpenNow(h) === true;
+    }).length;
+    const topName = results[0]?.name ?? null;
+    const hasOrdering = results.some(r => r.claimed_at && r.website);
+
+    // Time phrase
     const timePhrase = temporal === 'open_now'   ? ', open right now'
       : temporal === 'happy_hour' ? ' with happy hour'
-      : temporal === 'late_night' ? ', open late tonight'
+      : temporal === 'late_night' ? ', open late'
       : temporal === 'morning'    ? ' open for breakfast'
       : temporal === 'midday'     ? ' open for lunch'
       : temporal === 'evening'    ? ' open for dinner'
       : '';
 
-    const howPhrase = meta?.semantic_search ? ' (found by meaning, not just keywords)' : '';
+    // Qualifier phrase — what makes this list notable
+    const qualParts = [];
+    if (openCount > 0 && temporal !== 'open_now') {
+      qualParts.push(`${openCount} open now`);
+    }
+    if (claimedCount > 0) {
+      qualParts.push(`${claimedCount} with direct ordering`);
+    }
+    const qualPhrase = qualParts.length ? ` — ${qualParts.join(', ')}` : '';
 
-    // Relevance gate — when the query has a cuisine, only describe results as
-    // that cuisine when the top result actually matches. Otherwise we'd be
-    // dressing up an unrelated claimed/wallet business (e.g. McFlamingo
-    // surfacing first on an "italian" query) with a confidently-wrong blurb.
+    // Single result — name it directly
+    if (count === 1 && topName) {
+      const label = cuisine ? cuisine
+        : category ? ((_CATEGORY_LABELS[category] || category).toLowerCase())
+        : group === 'food' ? 'spot'
+        : group === 'health' ? 'provider'
+        : 'option';
+      return `Found ${topName}${timePhrase ? ` (${timePhrase.trim()})` : ''} — the closest ${label} we have near ${zip}.`;
+    }
+
+    // Small set (2–4) — mention top name
+    if (count <= 4 && topName) {
+      const label = cuisine
+        ? `${cuisine} spot${count !== 1 ? 's' : ''}`
+        : category
+          ? `${(_CATEGORY_LABELS[category] || category).toLowerCase()}${count !== 1 ? 's' : ''}`
+          : group === 'food' ? `restaurant${count !== 1 ? 's' : ''}`
+          : group === 'health' ? `provider${count !== 1 ? 's' : ''}`
+          : `option${count !== 1 ? 's' : ''}`;
+      return `${count} ${label}${timePhrase} near ${zip}, starting with ${topName}${qualPhrase}.`;
+    }
+
+    // Cuisine path — relevance gate
     if (cuisine) {
       const top = results[0] || {};
       const cuisineLc = String(cuisine).toLowerCase();
       const fields = [top.cuisine, top.category, top.description]
-        .filter(Boolean)
-        .map(s => String(s).toLowerCase());
+        .filter(Boolean).map(s => String(s).toLowerCase());
       const topMatchesCuisine = fields.some(f => f.includes(cuisineLc));
       if (topMatchesCuisine) {
-        return `${count} ${cuisine} spot${count !== 1 ? 's' : ''}${timePhrase} near you.`;
+        return `${count} ${cuisine} spot${count !== 1 ? 's' : ''}${timePhrase} near ${zip}${qualPhrase}.`;
       }
-      // Top result doesn't match the cuisine — fall through to a neutral
-      // narrative rather than claiming N "<cuisine> restaurants".
     }
+
+    // Standard path
     if (category) {
-      return `${count} ${category}${count !== 1 ? 's' : ''}${timePhrase} near you.`;
+      const catLabel = (_CATEGORY_LABELS[category] || category).toLowerCase();
+      return `${count} ${catLabel}${count !== 1 ? 's' : ''}${timePhrase} near ${zip}${qualPhrase}.`;
     }
+
     const groupLabel = group === 'food' ? 'restaurant'
-      : group === 'bar' ? 'bar'
+      : group === 'bar'    ? 'bar'
       : group === 'health' ? 'health provider'
+      : group === 'retail' ? 'shop'
       : 'business';
-    return `${count} ${groupLabel}${count !== 1 ? 's' : ''}${timePhrase} near you.`;
+    return `${count} ${groupLabel}${count !== 1 ? 's' : ''}${timePhrase} near ${zip}${qualPhrase}.`;
+
   } catch (_) {
     return null;
   }
