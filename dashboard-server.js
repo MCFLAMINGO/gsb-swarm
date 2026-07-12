@@ -2661,12 +2661,9 @@ app.get('/.well-known/mcp/server-card.json', (req, res) => {
 // GET: discovery/server-info | POST: proxy to internal MCP server on 3004
 app.get('/mcp', async (req, res) => {
   try {
-    const response = await fetch('http://localhost:3004/mcp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
-    });
-    const data = await response.json();
+    const { invokeMcp } = require('./lib/mcpInvoke');
+    const invoked = await invokeMcp({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+    const data = invoked.json || {};
     res.json({ jsonrpc: '2.0', id: null, result: { protocolVersion: '2024-11-05', serverInfo: { name: 'localintel', version: '1.0.0' }, capabilities: { tools: {} }, tools: data?.result?.tools || [] } });
   } catch (e) {
     res.json({ jsonrpc: '2.0', id: null, result: { protocolVersion: '2024-11-05', serverInfo: { name: 'localintel', version: '1.0.0' }, capabilities: { tools: {} } } });
@@ -2705,13 +2702,12 @@ app.post('/mcp', express.json(), async (req, res) => {
         });
       }
     }
-    const response = await fetch('http://localhost:3004/mcp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const data = await response.json();
-    res.status(response.status).json(data);
+    const { invokeMcp } = require('./lib/mcpInvoke');
+    const invoked = await invokeMcp(body);
+    if (invoked.via && invoked.via !== 'http:3004') {
+      res.setHeader('X-LocalIntel-MCP-Via', invoked.via);
+    }
+    res.status(invoked.status || 200).json(invoked.json);
   } catch (e) {
     res.status(503).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'MCP unavailable: ' + e.message } });
   }
@@ -7304,7 +7300,91 @@ async function handleSmsInbound(req, res) {
     }
   }
 
-  // ── RFQ-v2 reply check (Step 8) ──────────────────────────────────────────
+  // ── Canonical RFQ YES/NO (rfqService UUID tables) ─────────────────────────
+  // Prefer this over rfq_requests_v2. Match by phone via businesses + broadcast_log.
+  // Accepts: YES | NO | YES $150 tomorrow | YES (ref: abcdef12)
+  if (from && body) {
+    try {
+      const upper = body.toUpperCase();
+      const isYes = /\bYES\b/.test(upper);
+      const isNo  = /\bNO\b/.test(upper);
+      if (isYes || isNo) {
+        const db = require('./lib/db');
+        const rfqService = require('./lib/rfqService');
+        const refMatch = upper.match(/REF[:\s-]*([A-F0-9]{8})/) || upper.match(/\b([A-F0-9]{8})\b/);
+        const phoneDigits = String(from).replace(/\D/g, '').slice(-10);
+
+        let pending = null;
+        if (refMatch) {
+          const ref = refMatch[1].toLowerCase();
+          const rows = await db.query(
+            `SELECT r.id AS rfq_id, r.status AS rfq_status, r.category, r.zip, r.description,
+                    b.business_id, b.name AS business_name, b.phone AS business_phone
+               FROM rfq_broadcast_log bl
+               JOIN rfq_requests r ON r.id = bl.rfq_id
+               JOIN businesses b ON b.business_id = bl.business_id
+              WHERE RIGHT(regexp_replace(COALESCE(b.phone,''), '\\D', '', 'g'), 10) = $1
+                AND LOWER(LEFT(REPLACE(r.id::text, '-', ''), 8)) = $2
+                AND r.status IN ('open','matched','pending')
+              ORDER BY bl.created_at DESC NULLS LAST, r.created_at DESC
+              LIMIT 1`,
+            [phoneDigits, ref]
+          );
+          pending = rows[0] || null;
+        }
+        if (!pending) {
+          const rows = await db.query(
+            `SELECT r.id AS rfq_id, r.status AS rfq_status, r.category, r.zip, r.description,
+                    b.business_id, b.name AS business_name, b.phone AS business_phone
+               FROM rfq_broadcast_log bl
+               JOIN rfq_requests r ON r.id = bl.rfq_id
+               JOIN businesses b ON b.business_id = bl.business_id
+              WHERE RIGHT(regexp_replace(COALESCE(b.phone,''), '\\D', '', 'g'), 10) = $1
+                AND r.status IN ('open','matched','pending')
+              ORDER BY bl.created_at DESC NULLS LAST, r.created_at DESC
+              LIMIT 1`,
+            [phoneDigits]
+          );
+          pending = rows[0] || null;
+        }
+
+        if (pending && pending.business_id) {
+          let parsedPrice = null;
+          let parsedEta = null;
+          if (isYes) {
+            const priceMatch = body.match(/\$?\s*(\d+(?:\.\d{1,2})?)/);
+            if (priceMatch) parsedPrice = parseFloat(priceMatch[1]);
+            const afterYes = body.replace(/^\s*YES\s*/i, '').replace(/\$?\s*\d+(?:\.\d{1,2})?\s*/i, '').replace(/\(ref:[^)]+\)/ig, '').trim();
+            if (afterYes) parsedEta = afterYes.slice(0, 100);
+          }
+
+          if (isYes) {
+            await rfqService.submitResponse(pending.rfq_id, pending.business_id, {
+              quote_usd: parsedPrice,
+              eta_text: parsedEta,
+              message: body.replace(/^\s*YES\s*/i, '').trim().slice(0, 500) || null,
+              business_phone: from,
+            });
+          }
+
+          const shortRef = String(pending.rfq_id).replace(/-/g, '').slice(0, 8);
+          const replyMsg = isYes
+            ? `LocalIntel: Bid received for RFQ ${shortRef}${parsedPrice != null ? ` at $${parsedPrice}` : ''}. We'll notify the customer.`
+            : `LocalIntel: Declined RFQ ${shortRef}. Thanks — we'll try other providers.`;
+
+          res.set('Content-Type', 'text/xml');
+          res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${replyMsg.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</Message></Response>`);
+          console.log(`[sms-inbound] canonical RFQ ${isYes ? 'YES' : 'NO'} rfq=${pending.rfq_id} biz=${pending.business_id}`);
+          return;
+        }
+      }
+    } catch (canonErr) {
+      console.error('[sms-inbound] canonical RFQ reply error:', canonErr.message);
+      // fall through to legacy v2
+    }
+  }
+
+  // ── RFQ-v2 reply check (legacy — prefer canonical path above) ────────────
   // YES / NO from a business in response to a handleRFQ broadcast. We match
   // by (1) explicit "RFQ-<id>" reference if present, else (2) the most-recent
   // pending row for this business phone in rfq_responses_v2.
@@ -7706,13 +7786,12 @@ app.use((req, res, next) => {
         if (parsed.method && parsed.method.startsWith('notifications/') && parsed.id === undefined) {
           return res.status(204).end();
         }
-        const response = await fetch('http://localhost:3004/mcp', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(parsed),
-        });
-        const data = await response.json();
-        return res.status(response.status).json(data);
+        const { invokeMcp } = require('./lib/mcpInvoke');
+        const invoked = await invokeMcp(parsed);
+        if (invoked.via && invoked.via !== 'http:3004') {
+          res.setHeader('X-LocalIntel-MCP-Via', invoked.via);
+        }
+        return res.status(invoked.status || 200).json(invoked.json);
       } catch (e) {
         return res.status(503).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'MCP unavailable: ' + e.message } });
       }

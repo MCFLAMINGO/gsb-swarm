@@ -2,12 +2,14 @@
   "name": "gsb-intelligence-swarm",
   "version": "1.0.2",
   "description": "LocalIntel — agentic local business intelligence for Florida. 20 MCP tools covering spatial context, sector gap analysis, oracle narratives, tidal momentum scores, and vertical agents for restaurant, healthcare, retail, construction, and real estate. 1,445 ZIP briefs. LLMs pay $0.01–$0.05/call in pathUSD on Tempo.",
-  "main": "dashboard-server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node --experimental-require-module --no-warnings dashboard-server.js",
+    "start": "node --import ./acp-loader.mjs index.js",
+    "start:dashboard": "node --experimental-require-module --no-warnings dashboard-server.js",
     "test:query": "node scripts/test-inference-query.js",
     "test:query:local": "MCP_BASE_URL=http://localhost:3001 node scripts/test-inference-query.js",
-    "test:payments": "node scripts/test-agent-payments.js"
+    "test:payments": "node scripts/test-agent-payments.js",
+    "test:task-loop": "node scripts/smoke-task-loop.js"
   },
   "dependencies": {
     "@aa-sdk/core": "^4.0.0",
@@ -30,6 +32,7 @@
     "playwright": "^1.44.0",
     "resend": "^4.0.0",
     "ssh2-sftp-client": "^12.1.1",
+    "twilio": "^5.13.1",
     "unzipper": "^0.12.3",
     "viem": "^2.0.0",
     "web-push": "^3.6.7",

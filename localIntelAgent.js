@@ -5914,18 +5914,20 @@ router.post('/mcp', express.json(), harvestGuard, apiKeyMiddleware, async (req, 
     if (_postMode && body.params) {
       body.params._meta = { ...(body.params._meta || {}), mode: _postMode };
     }
-    const response = await fetch('http://localhost:3004/mcp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    const { invokeMcp } = require('./lib/mcpInvoke');
+    const invoked = await invokeMcp(body, {
+      callerInfo: { tier: req.agentTier || 'sandbox', caller: detectSource(req), agentSessionId: null },
     });
-    let data = await response.json();
+    let data = invoked.json;
     // B64: enrich oracle/signal/sector_gap responses with site_intelligence scoring
     if (body.method === 'tools/call'
         && ['local_intel_oracle','local_intel_signal','local_intel_sector_gap'].includes(body.params?.name)) {
       data = await enrichMcpResponseWithScore(data, body.params.name, body.params.arguments || {});
     }
-    res.status(response.status).json(data);
+    if (invoked.via && invoked.via !== 'http:3004') {
+      res.setHeader('X-LocalIntel-MCP-Via', invoked.via);
+    }
+    res.status(invoked.status || 200).json(data);
   } catch (e) {
     res.status(503).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'MCP server unavailable: ' + e.message } });
   }
@@ -5964,18 +5966,20 @@ router.post('/mcp/x402', express.json(), async (req, res, next) => {
       body.params._caller = detectSource(req);
       body.params._entry  = 'x402';
     }
-    const response = await fetch('http://localhost:3004/mcp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    const { invokeMcp } = require('./lib/mcpInvoke');
+    const invoked = await invokeMcp(body, {
+      callerInfo: { tier: 'x402', caller: detectSource(req), agentSessionId: null },
     });
-    let data = await response.json();
+    let data = invoked.json;
     // B64: enrich oracle/signal/sector_gap responses with site_intelligence scoring
     if (body.method === 'tools/call'
         && ['local_intel_oracle','local_intel_signal','local_intel_sector_gap'].includes(body.params?.name)) {
       data = await enrichMcpResponseWithScore(data, body.params.name, body.params.arguments || {});
     }
-    res.status(response.status).json(data);
+    if (invoked.via && invoked.via !== 'http:3004') {
+      res.setHeader('X-LocalIntel-MCP-Via', invoked.via);
+    }
+    res.status(invoked.status || 200).json(data);
   } catch (e) {
     res.status(503).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'MCP unavailable: ' + e.message } });
   }
@@ -5995,13 +5999,14 @@ router.post('/mcp/x402/premium', express.json(), async (req, res, next) => {
       body.params._caller = detectSource(req);
       body.params._entry  = 'x402-premium';
     }
-    const response = await fetch('http://localhost:3004/mcp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    const { invokeMcp } = require('./lib/mcpInvoke');
+    const invoked = await invokeMcp(body, {
+      callerInfo: { tier: 'x402-premium', caller: detectSource(req), agentSessionId: null },
     });
-    const data = await response.json();
-    res.status(response.status).json(data);
+    if (invoked.via && invoked.via !== 'http:3004') {
+      res.setHeader('X-LocalIntel-MCP-Via', invoked.via);
+    }
+    res.status(invoked.status || 200).json(invoked.json);
   } catch (e) {
     res.status(503).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'MCP unavailable: ' + e.message } });
   }
@@ -8486,8 +8491,19 @@ router.get('/search', harvestGuard, async (req, res) => {
     return res.status(400).json({ error: 'q, zip, or cat required' });
   }
 
+  // Canonical intent for agents + humans (same HOW on every channel)
+  const { normalizeQueryIntent, howLabel } = require('./lib/intentUnified');
+  const unifiedIntent = normalizeQueryIntent(raw || cat || '', { channel: 'web' });
+  const _origJson = res.json.bind(res);
+  res.json = (payload) => {
+    if (payload && typeof payload === 'object' && !Array.isArray(payload) && payload.intent === undefined) {
+      payload = { ...payload, intent: { ...unifiedIntent, how: howLabel(unifiedIntent) } };
+    }
+    return _origJson(payload);
+  };
+
   try {
-    const db = require('./lib/db');
+  const db = require('./lib/db');
 
     // ── ORDER_ITEM intent detection ────────────────────────────────────────────
     // Matches "order ITEM at BIZ" — user specifies an item. Frontend will then
