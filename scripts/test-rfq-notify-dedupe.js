@@ -26,6 +26,14 @@ assert(inferCategoryFromText('I need a landscaper tomorrow', 'service') === 'lan
 assert(inferCategoryFromText('random stuff', 'general') === null, 'generic stays null');
 assert(inferCategoryFromText('get a plumber', 'plumber') === 'plumber', 'explicit category kept');
 
+const { computeBidWindow, MAX_RFQ_LIVE_MINUTES, clampDeadlineIso } = require('../lib/rfqService');
+assert(computeBidWindow({}).minutes === MAX_RFQ_LIVE_MINUTES, 'default window = 1 day');
+assert(computeBidWindow({ deadline_minutes: 60 * 24 * 30 }).minutes === MAX_RFQ_LIVE_MINUTES, '30-day override capped to 1 day');
+assert(computeBidWindow({ budget_usd: 9000 }).minutes === MAX_RFQ_LIVE_MINUTES, 'large job capped to 1 day');
+assert(computeBidWindow({ is_same_day: true }).minutes === 4 * 60, 'same-day stays 4h');
+const far = clampDeadlineIso(new Date(Date.now() + 40 * 24 * 3600 * 1000).toISOString());
+assert(Date.parse(far) - Date.now() <= MAX_RFQ_LIVE_MINUTES * 60 * 1000 + 5000, 'deadline_iso clamped to ≤1 day');
+
 const matched = [
   { business_id: 'a', name: 'Biz A', notification_email: 'erik@mcflamingo.com', verified: false },
   { business_id: 'b', name: 'Biz B', notification_email: 'erik@mcflamingo.com', verified: true },

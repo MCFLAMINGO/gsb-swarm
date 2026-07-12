@@ -4785,7 +4785,7 @@ router.get('/inbox/requests', async (req, res) => {
     if (!biz) return res.status(403).json({ error: 'invalid token' });
     const bid = biz.business_id;
 
-    // RFQs broadcast to this business — last 90 days
+    // RFQs broadcast to this business — actionable for 1 day only (not 90)
     // Canonical path: rfq_requests + rfq_broadcast_log + rfq_bids
     // All three write paths (SMS NLP, web form, MCP) now converge here.
     const rfqs = await db.query(
@@ -4801,7 +4801,8 @@ router.get('/inbox/requests', async (req, res) => {
        WHERE r.id IN (
          SELECT rfq_id FROM rfq_broadcast_log WHERE business_id = $1
        )
-       AND r.created_at > NOW() - INTERVAL '90 days'
+       AND r.created_at > NOW() - INTERVAL '1 day'
+       AND (r.status != 'open' OR r.deadline_at IS NULL OR r.deadline_at > NOW())
        ORDER BY r.created_at DESC
        LIMIT 50`,
       [bid]
