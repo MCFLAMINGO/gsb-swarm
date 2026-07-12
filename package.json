@@ -9,7 +9,8 @@
     "test:query": "node scripts/test-inference-query.js",
     "test:query:local": "MCP_BASE_URL=http://localhost:3001 node scripts/test-inference-query.js",
     "test:payments": "node scripts/test-agent-payments.js",
-    "test:task-loop": "node scripts/smoke-task-loop.js"
+    "test:task-loop": "node scripts/smoke-task-loop.js",
+    "test:rfq-dedupe": "node scripts/test-rfq-notify-dedupe.js"
   },
   "dependencies": {
     "@aa-sdk/core": "^4.0.0",
