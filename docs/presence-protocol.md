@@ -3,6 +3,7 @@
 > Captured: 2026-06-10
 > Author: Erik Osol
 > Status: FOUNDATIONAL — this is what we are building
+> Program brief: see [product-vision.md](product-vision.md) for the unified GSB Swarm + TheLocalIntel + WildWallet W5+H frame (Google + Angie's List for Florida, then state-by-state).
 
 ---
 
