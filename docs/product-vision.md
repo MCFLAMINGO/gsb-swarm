@@ -1,6 +1,7 @@
 # Product Vision — Unified Program Brief (W5+H)
 
-> **Status:** CANONICAL — read this before treating GSB Swarm, TheLocalIntel, or WildWallet as separate products.
+> **Status:** Swarm-side engineering canon of the shared product vision.
+> **Shared twin (keep in sync with landing):** [`../PRODUCT.md`](../PRODUCT.md) — identical file in `localintel-landing` and `gsb-swarm`.
 > **Captured:** 2026-07-12
 > **Author:** Erik Osol (via cloud agent merge of prior sessions + repo truth)
 > **Related:** [presence-protocol.md](presence-protocol.md) · [architecture.md](architecture.md) · [intent-routing.md](intent-routing.md) · [roadmap.md](roadmap.md)

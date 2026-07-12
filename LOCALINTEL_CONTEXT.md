@@ -12,13 +12,15 @@
 - **DB rule:** `db.query()` returns array directly — NEVER `.rows`
 - **Payment:** Tempo mainnet, pathUSD, pay on confirmed completion only
 - **LLM rule:** ZERO LLM API calls for LocalIntel intelligence (CEO/search layers) — LLM only in /api/local-intel/chat (subscriber tier)
-- **Program rule:** GSB Swarm + TheLocalIntel + WildWallet demand = **one system** (not separate products). Read [product-vision.md](docs/product-vision.md) first.
+- **Program rule:** GSB Swarm + TheLocalIntel + WildWallet demand = **one system** (not separate products). Read [PRODUCT.md](PRODUCT.md) first (keep identical with `localintel-landing`).
+- **Repo split:** brain/API/RFQ/wallets → this repo; homepage/SEO/claim/inbox/UI → `localintel-landing`. Two agents / two chats — one per repo.
 
 ## Docs
 
 | File | What's in it |
 |---|---|
-| [product-vision.md](docs/product-vision.md) | **START HERE** — unified W5+H program brief; Google+Angie's List frame; Swarm/TLI/WildWallet merge; demo flows |
+| [PRODUCT.md](PRODUCT.md) | **START HERE (shared twin)** — identical with landing PR; W5+H + where-to-work table |
+| [product-vision.md](docs/product-vision.md) | Deeper Swarm-side engineering canon of the same vision (surfaces, gaps, agent rules) |
 | [architecture.md](docs/architecture.md) | Three access points, hive model, bees/macro/micro, messaging as routing |
 | [basalt-surge-api.md](docs/basalt-surge-api.md) | Full Basalt/Surge API reference, payment portal, subscriptions |
 | [subscribers.md](docs/subscribers.md) | $9.99/mo chat tier, trial flow, agent wallets, Surge subscription endpoints |
