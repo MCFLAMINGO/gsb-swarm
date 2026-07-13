@@ -77,7 +77,8 @@ function toRow(b, defaultZip) {
 
 /**
  * Insert a batch of rows using a single multi-value INSERT.
- * ON CONFLICT (lower(name), zip) WHERE sunbiz_doc_number IS NULL → DO NOTHING
+ * ON CONFLICT (lower(trim(name)), zip) WHERE sunbiz_doc_number IS NULL → DO UPDATE
+ * Must match idx_businesses_name_zip_unique (migration 050) and lib/db.js upsertBusiness.
  * This is the fast path — no fuzzy scan per row.
  */
 async function insertBatch(rows) {
@@ -87,7 +88,7 @@ async function insertBatch(rows) {
   if (!valid.length) return 0;
 
   // Dedup within the batch — Postgres rejects ON CONFLICT DO UPDATE if two rows
-  // in the same batch share the same conflict key (lower(name), zip).
+  // in the same batch share the same conflict key (lower(trim(name)), zip).
   // Keep the last occurrence of each key (highest confidence wins).
   const seen = new Map();
   for (const r of valid) {
@@ -126,7 +127,7 @@ async function insertBatch(rows) {
   const sql = `
     INSERT INTO businesses (${cols.join(',')})
     VALUES ${values.join(',')}
-    ON CONFLICT (lower(name), zip) WHERE sunbiz_doc_number IS NULL
+    ON CONFLICT (lower(trim(name)), zip) WHERE sunbiz_doc_number IS NULL
     DO UPDATE SET
       confidence_score = GREATEST(businesses.confidence_score, EXCLUDED.confidence_score),
       phone    = COALESCE(NULLIF(EXCLUDED.phone,''),    businesses.phone),
@@ -147,7 +148,7 @@ async function insertBatch(rows) {
         const s = `
           INSERT INTO businesses (${cols.join(',')})
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW())
-          ON CONFLICT (lower(name), zip) WHERE sunbiz_doc_number IS NULL
+          ON CONFLICT (lower(trim(name)), zip) WHERE sunbiz_doc_number IS NULL
           DO UPDATE SET
             confidence_score = GREATEST(businesses.confidence_score, EXCLUDED.confidence_score),
             phone    = COALESCE(NULLIF(EXCLUDED.phone,''),    businesses.phone),
