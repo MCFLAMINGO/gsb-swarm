@@ -13,7 +13,7 @@
  *   sig_wallet_rate        — % of businesses with a wallet (paid tier)
  *   sig_task_density       — task templates per business, scaled to 0-100
  *   sig_closure_rate_food  — food/restaurant closure rate (0-100)
- *   sig_unmet_demand_score — placeholder (0) — populated later by taskSignalWorker
+ *   sig_unmet_demand_score — left to taskSignalWorker (micro RFQ/dead-end loop)
  *
  * Worker contract:
  *   START → freshness check (skip if <24h) → aggregate per-ZIP → upsert → END
@@ -152,9 +152,7 @@ async function run() {
       ? (b.food_closures / food_total) * 100
       : 0;
 
-    // Placeholder until taskSignalWorker is built — column exists so scoring
-    // engine can reference it without errors.
-    const sig_unmet_demand_score = 0;
+    // sig_unmet_demand_score owned by taskSignalWorker (micro action loop)
 
     // B67: businesses per 1k residents — null when population unknown/zero
     const pop = popMap[zip];
@@ -168,7 +166,6 @@ async function run() {
         sig_wallet_rate:        Math.round(sig_wallet_rate * 10) / 10,
         sig_task_density:       Math.round(sig_task_density * 10) / 10,
         sig_closure_rate_food:  Math.round(sig_closure_rate_food * 10) / 10,
-        sig_unmet_demand_score,
         biz_density_per_1k,
       });
       written++;

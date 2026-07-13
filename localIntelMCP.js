@@ -2368,7 +2368,7 @@ const MCP_MANIFEST = {
     },
     {
       name: 'local_intel_complete',
-      description: 'Mark a booked job as complete. Triggers escrow release in v2. Call when the job is done.',
+      description: 'Mark a booked job as complete and settle payment to the local merchant wallet (Tempo pathUSD when SETTLEMENT_ENABLED=true; otherwise records settled_intent and feeds the forecast loop).',
       inputSchema: {
         type: 'object',
         required: ['booking_id'],
