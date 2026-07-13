@@ -15,12 +15,14 @@
 - **Program rule:** GSB Swarm + TheLocalIntel + WildWallet demand = **one system** (not separate products). Read [PRODUCT.md](PRODUCT.md) first (keep identical with `localintel-landing`).
 - **Repo split:** brain/API/RFQ/wallets → this repo; homepage/SEO/claim/inbox/UI → `localintel-landing`. Two agents / two chats — one per repo.
 - **Result rule:** Activity without task completion is failure. Canonical loop + deprecated paths: [SYSTEM_MAP.md](docs/SYSTEM_MAP.md).
+- **Business UX:** Trust-first Business Home — claim with email only; pay later. Canon: [BUSINESS_UX.md](docs/BUSINESS_UX.md).
 
 ## Docs
 
 | File | What's in it |
 |---|---|
 | [PRODUCT.md](PRODUCT.md) | **START HERE (shared twin)** — identical with landing PR; W5+H + where-to-work table |
+| [BUSINESS_UX.md](docs/BUSINESS_UX.md) | **Business Home** — trust-first claim, broadcast format, Surge + prepaid agents, onboarding pack |
 | [SYSTEM_MAP.md](docs/SYSTEM_MAP.md) | **Operating contract** — result=task done; canonical routes; RFQ/MCP/payment truth |
 | [DEPRECATIONS.md](docs/DEPRECATIONS.md) | Do-not-extend paths (v2 RFQ, flat-file workers, split intent) |
 | [product-vision.md](docs/product-vision.md) | Deeper Swarm-side engineering canon of the same vision (surfaces, gaps, agent rules) |

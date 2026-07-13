@@ -3156,10 +3156,17 @@ router.post('/claim/verify', express.json(), async (req, res) => {
     const dispatchToken = randomUUID();
     // sunbiz_id may be passed from claim flow step 3 (verifyDoc field)
     const sunbizId = req.body?.sunbiz_id || null;
+    try {
+      const businessHome = require('./lib/businessHome');
+      await businessHome.ensureColumns();
+    } catch (_) { /* non-fatal */ }
     await db.query(
       `UPDATE businesses
           SET claimed_at = NOW(), claim_token = NULL, claim_token_exp = NULL,
-              dispatch_token = $2
+              dispatch_token = $2,
+              accepts_rfq = COALESCE(accepts_rfq, true),
+              claim_stage = 'presence_draft',
+              notify_email = COALESCE(notify_email, true)
               ${sunbizId ? ', sunbiz_id = $3' : ''}
         WHERE business_id = $1`,
       sunbizId ? [business_id, dispatchToken, sunbizId] : [business_id, dispatchToken]
@@ -3194,19 +3201,38 @@ router.post('/claim/verify', express.json(), async (req, res) => {
     const channels = ['web'];
     if (biz.notify_sms)   channels.push('sms');
     if (biz.notify_email) channels.push('email');
+    const inboxUrl = `https://www.thelocalintel.com/inbox.html?token=${dispatchToken}`;
+    const packUrl  = `https://gsb-swarm-production.up.railway.app/api/local-intel/business/${business_id}/onboarding-pack?format=html`;
     await nq.enqueue(business_id,
       `Welcome to LocalIntel, ${biz.name}`,
-      { body: `Your listing is claimed. You'll receive market intelligence when agents query your area.`,
-        body_es: `Tu perfil est\u00e1 reclamado. Recibir\u00e1s inteligencia de mercado cuando los agentes consulten tu \u00e1rea.`,
+      { body: `You're in. No wallet required yet. Bookmark your Business Home — jobs land there. Next: add one specialty sentence.`,
+        body_es: `Listo. No necesitas billetera a\u00fan. Guarda tu Business Home — all\u00ed llegan los trabajos. Siguiente: una frase de especialidad.`,
         subject_es: `Bienvenido a LocalIntel \u2014 ${biz.name}`,
-        cta_url: 'https://thelocalintel.com', cta_label: 'View Dashboard', cta_label_es: 'Ver panel' },
+        cta_url: inboxUrl, cta_label: 'Open Business Home', cta_label_es: 'Abrir Business Home' },
       channels
     );
     setImmediate(() => nq.processQueue(5).catch(() => {}));
-    res.json({ ok: true, claimed: true, business_id, name: biz.name,
+    res.json({
+      ok: true,
+      claimed: true,
+      business_id,
+      name: biz.name,
       dispatch_token: dispatchToken,
       deposit_address: depositAddr,
-      inbox_url: `https://www.thelocalintel.com/inbox?token=${dispatchToken}` });
+      inbox_url: inboxUrl,
+      home_url: `https://gsb-swarm-production.up.railway.app/api/local-intel/inbox/home?token=${dispatchToken}`,
+      pack_url: packUrl,
+      next_action: {
+        id: 'add_specialty',
+        label: 'Add one sentence: what do you do specially?',
+        tab: 'broadcast',
+      },
+      fear_reducers: [
+        'No bank login required',
+        'No crypto wallet required to receive jobs',
+        'You can get paid invoice/cash forever',
+      ],
+    });
   } catch (err) {
     console.error('[claim/verify]', err.message);
     res.status(500).json({ error: err.message });
@@ -3307,10 +3333,16 @@ router.post('/merchant/request-link', express.json(), async (req, res) => {
 
   try {
     const db = require('./lib/db');
+    const { randomUUID } = require('crypto');
+    const businessHome = require('./lib/businessHome');
+    await businessHome.ensureColumns();
     const normEmail = String(email).toLowerCase().trim();
 
     let [business] = await db.query(
-      'SELECT * FROM businesses WHERE merchant_email = $1 LIMIT 1',
+      `SELECT * FROM businesses
+        WHERE lower(COALESCE(merchant_email, notification_email, '')) = $1
+           OR lower(COALESCE(owner_email, '')) = $1
+        LIMIT 1`,
       [normEmail]
     );
 
@@ -3322,55 +3354,80 @@ router.post('/merchant/request-link', express.json(), async (req, res) => {
         });
       }
       const [inserted] = await db.query(
-        `INSERT INTO businesses (name, phone, zip, category, merchant_email, claimed, status)
-         VALUES ($1, $2, $3, $4, $5, true, 'active')
+        `INSERT INTO businesses (name, phone, zip, category, merchant_email, notification_email,
+                                 claimed_at, status, accepts_rfq, claim_stage)
+         VALUES ($1, $2, $3, $4, $5, $5, NOW(), 'active', true, 'presence_draft')
          RETURNING *`,
         [name, phone ?? null, zip, category ?? 'general', normEmail]
       );
       business = inserted;
     }
 
-    const token = require('crypto').randomBytes(32).toString('hex');
-    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    // Permanent dispatch_token — never the legacy 24h dashboard_token
+    let dispatchToken = business.dispatch_token;
+    if (!dispatchToken) {
+      dispatchToken = randomUUID();
+      await db.query(
+        `UPDATE businesses
+            SET dispatch_token = $1,
+                claimed_at = COALESCE(claimed_at, NOW()),
+                notification_email = COALESCE(notification_email, $2),
+                merchant_email = COALESCE(merchant_email, $2),
+                accepts_rfq = COALESCE(accepts_rfq, true),
+                claim_stage = COALESCE(claim_stage, 'presence_draft')
+          WHERE business_id = $3`,
+        [dispatchToken, normEmail, business.business_id]
+      );
+    } else {
+      await db.query(
+        `UPDATE businesses
+            SET notification_email = COALESCE(notification_email, $1),
+                merchant_email = COALESCE(merchant_email, $1)
+          WHERE business_id = $2`,
+        [normEmail, business.business_id]
+      );
+    }
 
-    await db.query(
-      `UPDATE businesses
-         SET dashboard_token = $1, token_expires_at = $2, claimed = true
-       WHERE business_id = $3`,
-      [token, expires, business.business_id]
-    );
-
-    const dashboardUrl = `https://www.thelocalintel.com/inbox.html?token=${token}`;
+    const dashboardUrl = `https://www.thelocalintel.com/inbox.html?token=${dispatchToken}`;
+    const packUrl = `https://gsb-swarm-production.up.railway.app/api/local-intel/business/${business.business_id}/onboarding-pack?format=html`;
 
     try {
       const { Resend } = require('resend');
       const resend = new Resend(process.env.RESEND_API_KEY);
+      const packLib = require('./lib/onboardingPack');
+      const html = packLib.buildPackEmailHtml(
+        { ...business, notification_email: normEmail },
+        { token: dispatchToken, packUrl }
+      );
       await resend.emails.send({
         from: 'LocalIntel <intel@thelocalintel.com>',
         to: normEmail,
-        subject: 'Your LocalIntel merchant dashboard',
-        html: `
+        subject: `${business.name || 'Your business'} — LocalIntel Business Home`,
+        html: html || `
           <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;">
             <p style="font-size:15px;color:#111827;">Hi <strong>${(business.name || '').replace(/</g,'&lt;')}</strong>,</p>
-            <p style="font-size:15px;color:#374151;">Here's your private merchant dashboard link:</p>
+            <p style="font-size:15px;color:#374151;">Your private Business Home (bookmark this):</p>
             <p style="margin:28px 0;">
-              <a href="${dashboardUrl}" style="background:#16A34A;color:#fff;padding:13px 26px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;">Open My Dashboard &rarr;</a>
+              <a href="${dashboardUrl}" style="background:#0f6b4c;color:#fff;padding:13px 26px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;">Open Business Home &rarr;</a>
             </p>
-            <p style="font-size:13px;color:#6B7280;">Or copy this link:<br><a href="${dashboardUrl}" style="color:#16A34A;word-break:break-all;">${dashboardUrl}</a></p>
-            <p style="font-size:13px;color:#6B7280;margin-top:20px;">This link expires in 24 hours.</p>
+            <p style="font-size:13px;color:#6B7280;">No wallet or bank login required to start. Jobs show up here.</p>
+            <p style="font-size:13px;"><a href="${packUrl}">Download your onboarding pack</a></p>
             <hr style="border:none;border-top:1px solid #E5E7EB;margin:28px 0;">
             <p style="font-size:12px;color:#9CA3AF;">LocalIntel · thelocalintel.com</p>
           </div>`
       });
+      await db.query(
+        `UPDATE businesses SET onboarding_pack_sent_at = NOW() WHERE business_id = $1`,
+        [business.business_id]
+      ).catch(() => {});
     } catch (emailErr) {
       console.error('[merchant] email send failed:', emailErr.message);
-      // non-fatal — link is in response payload for dev
     }
 
     return res.json({
       success: true,
-      message: `Dashboard link sent to ${normEmail}`,
-      ...(process.env.NODE_ENV === 'production' ? {} : { dashboard_url: dashboardUrl })
+      message: `Business Home link sent to ${normEmail}`,
+      ...(process.env.NODE_ENV === 'production' ? {} : { dashboard_url: dashboardUrl, pack_url: packUrl })
     });
   } catch (err) {
     console.error('[merchant] request-link error:', err.message);
@@ -3495,6 +3552,88 @@ router.get('/merchant/dashboard/:token', async (req, res) => {
   } catch (err) {
     console.error('[merchant] dashboard error:', err.message);
     return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Business Home (trust-first) ───────────────────────────────────────────────
+// GET /api/local-intel/inbox/home?token= — single payload for landing Business Home
+router.get('/inbox/home', async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(401).json({ error: 'token required' });
+  try {
+    const businessHome = require('./lib/businessHome');
+    const home = await businessHome.buildHome(token);
+    if (!home) return res.status(401).json({ error: 'invalid token' });
+    res.json({ ok: true, ...home });
+  } catch (err) {
+    console.error('[inbox/home]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/local-intel/inbox/send-pack — email onboarding pack to owner
+router.post('/inbox/send-pack', express.json(), async (req, res) => {
+  const { token, email } = req.body || {};
+  if (!token) return res.status(401).json({ error: 'token required' });
+  try {
+    const businessHome = require('./lib/businessHome');
+    const packLib = require('./lib/onboardingPack');
+    await businessHome.ensureColumns();
+    const biz = await businessHome.loadBizByToken(token);
+    if (!biz) return res.status(401).json({ error: 'invalid token' });
+
+    const to = (email || biz.notification_email || biz.owner_email || '').toLowerCase().trim();
+    if (!to) return res.status(400).json({ error: 'no email on file — pass email in body' });
+
+    const home = await businessHome.buildHome(token);
+    const packUrl = `https://gsb-swarm-production.up.railway.app/api/local-intel/business/${biz.business_id}/onboarding-pack?format=html`;
+    const html = packLib.buildPackEmailHtml(biz, { token, home, packUrl });
+
+    if (!process.env.RESEND_API_KEY) {
+      return res.status(503).json({ error: 'email not configured', pack_url: packUrl });
+    }
+    const { Resend } = require('resend');
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    await resend.emails.send({
+      from: 'LocalIntel <intel@thelocalintel.com>',
+      to,
+      subject: `${biz.name} — your LocalIntel pack`,
+      html,
+    });
+
+    await db.query(
+      `UPDATE businesses SET onboarding_pack_sent_at = NOW() WHERE business_id = $1`,
+      [biz.business_id]
+    );
+
+    res.json({ ok: true, sent_to: to, pack_url: packUrl });
+  } catch (err) {
+    console.error('[inbox/send-pack]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/local-intel/business/:id/onboarding-pack — JSON or HTML one-pager
+router.get('/business/:id/onboarding-pack', async (req, res) => {
+  try {
+    const businessHome = require('./lib/businessHome');
+    const packLib = require('./lib/onboardingPack');
+    const biz = await businessHome.loadBizById(req.params.id);
+    if (!biz) return res.status(404).json({ error: 'not found' });
+
+    const home = biz.dispatch_token
+      ? await businessHome.buildHome(biz.dispatch_token).catch(() => null)
+      : null;
+    const format = String(req.query.format || 'json').toLowerCase();
+
+    if (format === 'html') {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(packLib.buildPackHtml(biz, { token: biz.dispatch_token, home }));
+    }
+    res.json(packLib.buildPackJson(biz, { token: biz.dispatch_token, home }));
+  } catch (err) {
+    console.error('[onboarding-pack]', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
