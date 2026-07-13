@@ -117,7 +117,7 @@ NODE_TLS_REJECT_UNAUTHORIZED=0 npx vercel --token $VERCEL_TOKEN --yes --prod
 3. Twilio SMS (if business has `phone`) → job summary + accept/decline links
 4. Email fallback → Resend via existing `rfqService` path
 
-**Tempo escrow:** `holdTempoEscrow` / `releaseTempoEscrow` in `dispatchRail.js` are **intent-only** (log only, no viem TX). Real on-chain escrow is a future build.
+**Tempo escrow:** `holdOnBook` / `settleOnComplete` in `lib/settlementService.js` record settlement_events and pay treasury→merchant when `SETTLEMENT_ENABLED=true` + `TEMPO_EXECUTOR_PK`. Default is `settled_intent` (ledger + forecast advance without chain). `dispatchRail.releaseTempoEscrow` delegates to settlementService.
 
 **PLAYER wallet holds pathUSD, not USDC.** Always use `tokenAddr: 'auto'` for sponsor-tx calls.
 
@@ -312,8 +312,9 @@ NODE_TLS_REJECT_UNAUTHORIZED=0 npx vercel --token $VERCEL_TOKEN --yes --prod
 | Stripe PaymentIntent | ✅ Built | Manual capture, 5% fee, USD/USDC |
 | Twilio SMS outbound | ✅ Built | Job summary + accept/decline links |
 | Email fallback | ✅ Existing | rfqService Resend path (pre-existing) |
-| Tempo escrow hold | ⚠️ Intent only | holdTempoEscrow() logs but no viem TX |
-| Tempo escrow release | ⚠️ Intent only | releaseTempoEscrow() logs but no viem TX |
+| Tempo / settlement hold | ✅ Wired | `settlementService.holdOnBook` writes escrow_data + settlement_events |
+| Tempo / settlement release | ✅ Wired | `settleOnComplete` pays treasury→merchant when SETTLEMENT_ENABLED; else settled_intent |
+| Task → forecast loop | ✅ Wired | `taskSignalWorker` writes sig_task_* + zip_forecast v1-task-loop |
 | Twilio inbound SMS | ❌ Not built | Business texting YES/NO not wired |
 | Stripe keys in Railway | ❌ Not set | STRIPE_SECRET_KEY env var needed |
 | Watchdog 60s tick | ✅ Built | Starts on server boot via dashboard-server.js |
@@ -333,14 +334,18 @@ NODE_TLS_REJECT_UNAUTHORIZED=0 npx vercel --token $VERCEL_TOKEN --yes --prod
       → Surge UCP → Stripe → Twilio SMS → email (priority order)
 3. Business responds (SMS/email/Surge webhook) → rfq_responses row
 4. Agent calls local_intel_book { rfq_id, response_id }
-   → rfqService.completeBooking()
+   → rfqService.bookRfq()
    → writes rfq_bookings row
-   → calls dispatchRail.holdTempoEscrow() (intent-only)
+   → settlementService.holdOnBook() → escrow_data + settlement_events(held)
 5. Work completed → Agent calls local_intel_complete { booking_id }
    → rfqService.completeBooking() marks complete
-   → calls dispatchRail.releaseTempoEscrow() (intent-only)
+   → settlementService.settleOnComplete() → treasury→merchant (or settled_intent)
+   → feeService.logFee(job_complete)
    → rewardCompletion() → confidence +0.02
-6. dispatchWatchdog (60s tick):
+6. taskSignalWorker (6h):
+   → aggregates RFQs + settlements + dead ends → zip_signals sig_task_*
+   → writes zip_forecast model_version=v1-task-loop
+7. dispatchWatchdog (60s tick):
    → finds open RFQs past timeout threshold
    → retries dispatch
    → penalises no-shows → confidence -0.05

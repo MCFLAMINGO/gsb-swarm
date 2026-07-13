@@ -7833,6 +7833,7 @@ app.use((req, res, next) => {
   // lodesWorker, irsSoiWorker, fccBroadbandWorker, schoolEnrollmentWorker
   // ↑ all moved into batchDataWorker — share 1 connection slot, run sequentially every 6h
   { name: 'Business Signal Worker',        file: 'workers/businessSignalWorker.js' },  // B65 — 24h freshness; derives claimed/wallet/task/closure rates → zip_signals
+  { name: 'Task Signal Worker',            file: 'workers/taskSignalWorker.js' },      // last-mile: RFQ/settlement/dead-ends → zip_signals + zip_forecast
   // Geocoding, CategoryReclass, RouterLearning moved to batchDataWorker sequential queue
   // to free 3 dedicated connection slots for search traffic (pool budget fix)
   ];
