@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>LocalIntel — Business Home demo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --ink: #1c1914;
+      --muted: #5e574c;
+      --paper: #f7f1e6;
+      --card: #fffcf7;
+      --line: #e4d9c5;
+      --pine: #0f6b4c;
+      --pine-deep: #0a4d38;
+      --clay: #c45c26;
+      --fog: rgba(28, 25, 20, 0.06);
+      --shadow: 0 18px 50px rgba(28, 25, 20, 0.1);
+      --radius: 14px;
+      --font-display: "Fraunces", Georgia, serif;
+      --font-body: "Source Sans 3", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font-body);
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #ffe8c8 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #d9efe4 0%, transparent 50%),
+        linear-gradient(180deg, #f3ebe0 0%, var(--paper) 40%, #efe6d8 100%);
+    }
+    .shell { max-width: 980px; margin: 0 auto; padding: 28px 20px 64px; }
+    .topbar {
+      display: flex; justify-content: space-between; align-items: baseline;
+      margin-bottom: 22px;
+    }
+    .brand {
+      font-family: var(--font-display);
+      font-size: 1.35rem;
+      letter-spacing: -0.02em;
+    }
+    .brand span { color: var(--pine); }
+    .demo-tag {
+      font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    .steps {
+      display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 22px;
+    }
+    .step-pill {
+      border: 1px solid var(--line); background: rgba(255,252,247,0.7);
+      border-radius: 999px; padding: 8px 14px; font-size: 0.86rem;
+      cursor: pointer; color: var(--muted); transition: 180ms ease;
+    }
+    .step-pill:hover { border-color: var(--pine); color: var(--ink); }
+    .step-pill.active {
+      background: var(--pine); border-color: var(--pine); color: #fff;
+    }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      animation: rise 420ms ease both;
+    }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: none; }
+    }
+    .panel-head {
+      padding: 22px 24px 14px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #fff 0%, #fbf7ef 100%);
+    }
+    .panel-head h1 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: clamp(1.6rem, 3vw, 2.1rem);
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+    }
+    .panel-head p { margin: 8px 0 0; color: var(--muted); max-width: 46ch; }
+    .panel-body { padding: 22px 24px 28px; }
+    .grid-2 { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 18px; }
+    @media (max-width: 760px) {
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+    label { display: block; font-size: 0.82rem; font-weight: 700; margin: 0 0 6px; }
+    input, textarea {
+      width: 100%; border: 1px solid var(--line); border-radius: 10px;
+      padding: 12px 14px; font: inherit; background: #fff; color: var(--ink);
+    }
+    textarea { min-height: 88px; resize: vertical; }
+    .field { margin-bottom: 14px; }
+    .hint { font-size: 0.8rem; color: var(--muted); margin-top: 6px; }
+    .btn {
+      appearance: none; border: 0; border-radius: 10px;
+      background: var(--pine); color: #fff; font: inherit; font-weight: 700;
+      padding: 12px 18px; cursor: pointer; transition: 160ms ease;
+    }
+    .btn:hover { background: var(--pine-deep); }
+    .btn.secondary {
+      background: transparent; color: var(--pine); border: 1px solid var(--pine);
+    }
+    .btn.ghost { background: var(--fog); color: var(--ink); }
+    .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+    .fear {
+      background: #eef7f2; border: 1px solid #cfe6da; border-radius: 12px;
+      padding: 14px 16px; font-size: 0.9rem;
+    }
+    .fear strong { color: var(--pine-deep); }
+    .fear ul { margin: 8px 0 0; padding-left: 1.1rem; }
+    .tabs {
+      display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 18px;
+      padding: 4px; background: var(--fog); border-radius: 12px;
+    }
+    .tab {
+      border: 0; background: transparent; border-radius: 9px;
+      padding: 10px 14px; font: inherit; font-weight: 700; color: var(--muted);
+      cursor: pointer;
+    }
+    .tab.active { background: #fff; color: var(--ink); box-shadow: 0 1px 0 var(--line); }
+    .score-row {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 12px; margin-bottom: 16px;
+    }
+    .score {
+      font-family: var(--font-display); font-size: 2rem; color: var(--pine);
+    }
+    .next {
+      border-left: 3px solid var(--clay);
+      background: #fff7f0; padding: 12px 14px; border-radius: 0 10px 10px 0;
+      margin-bottom: 16px;
+    }
+    .dims { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    @media (max-width: 760px) { .dims { grid-template-columns: repeat(2, 1fr); } }
+    .dim {
+      border: 1px solid var(--line); border-radius: 10px; padding: 10px;
+      background: #fff;
+    }
+    .dim b { display: block; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+    .bar {
+      height: 6px; border-radius: 99px; background: #efe8db; margin-top: 8px; overflow: hidden;
+    }
+    .bar > i { display: block; height: 100%; background: var(--pine); }
+    .job {
+      border: 1px solid var(--line); border-radius: 12px; padding: 14px;
+      margin-bottom: 10px; background: #fff;
+    }
+    .job h3 { margin: 0 0 4px; font-size: 1rem; }
+    .meta { color: var(--muted); font-size: 0.84rem; }
+    .pay-card {
+      border: 1px dashed var(--line); border-radius: 12px; padding: 14px;
+      margin-bottom: 10px; background: #fff;
+    }
+    .pay-card.locked { opacity: 0.72; }
+    .badge {
+      display: inline-block; font-size: 0.72rem; font-weight: 700;
+      letter-spacing: 0.06em; text-transform: uppercase;
+      padding: 3px 8px; border-radius: 999px; background: #fff3e8; color: var(--clay);
+    }
+    .badge.ok { background: #e8f6ef; color: var(--pine-deep); }
+    .pack-preview {
+      border: 1px solid var(--line); border-radius: 12px; padding: 18px;
+      background: linear-gradient(180deg, #fff, #fbf6ec);
+    }
+    .hidden { display: none !important; }
+    .toast {
+      position: fixed; right: 18px; bottom: 18px; background: var(--ink); color: #fff;
+      padding: 12px 16px; border-radius: 10px; font-size: 0.9rem;
+      box-shadow: var(--shadow); opacity: 0; transform: translateY(8px);
+      transition: 220ms ease; pointer-events: none; z-index: 20;
+    }
+    .toast.show { opacity: 1; transform: none; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <div class="brand">Local<span>Intel</span> Business Home</div>
+      <div class="demo-tag">Interactive demo · no login</div>
+    </div>
+
+    <div class="steps" id="storySteps">
+      <button class="step-pill active" data-screen="claim">1 · Claim</button>
+      <button class="step-pill" data-screen="home">2 · Home</button>
+      <button class="step-pill" data-screen="broadcast">3 · Broadcast</button>
+      <button class="step-pill" data-screen="jobs">4 · Jobs</button>
+      <button class="step-pill" data-screen="pay">5 · Get paid</button>
+      <button class="step-pill" data-screen="pack">6 · Share pack</button>
+    </div>
+
+    <!-- CLAIM -->
+    <section class="panel" id="screen-claim">
+      <div class="panel-head">
+        <h1>Claim in under two minutes</h1>
+        <p>Find your listing. Enter email or phone. Enter a code. No wallet. No bank. No APIM key.</p>
+      </div>
+      <div class="panel-body grid-2">
+        <div>
+          <div class="field">
+            <label>Find your business</label>
+            <input id="bizSearch" value="Coastal Blooms Florist · 32082" readonly/>
+            <div class="hint">Pre-filled from the Florida graph — you only confirm.</div>
+          </div>
+          <div class="field">
+            <label>Email or phone</label>
+            <input id="contact" type="email" value="owner@coastalbloomspv.com"/>
+          </div>
+          <div class="field hidden" id="codeField">
+            <label>6-digit code</label>
+            <input id="code" value="482193" maxlength="6"/>
+          </div>
+          <div class="btn-row">
+            <button class="btn" id="sendCodeBtn">Send code</button>
+            <button class="btn secondary hidden" id="verifyBtn">Verify & open home</button>
+          </div>
+        </div>
+        <div class="fear">
+          <strong>You do not need to fear this</strong>
+          <ul>
+            <li>No bank login to claim</li>
+            <li>No crypto wallet to get job alerts</li>
+            <li>Stay invoice/cash forever if you want</li>
+            <li>You control what agents can see</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- HOME -->
+    <section class="panel hidden" id="screen-home">
+      <div class="panel-head">
+        <h1>Coastal Blooms Florist</h1>
+        <p>One home for broadcast, jobs, pay, and your share pack — Surge-simple, for every kind of place.</p>
+      </div>
+      <div class="panel-body">
+        <div class="tabs" id="homeTabs">
+          <button class="tab active" data-goto="home">Overview</button>
+          <button class="tab" data-goto="broadcast">Broadcast</button>
+          <button class="tab" data-goto="jobs">Jobs</button>
+          <button class="tab" data-goto="pay">Get paid</button>
+          <button class="tab" data-goto="pack">Share pack</button>
+        </div>
+        <div class="score-row">
+          <div>
+            <div class="meta">Presence score</div>
+            <div class="score">42</div>
+          </div>
+          <div class="meta">Stage: presence draft · Open for work</div>
+        </div>
+        <div class="next">
+          <div class="meta">Next one action</div>
+          <strong>Add one sentence: what do you do specially?</strong>
+          <div class="btn-row">
+            <button class="btn" data-goto="broadcast">Do it now</button>
+          </div>
+        </div>
+        <div class="dims">
+          <div class="dim"><b>Who</b><div class="bar"><i style="width:70%"></i></div></div>
+          <div class="dim"><b>What</b><div class="bar"><i style="width:25%"></i></div></div>
+          <div class="dim"><b>Where</b><div class="bar"><i style="width:55%"></i></div></div>
+          <div class="dim"><b>When</b><div class="bar"><i style="width:20%"></i></div></div>
+          <div class="dim"><b>Why</b><div class="bar"><i style="width:15%"></i></div></div>
+          <div class="dim"><b>How</b><div class="bar"><i style="width:40%"></i></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BROADCAST -->
+    <section class="panel hidden" id="screen-broadcast">
+      <div class="panel-head">
+        <h1>Broadcast what you do specially</h1>
+        <p>Same W5+H format for florists, landscapers, dentists, restaurants — plain language, not a spreadsheet.</p>
+      </div>
+      <div class="panel-body">
+        <div class="tabs">
+          <button class="tab" data-goto="home">Overview</button>
+          <button class="tab active" data-goto="broadcast">Broadcast</button>
+          <button class="tab" data-goto="jobs">Jobs</button>
+          <button class="tab" data-goto="pay">Get paid</button>
+          <button class="tab" data-goto="pack">Share pack</button>
+        </div>
+        <div class="grid-2">
+          <div>
+            <div class="field">
+              <label>WHAT — What do you do specially?</label>
+              <textarea id="specialty">Wedding bouquets, dozen roses same-day, Ponte Vedra delivery</textarea>
+            </div>
+            <div class="field">
+              <label>WHEN — When can people get you?</label>
+              <input value="Tue–Sat 9–6 · same-day when open"/>
+            </div>
+            <div class="field">
+              <label>HOW — How should work arrive?</label>
+              <input value="Orders · RFQ delivery · walk-in"/>
+            </div>
+            <div class="btn-row">
+              <button class="btn" id="saveBroadcast">Save broadcast</button>
+              <button class="btn ghost" data-goto="jobs">See jobs →</button>
+            </div>
+          </div>
+          <div class="fear">
+            <strong>Agents read this as presence data</strong>
+            <p style="margin:8px 0 0;color:var(--muted);font-size:0.9rem;">
+              <code>GET /presence/:id</code> returns structured WHO/WHAT/WHERE/WHEN/WHY/HOW —
+              the same fields you edit here. No second form for “the AI version.”
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- JOBS -->
+    <section class="panel hidden" id="screen-jobs">
+      <div class="panel-head">
+        <h1>Jobs for this business only</h1>
+        <p>Live for one day. Accept, quote, or done — not twenty emails pretending you are twenty shops.</p>
+      </div>
+      <div class="panel-body">
+        <div class="tabs">
+          <button class="tab" data-goto="home">Overview</button>
+          <button class="tab" data-goto="broadcast">Broadcast</button>
+          <button class="tab active" data-goto="jobs">Jobs</button>
+          <button class="tab" data-goto="pay">Get paid</button>
+          <button class="tab" data-goto="pack">Share pack</button>
+        </div>
+        <div class="job">
+          <span class="badge">Delivery · today</span>
+          <h3>Dozen roses — pickup then deliver to 32082</h3>
+          <div class="meta">Budget open · Flexible timeline · Matched as florist</div>
+          <div class="btn-row">
+            <button class="btn" id="acceptJob">Accept</button>
+            <button class="btn secondary">Quote $65</button>
+            <button class="btn ghost">Decline</button>
+          </div>
+        </div>
+        <div class="job">
+          <span class="badge ok">Appointment</span>
+          <h3>Wedding consult Saturday morning</h3>
+          <div class="meta">Customer asked via agent · confirm a time</div>
+          <div class="btn-row">
+            <button class="btn secondary">Propose 10:00</button>
+            <button class="btn ghost">Decline</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PAY -->
+    <section class="panel hidden" id="screen-pay">
+      <div class="panel-head">
+        <h1>Get paid — when money shows up</h1>
+        <p>Connect rails after a job, not at claim. Surge stays the easy catalog path. Agents may use prepaid cards or x402; you just see Paid → Done.</p>
+      </div>
+      <div class="panel-body">
+        <div class="tabs">
+          <button class="tab" data-goto="home">Overview</button>
+          <button class="tab" data-goto="broadcast">Broadcast</button>
+          <button class="tab" data-goto="jobs">Jobs</button>
+          <button class="tab active" data-goto="pay">Get paid</button>
+          <button class="tab" data-goto="pack">Share pack</button>
+        </div>
+        <div class="pay-card">
+          <strong>Invoice / cash / card offline</strong>
+          <div class="meta">Default — keep doing what you already do</div>
+          <div class="btn-row"><button class="btn secondary" id="keepCash">Keep this</button></div>
+        </div>
+        <div class="pay-card">
+          <strong>Surge / Basalt catalog</strong>
+          <div class="meta">McFlamingo pattern — menu, receipt, embedded pay. Secrets stay on Swarm.</div>
+          <div class="btn-row"><button class="btn ghost">Connect Surge later</button></div>
+        </div>
+        <div class="pay-card locked">
+          <strong>Agent prepaid / x402</strong>
+          <div class="meta">Agent-side funding. You do not configure protocols — you confirm completion.</div>
+        </div>
+        <div class="pay-card locked">
+          <strong>Wallet (pathUSD)</strong>
+          <div class="meta">Optional. Never required to receive job alerts.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PACK -->
+    <section class="panel hidden" id="screen-pack">
+      <div class="panel-head">
+        <h1>Everything important, one pack</h1>
+        <p>Download or email: inbox link, presence URL, how jobs work, QR, next step — so nobody hunts docs.</p>
+      </div>
+      <div class="panel-body grid-2">
+        <div class="pack-preview">
+          <div class="demo-tag">Printable one-pager</div>
+          <h2 style="font-family:var(--font-display);margin:8px 0 4px;font-size:1.5rem;">Coastal Blooms Florist</h2>
+          <div class="meta">florist · 32082 · Wedding bouquets & same-day roses</div>
+          <p style="margin:14px 0 8px;"><strong>Business Home</strong><br/><span class="meta">inbox.html?token=… (bookmark this)</span></p>
+          <p style="margin:0 0 8px;"><strong>How it works</strong></p>
+          <ul class="meta">
+            <li>Agents & people find what you do specially</li>
+            <li>Jobs land here for one day</li>
+            <li>Get paid Surge, cash, or agent prepaid</li>
+          </ul>
+          <div class="btn-row">
+            <button class="btn" id="emailPack">Email me this pack</button>
+            <a class="btn secondary" href="/api/local-intel/business/demo/onboarding-pack?format=html" id="downloadPack">Open HTML pack</a>
+          </div>
+        </div>
+        <div class="fear">
+          <strong>Landing wires here next</strong>
+          <ul>
+            <li><code>GET /inbox/home</code></li>
+            <li><code>GET /business/:id/onboarding-pack</code></li>
+            <li><code>POST /inbox/send-pack</code></li>
+          </ul>
+          <p style="margin:10px 0 0;font-size:0.88rem;color:var(--muted);">This page is the clickable story of PR #6 — thereal screens live on thelocalintel.com once landing consumes these APIs.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const screens = ['claim','home','broadcast','jobs','pay','pack'];
+    function show(id) {
+      screens.forEach((s) => {
+        document.getElementById('screen-' + s).classList.toggle('hidden', s !== id);
+      });
+      document.querySelectorAll('.step-pill').forEach((el) => {
+        el.classList.toggle('active', el.dataset.screen === id);
+      });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    function toast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2200);
+    }
+
+    document.getElementById('storySteps').addEventListener('click', (e) => {
+      const pill = e.target.closest('.step-pill');
+      if (pill) show(pill.dataset.screen);
+    });
+    document.body.addEventListener('click', (e) => {
+      const go = e.target.closest('[data-goto]');
+      if (go) show(go.dataset.goto);
+    });
+
+    document.getElementById('sendCodeBtn').addEventListener('click', () => {
+      document.getElementById('codeField').classList.remove('hidden');
+      document.getElementById('verifyBtn').classList.remove('hidden');
+      document.getElementById('sendCodeBtn').classList.add('hidden');
+      toast('Code sent — still no wallet asked');
+    });
+    document.getElementById('verifyBtn').addEventListener('click', () => {
+      toast('Claimed · open for work');
+      show('home');
+    });
+    document.getElementById('saveBroadcast').addEventListener('click', () => {
+      toast('Presence updated — agents can read WHAT now');
+    });
+    document.getElementById('acceptJob').addEventListener('click', () => {
+      toast('Accepted — connect pay only if you want');
+      show('pay');
+    });
+    document.getElementById('keepCash').addEventListener('click', () => {
+      toast('Invoice/cash locked in — no crypto required');
+    });
+    document.getElementById('emailPack').addEventListener('click', () => {
+      toast('Pack emailed — inbox link + QR + how jobs work');
+    });
+    document.getElementById('downloadPack').addEventListener('click', (e) => {
+      e.preventDefault();
+      // Open the real pack renderer pattern as a data URL preview
+      const html = `<!DOCTYPE html><html><body style="font-family:Georgia,serif;padding:40px;background:#f7f1e6">
+        <h1>Coastal Blooms Florist</h1>
+        <p>florist · 32082</p>
+        <p><strong>Specialty:</strong> Wedding bouquets, dozen roses same-day</p>
+        <p><a href="#">Open Business Home</a></p>
+        <p>How LocalIntel works · You do not need to fear this · QR goes here</p>
+        <p style="color:#5e574c;font-size:12px">LocalIntel onboarding pack demo</p>
+      </body></html>`;
+      const w = window.open('');
+      w.document.write(html);
+      w.document.close();
+    });
+  </script>
+</body>
+</html>
