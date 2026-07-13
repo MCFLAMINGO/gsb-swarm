@@ -50,6 +50,7 @@ Official product roadmap, north star $546k, pending setup items, strategic direc
 
 ## North Star
 **$546k / LocalIntel = Bloomberg of the agent economy for local commerce**
+- **Product pillars:** action layer over historical data · macro+micro → trend forecasts · SMB agent-wallet on-ramp · keep money local vs Amazon/big tech (see [`PRODUCT.md`](../PRODUCT.md))
 - Three buyer profiles: B2B SaaS/POS, Commercial RE/investors, Franchise operators
 - Payment: Tempo mainnet pathUSD for all LocalIntel query pricing
 - Everyone pays in pathUSD — no registration, no query. No balance, no response.
@@ -92,8 +93,9 @@ Official product roadmap, north star $546k, pending setup items, strategic direc
 **Competitive position:**
 - Google Local / Yelp: have data scale, no agentic task completion or payment rails
 - DoorDash: food logistics only, high rake, no cross-vertical coverage
+- Amazon / national marketplaces: agent-ready checkout at global scale; extract demand out of town
 - Perplexity/ChatGPT search: LLM reasoning, no local graph depth, hallucination risk
-- LocalIntel moat: local merchant graph in Postgres + Tempo payment rails + W5 intent router + task completion loop. Deepens with every resolved query.
+- LocalIntel moat: local merchant graph in Postgres + Tempo payment rails + W5 intent router + task completion loop + macro+micro forecast feedback. Deepens with every resolved query. Keeps money local.
 
 **The demo that closes investors:** Someone orders dinner through a text message and feels like they have a concierge. One complete flow, flawless execution, filmed.
 

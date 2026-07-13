@@ -3,6 +3,7 @@
 > Captured: 2026-06-10
 > Author: Erik Osol
 > Status: FOUNDATIONAL — this is what we are building
+> Program brief: see [product-vision.md](product-vision.md) / [`../PRODUCT.md`](../PRODUCT.md) — action layer over historical data; macro+micro → trend forecasts; SMB agent wallets; keep money local (Google + Angie's List task depth for Florida, then state-by-state).
 
 ---
 

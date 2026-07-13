@@ -2,9 +2,11 @@
 
 [![smithery badge](https://smithery.ai/badge/erik-7clt/local-intel)](https://smithery.ai/servers/erik-7clt/local-intel)
 
-Autonomous business intelligence for Florida ZIP codes. 20 MCP tools. 1,445 ZIP briefs. Built for LLMs and autonomous agents.
+**Action layer over local historical data** for Florida ZIP codes. Macro ground truth + live task signals become trend forecasts; small businesses claim a node, get an agent wallet, and keep spend local. 20+ MCP tools. Built for LLMs and autonomous agents.
 
-> *"Let Google pay for the satellites. We sell the weather forecast."*
+> *"Let Google pay for the satellites. We sell the weather forecast."* — then we route the job and settle it locally.
+
+Shared product canon: [`PRODUCT.md`](PRODUCT.md) · engineering depth: [`docs/product-vision.md`](docs/product-vision.md)
 
 ---
 

@@ -11,11 +11,16 @@
 
 **LocalIntel = universal local action layer for the agent economy.**
 
+> **One program:** GSB Swarm (engine) + TheLocalIntel (public surface) + WildWallet agents (demand) are not separate products. Canonical brief: [`PRODUCT.md`](PRODUCT.md) · Swarm depth: [`docs/product-vision.md`](docs/product-vision.md). Presence schema: [`docs/presence-protocol.md`](docs/presence-protocol.md).
+>
+> **Pillars:** (1) action layer over historical data, (2) macro + micro datasets → trend forecasts, (3) SMB claim → agent wallet on-ramp, (4) keep money local vs Amazon / big-tech gatekeepers.
+
 - Postgres is the source of truth. Workers enrich. Oracle reads. MCP exposes. Payment gate collects.
 - Free to consumers (voice/routing). Businesses pay to be in the network.
 - No LLM on the hot path — deterministic vocabulary scoring everywhere.
 - Zero human in the loop — all agents run autonomously.
 - **$546k** is the revenue north star.
+- Product frame: Florida-first **Google discovery + Angie's List task completion**, then clone state-by-state — router for real work, not listings only.
 
 ---
 
