@@ -1986,9 +1986,12 @@ const TOOLS = {
   local_intel_compare:      { fn: toolCompare, desc: 'Compare up to 10 ZIPs side-by-side and get a ranked opportunity table. Pass focus="opportunity" (default), "hhi", "saturation", "growth", or "population". Returns per-ZIP signals (HHI, capture rate, infra momentum, consumer profile, top gap) plus a top_pick recommendation with reasoning. Best tool for site selection, franchise expansion, investment screening, and market prioritization.' },
   local_intel_project:      { fn: handleProject, desc: 'Project-type query: pass project_type (e.g. restaurant, clinic, banking, construction, real_estate) and get L1 ZIPs ranked by market or residential opportunity score + L2 matched verified businesses in that sector. Best tool for site selection when you know the business type but not the ZIP.' },
   local_intel_rfq: {
-    fn: async (args) => {
+    fn: async (args, callerMeta) => {
       const rfqService = require('./lib/rfqService');
-      return await rfqService.createRfq(args);
+      const caller_key = args.caller_key || callerMeta?.caller || null;
+      const dry_run = args.dry_run === true || args.dry_run === 'true'
+        || rfqService.isTestCaller(caller_key);
+      return await rfqService.createRfq({ ...args, caller_key, dry_run });
     }
   },
   local_intel_rfq_status: {
@@ -2326,6 +2329,7 @@ const MCP_MANIFEST = {
           deadline_minutes:{ type: 'number', description: 'Minutes until deadline (for urgent delivery jobs)' },
           autonomy:        { type: 'string', enum: ['full', 'approve', 'human'], description: 'full=agent books automatically; approve=agent picks best, human confirms; human=human picks from list' },
           notify_email:    { type: 'string', description: 'Email to notify for approve/human autonomy levels' },
+          dry_run:         { type: 'boolean', description: 'If true, match businesses but do NOT send email/SMS/push/rail notifications. Also auto-enabled for x-agent-id values starting with cursor-test-, test-, agent-test-, or dry-run.' },
         },
       },
     },
@@ -3021,7 +3025,10 @@ async function handleRPC(req, callerInfo) {
 
     try {
       const t0 = Date.now();
-      const result = await Promise.resolve(TOOLS[toolName].fn(toolArgs));
+      // Second arg is optional caller meta (used by RFQ dry-run guard; ignored by other tools).
+      const result = await Promise.resolve(
+        TOOLS[toolName].fn(toolArgs, { caller, tier: callerTier, wallet: callerWallet })
+      );
       const latency = Date.now() - t0;
       // Extract zip + intent for observability
       const parsed = (typeof result === 'object' && result !== null) ? result : {};
