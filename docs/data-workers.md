@@ -28,8 +28,9 @@ ephemeral; nothing persists across redeploys except Postgres**:
 | businessSignalWorker | worker_heartbeat freshness 24h | zip_signals (sig_claimed_rate, sig_wallet_rate, sig_task_density, sig_closure_rate_food, sig_unmet_demand_score) |
 | claimOutreachWorker | claim_outreach table dedup 30d | claim_outreach, businesses.contact_email |
 
-`embeddingWorker` is **disabled** in `dashboard-server.js` — needs pgvector
-to be revived.
+`embeddingWorker` (MiniLM → disk) is **DEPRECATED** — tombstone only. Canonical
+semantic path is `embeddingBackfillWorker` → `businesses.embedding` (pgvector) via
+Railway `eloquent-energy`. See `docs/DEPRECATIONS.md`.
 
 All `data/*.json` writes for these workers are removed. CSV downloads
 (IRS SOI) live in `os.tmpdir()`. Static seeds (e.g. `data/spendingZones.json`)
