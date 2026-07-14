@@ -8172,15 +8172,13 @@ server.listen(PORT, '0.0.0.0', async () => {
     } catch (e) {
       console.warn('[gsb-dashboard] Watchdog start failed (non-fatal):', e.message);
     }
-  }
-
-  // Telegram bot disabled — caused 409 conflicts on redeploy (two instances polling getUpdates)
-  // console.warn('[tg-bot] Disabled');
-
-  try {
-    // initAcp disabled — ACP paused pending GSB-THROW env migration
-    // await initAcp();
-    console.warn('[acp] ACP client disabled — paused pending GSB-THROW env migration');
+   try {
+    // Re-enabled for Virtuals ACP — set ACP_ENABLED=false to pause without a code change
+    if (process.env.ACP_ENABLED === 'false' || process.env.ACP_ENABLED === '0') {
+      console.warn('[acp] ACP client paused via ACP_ENABLED=false');
+    } else {
+      await initAcp();
+    }
   } catch (err) {
     console.error('[acp] initAcp crashed — dashboard still running, fire-job disabled:', err.message);
   }
