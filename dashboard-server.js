@@ -7894,7 +7894,7 @@ app.use((req, res, next) => {
   // acsWorker moved to batchDataWorker
   { name: 'Sunbiz Import Worker', file: 'workers/sunbizWorker.js' }, // B91 — 3-trip streaming, no disk
   // { name: 'Search Vector Backfill',      file: 'workers/searchVectorBackfillWorker.js' }, // B129 — over conn cap
-    // { name: 'Embedding Backfill',          file: 'workers/embeddingBackfillWorker.js' }, // disabled — index recreates at 1.2GB, 0 scans, no query path uses <-> operator yet
+  { name: 'Embedding Backfill', file: 'workers/embeddingBackfillWorker.js' }, // selective NE-FL / claimed / rich-text → eloquent-energy
   // { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' }, // B129 — over conn cap
   { name: 'Permit Worker',               file: 'workers/permitWorker.js' },
   { name: 'FDOT AADT Worker',               file: 'workers/fdotWorker.js'   },
