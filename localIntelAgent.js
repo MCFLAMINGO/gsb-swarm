@@ -10587,6 +10587,27 @@ router.post('/rail-weights', express.json(), async (req, res) => {
   }
 });
 
+// POST /api/local-intel/admin/expire-rfq — expire an open RFQ (stops watchdog retries)
+// Body: { rfq_id, reason? }  Header: x-admin-token: localintel-migrate-2026
+router.post('/admin/expire-rfq', express.json(), async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const token = req.headers['x-admin-token'] || req.body?.admin_token;
+  if (token !== process.env.LOCAL_INTEL_ADMIN_TOKEN && token !== 'localintel-migrate-2026') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    const rfq_id = req.body?.rfq_id || req.query?.rfq_id;
+    const reason = req.body?.reason || 'admin_expire';
+    if (!rfq_id) return res.status(400).json({ error: 'rfq_id required' });
+    const rfqService = require('./lib/rfqService');
+    const result = await rfqService.expireRfq(rfq_id, reason);
+    return res.status(result.ok ? 200 : 404).json(result);
+  } catch (e) {
+    console.error('[admin/expire-rfq]', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/local-intel/fee-control  — update rates at runtime (internal only)
 // Body: { rfq_match_fee: number, order_fee_pct: number, routing_enabled: boolean }
 // NOTE: env vars are the source of truth on Railway. This sets process.env at runtime

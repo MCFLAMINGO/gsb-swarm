@@ -241,7 +241,9 @@ async function seedTestBusinesses(db) {
       );
 
       const dispatch_token = existing?.dispatch_token || crypto.randomBytes(24).toString('hex');
-      const notification_email = 'erik@mcflamingo.com'; // all test biz alerts go to Erik
+      const notification_email = (biz.category_group === 'food_drink' || biz.category === 'restaurant' || biz.category === 'cafe')
+        ? 'erik@mcflamingo.com'   // restaurant/cafe test alerts only
+        : null;                   // never pipe landscaping/trades into the McFlamingo restaurant inbox
 
       const fields = {
         address: biz.address,
