@@ -1,6 +1,12 @@
 import { pipeline } from '@xenova/transformers';
 import express from 'express';
 
+/**
+ * Canonical embedder sidecar for LocalIntel search (Railway: eloquent-energy).
+ * ONE model / ONE dim — nomic-embed-text-v1 @ 768-d → businesses.embedding.
+ * Do not stand up a second MiniLM or OpenAI embed path alongside this.
+ */
+
 const app = express();
 app.use(express.json());
 

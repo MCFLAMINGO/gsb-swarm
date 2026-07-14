@@ -202,24 +202,24 @@ Conventions:
 - **Notes**: One-time backfill.
 
 ### embeddingBackfillWorker.js
-- **Status**: disabled
-- **Data Source**: Postgres `businesses` rows (name + description + cuisine + category)
-- **Output Table/File**: `businesses.embedding` (768-d pgvector); creates `idx_businesses_embedding` ivfflat
-- **Run Frequency**: Was fire-and-forget at startup, batches of 50
-- **Downstream Consumer**: `local_intel_search` semantic mode via pgvector cosine
-- **Goal**: Populate pgvector embedding column on every business for semantic search.
-- **Priority**: FUTURE
-- **Notes**: Disabled — index recreated at 1.2 GB with 0 scans because no query path uses the `<->` operator yet. Re-enable once a vector-search path is wired up.
+- **Status**: active (selective)
+- **Data Source**: Postgres `businesses` rows (claimed / showcase / wallet / rich description / NE-FL ZIPs)
+- **Output Table/File**: `businesses.embedding` (768-d pgvector); creates `idx_businesses_embedding` ivfflat after ≥50 rows
+- **Run Frequency**: Fire-and-forget at startup (staggered), batches of 50, cap `EMBEDDING_BACKFILL_MAX` (default 8000)
+- **Downstream Consumer**: `lib/semanticSearch.js` on `GET /search` + POST/SMS (same chain)
+- **Goal**: Populate embeddings for the live demo graph so pgvector fallback can resolve soft NL
+- **Priority**: HIGH
+- **Notes**: Upgrade of the existing search ladder — not a parallel search product. Do not expand to full Sunbiz dump until ivfflat scans prove value.
 
 ### embeddingWorker.js
-- **Status**: disabled
-- **Data Source**: Local Python sentence-transformers sidecar `embed_server.py` (all-MiniLM-L6-v2, port 8765); `data/zips/{zip}.json`
-- **Output Table/File**: `data/embeddings/{zip}.bin` (Float32Array) + `data/embeddings/_index.json`
-- **Run Frequency**: Was startup + every 6h
-- **Downstream Consumer**: `semanticSearch` export used by `local_intel_search`
-- **Goal**: File-based 384-d embeddings for every business, free semantic search w/o API cost.
-- **Priority**: FUTURE
-- **Notes**: Disabled — Railway disk is ephemeral; superseded by pgvector path which is itself FUTURE.
+- **Status**: DEPRECATED (tombstone — process.exit(1))
+- **Data Source**: Was Python MiniLM `embed_server.py` → `data/embeddings/{zip}.bin`
+- **Output Table/File**: Was file-based 384-d vectors (Railway disk ephemeral)
+- **Run Frequency**: Never — refused at start
+- **Downstream Consumer**: None (was never wired into GET `/search`)
+- **Goal**: ~~File-based semantic search~~ — superseded
+- **Priority**: DO NOT EXTEND
+- **Notes**: Parallel build. Use `embeddingBackfillWorker` + `eloquent-energy` + `lib/semanticSearch.js`. See `docs/DEPRECATIONS.md`.
 
 ### enrichmentAgent.js
 - **Status**: active

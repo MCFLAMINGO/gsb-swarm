@@ -85,6 +85,15 @@ assert(getEmbedderUrl() === 'https://example.test/embedder', 'explicit URL wins'
     console.log('SKIP live embedder probe:', e.message);
   }
 
+  // Tombstone: MiniLM disk worker must refuse
+  const { spawnSync } = require('child_process');
+  const tomb = spawnSync(process.execPath, ['workers/embeddingWorker.js'], {
+    cwd: require('path').join(__dirname, '..'),
+    encoding: 'utf8',
+  });
+  assert(tomb.status === 1, 'embeddingWorker tombstone exits 1');
+  assert(/DEPRECATED/i.test(tomb.stderr || tomb.stdout || ''), 'embeddingWorker prints DEPRECATED');
+
   console.log(failed ? 'RESULT: FAIL' : 'RESULT: OK');
   process.exit(failed ? 1 : 0);
 })();
