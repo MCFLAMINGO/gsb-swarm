@@ -52,8 +52,9 @@ ephemeral; nothing persists across redeploys except Postgres**:
 | enrichmentFillWorker | `SELECT business_id FROM businesses WHERE zip = ANY(TARGET_ZIPS) AND category_intel IS NOT NULL AND enrichment_source IS NOT NULL` | `businesses` (services_text, description, category_intel, enrichment_source, enrichment_updated_at) |
 | taskSeedWorker | `SELECT DISTINCT business_id FROM business_tasks` (run-once) | `business_tasks` |
 
-`embeddingWorker` is **disabled** in `dashboard-server.js` — needs pgvector
-to be revived.
+`embeddingWorker` (MiniLM → disk) is **DEPRECATED** — tombstone only. Canonical
+semantic path is `embeddingBackfillWorker` → `businesses.embedding` (pgvector) via
+Railway `eloquent-energy`. See `docs/DEPRECATIONS.md`.
 
 All `data/*.json` writes for these workers are removed. CSV downloads
 (IRS SOI) live in `os.tmpdir()`. Static seeds (e.g. `data/spendingZones.json`)

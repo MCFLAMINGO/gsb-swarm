@@ -49,6 +49,25 @@ Legacy modules (`intentMap`, `intentRegistry`, `taskIntent`, `intentRouter`) sti
 
 ---
 
+## Search = one upgraded chain (not a parallel product)
+
+Humans (`GET /search`) and agents (POST/SMS / MCP) share the **same** discovery ladder. Semantic is a step on that ladder, not a second search app.
+
+```
+ILIKE / category / name
+  → tsvector (Postgres full-text)
+  → pgvector cosine via eloquent-energy (lib/semanticSearch.js)
+  → RFQ / dispatch when still unresolved
+```
+
+| Canonical | Parallel — do not revive |
+|-----------|--------------------------|
+| `services/embedder/` + Railway `eloquent-energy` (nomic 768-d) | `workers/embeddingWorker.js` + `embed_server.py` (MiniLM → disk) |
+| `workers/embeddingBackfillWorker.js` → `businesses.embedding` | Full statewide re-embed / second vector column |
+| `lib/semanticSearch.js` used by GET + POST | Sidecar-only public search API |
+
+---
+
 ## RFQ truth
 
 | Use | Do not use for new work |
@@ -107,8 +126,8 @@ See [`DEPRECATIONS.md`](DEPRECATIONS.md). Short list:
 |------|-------|
 | Better matching / intent | `lib/intentUnified.js` → then registry/map |
 | Search ranking / SQL | `localIntelAgent.js` `GET /search`, `lib/searchRank.js` |
-| Semantic search (pgvector) | `lib/semanticSearch.js` + `lib/embedderClient.js` → Railway `eloquent-energy` (`EMBEDDING_SERVICE_URL` or Railway default URL) |
-| Embedding backfill | `workers/embeddingBackfillWorker.js` (selective: claimed / showcase / rich text / NE-FL) |
+| Semantic step in **same** search chain | `lib/semanticSearch.js` + `lib/embedderClient.js` → Railway `eloquent-energy` |
+| Embedding backfill (same path) | `workers/embeddingBackfillWorker.js` → `businesses.embedding` |
 | RFQ loop | `lib/rfqService.js`, `lib/dispatchRail.js` |
 | Agent tools | `localIntelMCP.js` |
 | SMS / voice | `dashboard-server.js` `handleSmsInbound`, `lib/voiceIntake.js` |

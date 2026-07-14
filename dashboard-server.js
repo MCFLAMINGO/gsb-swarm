@@ -7890,11 +7890,11 @@ app.use((req, res, next) => {
   { name: 'Website Enricher',           file: 'workers/websiteEnricherWorker.js' },  // weekly — description, email, tags for businesses with websites
   // { name: 'ZIP Brief Worker',           file: 'workers/zipBriefWorker.js'        }, // B129 — over conn cap
   { name: 'Hours Parse Worker',         file: 'workers/hoursParseWorker.js'      },
-    // { name: 'Embedding Worker',           file: 'workers/embeddingWorker.js'       }, // disabled — Railway disk ephemeral, needs pgvector
+    // { name: 'Embedding Worker',           file: 'workers/embeddingWorker.js'       }, // DEPRECATED tombstone — MiniLM disk parallel; use Embedding Backfill + eloquent-energy
   // acsWorker moved to batchDataWorker
   { name: 'Sunbiz Import Worker', file: 'workers/sunbizWorker.js' }, // B91 — 3-trip streaming, no disk
   // { name: 'Search Vector Backfill',      file: 'workers/searchVectorBackfillWorker.js' }, // B129 — over conn cap
-  { name: 'Embedding Backfill', file: 'workers/embeddingBackfillWorker.js' }, // selective NE-FL / claimed / rich-text → eloquent-energy
+  { name: 'Embedding Backfill', file: 'workers/embeddingBackfillWorker.js' }, // selective → businesses.embedding (pgvector) via eloquent-energy — ONE semantic path
   // { name: 'Category Reclass Backfill',   file: 'workers/categoryReclassWorker.js' }, // B129 — over conn cap
   { name: 'Permit Worker',               file: 'workers/permitWorker.js' },
   { name: 'FDOT AADT Worker',               file: 'workers/fdotWorker.js'   },
