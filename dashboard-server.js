@@ -8169,12 +8169,12 @@ server.listen(PORT, '0.0.0.0', async () => {
     try {
       const watchdog = require('./lib/dispatchWatchdog');
       await watchdog.start();
-       } catch (e) {
+    } catch (e) {
       console.warn('[gsb-dashboard] Watchdog start failed (non-fatal):', e.message);
     }
-  }   // ← add this closing brace for if (LOCAL_INTEL_DB_URL)
+  }
 
-  try {  // ← ACP init stays outside that if
+  try {
     // Re-enabled for Virtuals ACP — set ACP_ENABLED=false to pause without a code change
     if (process.env.ACP_ENABLED === 'false' || process.env.ACP_ENABLED === '0') {
       console.warn('[acp] ACP client paused via ACP_ENABLED=false');
