@@ -107,6 +107,8 @@ See [`DEPRECATIONS.md`](DEPRECATIONS.md). Short list:
 |------|-------|
 | Better matching / intent | `lib/intentUnified.js` → then registry/map |
 | Search ranking / SQL | `localIntelAgent.js` `GET /search`, `lib/searchRank.js` |
+| Semantic search (pgvector) | `lib/semanticSearch.js` + `lib/embedderClient.js` → Railway `eloquent-energy` (`EMBEDDING_SERVICE_URL` or Railway default URL) |
+| Embedding backfill | `workers/embeddingBackfillWorker.js` (selective: claimed / showcase / rich text / NE-FL) |
 | RFQ loop | `lib/rfqService.js`, `lib/dispatchRail.js` |
 | Agent tools | `localIntelMCP.js` |
 | SMS / voice | `dashboard-server.js` `handleSmsInbound`, `lib/voiceIntake.js` |

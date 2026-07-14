@@ -2347,43 +2347,27 @@ router.post('/', async (req, res) => {
     }
 
     // ── Semantic search fallback (pgvector) — fires when tsvector also returns 0 ──
-    // Only runs if EMBEDDING_SERVICE_URL is configured. Failure → rawRows stays
-    // empty → falls through to dispatchTask. Never crashes.
+    // Uses eloquent-energy sidecar via lib/semanticSearch. Failure → empty → dispatchTask.
     let usedSemantic = false;
-    if ((!rawRows || rawRows.length === 0) && query && typeof query === 'string'
-        && process.env.EMBEDDING_SERVICE_URL) {
-      try {
-        const { embedText } = require('./lib/embedderClient');
-        const queryVector = await embedText(query);
-        if (queryVector) {
-          const detectedZips = zip ? [zip] : TARGET_ZIPS;
-          const semanticResults = await db.query(
-            `SELECT
-                business_id, name, address, city, zip, phone, website,
-                hours, category, category_group, tags, description, cuisine,
-                confidence_score AS confidence, confidence_score, lat, lon, sunbiz_doc_number,
-                claimed_at IS NOT NULL AS claimed,
-                wallet,
-                pos_config->>'pos_type' AS pos_type,
-                is_showcase,
-                (embedding <=> $1::vector) AS semantic_distance
-             FROM businesses
-             WHERE zip = ANY($2::text[])
-               AND embedding IS NOT NULL
-               AND status != 'inactive'
-             ORDER BY semantic_distance ASC
-             LIMIT 20`,
-            [`[${queryVector.join(',')}]`, detectedZips]
-          );
-          if (semanticResults && semanticResults.length > 0) {
-            rawRows = semanticResults;
-            usedSemantic = true;
-            console.log(`[localintel] semantic search found ${rawRows.length} results for: ${query}`);
-          }
-        }
-      } catch (semErr) {
-        console.error('[local-intel semantic-fallback]', semErr.message);
-        // rawRows stays empty — fall through to dispatchTask
+    if ((!rawRows || rawRows.length === 0) && query && typeof query === 'string') {
+      const { semanticBusinessSearch } = require('./lib/semanticSearch');
+      const detectedZips = zip
+        ? (typeof getNearbyZips === 'function' ? getNearbyZips(zip) : [zip])
+        : TARGET_ZIPS;
+      const sem = await semanticBusinessSearch({
+        query,
+        zips: detectedZips,
+        limit: 20,
+        dbQuery: (sql, params) => db.query(sql, params),
+      });
+      if (sem.used) {
+        rawRows = sem.rows.map(r => ({
+          ...r,
+          confidence: r.confidence_score,
+          claimed: !!r.claimed_at,
+        }));
+        usedSemantic = true;
+        console.log(`[localintel] semantic search found ${rawRows.length} results for: ${query}`);
       }
     }
 
@@ -9485,8 +9469,8 @@ router.get('/search', harvestGuard, async (req, res) => {
     }
 
     let rows = [];
-
-    // 1. Exact/partial name match
+    let usedTsFallback = false;
+    let usedSemantic = false;
     // Skip name search when NL_INTENT already resolved a category — go straight to cat search.
     // EXCEPTION: if the raw query looks like a brand/business name (1-3 words, no NL starters,
     // not a generic category word), always run name search regardless of thread-carried category.
@@ -9657,9 +9641,26 @@ router.get('/search', harvestGuard, async (req, res) => {
                LIMIT $3`,
               [tsQuery, tsZipParam, limit]
             );
+            if (rows.length) usedTsFallback = true;
           } catch (tsErr) {
             console.error('[/search] tsvector fallback error:', tsErr.message);
           }
+        }
+      }
+
+      // ── Semantic / pgvector fallback (GET /search) — same as POST path ──
+      if (!rows.length && q) {
+        const { semanticBusinessSearch } = require('./lib/semanticSearch');
+        const sem = await semanticBusinessSearch({
+          query: q,
+          zips: catArea,
+          limit,
+          dbQuery: (sql, params) => db.query(sql, params),
+        });
+        if (sem.used) {
+          rows = sem.rows;
+          usedSemantic = true;
+          console.log(`[/search] semantic found ${rows.length} for: ${q}`);
         }
       }
     }
@@ -9963,7 +9964,9 @@ router.get('/search', harvestGuard, async (req, res) => {
         intent:     { taskClass: cat ? 'CATEGORY_SEARCH' : 'TEXT_SEARCH', group: intentGroup, cuisine: null },
         zip:        zip || null,
         resolved,
-        resolvedVia: resolved ? 'search' : null,
+        resolvedVia: resolved
+          ? (usedSemantic ? 'pgvector' : (usedTsFallback ? 'tsvector' : 'search'))
+          : null,
         resultCount: results.length,
         startTime:  t0,
       });
@@ -10054,6 +10057,9 @@ router.get('/search', harvestGuard, async (req, res) => {
       latency_ms:    Date.now() - t0,
       narrative,
       notable_businesses: notableBusinesses,
+      semantic_search: usedSemantic,
+      ts_fallback:     usedTsFallback && !usedSemantic,
+      source:          usedSemantic ? 'postgres+pgvector' : (usedTsFallback ? 'postgres+tsvector' : 'postgres'),
       results,
     });
   } catch (e) {

@@ -11,7 +11,8 @@
     "test:payments": "node scripts/test-agent-payments.js",
     "test:task-loop": "node scripts/smoke-task-loop.js",
     "test:rfq-dedupe": "node scripts/test-rfq-notify-dedupe.js",
-    "test:business-home": "node scripts/test-business-home.js"
+    "test:business-home": "node scripts/test-business-home.js",
+    "test:semantic": "node scripts/test-semantic-search.js"
   },
   "dependencies": {
     "@aa-sdk/core": "^4.0.0",
