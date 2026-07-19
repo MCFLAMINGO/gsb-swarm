@@ -4051,12 +4051,14 @@ router.get('/surge/menu/:id', async (req, res) => {
 // ── POST /api/local-intel/customers/register — upsert customer, record SMS opt-in ──
 router.post('/customers/register', express.json(), async (req, res) => {
   try {
-    const { phone, name, zip, email, sms_opt_in = true } = req.body || {};
+    const { phone, name, zip, email, sms_opt_in } = req.body || {};
     if (!phone) return res.status(400).json({ error: 'phone required' });
     const clean = phone.replace(/\D/g, '');
     if (clean.length < 10) return res.status(400).json({ error: 'invalid phone' });
     const normalized = '+1' + clean.slice(-10);
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
+    // SMS consent must be explicit — never default to opted-in (A2P forced-consent rule)
+    const smsOptIn = sms_opt_in === true || sms_opt_in === 'true' || sms_opt_in === 1 || sms_opt_in === '1';
 
     const [existing] = await db.query(
       `SELECT customer_id, sms_opt_in FROM customers WHERE phone = $1`, [normalized]
@@ -4064,7 +4066,7 @@ router.post('/customers/register', express.json(), async (req, res) => {
 
     if (existing) {
       // Update — preserve opt-out if they previously opted out and now not explicitly opting in
-      const newOptIn = existing.sms_opt_in === false && sms_opt_in !== true ? false : Boolean(sms_opt_in);
+      const newOptIn = existing.sms_opt_in === false && smsOptIn !== true ? false : Boolean(smsOptIn);
       await db.query(
         `UPDATE customers SET name=COALESCE($1,name), zip=COALESCE($2,zip), email=COALESCE($3,email),
          sms_opt_in=$4, updated_at=NOW() WHERE phone=$5`,
@@ -4076,9 +4078,9 @@ router.post('/customers/register', express.json(), async (req, res) => {
     const [row] = await db.query(
       `INSERT INTO customers (phone, name, zip, email, sms_opt_in, opt_in_ip)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING customer_id`,
-      [normalized, name || null, zip || null, email || null, Boolean(sms_opt_in), ip]
+      [normalized, name || null, zip || null, email || null, smsOptIn, ip]
     );
-    res.json({ customer_id: row.customer_id, status: 'created', phone: normalized, sms_opt_in: Boolean(sms_opt_in) });
+    res.json({ customer_id: row.customer_id, status: 'created', phone: normalized, sms_opt_in: smsOptIn });
   } catch (e) {
     console.error('[customers/register]', e.message);
     res.status(500).json({ error: e.message });

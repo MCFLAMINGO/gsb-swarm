@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Create Account — LocalIntel</title>
+  <meta name="description" content="Create a LocalIntel account. SMS updates are optional — check the box only if you want transactional texts. Reply STOP to cancel." />
+  <meta name="robots" content="index,follow" />
+  <link rel="canonical" href="https://www.thelocalintel.com/sms-signup" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f9fafb;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 16px;
+    }
+    .logo {
+      font-size: 2rem;
+      font-weight: 800;
+      color: #111;
+      margin-bottom: 8px;
+      letter-spacing: -0.5px;
+      text-decoration: none;
+    }
+    .logo span { color: #16a34a; }
+    .tagline {
+      font-size: 0.9rem;
+      color: #6b7280;
+      margin-bottom: 40px;
+    }
+    .card {
+      background: #1a1a2e;
+      border-radius: 16px;
+      padding: 32px;
+      width: 100%;
+      max-width: 480px;
+      color: #fff;
+    }
+    .card-eyebrow {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: #16a34a;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+    .card-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+    .card-desc {
+      font-size: 0.85rem;
+      color: #a0aec0;
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+    .form-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .form-row input {
+      flex: 1;
+      min-width: 120px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1.5px solid #2d3748;
+      background: #0f0f1a;
+      color: #fff;
+      font-size: 0.9rem;
+    }
+    .form-row input::placeholder { color: #4a5568; }
+    .form-row input:focus { outline: none; border-color: #16a34a; }
+    .opt-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin: 16px 0 8px;
+      padding: 12px;
+      border: 1px solid #2d3748;
+      border-radius: 10px;
+      background: #12121f;
+    }
+    .opt-row input[type="checkbox"] {
+      margin-top: 2px;
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      accent-color: #16a34a;
+      cursor: pointer;
+    }
+    .opt-row label {
+      font-size: 0.78rem;
+      color: #a0aec0;
+      line-height: 1.5;
+    }
+    .opt-row label a { color: #16a34a; }
+    .opt-optional {
+      font-size: 0.72rem;
+      color: #6b7280;
+      margin: 0 0 16px;
+      line-height: 1.45;
+    }
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .submit-btn {
+      width: 100%;
+      padding: 12px;
+      background: #16a34a;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .submit-btn:hover { background: #15803d; }
+    .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .skip-btn {
+      width: 100%;
+      padding: 11px;
+      background: transparent;
+      color: #a0aec0;
+      border: 1.5px solid #2d3748;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .skip-btn:hover { border-color: #4a5568; color: #fff; }
+    .legal-note {
+      margin-top: 24px;
+      font-size: 0.75rem;
+      color: #6b7280;
+      text-align: center;
+      line-height: 1.6;
+      max-width: 480px;
+    }
+    .legal-note a { color: #16a34a; }
+    .err {
+      display: none;
+      font-size: 0.75rem;
+      color: #f87171;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <a href="/" class="logo">The<span>Local</span>Intel</a>
+  <div class="tagline">Florida's agent-powered local business network</div>
+
+  <div class="card" id="card">
+    <div class="card-eyebrow">Create account</div>
+    <div class="card-title">Register for LocalIntel</div>
+    <div class="card-desc">
+      Create an account with your name and mobile number to use LocalIntel.
+      SMS messages are <strong style="color:#fff">optional</strong> — leave the checkbox unchecked
+      if you do not want texts. You can use the service either way.
+    </div>
+
+    <div class="form-row" id="form-inputs">
+      <input type="text"  id="regName"  placeholder="Full name"     autocomplete="name" />
+      <input type="tel"   id="regPhone" placeholder="Mobile number" autocomplete="tel" required />
+      <input type="text"  id="regZip"   placeholder="ZIP code"      maxlength="5" autocomplete="postal-code" />
+    </div>
+
+    <div class="opt-row" id="opt-row">
+      <input type="checkbox" id="regSmsOpt" />
+      <label for="regSmsOpt">
+        <strong style="color:#e2e8f0">Optional:</strong> I agree to receive recurring transactional SMS
+        messages from LocalIntel (MCFL Restaurant Holdings LLC) at the number provided, including
+        order confirmations, receipts, and service-request updates. Message frequency varies.
+        Message and data rates may apply. Reply <strong>STOP</strong> to cancel.
+        Reply <strong>HELP</strong> for help. Mobile numbers are not shared with third parties or
+        affiliates for marketing or promotional purposes.
+        <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a> ·
+        <a href="/terms" target="_blank" rel="noopener">Terms &amp; Conditions</a>
+      </label>
+    </div>
+    <p class="opt-optional">
+      This SMS checkbox is unchecked by default and is not required to create an account.
+      You may register without agreeing to receive text messages.
+    </p>
+
+    <div class="err" id="form-error">Enter a valid mobile number to continue.</div>
+
+    <div class="actions">
+      <button class="submit-btn" id="submitBtn" type="button" onclick="handleSubmit(false)">
+        Create account
+      </button>
+      <button class="skip-btn" id="skipSmsBtn" type="button" onclick="handleSubmit(true)">
+        Create account without SMS
+      </button>
+    </div>
+  </div>
+
+  <div class="legal-note">
+    SMS messages (only if you opt in) are sent by <strong>MCFL Restaurant Holdings LLC</strong> (LocalIntel).<br>
+    Program phone: <strong>(904) 506-7476</strong>. Message frequency varies. Message and data rates may apply.<br>
+    Mobile numbers are never shared with third parties or affiliates for marketing or promotional purposes.<br>
+    Reply <strong>STOP</strong> to cancel · <strong>HELP</strong> for support · email erik@mcflamingo.com<br>
+    <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms &amp; Conditions</a> ·
+    <a href="/">Home</a> · <a href="/search.html">Search without registering</a>
+  </div>
+
+  <script>
+    function showSuccess(phone, smsOptIn) {
+      const smsLine = smsOptIn
+        ? 'You opted in to transactional LocalIntel SMS at <strong style="color:#fff">' + phone + '</strong>. Reply <strong>STOP</strong> to cancel · <strong>HELP</strong> for help.'
+        : 'Account created for <strong style="color:#fff">' + phone + '</strong>. You did <strong style="color:#fff">not</strong> opt in to SMS — no texts will be sent unless you opt in later.';
+      document.getElementById('card').innerHTML =
+        '<div style="text-align:center;padding:28px 0">' +
+        '<div style="font-size:2rem;margin-bottom:12px">✓</div>' +
+        '<div style="font-weight:700;font-size:1.15rem;margin-bottom:10px">You\'re registered</div>' +
+        '<div style="color:#a0aec0;font-size:0.88rem;line-height:1.65">' + smsLine + '</div>' +
+        '<a href="/search.html" style="display:inline-block;margin-top:20px;color:#16a34a;font-weight:700;text-decoration:none">Continue to search →</a>' +
+        '</div>';
+    }
+
+    function handleSubmit(forceNoSms) {
+      const name  = document.getElementById('regName').value.trim();
+      const phone = document.getElementById('regPhone').value.trim();
+      const zip   = document.getElementById('regZip').value.trim();
+      const optBox = document.getElementById('regSmsOpt');
+      const smsOptIn = forceNoSms ? false : !!(optBox && optBox.checked);
+      const err = document.getElementById('form-error');
+      err.style.display = 'none';
+
+      if (!phone || phone.replace(/\D/g, '').length < 10) {
+        err.textContent = 'Enter a valid mobile number to continue.';
+        err.style.display = 'block';
+        document.getElementById('regPhone').focus();
+        return;
+      }
+
+      const btn = document.getElementById('submitBtn');
+      const skip = document.getElementById('skipSmsBtn');
+      btn.disabled = true;
+      skip.disabled = true;
+      btn.textContent = 'Creating account...';
+
+      fetch('https://gsb-swarm-production.up.railway.app/api/local-intel/customers/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          phone,
+          zip,
+          sms_opt_in: smsOptIn,
+          opt_in_source: 'sms-signup'
+        })
+      })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.d.customer_id) {
+          throw new Error((res.d && res.d.error) || 'Registration failed');
+        }
+        showSuccess(res.d.phone || phone, smsOptIn);
+      })
+      .catch(function (e) {
+        btn.disabled = false;
+        skip.disabled = false;
+        btn.textContent = 'Create account';
+        err.textContent = e.message || 'Something went wrong. Please try again.';
+        err.style.display = 'block';
+      });
+    }
+  </script>
+</body>
+</html>
