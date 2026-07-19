@@ -1,0 +1,2366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="canonical" href="https://www.thelocalintel.com/search">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LocalIntel — Find Local Services Near You in Florida</title>
+  <meta name="description" content="Looking for a restaurant, plumber, doctor, landscaper, or any local service in Florida? Tell LocalIntel what you need and we’ll connect you with the right verified local business.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%2316A34A'/><circle cx='16' cy='16' r='6' fill='white'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..800&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg: #FFFFFF;
+      --bg-card: #F9FAFB;
+      --text: #111827;
+      --text-2: #6B7280;
+      --text-3: #9CA3AF;
+      --accent: #16A34A;
+      --accent-hover: #15803D;
+      --accent-light: #DCFCE7;
+      --accent-text: #166534;
+      --border: #E5E7EB;
+      --radius-sm: 6px;
+      --radius: 10px;
+      --radius-lg: 16px;
+      --shadow: 0 4px 12px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04);
+      --shadow-lg: 0 12px 32px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --max: 860px;
+      --nav-h: 64px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { -webkit-font-smoothing: antialiased; }
+    body { font-family: var(--font); font-size: 16px; line-height: 1.65; color: var(--text); background: var(--bg); }
+    a { color: inherit; text-decoration: none; }
+    button { cursor: pointer; border: none; background: none; font: inherit; }
+
+    /* NAV */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+      height: var(--nav-h);
+      background: rgba(255,255,255,0.97);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--max); margin: 0 auto; padding: 0 24px;
+      height: 100%; display: flex; align-items: center; justify-content: space-between;
+    }
+    .nav-logo { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 700; letter-spacing: -0.4px; }
+    .logo-dot { width: 22px; height: 22px; background: var(--accent); border-radius: 50%; position: relative; flex-shrink: 0; }
+    .logo-dot::after { content: ''; position: absolute; width: 8px; height: 8px; background: white; border-radius: 50%; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+    .nav-back { font-size: 14px; font-weight: 500; color: var(--text-2); display: flex; align-items: center; gap: 6px; transition: color 0.15s; }
+    .nav-back:hover { color: var(--text); }
+
+    /* ── SEARCH HEADER
+       Two modes:
+       .idle   — full hero: title + subtitle + filters + search bar
+       .active — compact sticky bar: just filters + search bar, pinned below nav
+    ────────────────────────────────────────────────────────────────────────── */
+    .search-header {
+      position: sticky;
+      top: var(--nav-h);
+      z-index: 100;
+      background: rgba(255,255,255,0.97);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      transition: padding 0.25s ease, box-shadow 0.25s ease;
+    }
+    .search-header-inner {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 0 16px;
+    }
+
+
+    /* ── Customer registration panel ── */
+    .reg-panel {
+      width: 100%;
+      max-width: var(--max);
+      margin: 0 auto 20px;
+      background: #0f111a;
+      border: 1px solid rgba(99,102,241,0.35);
+      border-radius: 14px;
+      padding: 18px 24px 16px;
+      box-shadow: 0 2px 24px rgba(0,0,0,0.5);
+      position: relative;
+      overflow: hidden;
+      transition: padding 0.25s ease;
+    }
+    .reg-panel.hidden { display: none; }
+    /* collapsed state — just the teaser row */
+    .reg-panel.collapsed { padding: 14px 24px; }
+
+    .reg-panel__top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .reg-panel__eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: #818cf8;
+    }
+    .reg-panel__eyebrow span {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: #6366f1;
+      box-shadow: 0 0 8px #6366f1;
+      display: inline-block;
+      animation: pulse-dot 2s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    @keyframes pulse-dot {
+      0%,100% { opacity:1; transform:scale(1); }
+      50% { opacity:.5; transform:scale(0.75); }
+    }
+    .reg-panel__title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.3;
+      margin: 0;
+    }
+    /* collapsed teaser — left side */
+    .reg-panel__teaser {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      flex: 1;
+    }
+    /* expand button (shown in collapsed state) */
+    .reg-panel__expand-btn {
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 18px;
+      font-size: 13px;
+      font-weight: 650;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: background .18s;
+    }
+    .reg-panel__expand-btn:hover { background: #4f46e5; }
+    .reg-panel__skip-top {
+      background: none;
+      border: none;
+      color: #64748b;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 0 0 12px;
+      flex-shrink: 0;
+      transition: color .15s;
+    }
+    .reg-panel__skip-top:hover { color: #cbd5e1; }
+
+    /* expanded body — hidden when collapsed */
+    .reg-panel__body {
+      overflow: hidden;
+      max-height: 0;
+      opacity: 0;
+      transition: max-height 0.3s ease, opacity 0.28s ease, margin-top 0.25s ease;
+      margin-top: 0;
+    }
+    .reg-panel.expanded .reg-panel__body {
+      max-height: 200px;
+      opacity: 1;
+      margin-top: 16px;
+    }
+
+    .reg-panel__sub {
+      font-size: 12px;
+      color: #94a3b8;
+      line-height: 1.5;
+      margin-bottom: 14px;
+    }
+    .reg-panel__fields {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .reg-panel__fields input {
+      flex: 1 1 0;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px;
+      padding: 9px 13px;
+      font-size: 13px;
+      color: #ffffff;
+      outline: none;
+      transition: border-color .18s, background .18s;
+      min-width: 0;
+    }
+    .reg-panel__fields input::placeholder { color: #64748b; }
+    .reg-panel__fields input:focus {
+      border-color: rgba(99,102,241,0.7);
+      background: rgba(99,102,241,0.08);
+    }
+
+    .reg-panel__opt {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      font-size: 11px;
+      color: #94a3b8;
+      margin-bottom: 14px;
+      line-height: 1.55;
+    }
+    .reg-panel__opt input[type=checkbox] {
+      margin-top: 2px;
+      accent-color: #6366f1;
+      flex-shrink: 0;
+      width: 13px; height: 13px;
+    }
+    .reg-panel__opt a { color: #818cf8; text-decoration: none; }
+    .reg-panel__opt a:hover { text-decoration: underline; }
+
+    .reg-panel__bottom {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .reg-btn-primary {
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 9px 22px;
+      font-size: 13px;
+      font-weight: 650;
+      cursor: pointer;
+      letter-spacing: .01em;
+      transition: background .18s, transform .1s;
+      flex-shrink: 0;
+    }
+    .reg-btn-primary:hover:not(:disabled) { background: #4f46e5; transform: translateY(-1px); }
+    .reg-btn-primary:disabled { opacity: .45; cursor: default; }
+
+    .reg-panel__divider { width: 1px; height: 18px; background: rgba(255,255,255,0.1); flex-shrink: 0; }
+
+    .reg-panel__wallet-cta {
+      font-size: 12px;
+      color: #64748b;
+      white-space: nowrap;
+    }
+    .reg-panel__wallet-cta a {
+      color: #818cf8;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .reg-panel__wallet-cta a:hover { text-decoration: underline; }
+
+    /* post-registration upsell */
+    .reg-panel__upsell {
+      padding-top: 4px;
+    }
+    .reg-upsell__confirm {
+      font-size: 15px;
+      color: #166534;
+      font-weight: 700;
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+    .reg-upsell__confirm-box {
+      background: #f0fdf4;
+      border: 1.5px solid #86efac;
+      border-radius: 12px;
+      padding: 16px 18px;
+      margin-bottom: 14px;
+    }
+    .reg-upsell__confirm-detail {
+      font-size: 13px;
+      color: #166534;
+      line-height: 1.55;
+      font-weight: 500;
+    }
+    .reg-upsell__confirm-detail strong { color: #14532d; }
+    .reg-upsell__confirm-hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #15803d;
+      line-height: 1.5;
+    }
+    .reg-upsell__continue {
+      display: block;
+      width: 100%;
+      margin-bottom: 14px;
+      padding: 12px 16px;
+      background: #16a34a;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .reg-upsell__continue:hover { background: #15803d; }
+    .reg-upsell__pitch {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      background: rgba(99,102,241,0.08);
+      border: 1px solid rgba(99,102,241,0.2);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 14px;
+    }
+    .reg-upsell__pitch-icon {
+      font-size: 28px;
+      line-height: 1;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .reg-upsell__pitch-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 6px;
+    }
+    .reg-upsell__pitch-sub {
+      font-size: 12px;
+      color: #94a3b8;
+      line-height: 1.55;
+      margin-bottom: 12px;
+    }
+    .reg-upsell__pitch-cta {
+      display: inline-block;
+      background: #6366f1;
+      color: #fff;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 650;
+      padding: 8px 20px;
+      border-radius: 8px;
+      transition: background .18s;
+    }
+    .reg-upsell__pitch-cta:hover { background: #4f46e5; }
+    .reg-upsell__dismiss {
+      background: none;
+      border: none;
+      color: #475569;
+      font-size: 12px;
+      cursor: pointer;
+      padding: 0;
+      transition: color .15s;
+    }
+    .reg-upsell__dismiss:hover { color: #94a3b8; }
+
+
+    /* IDLE: full hero */
+    .search-header.idle {
+      position: relative;
+      top: 0;
+      border-bottom: none;
+      background: transparent;
+      backdrop-filter: none;
+    }
+    .search-header.idle .search-header-inner {
+      padding: 40px 16px 0;
+    }
+
+    /* hero title — Google style */
+    .hero-title {
+      text-align: center;
+      padding-bottom: 28px;
+      overflow: hidden;
+      transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease;
+      max-height: 200px;
+      opacity: 1;
+    }
+    .hero-title h1 {
+      font-size: clamp(2.4rem, 6vw, 4rem);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      color: var(--text);
+      margin-bottom: 10px;
+      line-height: 1.05;
+    }
+    .hero-title h1 .brand-dot {
+      color: #16a34a;
+    }
+    .hero-title p {
+      font-size: 15px;
+      color: var(--text-2);
+      max-width: 480px;
+      margin: 0 auto;
+      line-height: 1.5;
+    }
+
+    /* hero stays visible always */
+    .search-header.active .hero-title {
+      max-height: 200px;
+      opacity: 1;
+      padding-bottom: 28px;
+    }
+
+    /* FILTERS ROW */
+    .filters-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 10px 0 8px;
+    }
+    .search-header.active .filters-row {
+      padding: 8px 0 6px;
+    }
+    .filter-select {
+      padding: 7px 10px;
+      font-size: 13px;
+      font-family: var(--font);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: white;
+      color: var(--text);
+      cursor: pointer;
+      outline: none;
+      transition: border-color 0.15s;
+      flex: 1;
+      min-width: 110px;
+    }
+    .filter-select:focus { border-color: var(--accent); }
+    .zip-detect-wrap { display: flex; align-items: center; gap: 4px; }
+    .zip-detect-wrap .filter-select { flex: 1; }
+    .locate-btn {
+      background: none;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 6px 8px;
+      cursor: pointer;
+      font-size: 15px;
+      line-height: 1;
+      transition: border-color 0.15s, opacity 0.15s;
+      color: var(--accent);
+    }
+    .locate-btn:hover { border-color: var(--accent); }
+    .locate-btn.loading { opacity: 0.5; pointer-events: none; }
+
+    /* INPUT ROW */
+    .input-row {
+      display: flex;
+      gap: 8px;
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      background: white;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+      transition: border-color 0.2s;
+      margin-bottom: 8px;
+    }
+    .input-row:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(22,163,74,0.1), var(--shadow); }
+    .search-input {
+      flex: 1;
+      padding: 13px 16px;
+      font-size: 15px;
+      font-family: var(--font);
+      border: none;
+      outline: none;
+      color: var(--text);
+      background: transparent;
+    }
+    .search-input::placeholder { color: var(--text-3); }
+    .send-btn {
+      padding: 11px 20px;
+      background: var(--accent);
+      color: white;
+      font-size: 15px;
+      font-weight: 600;
+      font-family: var(--font);
+      transition: background 0.18s;
+      border: none;
+      white-space: nowrap;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .send-btn:hover { background: var(--accent-hover); }
+
+    /* CALL CTA — only shown in idle below the input */
+    .call-cta {
+      text-align: center;
+      padding-bottom: 16px;
+    }
+    .search-header.active .call-cta {
+      padding-bottom: 8px;
+    }
+    .call-link {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 7px 16px;
+      background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+      border-radius: 8px; color: #fff;
+      box-shadow: 0 2px 10px rgba(22,163,74,.25);
+      font-size: 13px; font-weight: 600;
+    }
+    .call-pulse { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; flex-shrink:0; animation: pulse-ring 1.8s ease-out infinite; }
+    @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(74,222,128,.6); } 70% { box-shadow: 0 0 0 6px rgba(74,222,128,0); } 100% { box-shadow: 0 0 0 0 rgba(74,222,128,0); } }
+
+    /* PAGE LAYOUT — content below the header */
+    .page-wrap {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: calc(var(--nav-h) + 16px) 16px 80px;
+    }
+    /* when header is active (sticky), page-wrap needs no extra top offset — header is in flow */
+    body.search-active .page-wrap {
+      padding-top: 16px;
+    }
+
+    /* CONVERSATION THREAD */
+    .thread {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+
+    /* USER BUBBLE */
+    .bubble-user { display: flex; justify-content: flex-end; }
+    .bubble-user-inner {
+      background: var(--accent);
+      color: white;
+      border-radius: 18px 18px 4px 18px;
+      padding: 12px 18px;
+      font-size: 15px;
+      font-weight: 500;
+      max-width: 80%;
+      line-height: 1.5;
+      overflow-wrap: break-word;
+      word-break: break-word;
+    }
+
+    /* AGENT ANSWER */
+    .bubble-agent { display: flex; align-items: flex-start; gap: 10px; }
+    .agent-avatar {
+      width: 32px; height: 32px;
+      background: var(--accent);
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      margin-top: 2px;
+    }
+    .agent-avatar::after { content: ''; width: 12px; height: 12px; background: white; border-radius: 50%; }
+    .bubble-agent-body { flex: 1; min-width: 0; }
+
+    /* NARRATIVE */
+    .agent-narrative {
+      background: linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%);
+      border: 1.5px solid #86EFAC;
+      border-radius: 4px 18px 18px 18px;
+      padding: 16px 20px;
+      font-size: 15px;
+      line-height: 1.7;
+      color: #1A2E1A;
+      margin-bottom: 12px;
+    }
+    .agent-narrative .label {
+      font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+      color: var(--accent); margin-bottom: 8px; display: flex; align-items: center; gap: 5px;
+    }
+    .label-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+
+    /* TASK CARD */
+    .agent-task-card {
+      background: white;
+      border: 1.5px solid var(--border);
+      border-top: 3px solid var(--accent);
+      border-radius: 4px 12px 12px 12px;
+      padding: 16px 20px;
+      margin-bottom: 12px;
+    }
+    .task-job-id { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-3); margin-bottom: 4px; }
+    .task-status { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+    .task-action-btn {
+      display: inline-block; background: var(--accent); color: white;
+      font-weight: 600; font-size: 14px; padding: 9px 20px; border-radius: 8px; margin-top: 4px;
+    }
+    /* Contact collection widget (B147) */
+    .contact-widget {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+    .contact-widget-label {
+      font-size: 13px; font-weight: 600; color: var(--text-2); margin-bottom: 10px;
+    }
+    .contact-widget-row {
+      display: flex; gap: 8px; flex-wrap: wrap;
+    }
+    .contact-widget input {
+      flex: 1; min-width: 140px;
+      background: var(--bg-2); border: 1.5px solid var(--border);
+      border-radius: 8px; padding: 9px 13px; font-size: 14px; color: var(--text);
+      outline: none; transition: border-color 0.15s;
+    }
+    .contact-widget input:focus { border-color: var(--accent); }
+    .contact-widget input::placeholder { color: var(--text-3); }
+    .contact-widget-submit {
+      background: var(--accent); color: white; border: none; cursor: pointer;
+      font-weight: 600; font-size: 14px; padding: 9px 18px; border-radius: 8px;
+      white-space: nowrap; transition: opacity 0.15s;
+    }
+    .contact-widget-submit:hover { opacity: 0.88; }
+    .contact-widget-submit:disabled { opacity: 0.5; cursor: default; }
+    .contact-widget-success {
+      font-size: 14px; color: var(--accent); font-weight: 600; margin-top: 8px;
+    }
+    /* Sub-category chip (B146) */
+    .subcat-chip {
+      display: inline-block; background: rgba(22,163,74,0.1); color: var(--accent);
+      font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 3px 9px; border-radius: 20px; margin-bottom: 8px;
+    }
+
+    /* Detected-category chip — shown in agent bubble when NL category is resolved */
+    .detected-cat-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: rgba(22,163,74,0.08); border: 1px solid rgba(22,163,74,0.25);
+      color: var(--accent); font-size: 11px; font-weight: 700;
+      letter-spacing: .04em; text-transform: uppercase;
+      padding: 3px 10px; border-radius: 20px; margin-bottom: 10px;
+    }
+
+    /* Example query chips row */
+    .example-chips {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      justify-content: center; padding: 10px 0 4px;
+    }
+    .example-chip {
+      cursor: pointer;
+      background: rgba(22,163,74,0.07); border: 1px solid rgba(22,163,74,0.2);
+      color: var(--text-2); font-size: 12px; font-weight: 500;
+      padding: 5px 12px; border-radius: 20px;
+      transition: background .15s, color .15s, border-color .15s;
+      white-space: nowrap;
+    }
+    .example-chip:hover {
+      background: rgba(22,163,74,0.15); border-color: var(--accent); color: var(--accent);
+    }
+
+    /* ORDER CARD */
+    .order-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-top: 3px solid var(--accent);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      margin-bottom: 12px;
+      box-shadow: var(--shadow);
+    }
+    .order-card-header {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 12px; margin-bottom: 8px;
+    }
+    .order-card-name {
+      font-size: 17px; font-weight: 700; color: var(--text);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .order-card-zip { font-size: 13px; font-weight: 700; color: var(--text-3); }
+    .order-card-desc { font-size: 13px; color: var(--text-2); line-height: 1.5; margin-bottom: 4px; }
+    .order-card-addr { font-size: 13px; color: var(--text-2); margin-bottom: 14px; }
+    .order-card-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+    .order-cta-btn {
+      display: inline-block; background: var(--accent); color: white;
+      font-weight: 700; font-size: 14px; padding: 10px 22px; border-radius: 8px;
+      text-decoration: none; transition: background .15s;
+    }
+    .order-cta-btn:hover { background: #15803D; }
+    .order-phone-link {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 14px; color: var(--text-2); font-weight: 600;
+    }
+    .order-phone-link:hover { color: var(--accent); }
+    .order-card-footer {
+      font-size: 11px; color: var(--text-3);
+      border-top: 1px solid var(--border);
+      padding-top: 10px; margin-top: 4px;
+      letter-spacing: .02em;
+    }
+
+    /* RESULT CARDS */
+    .results-section { margin-top: 4px; }
+    .results-count { font-size: 13px; color: var(--text-2); font-weight: 500; margin-bottom: 10px; padding-left: 2px; }
+    .result-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      transition: box-shadow 0.2s, border-color 0.2s;
+    }
+    .result-card:hover { box-shadow: var(--shadow); border-color: #D1FAE5; }
+    .result-icon { width: 40px; height: 40px; background: var(--accent-light); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+    .result-body { flex: 1; min-width: 0; }
+    .result-name { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+    .match-reason {
+      font-size: 0.72rem;
+      color: #6b7280;
+      margin-top: 2px;
+      margin-bottom: 4px;
+      font-weight: 500;
+      letter-spacing: 0.01em;
+    }
+    .result-tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; background: var(--accent-light); color: var(--accent-text); padding: 2px 8px; border-radius: 999px; margin-bottom: 6px; }
+    .result-detail-link { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--text-2); margin-right: 12px; margin-top: 3px; transition: color .15s; }
+    .result-detail-link:hover { color: var(--accent); }
+    a.result-detail-link[style*="color:#3b82f6"]:hover { color: #2563eb; text-decoration: underline; }
+    .result-right { flex-shrink: 0; text-align: right; }
+    .result-zip { font-size: 13px; font-weight: 700; }
+    .result-status { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+    .result-status.claimed { color: var(--accent); font-weight: 600; }
+
+    /* LOADING */
+    .spinner { display: inline-block; width: 18px; height: 18px; border: 2.5px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .thinking-bubble {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 18px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 4px 18px 18px 18px;
+      color: var(--text-2);
+      font-size: 14px;
+    }
+
+    /* EMPTY */
+    .empty-state { text-align: center; padding: 40px 24px; color: var(--text-2); }
+
+    @media (max-width: 640px) {
+      .result-card { flex-wrap: wrap; gap: 10px; }
+      .result-right { flex: 0 0 100%; text-align: left; display: flex; gap: 12px; align-items: center; }
+      .bubble-user-inner { max-width: 90%; }
+      .filter-select { min-width: 90px; font-size: 12px; }
+    }
+  
+    /* ── Search card CTAs ── */
+    .result-cta { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; padding: 7px 16px; border-radius: 8px; border: none; cursor: pointer; text-decoration: none; transition: opacity .15s; margin-top: 8px; }
+    .result-cta:hover { opacity: .85; }
+    .result-cta-wallet  { background: #7C3AED; color: #fff; }
+    .result-cta-rfq     { background: #16a34a; color: #fff; }
+    .result-cta-book    { background: #2563eb; color: #fff; }
+    .result-cta-reserve { background: #0891b2; color: #fff; }
+    .result-cta-order   { background: #ea580c; color: #fff; }
+    .result-cta-call    { background: var(--bg-2,#f3f4f6); color: var(--text,#111); border: 1px solid var(--border,#e5e7eb); }
+    .result-cta-email   { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; }
+    .result-b2b-note    { font-size: 11px; color: var(--text-3,#9ca3af); margin-top: 4px; }
+
+  </style>
+  <meta property="og:image" content="https://www.thelocalintel.com/images/localintel-logo-512.jpg">
+  <meta property="og:image:width" content="512">
+  <meta property="og:image:height" content="512">
+  <meta property="twitter:card" content="summary">
+  <meta property="twitter:image" content="https://www.thelocalintel.com/images/localintel-logo-512.jpg">
+</head>
+<body>
+
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-logo"><div class="logo-dot"></div>LocalIntel</a>
+      <a href="/" class="nav-back">← Back to home</a>
+    </div>
+  </nav>
+
+  <!-- SEARCH HEADER — starts idle, becomes sticky active after first search -->
+  <div class="search-header idle" id="searchHeader">
+    <div class="search-header-inner">
+
+      <!-- Hero title — Google style, hidden when active -->
+      <div class="hero-title">
+        <h1>The<span class="brand-dot">Local</span>Intel</h1>
+        <p>Florida's agent-powered local business network.<br><span id="search-biz-count">507,000+</span> verified listings — ask anything in plain English.</p>
+      </div>
+
+
+      <!-- ── Human registration panel ── -->
+      <div class="reg-panel collapsed hidden" id="regPanel">
+
+        <!-- Collapsed state: teaser + Register button + skip -->
+        <div class="reg-panel__top">
+          <div class="reg-panel__teaser">
+            <div class="reg-panel__eyebrow"><span></span>LocalIntel Network</div>
+            <div class="reg-panel__title">Register your phone — get orders, confirmations &amp; receipts via SMS.</div>
+          </div>
+          <button class="reg-panel__expand-btn" id="regExpandBtn" onclick="expandRegPanel()">Register</button>
+          <button class="reg-panel__skip-top" onclick="skipRegistration()" title="Skip">&times;</button>
+        </div>
+
+        <!-- Expanded body -->
+        <div class="reg-panel__body" id="regBody">
+          <div class="reg-panel__sub">
+            Create an account so LocalIntel can save your preferences.
+            SMS is optional — leave the checkbox unchecked if you do not want texts.
+          </div>
+
+          <div class="reg-panel__fields">
+            <input type="text" id="regName"  placeholder="Full name"     autocomplete="name" />
+            <input type="tel"  id="regPhone" placeholder="Mobile number"  autocomplete="tel" />
+            <input type="text" id="regZip"   placeholder="ZIP code"       maxlength="5" autocomplete="postal-code" />
+          </div>
+
+          <div class="reg-panel__opt">
+            <input type="checkbox" id="regSmsOpt" />
+            <label for="regSmsOpt">
+              <strong>Optional:</strong> I agree to receive recurring transactional SMS messages from LocalIntel
+              (MCFL Restaurant Holdings LLC) at the number provided, including order
+              confirmations, receipts, and service-request updates. Message frequency varies.
+              Message and data rates may apply. Reply <strong>STOP</strong> to cancel.
+              Reply <strong>HELP</strong> for help. Mobile numbers are not shared with third
+              parties or affiliates for marketing or promotional purposes.
+              <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a> ·
+              <a href="/terms" target="_blank" rel="noopener">Terms &amp; Conditions</a>
+            </label>
+          </div>
+          <p style="font-size:12px;color:#94a3b8;margin:0 0 14px;line-height:1.45">
+            SMS consent is unchecked by default and not required to register. You can create an account without receiving texts.
+          </p>
+
+          <div class="reg-panel__bottom">
+            <button class="reg-btn-primary" id="regSubmitBtn" onclick="submitRegistration()">Create account</button>
+            <button type="button" id="regNoSmsBtn" onclick="submitRegistration(true)" style="margin-top:8px;width:100%;padding:10px;background:transparent;border:1px solid #334155;color:#94a3b8;border-radius:8px;font-weight:600;cursor:pointer">Create account without SMS</button>
+            <div class="reg-panel__divider"></div>
+            <div class="reg-panel__wallet-cta">Have an agent wallet? <a href="https://mybestfriend-production-fa71.up.railway.app/#/market" target="_blank" rel="noopener">Get Dusty &rarr;</a></div>
+          </div>
+
+          <!-- Post-registration success state -->
+          <div class="reg-panel__upsell" id="regUpsell" style="display:none" aria-live="polite">
+            <div class="reg-upsell__confirm-box">
+              <div class="reg-upsell__confirm">&#10003; You're registered</div>
+              <div class="reg-upsell__confirm-detail">
+                SMS is on for <strong id="regSuccessPhone">your number</strong>.
+                You'll get LocalIntel confirmations, receipts, and service updates.
+              </div>
+              <div class="reg-upsell__confirm-hint">
+                Reply <strong>STOP</strong> anytime to cancel · <strong>HELP</strong> for help · Msg&amp;data rates may apply
+              </div>
+            </div>
+            <button type="button" class="reg-upsell__continue" onclick="hideRegPanel()">Continue searching</button>
+            <div class="reg-upsell__pitch">
+              <div class="reg-upsell__pitch-body">
+                <div class="reg-upsell__pitch-title">Optional: agent wallet</div>
+                <div class="reg-upsell__pitch-sub">Want agents to order for you automatically? Dusty can place orders and pay — hands-free.</div>
+                <a class="reg-upsell__pitch-cta" href="https://mybestfriend-production-fa71.up.railway.app/#/market" target="_blank" rel="noopener">Get Dusty &rarr;</a>
+              </div>
+            </div>
+            <button class="reg-upsell__dismiss" onclick="hideRegPanel()">Close</button>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- Filters always visible -->
+      <div class="filters-row">
+        <div class="zip-detect-wrap">
+        <select id="zipFilter" class="filter-select">
+          <option value="">All ZIPs</option>
+          <option value="32082">32082 — Ponte Vedra Beach</option>
+          <option value="32081">32081 — Nocatee</option>
+          <option value="32250">32250 — Jacksonville Beach</option>
+          <option value="32266">32266 — Neptune Beach</option>
+          <option value="32233">32233 — Atlantic Beach</option>
+          <option value="32259">32259 — St. Johns</option>
+          <option value="32034">32034 — Fernandina Beach</option>
+          <option value="32092">32092 — World Golf Village</option>
+          <option value="32084">32084 — St. Augustine</option>
+        </select>
+        <button id="locateBtn" class="locate-btn" title="Detect my ZIP" onclick="detectZip(true)">📍</button>
+        </div>
+        <select id="categoryFilter" class="filter-select">
+          <option value="">All Categories</option>
+          <option value="restaurant">Restaurant</option>
+          <option value="healthcare">Healthcare</option>
+          <option value="retail">Retail</option>
+          <option value="construction">Construction</option>
+          <option value="professional_services">Professional Services</option>
+          <option value="landscaping">Landscaping</option>
+          <option value="cleaning">Cleaning</option>
+          <option value="hvac">HVAC</option>
+          <option value="plumber">Plumbing</option>
+          <option value="electrician">Electrical</option>
+          <option value="real_estate">Real Estate</option>
+          <option value="finance">Financial Services</option>
+          <option value="auto_repair">Automotive</option>
+          <option value="beauty">Beauty &amp; Wellness</option>
+          <option value="education">Education</option>
+          <option value="gym">Fitness &amp; Gym</option>
+          <option value="bar">Bar &amp; Nightlife</option>
+          <option value="cafe">Cafe &amp; Coffee</option>
+          <option value="pizza">Pizza</option>
+          <option value="hotel">Hotel &amp; Lodging</option>
+          <option value="library">Library</option>
+          <option value="pet_services">Pet Services</option>
+          <option value="childcare">Childcare</option>
+          <option value="moving">Moving &amp; Hauling</option>
+          <option value="roofing">Roofing</option>
+          <option value="flooring">Flooring</option>
+          <option value="pool_service">Pool Service</option>
+          <option value="pest_control">Pest Control</option>
+          <option value="photography">Photography</option>
+          <option value="tutoring">Tutoring</option>
+          <option value="dry_cleaning">Dry Cleaning</option>
+          <option value="liquor_store">Liquor Store</option>
+        </select>
+        <select id="statusFilter" class="filter-select">
+          <option value="">Any Status</option>
+          <option value="claimed">Claimed</option>
+          <option value="unclaimed">Unclaimed</option>
+        </select>
+      </div>
+
+      <!-- Search input -->
+      <div class="input-row">
+        <input
+          type="text"
+          id="searchInput"
+          class="search-input"
+          placeholder='Ask anything — "I need a landscaper", "restaurants in 32082", "what does McFlamingo serve?"'
+          autocomplete="off"
+          spellcheck="false"
+        >
+        <button class="send-btn" onclick="sendMessage()" id="sendBtn">
+          <span id="sendLabel">Ask</span>
+          <span>→</span>
+        </button>
+      </div>
+
+      <!-- Natural-language example query chips -->
+      <div class="example-chips" id="exampleChips">
+        <button class="example-chip" onclick="runExampleQuery('my toilet is leaking')">my toilet is leaking</button>
+        <button class="example-chip" onclick="runExampleQuery('need a haircut today')">need a haircut today</button>
+        <button class="example-chip" onclick="runExampleQuery('good sushi near me')">good sushi near me</button>
+        <button class="example-chip" onclick="runExampleQuery('my AC is broken')">my AC is broken</button>
+        <button class="example-chip" onclick="runExampleQuery('I need a lawyer')">I need a lawyer</button>
+        <button class="example-chip" onclick="runExampleQuery('pizza delivery in Ponte Vedra')">pizza delivery</button>
+        <button class="example-chip" onclick="runExampleQuery('someone to cut my grass')">someone to cut my grass</button>
+        <button class="example-chip" onclick="runExampleQuery('best coffee shop nearby')">best coffee nearby</button>
+      </div>
+
+      <div class="call-cta" style="display:flex; align-items:center; flex-wrap:wrap; justify-content:center; gap:12px;">
+        <a href="tel:+19045067476" class="call-link">
+          <span class="call-pulse"></span>
+          Skip the search — just call (904) 506-7476
+        </a>
+        <a href="#" onclick="openAiChatModal(); return false;" style="font-size:13px; color:var(--accent, #16a34a); font-weight:600; text-decoration:none; white-space:nowrap; margin-left:16px;">Ask a deeper question →</a>
+      </div>
+
+      <!-- Dusty persistent CTA — always visible -->
+      <div style="text-align:center; margin-top:10px; margin-bottom:2px;">
+        <a href="https://mybestfriend-production-fa71.up.railway.app/#/market" target="_blank" rel="noopener" style="font-size:13px; color:#818cf8; font-weight:600; text-decoration:none; letter-spacing:.01em;">✨ Get an agent wallet — <span style="text-decoration:underline;">Get Dusty on My Best Friend</span> →</a>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- CONTENT — thread + results scroll here -->
+  <div class="page-wrap">
+    <div class="thread" id="thread"></div>
+    <div id="resultsArea"></div>
+
+  </div>
+
+  <script>
+    const SEARCH_URL = 'https://gsb-swarm-production.up.railway.app/api/local-intel/search';
+    const API_BASE   = 'https://gsb-swarm-production.up.railway.app/api/local-intel';
+
+    // ── Session identity ───────────────────────────────────────────────────────
+    // Persistent within the browser tab session. Cleared on refresh (sessionStorage).
+    // Sent as x-session-id header so the backend can thread conversation context
+    // across multiple queries — ZIP carry-forward, referential resolution, RFQ state.
+    function getSessionId() {
+      let sid = sessionStorage.getItem('li_session_id');
+      if (!sid) {
+        sid = 'web-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 9);
+        sessionStorage.setItem('li_session_id', sid);
+      }
+      return sid;
+    }
+    const SESSION_ID = getSessionId();
+
+    // ── State ──────────────────────────────────────────────────────────────────
+    const thread = [];
+    let context = { zip: null, category: null, lastBusiness: null, lastResultNames: [] };
+    let isLoading = false;
+    let hasSearched = false;
+
+    // ── Activate search mode — collapses hero, makes header sticky ─────────────
+    function activateSearchMode() {
+      if (hasSearched) return;
+      hasSearched = true;
+      const header = document.getElementById('searchHeader');
+      header.classList.remove('idle');
+      header.classList.add('active');
+      document.body.classList.add('search-active');
+      // Hide example chips once user starts searching
+      const chips = document.getElementById('exampleChips');
+      if (chips) chips.style.display = 'none';
+      // Scroll to very top so sticky header locks into place immediately
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }
+
+    // ── Example query chips — fills input and fires search ─────────────────────
+    function runExampleQuery(text) {
+      const input = document.getElementById('searchInput');
+      if (input) input.value = text;
+      sendMessage();
+    }
+
+    // ── Utilities ──────────────────────────────────────────────────────────────
+    function esc(str) {
+      return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    const CAT_ICONS = {
+      restaurant:'🍽️', food:'🍽️', cafe:'☕', bar:'🍺',
+      health:'🏥', medical:'🏥', dental:'🦷', pharmacy:'💊',
+      retail:'🛍️', shop:'🛍️', store:'🛍️',
+      construction:'🔨', contractor:'🔨', roofing:'🏗️',
+      landscaping:'🌿', lawn:'🌿', tree:'🌿',
+      cleaning:'🧹', maid:'🧹',
+      hvac:'❄️', plumbing:'🔧', electrical:'⚡',
+      realty:'🏠', 'real estate':'🏠',
+      auto:'🚗', car:'🚗',
+      beauty:'💅', salon:'💇', spa:'💆',
+      education:'📚', school:'📚',
+      finance:'💼', insurance:'🛡️', law:'⚖️',
+      default:'🏢',
+    };
+    function getIcon(cat) {
+      const lower = (cat||'').toLowerCase();
+      for (const [k,v] of Object.entries(CAT_ICONS)) { if (lower.includes(k)) return v; }
+      return CAT_ICONS.default;
+    }
+
+    // ── Context resolution ─────────────────────────────────────────────────────
+    const FOLLOW_UP_RE = /\b(they|them|their|it|this company|this business|that place|the company|the business)\b/i;
+
+    function resolveQuery(raw) {
+      let q   = raw.trim();
+      let zip = document.getElementById('zipFilter').value;
+      let cat = document.getElementById('categoryFilter').value;
+      if (FOLLOW_UP_RE.test(q) && context.lastBusiness) {
+        q = q.replace(FOLLOW_UP_RE, context.lastBusiness);
+      }
+      if (!zip && context.zip) zip = context.zip;
+      if (!cat && context.category) cat = context.category;
+      return { q, zip, cat };
+    }
+
+    const TASK_FIRE_RE = /\b(ok(?:ay)?[\s,]+(?:call|contact|text|email|send|reach|ping|message|ask)\s+them|go\s+ahead|yes[\s,]+call|send\s+(?:them|it)|fire\s+(?:it|that)|book\s+it|schedule\s+it|do\s+it)\b/i;
+
+    // ── API call ───────────────────────────────────────────────────────────────
+    async function callSearch(q, zip, cat) {
+      const params = new URLSearchParams();
+      if (q)   params.set('q', q);
+      if (zip) params.set('zip', zip);
+      if (cat) params.set('cat', cat);
+      if (context.lastBusiness) params.set('ctx_business', context.lastBusiness);
+      if (context.lastResultNames.length) params.set('ctx_names', context.lastResultNames.slice(0,5).join(','));
+      const res = await fetch(`${SEARCH_URL}?${params}`, {
+        headers: {
+          'X-Agent-Origin': 'localintel-search-ui',
+          'x-session-id':   SESSION_ID,
+        },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+
+
+    // ── Category inference sets (mirrors categoryMap.js) ──────────────────────
+    // Used when business has no DB flags set (unclaimed). Best-effort from category alone.
+    const RFQ_CATS = new Set([
+      'plumber','plumbing','electrician','hvac','handyman','roofing','landscaping',
+      'painting','pest_control','locksmith','flooring','pool_service','moving',
+      'general_contractor','contractor','concrete','cleaning','dry_cleaning','towing','catering',
+    ]);
+    const APPT_CATS = new Set([
+      'beauty','beauty_salon','hairdresser','barbershop','hair_chain','nail_salon','nails',
+      'spa_massage','massage','spa','cosmetics','tattoo','pet_grooming','optician',
+      'clinic','dentist','dental','doctors','urgent_care','hospital','healthcare',
+      'veterinary','plastic_surgery','dermatology','medical_spa','aesthetics','pharmacy',
+      'gym','gym_chain','fitness_centre','sports_centre','fitness','childcare',
+      'accounting','tax_advisor','financial_advisor','law_firm','legal','insurance',
+      'insurance_agency','real_estate','real_estate_agency','estate_agent',
+    ]);
+    const RESV_CATS = new Set([
+      'restaurant','fast_food','casual_dining','fine_dining','cafe','coffee_chain','bakery',
+      'pizza','bar','pub','sports_bar','brewery','bar_dining','seafood','mexican','bbq',
+      'steakhouse','sandwich','fast_casual_mexican','deli','ice_cream','dessert',
+      'hotel','upscale_hotel','budget_hotel',
+    ]);
+
+    // ── Smart CTA per action_type ──────────────────────────────────────────────
+    function renderCardCta(biz) {
+      const wallet   = biz.wallet;
+      const bookUrl  = biz.booking_url;
+      const website  = biz.website;
+      const phone    = (biz.phone||'').replace(/\D/g,'');
+      const bizId    = biz.business_id || biz.id;
+      const cat      = (biz.category||'').toLowerCase();
+      const claimed  = !!(biz.claimed_at || biz.wallet);
+
+      // ── Blank-slate B2B: intentionally configured with contact_email ────────
+      // Only fires when contact_email is explicitly set — these are businesses we
+      // inserted as blank slates (Syncworks, AcceleratePV, Silicon Beach AI, etc.)
+      // agent_routable defaults FALSE for ALL legacy businesses, so we MUST check
+      // contact_email to distinguish blank-slate B2B from normal unclaimed listings.
+      if (biz.contact_email) {
+        const subject = encodeURIComponent('Inquiry via LocalIntel');
+        const body    = encodeURIComponent('Hi, I found you on LocalIntel and wanted to get in touch.');
+        return `<a href="mailto:${esc(biz.contact_email)}?subject=${subject}&body=${body}" class="result-cta result-cta-email">✉ Contact Sales</a>`;
+      }
+
+      // DB flags are the source of truth — no category inference for reservations/appointments.
+      // A business must explicitly opt in (accepts_reservations=true) before we surface a
+      // reservation CTA. Category alone is not enough.
+      const hasRfq   = biz.accepts_rfq  != null ? biz.accepts_rfq  : RFQ_CATS.has(cat);
+      const hasAppt  = biz.accepts_appointments === true;  // explicit opt-in only
+      const hasResv  = biz.accepts_reservations === true;  // explicit opt-in only
+      const hasMeal  = biz.menu_url || RESV_CATS.has(cat);
+
+      // Wallet → agent-routed RFQ — but NOT for browsable/dining categories.
+      // A restaurant with a wallet should surface Reserve/Order, not Request Quote.
+      const _isServiceCat = !RESV_CATS.has(cat) && !APPT_CATS.has(cat);
+      if (wallet && bizId && _isServiceCat) {
+        return `<a href="https://www.thelocalintel.com/quote.html?business_id=${esc(bizId)}&category=${esc(biz.category||'')}" class="result-cta result-cta-wallet">⚡ Request Quote</a>`;
+      }
+      // Reservations
+      // Priority: booking_url (direct) → phone call → LocalIntel intake form
+      // LocalIntel is the conduit — we only collect info when no direct path exists
+      if (hasResv) {
+        if (bookUrl) {
+          return `<a href="${esc(bookUrl)}" target="_blank" rel="noopener" class="result-cta result-cta-reserve">📅 Reserve</a>`;
+        }
+        if (phone) {
+          return `<a href="tel:${phone}" class="result-cta result-cta-call">📞 Call to Reserve</a>`;
+        }
+        // No direct path — use LocalIntel intake as lightweight booking calendar
+        if (bizId) {
+          return `<a href="https://www.thelocalintel.com/quote.html?business_id=${esc(bizId)}&category=${esc(cat)}&type=reservation" class="result-cta result-cta-reserve">Request Reservation</a>`;
+        }
+      }
+      // Appointment
+      if (hasAppt) {
+        const dest = bookUrl || website || `https://www.thelocalintel.com/quote.html?business_id=${esc(bizId)}&category=${esc(cat)}`;
+        const target = (bookUrl || website) ? 'target="_blank" rel="noopener"' : '';
+        return `<a href="${esc(dest)}" ${target} class="result-cta result-cta-book">📅 Book Appt</a>`;
+      }
+      // RFQ
+      if (hasRfq && bizId) {
+        return `<a href="https://www.thelocalintel.com/quote.html?business_id=${esc(bizId)}&category=${esc(cat)}" class="result-cta result-cta-rfq">Request Quote</a>`;
+      }
+      // Food / menu order
+      if (hasMeal) {
+        const dest = biz.menu_url || website || `https://www.thelocalintel.com/quote.html?business_id=${esc(bizId)}&category=${esc(cat)}`;
+        const target = (biz.menu_url || website) ? 'target="_blank" rel="noopener"' : '';
+        return `<a href="${esc(dest)}" ${target} class="result-cta result-cta-order">Order →</a>`;
+      }
+      // Website
+      if (website) {
+        return `<a href="${esc(website)}" target="_blank" rel="noopener" class="result-cta result-cta-book">Visit Site →</a>`;
+      }
+      // Phone call
+      if (phone) {
+        return `<a href="tel:${phone}" class="result-cta result-cta-call">📞 Call</a>`;
+      }
+      // Final fallback
+      if (bizId) {
+        return `<a href="https://www.thelocalintel.com/quote.html?business_id=${esc(bizId)}&category=${esc(cat)}" class="result-cta result-cta-rfq">Contact</a>`;
+      }
+      return '';
+    }
+
+    // ── Render a business card ─────────────────────────────────────────────────
+    function renderCard(biz) {
+      const icon    = getIcon(biz.category || biz.category_group);
+      const claimed = biz.claimed || biz.claimed_at || biz.wallet;
+      const bizId   = biz.business_id || biz.id || null;
+      const cat     = biz.category || biz.category_group || '';
+      const addr    = [biz.address, biz.city].filter(Boolean).join(', ');
+      const full    = addr ? `${addr}, FL ${biz.zip||''}` : (biz.zip ? `${biz.zip}, FL` : '');
+      const mapUrl  = (biz.lat && biz.lon)
+        ? `https://www.openstreetmap.org/?mlat=${biz.lat}&mlon=${biz.lon}&zoom=17`
+        : `https://www.openstreetmap.org/search?query=${encodeURIComponent(full)}`;
+      const blurb   = biz.description || biz.services_text || '';
+      const hoursStr = biz.hours || '';
+      const tier    = biz.price_tier ? ({ casual:'$–$$', upscale:'$$$', fine_dining:'$$$$' }[biz.price_tier] || biz.price_tier) : '';
+
+      return `
+        <div class="result-card">
+          <div class="result-icon">${icon}</div>
+          <div class="result-body">
+            <div class="result-name">
+              ${biz.website
+                ? `<a href="${esc(biz.website)}" target="_blank" rel="noopener" style="border-bottom:1px dotted var(--border);">${esc(biz.name||'Unnamed')}</a>`
+                : esc(biz.name||'Unnamed')}
+            </div>
+            ${biz.matchReason ? `<div class="match-reason">${esc(biz.matchReason)}</div>` : ''}
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
+              ${cat ? `<span class="result-tag">${esc(cat)}</span>` : ''}
+              ${tier ? `<span class="result-tag" style="background:#FEF9C3;color:#854D0E;">${esc(tier)}</span>` : ''}
+            </div>
+            ${blurb ? `<div style="font-size:13px;color:var(--text-2);margin-bottom:5px;line-height:1.5;">${esc(blurb.slice(0,120))}${blurb.length>120?'…':''}</div>` : ''}
+            ${hoursStr && !/addId|thunderbolt|function/.test(hoursStr) ? `<div style="font-size:12px;color:var(--text-3);margin-bottom:4px;">🕐 ${esc(hoursStr)}</div>` : ''}
+            <div>
+              ${full ? `<a href="${mapUrl}" target="_blank" rel="noopener" class="result-detail-link">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                ${esc(full)}</a>` : ''}
+              ${biz.phone ? `<a href="tel:${biz.phone.replace(/\D/g,'')}" class="result-detail-link">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13 19.79 19.79 0 0 1 1.6 4.38 2 2 0 0 1 3.57 2.18h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.08 6.08l.91-.91a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21.73 17z"/></svg>
+                ${esc(biz.phone)}</a>` : ''}
+              ${biz.website ? `<a href="${esc(biz.website)}" target="_blank" rel="noopener" class="result-detail-link" style="color:#3b82f6;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                <span style="display:inline-block;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle;">${esc(biz.website.replace(/^https?:\/\//,''))}</span> ↗</a>`
+              : `<span class="result-detail-link" style="color:var(--text-3);font-style:italic;cursor:default;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                No website listed</span>`}
+            </div>
+          </div>
+          <div class="result-right">
+            <div class="result-zip">${esc(biz.zip||'')}</div>
+            <div class="result-status${claimed?' claimed':''}">
+              ${claimed ? '✓ Claimed' : 'Unclaimed'}
+            </div>
+            ${renderCardCta(biz)}
+            ${biz.contact_email ? `<div class="result-b2b-note">Agentic services not yet configured — contact their team directly.</div>` : ''}
+            ${!claimed && bizId ? `<a href="https://www.thelocalintel.com/claim.html?biz=${esc(bizId)}" style="display:block;margin-top:5px;font-size:10px;color:var(--text-3);text-align:center;text-decoration:none;" title="Own this business? Claim it to manage your listing.">Is this yours? <span style="color:var(--accent);">Claim &amp; correct →</span></a>` : ''}
+            <a href="${mapUrl}" target="_blank" rel="noopener"
+               style="display:inline-block;margin-top:6px;font-size:11px;color:var(--accent);font-weight:600;">
+              Map →
+            </a>
+          </div>
+        </div>`;
+    }
+
+    // ── Build agent bubble ─────────────────────────────────────────────────────
+    function buildAgentBubble(result, rawQuery) {
+      // ── ORDER intent: focused order-start CTA, no business list ─────────────
+      if (result?.intent === 'order' && result.business) {
+        const b       = result.business;
+        const ctaUrl  = result.cta_url || b.menu_url || b.website || '';
+        const phoneRaw= (result.fallback_phone || b.phone || '').replace(/\D/g,'');
+        const fullAddr= b.address ? esc(b.address) : '';
+        const desc    = b.description ? esc(b.description.slice(0,140)) + (b.description.length>140?'…':'') : '';
+        const message = esc(result.message || `Starting your order at ${b.name}.`);
+        const orderCardHtml = `
+          <div class="order-card">
+            <div class="order-card-header">
+              <div class="order-card-name">🍽 ${esc(b.name||'')}</div>
+              <div class="order-card-zip">${esc(result.business_zip || b.zip || '')}</div>
+            </div>
+            ${desc ? `<div class="order-card-desc">${desc}</div>` : ''}
+            ${fullAddr ? `<div class="order-card-addr">${fullAddr}</div>` : ''}
+            <div class="order-card-actions">
+              ${ctaUrl ? `<a href="${esc(ctaUrl)}" target="_blank" rel="noopener" class="order-cta-btn">${esc(result.cta_label || 'Start Order →')}</a>` : ''}
+              ${phoneRaw ? `<a href="tel:${phoneRaw}" class="order-phone-link">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13 19.79 19.79 0 0 1 1.6 4.38 2 2 0 0 1 3.57 2.18h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.08 6.08l.91-.91a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21.73 17z"/></svg>
+                ${esc(b.phone || '')}</a>` : ''}
+            </div>
+            <div class="order-card-footer">Powered by Toast · Routed by LocalIntel</div>
+          </div>`;
+        return `
+          <div class="bubble-agent">
+            <div class="agent-avatar"></div>
+            <div class="bubble-agent-body">
+              <div class="agent-narrative">
+                <div class="label"><span class="label-dot"></span> LocalIntel</div>
+                <div>${message}</div>
+              </div>
+              ${orderCardHtml}
+            </div>
+          </div>`;
+      }
+      if (result?.intent === 'order_not_found') {
+        return `
+          <div class="bubble-agent">
+            <div class="agent-avatar"></div>
+            <div class="bubble-agent-body">
+              <div class="agent-narrative">
+                <div class="label"><span class="label-dot"></span> LocalIntel</div>
+                <div>${esc(result.message || "I couldn't find that business in this area.")}</div>
+              </div>
+            </div>
+          </div>`;
+      }
+      // ── ORDER_ITEM_PARTIAL: item known, need restaurant name ──────────────────
+      if (result?.intent === 'ORDER_ITEM_PARTIAL') {
+        return `
+          <div class="bubble-agent">
+            <div class="agent-avatar"></div>
+            <div class="bubble-agent-body">
+              <div class="agent-narrative" style="border-color:#86EFAC;">
+                <div class="label"><span class="label-dot"></span> LocalIntel</div>
+                <div>${esc(result.message || `Which restaurant would you like that from?`)}</div>
+                <div style="margin-top:8px;font-size:12px;color:var(--text-3);">Type the restaurant name to continue your order.</div>
+              </div>
+            </div>
+          </div>`;
+      }
+
+      let narrativeHtml = '';
+      let cardsHtml     = '';
+      let countHtml     = '';
+
+      const businesses = Array.isArray(result?.results) ? result.results : [];
+      const narrative  = result?.narrative || result?.meta?.narrative || null;
+      const notables   = result?.notable_businesses || [];
+      const isTask      = result?.type === 'service_request';
+      const isDeflect   = result?.type === 'out_of_scope';
+      const jobCode     = result?.job_code     || null;
+      const subLabel    = result?.sub_label    || null;   // B146
+      const isNarrowing = result?.is_narrowing || false;  // B146
+      const contactPrompt = result?.contact_prompt || false; // B147
+      const ctaType   = result?.cta_type   || 'info';   // rfq | appointment | reservation | info
+      const ctaPrompt = result?.cta_prompt || null;      // question text from backend
+
+      // Detected-category chip — shown when backend resolved NL query to a category
+      const detectedCat = result?.detected_cat || null;
+      const detectedCatChip = detectedCat
+        ? `<div class="detected-cat-chip">${getIcon(detectedCat)} ${esc(detectedCat.replace(/_/g,' '))}</div>`
+        : '';
+
+      if (narrative || notables.length) {
+        const spotlit = notables.filter(b => b.description || (b.tags && b.tags.length)).slice(0,3);
+        const spotlightHtml = spotlit.map(b => {
+          const desc = b.description || `Known for: ${(b.tags||[]).slice(0,4).join(', ')}`;
+          return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(22,163,74,0.15);">
+            <span style="font-weight:600;">${esc(b.name)}</span>
+            <span style="opacity:0.85;font-size:14px;"> — ${esc(desc)}</span>
+            ${b.website ? `<a href="${esc(b.website)}" target="_blank" rel="noopener" style="margin-left:6px;font-size:12px;opacity:0.6;color:inherit;">↗</a>` : ''}
+          </div>`;
+        }).join('');
+
+        const mainText = (narrative || '').replace(
+          /(https?:\/\/[^\s<>"]+)/g,
+          url => `<a href="${url}" target="_blank" rel="noopener" style="color:var(--accent);">${url.replace(/^https?:\/\//,'')}</a>`
+        );
+
+        narrativeHtml = `
+          <div class="agent-narrative">
+            <div class="label"><span class="label-dot"></span> LocalIntel</div>
+            ${detectedCatChip}
+            ${mainText ? `<div>${mainText}</div>` : ''}
+            ${spotlightHtml}
+          </div>`;
+      } else if (isDeflect) {
+        narrativeHtml = `
+          <div class="agent-narrative">
+            <div class="label"><span class="label-dot"></span> LocalIntel</div>
+            <div>${esc(result.narrative || "That's outside my lane — try asking for a restaurant, landscaper, doctor, or any local service.")}</div>
+          </div>`;
+      } else if (!businesses.length) {
+        narrativeHtml = `
+          <div class="agent-narrative">
+            <div class="label"><span class="label-dot"></span> LocalIntel</div>
+            <div>No results found for <strong>${esc(rawQuery)}</strong>. Try a different name, category, or ZIP.</div>
+          </div>`;
+      }
+
+      if (isTask) {
+        // B146: unique widget ID so multiple service requests on the page don't collide
+        const widgetId = 'cw-' + Date.now().toString(36);
+
+        // CTA-type-aware status label
+        const taskStatus = isNarrowing
+          ? 'Narrowed to matching providers'
+          : ctaType === 'rfq'
+            ? 'Ready to send bid request'
+            : ctaType === 'appointment'
+              ? 'Ready to connect you'
+              : null;  // reservation + info: no status label — direct to business
+
+        // CTA-type-aware contact widget label
+        // reservation intentionally excluded — LocalIntel is a conduit, not a reservation agent.
+        // The business card's own Reserve button (renderCardCta) links directly to booking_url or phone.
+        const contactLabel = ctaType === 'rfq'
+          ? 'Leave your contact info and we&#39;ll send your bid request to these providers:'
+          : ctaType === 'appointment'
+            ? 'Leave your contact info and we&#39;ll send your appointment request to the business:'
+            : null;  // reservation + info: no widget — direct to business
+
+        // CTA-type-aware button label
+        const btnLabel = ctaType === 'rfq'
+          ? 'Send Bid Request'
+          : ctaType === 'appointment'
+            ? 'Request Appointment'
+            : 'Connect me';
+
+        const subcatChip = subLabel
+          ? `<div class="subcat-chip">${esc(subLabel)}</div>`
+          : '';
+
+        // Only show the widget for actionable CTA types
+        const widgetHtml = contactLabel ? `
+            <div class="contact-widget" id="${widgetId}">
+              <div class="contact-widget-label">${contactLabel}</div>
+              <div class="contact-widget-row">
+                <input type="email" placeholder="Email address" id="${widgetId}-email" />
+                <input type="tel"   placeholder="Phone (optional)" id="${widgetId}-phone" />
+                <button class="contact-widget-submit" id="${widgetId}-btn"
+                  data-cta-type="${esc(ctaType)}"
+                  onclick="submitContact('${widgetId}','${esc(jobCode||'')}','${esc(result.category||'')}','${esc(result.zip||'')}','${esc(ctaType)}')">
+                  ${btnLabel}
+                </button>
+              </div>
+              <div class="contact-widget-success" id="${widgetId}-ok" style="display:none;"></div>
+            </div>` : '';
+
+        narrativeHtml += `
+          <div class="agent-task-card" id="tc-${widgetId}">
+            ${jobCode ? `<div class="task-job-id">Job ${esc(jobCode)}</div>` : ''}
+            ${subcatChip}
+            ${taskStatus ? `<div class="task-status">${taskStatus}</div>` : ''}
+            ${widgetHtml}
+          </div>`;
+      }
+
+      if (businesses.length) {
+        const status  = document.getElementById('statusFilter').value;
+        let filtered  = businesses;
+        if (status === 'claimed')   filtered = filtered.filter(b => b.claimed || b.claimed_at || b.wallet);
+        if (status === 'unclaimed') filtered = filtered.filter(b => !b.claimed && !b.claimed_at && !b.wallet);
+        if (filtered.length) {
+          countHtml = `<div class="results-count">${result.total || filtered.length} businesses found</div>`;
+          cardsHtml = `<div>${filtered.map(renderCard).join('')}</div>`;
+        }
+      }
+
+      return `
+        <div class="bubble-agent">
+          <div class="agent-avatar"></div>
+          <div class="bubble-agent-body">
+            ${narrativeHtml}
+            <div class="results-section">
+              ${countHtml}
+              ${cardsHtml}
+            </div>
+          </div>
+        </div>`;
+    }
+
+    // ── Update context ─────────────────────────────────────────────────────────
+    // ── Contact collection widget (B147) ─────────────────────────────────────────
+    async function submitContact(widgetId, jobCode, category, zip, ctaType) {
+      const emailEl = document.getElementById(widgetId + '-email');
+      const phoneEl = document.getElementById(widgetId + '-phone');
+      const btnEl   = document.getElementById(widgetId + '-btn');
+      const okEl    = document.getElementById(widgetId + '-ok');
+
+      const email = (emailEl?.value || '').trim();
+      const phone = (phoneEl?.value || '').trim();
+
+      if (!email && !phone) {
+        if (emailEl) { emailEl.focus(); emailEl.style.borderColor = '#ef4444'; }
+        return;
+      }
+
+      btnEl.disabled = true;
+      btnEl.textContent = 'Sending...';
+
+      try {
+        const res = await fetch(API_BASE + '/rfq-contact', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-session-id': SESSION_ID },
+          body: JSON.stringify({
+            job_code: jobCode || null, category, zip, cta_type: ctaType || 'info',
+            email: email || null, phone: phone || null,
+          }),
+        });
+        if (res.ok) {
+          const row   = document.querySelector('#' + widgetId + ' .contact-widget-row');
+          const label = document.querySelector('#' + widgetId + ' .contact-widget-label');
+          if (row)   row.style.display   = 'none';
+          if (label) label.style.display = 'none';
+          okEl.style.display = 'block';
+          const contact = email ? `emailed to ${email}` : `texted to ${phone}`;
+          const successMsg = ctaType === 'rfq'
+            ? `Your bid request has been logged. We'll reach out once a provider responds. Confirmation ${contact}.`
+            : ctaType === 'appointment'
+              ? `Your appointment request has been sent to the business. Confirmation ${contact}.`
+              : ctaType === 'reservation'
+                ? `Your reservation request has been sent. Confirmation ${contact}.`
+                : `Got it — we'll follow up at ${email || phone}.`;
+          okEl.textContent = successMsg;
+        } else {
+          btnEl.disabled = false;
+          btnEl.textContent = 'Connect me';
+          okEl.style.display = 'block';
+          okEl.style.color = '#ef4444';
+          okEl.textContent = 'Something went wrong — please try again.';
+        }
+      } catch (e) {
+        btnEl.disabled = false;
+        btnEl.textContent = 'Connect me';
+        okEl.style.display = 'block';
+        okEl.style.color = '#ef4444';
+        okEl.textContent = 'Something went wrong — please try again.';
+      }
+    }
+
+    function updateContext(result, zip, cat) {
+      if (zip) context.zip = zip;
+      if (cat) context.category = cat;
+      const names = (result?.results||[]).map(b => b.name).filter(Boolean);
+      if (names.length) {
+        context.lastResultNames = names;
+        context.lastBusiness    = names[0];
+      }
+    }
+
+    // ── Render thread ──────────────────────────────────────────────────────────
+    function renderThread() {
+      const el = document.getElementById('thread');
+      el.innerHTML = thread.map(item => {
+        if (item.role === 'user') {
+          return `<div class="bubble-user"><div class="bubble-user-inner">${esc(item.text)}</div></div>`;
+        }
+        return item.html || '';
+      }).join('');
+
+      // In active mode: scroll so the latest user bubble is visible just below the sticky header
+      if (hasSearched) {
+        const lastUserBubble = el.querySelectorAll('.bubble-user');
+        if (lastUserBubble.length) {
+          const last     = lastUserBubble[lastUserBubble.length - 1];
+          const navH     = document.querySelector('nav').offsetHeight;
+          const headerH  = document.getElementById('searchHeader').offsetHeight;
+          const offset   = navH + headerH + 12;
+          const top      = last.getBoundingClientRect().top + window.scrollY - offset;
+          window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+        }
+      }
+    }
+
+    // ── Thinking indicator ─────────────────────────────────────────────────────
+    function showThinking() {
+      document.getElementById('resultsArea').innerHTML = `
+        <div class="bubble-agent">
+          <div class="agent-avatar"></div>
+          <div class="bubble-agent-body">
+            <div class="thinking-bubble">
+              <div class="spinner"></div>
+              <span>Searching <span id="search-biz-count-2">614,000+</span> businesses...</span>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    // ── Agentic Food Order flow ────────────────────────────────────────────────
+    // Triggered by intent === 'order_item_search'. Fetches menu, fuzzy-matches,
+    // shows item-found card → pickup/delivery → payment popup → confirmation.
+    const orderState = {}; // { [orderId]: { businessId, businessName, item, fulfillment, receiptId, paymentUrl, pollTimer } }
+
+    function fmtPrice(n) {
+      const v = Number(n) || 0;
+      return v.toFixed(2);
+    }
+
+    function buildOrderPanel(html) {
+      return `
+        <div class="bubble-agent">
+          <div class="agent-avatar"></div>
+          <div class="bubble-agent-body">${html}</div>
+        </div>`;
+    }
+
+    function pushAgentHtml(html) {
+      thread.push({ role: 'agent', html });
+      renderThread();
+    }
+
+    function replaceLastAgent(html) {
+      // Replace the most recent agent bubble in the thread with new html
+      for (let i = thread.length - 1; i >= 0; i--) {
+        if (thread[i].role === 'agent') { thread[i].html = html; break; }
+      }
+      renderThread();
+    }
+
+    function escAttr(s) { return esc(s).replace(/'/g, '&#39;'); }
+
+    function renderItemFoundCard(orderId, biz, item, fullMenu) {
+      const s = orderState[orderId];
+      s.item = item;
+      const seeMenuBtn = (fullMenu && fullMenu.length > 1)
+        ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:13px;color:var(--text-2);">
+             Not what you wanted?
+             <button onclick="showFullMenu('${orderId}')" style="background:none;border:none;color:var(--accent);font-weight:600;font-size:13px;cursor:pointer;padding:0 4px;text-decoration:underline;">See full menu ↗</button>
+           </div>`
+        : '';
+      return buildOrderPanel(`
+        <div class="agent-narrative" style="border-color:#86EFAC;">
+          <div class="label"><span class="label-dot"></span> 🍽 ${esc(biz.name)} ${biz.zip ? `<span style="margin-left:auto;color:var(--text-3);font-weight:400;">${esc(biz.zip)}</span>` : ''}</div>
+          <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">We found:</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--accent-light);border-radius:8px;margin-bottom:14px;">
+            <span style="font-weight:600;">${esc(item.name)}</span>
+            <span style="font-weight:700;color:var(--accent-text);">$${fmtPrice(item.priceUsd)}</span>
+          </div>
+          <div style="font-size:14px;font-weight:600;margin-bottom:8px;">How would you like it?</div>
+          <div style="display:flex;gap:10px;">
+            <button onclick="placeOrder('${orderId}','pickup')" style="flex:1;padding:12px;background:var(--accent);color:#fff;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;">🏃 Pickup</button>
+            <button onclick="placeOrder('${orderId}','delivery')" style="flex:1;padding:12px;background:var(--accent);color:#fff;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;">🚗 Delivery</button>
+          </div>
+          ${seeMenuBtn}
+        </div>`);
+    }
+
+    function renderFullMenuCard(orderId, biz, items) {
+      const groups = {};
+      items.forEach(it => {
+        const k = it.category || 'Menu';
+        (groups[k] = groups[k] || []).push(it);
+      });
+      const sections = Object.entries(groups).map(([cat, list]) => `
+        <div style="margin-top:10px;">
+          <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-3);font-weight:700;margin-bottom:6px;">${esc(cat)}</div>
+          ${list.map((it, idx) => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">
+              <div style="flex:1;min-width:0;">
+                <div style="font-weight:600;font-size:14px;">${esc(it.name)}</div>
+                <div style="font-size:12px;color:var(--text-2);">$${fmtPrice(it.priceUsd)}</div>
+              </div>
+              <button onclick="pickMenuItem('${orderId}', ${idx}, '${escAttr(cat)}')" style="font-size:12px;padding:6px 10px;background:var(--accent);color:#fff;border-radius:6px;font-weight:600;cursor:pointer;">Order this</button>
+            </div>
+          `).join('')}
+        </div>
+      `).join('');
+      // Stash the menu so pickMenuItem can resolve idx
+      orderState[orderId].fullMenu = items;
+      orderState[orderId].menuGroups = groups;
+      return buildOrderPanel(`
+        <div class="agent-narrative" style="border-color:#86EFAC;">
+          <div class="label"><span class="label-dot"></span> 🍽 ${esc(biz.name)} — Full Menu</div>
+          <div style="font-size:13px;color:var(--text-2);margin-bottom:6px;">Pick an item to order.</div>
+          ${sections}
+        </div>`);
+    }
+
+    window.showFullMenu = function(orderId) {
+      const s = orderState[orderId];
+      if (!s || !s.fullMenu) return;
+      replaceLastAgent(renderFullMenuCard(orderId, { name: s.businessName }, s.fullMenu));
+    };
+
+    window.pickMenuItem = function(orderId, idx, cat) {
+      const s = orderState[orderId];
+      if (!s || !s.menuGroups) return;
+      const list = s.menuGroups[cat] || [];
+      const item = list[idx];
+      if (!item) return;
+      replaceLastAgent(renderItemFoundCard(orderId, { name: s.businessName }, item, s.fullMenu));
+    };
+
+    window.placeOrder = async function(orderId, fulfillment) {
+      const s = orderState[orderId];
+      if (!s || !s.item) return;
+      s.fulfillment = fulfillment;
+      replaceLastAgent(buildOrderPanel(`
+        <div class="agent-narrative" style="border-color:#86EFAC;">
+          <div class="label"><span class="label-dot"></span> ${esc(s.businessName)}</div>
+          <div class="thinking-bubble" style="border:none;padding:0;">
+            <div class="spinner"></div>
+            <span>Creating your order...</span>
+          </div>
+        </div>`));
+
+      try {
+        const res = await fetch(`${API_BASE}/place-order`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Agent-Origin': 'localintel-search-ui' },
+          body: JSON.stringify({
+            business_id: s.businessId,
+            sku:         s.item.sku,
+            qty:         1,
+            fulfillment,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          const err = new Error(data.error || `HTTP ${res.status}`);
+          err.data = data;
+          throw err;
+        }
+        s.receiptId  = data.receiptId;
+        s.paymentUrl = data.paymentUrl;
+        // Open payment in embedded iframe modal (origin-verified PostMessage)
+        try { openPaymentModal(data.paymentUrl); } catch {}
+        replaceLastAgent(renderOrderCreatedCard(orderId));
+      } catch (e) {
+        const closedMsg = (e.data && e.data.error === 'business_closed' && e.data.message)
+          ? e.data.message
+          : null;
+        const body = closedMsg
+          ? `<div>${esc(closedMsg)}</div>`
+          : `<div>Couldn't create order: ${esc(e.message)}. Try again, or call the business directly.</div>`;
+        replaceLastAgent(buildOrderPanel(`
+          <div class="agent-narrative">
+            <div class="label"><span class="label-dot"></span> LocalIntel</div>
+            ${body}
+          </div>`));
+      }
+    };
+
+    function renderOrderCreatedCard(orderId) {
+      const s = orderState[orderId];
+      const fulfillLabel = s.fulfillment === 'pickup' ? 'Pickup' : 'Delivery';
+      return buildOrderPanel(`
+        <div class="agent-narrative" style="border-color:#86EFAC;">
+          <div class="label"><span class="label-dot"></span> ✓ Order created at ${esc(s.businessName)}</div>
+          <div style="margin:6px 0 12px;padding:10px 12px;background:var(--accent-light);border-radius:8px;">
+            <div style="display:flex;justify-content:space-between;font-weight:600;">
+              <span>${esc(s.item.name)}</span>
+              <span>$${fmtPrice(s.item.priceUsd)}</span>
+            </div>
+            <div style="font-size:12px;color:var(--text-2);margin-top:4px;">Fulfillment: ${fulfillLabel}</div>
+          </div>
+          <div style="font-size:13px;color:var(--text-2);margin-bottom:12px;">
+            Payment window opened. Once paid, your order goes straight to ${esc(s.businessName)}'s kitchen.
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button onclick="checkOrderStatus('${orderId}')" style="padding:9px 14px;background:var(--accent);color:#fff;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;">Check payment status</button>
+            <button onclick="reopenPayment('${orderId}')" style="padding:9px 14px;background:#fff;color:var(--accent);border:1.5px solid var(--accent);border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;">Open payment again</button>
+          </div>
+          <div style="margin-top:12px;font-size:12px;color:var(--text-3);">
+            No crypto wallet? <a href="https://surge.basalthq.com/signup" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">Get one free →</a>
+          </div>
+        </div>`);
+    }
+
+    window.reopenPayment = function(orderId) {
+      const s = orderState[orderId];
+      if (s && s.paymentUrl) openPaymentModal(s.paymentUrl);
+    };
+
+    window.checkOrderStatus = function(orderId) {
+      const s = orderState[orderId];
+      if (!s || !s.receiptId) return;
+      if (s.pollTimer) return; // already polling
+      const startedAt = Date.now();
+      const MAX_MS   = 2 * 60 * 1000;
+      replaceLastAgent(buildOrderPanel(`
+        <div class="agent-narrative" style="border-color:#86EFAC;">
+          <div class="label"><span class="label-dot"></span> ${esc(s.businessName)}</div>
+          <div class="thinking-bubble" style="border:none;padding:0;">
+            <div class="spinner"></div>
+            <span>Waiting for payment confirmation...</span>
+          </div>
+        </div>`));
+      const poll = async () => {
+        try {
+          const r = await fetch(`${API_BASE}/order-status/${encodeURIComponent(s.receiptId)}?business_id=${encodeURIComponent(s.businessId)}`, {
+            headers: { 'X-Agent-Origin': 'localintel-search-ui' },
+          });
+          const d = await r.json();
+          if (d.paid) {
+            clearInterval(s.pollTimer);
+            s.pollTimer = null;
+            const msg = s.fulfillment === 'pickup'
+              ? '✅ Order confirmed! Ready for pickup in ~15 min.'
+              : '✅ Order confirmed! A driver is being dispatched.';
+            replaceLastAgent(buildOrderPanel(`
+              <div class="agent-narrative" style="border-color:#86EFAC;">
+                <div class="label"><span class="label-dot"></span> ${esc(s.businessName)}</div>
+                <div style="font-size:16px;font-weight:600;color:var(--accent-text);">${esc(msg)}</div>
+                <div style="font-size:13px;color:var(--text-2);margin-top:6px;">${esc(s.item.name)} — $${fmtPrice(s.item.priceUsd)}</div>
+              </div>`));
+            return;
+          }
+          if (Date.now() - startedAt > MAX_MS) {
+            clearInterval(s.pollTimer);
+            s.pollTimer = null;
+            replaceLastAgent(buildOrderPanel(`
+              <div class="agent-narrative">
+                <div class="label"><span class="label-dot"></span> ${esc(s.businessName)}</div>
+                <div>Still waiting on payment confirmation. Once you complete payment in the popup, the order will fire automatically.</div>
+                <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+                  <button onclick="checkOrderStatus('${orderId}')" style="padding:9px 14px;background:var(--accent);color:#fff;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;">Check again</button>
+                  <button onclick="reopenPayment('${orderId}')" style="padding:9px 14px;background:#fff;color:var(--accent);border:1.5px solid var(--accent);border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;">Open payment again</button>
+                </div>
+              </div>`));
+          }
+        } catch (e) {
+          // swallow polling errors; keep trying until timeout
+          console.warn('[order-status poll]', e.message);
+        }
+      };
+      s.pollTimer = setInterval(poll, 3000);
+      poll();
+    };
+
+    async function handleOrderItemSearch(result, rawQuery) {
+      const orderId = `o_${Date.now()}_${Math.floor(Math.random()*1000)}`;
+      orderState[orderId] = {
+        businessId:   result.business_id,
+        businessName: result.business_name,
+        itemQuery:    result.item_query || '',
+      };
+      // Step 1: agent bubble with the routing message
+      pushAgentHtml(buildOrderPanel(`
+        <div class="agent-narrative" style="border-color:#86EFAC;">
+          <div class="label"><span class="label-dot"></span> LocalIntel</div>
+          <div>${esc(result.message)}</div>
+          <div class="thinking-bubble" style="border:none;padding:0;margin-top:10px;">
+            <div class="spinner"></div>
+            <span>Checking the menu...</span>
+          </div>
+        </div>`));
+
+      // Step 2: fetch menu
+      try {
+        const url = `${API_BASE}/menu/${encodeURIComponent(result.business_id)}` +
+                    (result.item_query ? `?q=${encodeURIComponent(result.item_query)}` : '');
+        const r = await fetch(url, { headers: { 'X-Agent-Origin': 'localintel-search-ui' } });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+
+        const items   = Array.isArray(d.items) ? d.items : [];
+        const matched = !!d.matched && items.length > 0;
+
+        if (!items.length) {
+          replaceLastAgent(buildOrderPanel(`
+            <div class="agent-narrative">
+              <div class="label"><span class="label-dot"></span> ${esc(result.business_name)}</div>
+              <div>No menu items available right now. Try again later or call the business directly.</div>
+            </div>`));
+          return;
+        }
+
+        if (matched) {
+          // Top match — show item-found card. Stash full menu (re-fetch w/o q) for "see full menu".
+          // To avoid an extra round-trip, we infer "full menu" from a follow-up call only if needed.
+          orderState[orderId].fullMenu = items; // matched items, used as fallback
+          // Fire a background fetch for the full menu so "See full menu" works
+          fetch(`${API_BASE}/menu/${encodeURIComponent(result.business_id)}`, {
+            headers: { 'X-Agent-Origin': 'localintel-search-ui' },
+          }).then(r2 => r2.json()).then(d2 => {
+            if (Array.isArray(d2.items) && d2.items.length) {
+              orderState[orderId].fullMenu = d2.items;
+            }
+          }).catch(() => {});
+          replaceLastAgent(renderItemFoundCard(orderId, { name: result.business_name }, items[0], items));
+        } else {
+          // No match — show full menu
+          replaceLastAgent(renderFullMenuCard(orderId, { name: result.business_name }, items));
+        }
+      } catch (e) {
+        replaceLastAgent(buildOrderPanel(`
+          <div class="agent-narrative">
+            <div class="label"><span class="label-dot"></span> LocalIntel</div>
+            <div>Couldn't load the menu: ${esc(e.message)}. Try again.</div>
+          </div>`));
+      }
+    }
+
+    // ── Main send handler ──────────────────────────────────────────────────────
+    async function sendMessage() {
+      const input = document.getElementById('searchInput');
+      const raw   = input.value.trim();
+      if (!raw || isLoading) return;
+
+      isLoading = true;
+      input.value = '';
+      document.getElementById('sendBtn').disabled = true;
+
+      // Switch to active/sticky mode on first search
+      activateSearchMode();
+
+      thread.push({ role: 'user', text: raw });
+      renderThread();
+      showThinking();
+
+      try {
+        if (TASK_FIRE_RE.test(raw) && context.lastBusiness) {
+          const taskResult = await callSearch(`contact ${context.lastBusiness}`, context.zip, context.category);
+          thread.push({ role: 'agent', html: buildAgentBubble(taskResult, raw) });
+          updateContext(taskResult, context.zip, context.category);
+        } else {
+          const { q, zip, cat } = resolveQuery(raw);
+          const result = await callSearch(q, zip, cat);
+          // Agentic order flow — user said "order ITEM at BIZ"
+          if (result && result.intent === 'order_item_search' && result.business_id) {
+            // Clear thinking bubble, then run the order flow (which manages its own bubbles)
+            document.getElementById('resultsArea').innerHTML = '';
+            await handleOrderItemSearch(result, raw);
+          } else {
+            thread.push({ role: 'agent', html: buildAgentBubble(result, raw) });
+            updateContext(result, zip, cat);
+          }
+        }
+      } catch (e) {
+        thread.push({ role: 'agent', html: `
+          <div class="bubble-agent">
+            <div class="agent-avatar"></div>
+            <div class="bubble-agent-body">
+              <div class="agent-narrative">
+                <div class="label"><span class="label-dot"></span> LocalIntel</div>
+                <div>Something went wrong: ${esc(e.message)}. Try again.</div>
+              </div>
+            </div>
+          </div>` });
+      } finally {
+        isLoading = false;
+        document.getElementById('sendBtn').disabled = false;
+        document.getElementById('resultsArea').innerHTML = '';
+        renderThread();
+        document.getElementById('searchInput').focus();
+      }
+    }
+
+    // ── Filter changes ─────────────────────────────────────────────────────────
+    function rerunLastQuery() {
+      if (!thread.length) return;
+      const lastUser = [...thread].reverse().find(t => t.role === 'user');
+      if (lastUser) {
+        document.getElementById('searchInput').value = lastUser.text;
+        sendMessage();
+      }
+    }
+    document.getElementById('zipFilter').addEventListener('change', rerunLastQuery);
+    document.getElementById('categoryFilter').addEventListener('change', rerunLastQuery);
+    document.getElementById('statusFilter').addEventListener('change', () => { if (thread.length) renderThread(); });
+    document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
+
+    // ── ZIP auto-detection ────────────────────────────────────────────────────
+    // Coverage ZIPs we support — only set the filter if the detected ZIP is in here
+    const COVERAGE_ZIPS = new Set(['32082','32081','32250','32266','32233','32259','32034','32092','32084','32095','32086','32080','32058','32043','32068','32065','32244','32210','32256','32258','32225','32211','32218','32277','32099']);
+
+    async function detectZip(userInitiated = false) {
+      const btn = document.getElementById('locateBtn');
+      if (btn) btn.classList.add('loading');
+      // 1. Try GPS if user explicitly clicked the button
+      if (userInitiated && navigator.geolocation) {
+        try {
+          const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { timeout: 6000 }));
+          const { latitude, longitude } = pos.coords;
+          // Reverse geocode via nominatim (free, no key)
+          const geo = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`).then(r => r.json());
+          const zip = geo?.address?.postcode?.slice(0,5);
+          if (zip && COVERAGE_ZIPS.has(zip)) { setZipFilter(zip, btn); return; }
+          // ZIP not in coverage — still show it as an option
+          if (zip) { addZipOption(zip, btn); return; }
+        } catch(e) { /* permission denied or timeout — fall through to IP */ }
+      }
+      // 2. Silent IP fallback (on page load or GPS fail)
+      try {
+        const ip = await fetch('https://ipapi.co/json/').then(r => r.json());
+        const zip = ip?.postal?.slice(0,5);
+        if (zip && COVERAGE_ZIPS.has(zip)) { setZipFilter(zip, btn); return; }
+      } catch(e) { /* IP lookup failed — keep default */ }
+      if (btn) btn.classList.remove('loading');
+    }
+
+    function setZipFilter(zip, btn) {
+      const sel = document.getElementById('zipFilter');
+      if (!sel) return;
+      // Make sure the option exists
+      if (![...sel.options].some(o => o.value === zip)) addZipOption(zip, btn);
+      sel.value = zip;
+      if (btn) btn.classList.remove('loading');
+      // If a search is already showing, rerun with the new ZIP
+      if (thread.length) rerunLastQuery();
+    }
+
+    function addZipOption(zip, btn) {
+      const sel = document.getElementById('zipFilter');
+      if (!sel || [...sel.options].some(o => o.value === zip)) return;
+      const opt = document.createElement('option');
+      opt.value = zip; opt.textContent = zip + ' — Near You';
+      // Insert after "All ZIPs" option
+      sel.insertBefore(opt, sel.options[1]);
+      sel.value = zip;
+      if (btn) btn.classList.remove('loading');
+      if (thread.length) rerunLastQuery();
+    }
+
+    // ── Auto-open with seed query ──────────────────────────────────────────────
+    window.addEventListener('DOMContentLoaded', () => {
+      const zipEl = document.getElementById('zipFilter');
+      if (zipEl && !zipEl.value) zipEl.value = '32082';
+      // Try silent IP detection after a short delay (don't block first render)
+      setTimeout(() => detectZip(false), 800);
+      document.getElementById('searchInput').value = 'Where should I eat in Ponte Vedra?';
+      sendMessage();
+      // Pull live business count from platform-stats
+      fetch('https://gsb-swarm-production.up.railway.app/api/local-intel/platform-stats')
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (!d || !d.businesses) return;
+          const n = d.businesses;
+          const fmt = v => (v >= 1000 ? Math.floor(v/1000) + ',000+' : v + '+');
+          ['search-biz-count','search-biz-count-2'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = fmt(n);
+          });
+        })
+        .catch(() => {});
+    });
+
+    // ── Embedded Surge payment modal (iframe + PostMessage) ────────────────────
+    function openPaymentModal(paymentUrl) {
+      const modal  = document.getElementById('payment-modal');
+      const iframe = document.getElementById('payment-iframe');
+      let opened   = false;
+      const fallbackToTab = () => {
+        if (opened) return;
+        opened = true;
+        modal.style.display = 'none';
+        iframe.src = '';
+        window.open(paymentUrl, '_blank', 'noopener');
+        const note = document.getElementById('resultsArea');
+        if (note) {
+          const div = document.createElement('div');
+          div.style.cssText = 'margin:12px 0;padding:10px 14px;background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;font-size:13px;color:#92400E;';
+          div.textContent = 'Payment window opened in new tab.';
+          note.appendChild(div);
+        }
+      };
+      iframe.onerror = fallbackToTab;
+      iframe.onload  = () => { opened = true; };
+      iframe.src     = paymentUrl;
+      modal.style.display = 'flex';
+      // CSP fallback safety net — if iframe never loads in 4s, open a tab
+      setTimeout(() => { if (!opened) fallbackToTab(); }, 4000);
+    }
+
+    function showOrderConfirmation(data) {
+      const area = document.getElementById('resultsArea');
+      if (!area) return;
+      const card = document.createElement('div');
+      card.style.cssText = 'margin:14px 0;padding:18px;background:#F0FDF4;border:1.5px solid #86EFAC;border-radius:12px;display:flex;gap:12px;align-items:flex-start;';
+      card.innerHTML = `
+        <div style="width:36px;height:36px;border-radius:50%;background:#16A34A;color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;">✓</div>
+        <div>
+          <div style="font-weight:700;font-size:15px;color:#14532D;margin-bottom:4px;">Order placed!</div>
+          <div style="font-size:13px;color:#166534;line-height:1.5;">Your order has been received. Check your Surge wallet for confirmation.</div>
+        </div>`;
+      area.appendChild(card);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const closeBtn = document.getElementById('payment-close');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          document.getElementById('payment-modal').style.display = 'none';
+          document.getElementById('payment-iframe').src = '';
+        });
+      }
+    });
+
+    window.addEventListener('message', (event) => {
+      if (event.origin !== 'https://surge.basalthq.com') return;
+      const { type, data } = event.data || {};
+      if (type === 'gateway-card-success') {
+        document.getElementById('payment-modal').style.display = 'none';
+        document.getElementById('payment-iframe').src = '';
+        showOrderConfirmation(data);
+      }
+      if (type === 'gateway-card-cancel') {
+        document.getElementById('payment-modal').style.display = 'none';
+        document.getElementById('payment-iframe').src = '';
+      }
+      if (type === 'gateway-preferred-height') {
+        const iframe = document.getElementById('payment-iframe');
+        if (data?.height) iframe.style.height = data.height + 'px';
+      }
+    });
+  </script>
+
+  <!-- Surge payment modal (embedded iframe) -->
+  <div id="payment-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:12px; width:480px; max-width:95vw; overflow:hidden; position:relative;">
+      <div style="padding:12px 16px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-weight:600; font-size:14px;">Complete Payment</span>
+        <button id="payment-close" style="background:none; border:none; cursor:pointer; font-size:18px; color:#666;">&times;</button>
+      </div>
+      <iframe id="payment-iframe" src="" style="width:100%; height:520px; border:none;" allow="payment"></iframe>
+      <div style="padding:8px 16px; font-size:11px; color:#999; text-align:center;">Powered by Surge · Secured by Basalt</div>
+    </div>
+  </div>
+
+  <!-- Ask a deeper question — smart chat modal -->
+  <div id="ai-chat-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:10000; align-items:center; justify-content:center;">
+    <div style="background:#111; border:1px solid #333; border-radius:16px; width:520px; max-width:95vw; padding:28px; position:relative; max-height:90vh; overflow-y:auto;">
+      <button onclick="closeAiChatModal()" style="position:absolute;top:14px;right:16px;background:none;border:none;color:#aaa;font-size:20px;cursor:pointer;line-height:1;">✕</button>
+
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#16a34a;margin-bottom:8px;">LocalIntel AI</div>
+      <h3 style="font-size:18px;font-weight:700;color:#fff;margin:0 0 6px;">Ask LocalIntel AI</h3>
+      <p style="font-size:13px;color:#cbd5e1;margin:0 0 14px;">Get deeper intelligence on any business, neighborhood, or market in Florida.</p>
+      <p id="s-modal-subhead" style="font-size:12px;color:#aaa;margin:0 0 14px;">5 free questions remaining — no signup needed</p>
+
+      <div style="margin-bottom:14px;">
+        <div style="font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Try asking</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+          <button type="button" onclick="setChatExample(this)" style="background:#1a1a1a;border:1px solid #333;color:#cbd5e1;font-size:12px;padding:6px 10px;border-radius:99px;cursor:pointer;text-align:left;">Which zip codes in St. Johns County are best for a wine bar?</button>
+          <button type="button" onclick="setChatExample(this)" style="background:#1a1a1a;border:1px solid #333;color:#cbd5e1;font-size:12px;padding:6px 10px;border-radius:99px;cursor:pointer;text-align:left;">What's the foot traffic like near 32082 on weekends?</button>
+          <button type="button" onclick="setChatExample(this)" style="background:#1a1a1a;border:1px solid #333;color:#cbd5e1;font-size:12px;padding:6px 10px;border-radius:99px;cursor:pointer;text-align:left;">Is 32081 a good area to open a med spa?</button>
+        </div>
+      </div>
+
+      <label for="s-phone" style="display:block;font-size:12px;color:#aaa;margin-bottom:4px;">Your mobile number (to save your conversation)</label>
+      <div style="position:relative; margin-bottom:10px;">
+        <input type="tel" id="s-phone" placeholder="(555) 123-4567"
+          style="width:100%;box-sizing:border-box;padding:10px 14px;background:#1a1a1a;border:1px solid #333;border-radius:6px;color:#fff;font-size:14px;"
+          onblur="checkSubscriberStatus()" />
+        <span id="s-sub-badge" style="display:none; position:absolute; right:10px; top:50%; transform:translateY(-50%); font-size:11px; font-weight:700; color:#16a34a; background:#16a34a1a; border:1px solid #16a34a4d; border-radius:99px; padding:2px 8px;">Subscribed ✓</span>
+      </div>
+
+      <textarea id="s-question" placeholder="Ask anything about Florida markets, businesses, or neighborhoods..." rows="3"
+        style="width:100%;box-sizing:border-box;padding:10px 14px;background:#1a1a1a;border:1px solid #333;border-radius:6px;color:#fff;font-size:14px;resize:vertical;margin-bottom:12px;"></textarea>
+      <button id="s-ask-btn" onclick="searchPageAsk()" style="width:100%;padding:12px;background:#16a34a;color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:16px;">Ask →</button>
+
+      <div id="s-answer" style="display:none;"></div>
+      <div id="s-paywall" style="display:none;margin-top:16px;text-align:center;">
+        <p style="color:#aaa;font-size:14px;margin:0 0 12px;">You've used your 5 free questions.</p>
+        <a href="/" onclick="closeAiChatModal()" style="display:inline-block;padding:10px 20px;background:transparent;border:1px solid #16a34a;color:#16a34a;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;">Unlock unlimited questions for $9.99/mo →</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function openAiChatModal() {
+      const modal = document.getElementById('ai-chat-modal');
+      modal.style.display = 'flex';
+      const saved = localStorage.getItem('li_phone');
+      if (saved) {
+        document.getElementById('s-phone').value = saved;
+        checkSubscriberStatus();
+      }
+    }
+    function closeAiChatModal() {
+      document.getElementById('ai-chat-modal').style.display = 'none';
+    }
+    function setChatExample(el) {
+      const ta = document.getElementById('s-question');
+      ta.value = el.textContent;
+      ta.focus();
+    }
+    document.getElementById('ai-chat-modal').addEventListener('click', function(e) {
+      if (e.target === this) closeAiChatModal();
+    });
+
+    async function checkSubscriberStatus() {
+      const phone = document.getElementById('s-phone').value.trim();
+      if (!phone || phone.length < 10) return;
+      localStorage.setItem('li_phone', phone);
+      try {
+        const res = await fetch(`https://gsb-swarm-production.up.railway.app/api/local-intel/subscriber-status?phone=${encodeURIComponent(phone)}`);
+        const data = await res.json();
+        const badge = document.getElementById('s-sub-badge');
+        const subhead = document.getElementById('s-modal-subhead');
+        if (data.is_subscriber) {
+          badge.style.display = 'inline-block';
+          subhead.textContent = 'Unlimited AI-powered answers. Ask anything.';
+        } else if (data.status === 'lapsed') {
+          badge.style.display = 'none';
+          subhead.textContent = 'Your subscription has lapsed. Subscribe to restore access.';
+        } else {
+          badge.style.display = 'none';
+          const rem = data.trial_remaining ?? 5;
+          if (rem > 0) {
+            subhead.textContent = `${rem} free question${rem !== 1 ? 's' : ''} remaining — no signup needed`;
+          } else {
+            subhead.textContent = `You've used your 5 free questions.`;
+          }
+        }
+      } catch(e) { /* silent fail */ }
+    }
+
+    async function searchPageAsk() {
+      const phone = document.getElementById('s-phone').value.trim();
+      const question = document.getElementById('s-question').value.trim();
+      if (!phone || !question) { alert('Enter your phone number and question.'); return; }
+      localStorage.setItem('li_phone', phone);
+      const btn = document.getElementById('s-ask-btn');
+      btn.disabled = true; btn.textContent = 'Thinking...';
+      try {
+        const res = await fetch('https://gsb-swarm-production.up.railway.app/api/local-intel/chat', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone, question })
+        });
+        const data = await res.json();
+        btn.disabled = false; btn.textContent = 'Ask →';
+        if (data.ok === false && data.error) {
+          const ans = document.getElementById('s-answer');
+          ans.style.display = 'block';
+          const errEntry = document.createElement('div');
+          errEntry.style.cssText = 'background:#1a1a1a;border:1px solid #ef4444;border-radius:8px;padding:14px;margin-bottom:10px;';
+          errEntry.innerHTML = `<p style="color:#ef4444;font-size:14px;margin:0;">${data.message || data.error}</p>`;
+          ans.appendChild(errEntry);
+          return;
+        }
+        if (data.gated) {
+          document.getElementById('s-paywall').style.display = 'block';
+          return;
+        }
+        const ans = document.getElementById('s-answer');
+        ans.style.display = 'block';
+        const rawConf = data.confidence_score ?? data.confidence ?? data.data_confidence;
+        let confLabel = 'High';
+        if (typeof rawConf === 'number') {
+          const pct = rawConf <= 1 ? rawConf * 100 : rawConf;
+          confLabel = Math.round(pct) + '%';
+        }
+        const answerText = data.answer || data.response || data.text || data.message || '';
+        const entry = document.createElement('div');
+        entry.style.cssText = 'background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:14px;margin-bottom:10px;';
+        entry.innerHTML = `
+          <div style="font-size:11px;color:#16a34a;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Answer · ${confLabel} confidence</div>
+          <p style="color:#cbd5e1;font-size:14px;line-height:1.6;margin:0 0 8px;">${answerText}</p>
+          ${data.trial_remaining != null ? `<div style="font-size:11px;color:#aaa;">${data.trial_remaining} free question${data.trial_remaining !== 1 ? 's' : ''} remaining</div>` : ''}
+        `;
+        ans.appendChild(entry);
+        ans.scrollTop = ans.scrollHeight;
+        if (data.trial_remaining != null) {
+          const tr = data.trial_remaining;
+          document.getElementById('s-modal-subhead').textContent = tr > 0
+            ? `${tr} free question${tr !== 1 ? 's' : ''} remaining — no signup needed`
+            : `You've used your 5 free questions.`;
+        }
+        if (data.trial_remaining === 0) {
+          document.getElementById('s-paywall').style.display = 'block';
+        }
+        document.getElementById('s-question').value = '';
+      } catch(e) {
+        btn.disabled = false; btn.textContent = 'Ask →';
+        alert('Something went wrong. Try again.');
+      }
+    }
+  
+  // ── Customer registration panel ────────────────────────────────────────────
+  const CUST_KEY = 'li_customer';
+
+  function initRegistration() {
+    const stored = localStorage.getItem(CUST_KEY);
+    if (stored) {
+      try {
+        const c = JSON.parse(stored);
+        if (c.customer_id) { hideRegPanel(); return; }
+      } catch(e) {}
+    }
+    document.getElementById('regPanel').classList.remove('hidden');
+  }
+
+  function expandRegPanel() {
+    const p = document.getElementById('regPanel');
+    if (!p) return;
+    p.classList.remove('collapsed');
+    p.classList.add('expanded');
+    // hide the expand button, focus first field
+    const btn = document.getElementById('regExpandBtn');
+    if (btn) btn.style.display = 'none';
+    setTimeout(() => { const f = document.getElementById('regName'); if (f) f.focus(); }, 310);
+  }
+
+  function hideRegPanel() {
+    const p = document.getElementById('regPanel');
+    if (p) p.classList.add('hidden');
+  }
+
+  async function submitRegistration(forceNoSms) {
+    const phone = document.getElementById('regPhone').value.trim();
+    const name  = document.getElementById('regName').value.trim();
+    const zip   = document.getElementById('regZip').value.trim();
+    const optBox = document.getElementById('regSmsOpt');
+    const opt   = forceNoSms ? false : !!(optBox && optBox.checked);
+    const btn   = document.getElementById('regSubmitBtn');
+    const noSmsBtn = document.getElementById('regNoSmsBtn');
+
+    if (!phone) { document.getElementById('regPhone').focus(); return; }
+    // SMS checkbox is optional — never block registration for unchecked consent
+
+    btn.disabled = true;
+    if (noSmsBtn) noSmsBtn.disabled = true;
+    btn.textContent = 'Creating account...';
+    try {
+      const resp = await fetch(API_BASE + '/customers/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, name: name || null, zip: zip || null, sms_opt_in: opt })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data.customer_id) {
+        const savedPhone = data.phone || phone;
+        localStorage.setItem(CUST_KEY, JSON.stringify({ customer_id: data.customer_id, phone: savedPhone, name, zip, sms_opt_in: opt }));
+        if (zip && document.getElementById('zipFilter')) {
+          const zf = document.getElementById('zipFilter');
+          if ([...zf.options].some(o => o.value === zip)) zf.value = zip;
+        }
+        const title = document.querySelector('.reg-panel__title');
+        if (title) title.textContent = opt ? "You're registered — SMS is on" : "You're registered — no SMS";
+        const eyebrow = document.querySelector('.reg-panel__eyebrow');
+        if (eyebrow) eyebrow.innerHTML = '<span></span>Registered';
+        const expandBtn = document.getElementById('regExpandBtn');
+        if (expandBtn) expandBtn.style.display = 'none';
+        const skipBtn = document.querySelector('.reg-panel__skip-top');
+        if (skipBtn) skipBtn.style.display = 'none';
+
+        const phoneEl = document.getElementById('regSuccessPhone');
+        if (phoneEl) phoneEl.textContent = savedPhone;
+        const detail = document.querySelector('.reg-upsell__confirm-detail');
+        if (detail) {
+          detail.innerHTML = opt
+            ? ('SMS is on for <strong id="regSuccessPhone">' + savedPhone + '</strong>. You\'ll get LocalIntel confirmations, receipts, and service updates.')
+            : ('Account created for <strong id="regSuccessPhone">' + savedPhone + '</strong>. You did <strong>not</strong> opt in to SMS — no texts will be sent unless you opt in later.');
+        }
+        const hint = document.querySelector('.reg-upsell__confirm-hint');
+        if (hint) {
+          hint.style.display = opt ? '' : 'none';
+        }
+
+        const sub = document.querySelector('.reg-panel__sub');
+        const fields = document.querySelector('.reg-panel__fields');
+        const optRow = document.querySelector('.reg-panel__opt');
+        const bottom = document.querySelector('.reg-panel__bottom');
+        if (sub) sub.style.display = 'none';
+        if (fields) fields.style.display = 'none';
+        if (optRow) optRow.style.display = 'none';
+        if (bottom) bottom.style.display = 'none';
+        const optionalNote = optRow && optRow.nextElementSibling;
+        if (optionalNote && optionalNote.tagName === 'P') optionalNote.style.display = 'none';
+        document.getElementById('regUpsell').style.display = 'block';
+
+        const panel = document.getElementById('regPanel');
+        if (panel) {
+          panel.classList.remove('collapsed', 'hidden');
+          panel.classList.add('expanded');
+        }
+      } else {
+        btn.disabled = false;
+        if (noSmsBtn) noSmsBtn.disabled = false;
+        btn.textContent = 'Create account';
+        alert(data.error || 'Registration failed — please try again.');
+      }
+    } catch (e) {
+      btn.disabled = false;
+      if (noSmsBtn) noSmsBtn.disabled = false;
+      btn.textContent = 'Create account';
+      alert('Could not reach LocalIntel. Check your connection and try again.');
+    }
+  }
+
+  function skipRegistration() {
+    // Store a skip flag — panel won't show again this session
+    sessionStorage.setItem('li_reg_skipped', '1');
+    hideRegPanel();
+  }
+
+  // Init on load
+  document.addEventListener('DOMContentLoaded', () => {
+    if (!sessionStorage.getItem('li_reg_skipped')) initRegistration();
+  });
+
+</script>
+</body>
+</html>

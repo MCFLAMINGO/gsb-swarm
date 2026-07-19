@@ -2724,6 +2724,12 @@ app.get('/acp', (req, res) => {
   });
 });
 
+// A2P 10DLC consent page — optional SMS checkbox, no forced consent
+app.use(express.static(path.join(__dirname, 'public')));
+app.get(['/sms-signup', '/sms-signup.html', '/a2p-sms-consent'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'sms-signup.html'));
+});
+
 app.use(express.static(path.join(__dirname, 'dashboard-ui')));
 
 // ── WebSocket broadcast ──────────────────────────────────────────────────────
