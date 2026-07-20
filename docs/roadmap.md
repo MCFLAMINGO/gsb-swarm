@@ -6,11 +6,14 @@ Official product roadmap, north star $546k, pending setup items, strategic direc
 
 ## Pending Setup (requires Erik action)
 
-### 1. Twilio — ✅ FULLY DONE (2026-05-01)
+### 1. Twilio — ✅ A2P APPROVED (2026-07-20)
 - Webhook: `https://gsb-swarm-production.up.railway.app/api/rfq/sms-inbound` (HTTP POST, URL only, no 'POST ' prefix)
-- A2P 10DLC: brand registered Low-Volume Standard ($4.50), campaign registered
-- Account upgraded from Trial to paid
-- SMS broadcasting fully unblocked
+- A2P 10DLC: Brand `BN0a864697b432e6be3551efe69b9bb064`, Campaign `CMdde30606a066ea5d5c2a4abe6dbd4339` (CUSTOMER_CARE) **approved & carrier-registered**
+- Messaging Service: `MG01ab31b68291d60514f7cb6af98f5a57`
+- Account SID: set `TWILIO_ACCOUNT_SID` in Railway (not committed)
+- From number: (904) 506-7476 / `+19045067476`
+- Full reference: [docs/twilio-a2p.md](twilio-a2p.md)
+- SMS broadcasting unblocked on numbers attached to the Messaging Service
 
 ### 2. Resend inbound MX record — ✅ COMPLETE (2026-05-02)
 - MX live, receiving enabled, webhook wired to `/api/rfq/email-inbound`
