@@ -40,9 +40,12 @@ Repos & URLs, Railway services + IDs, Vercel projects, git push commands, env va
 
 | Key | Purpose |
 |---|---|
-| `TWILIO_ACCOUNT_SID` | Twilio REST API |
-| `TWILIO_AUTH_TOKEN` | Twilio REST API |
-| `TWILIO_FROM_NUMBER` | (904) 506-7476 — outbound SMS + calls |
+| `TWILIO_ACCOUNT_SID` | Twilio REST API (Console — never commit) |
+| `TWILIO_AUTH_TOKEN` | Twilio REST API (secret — Console only, never commit) |
+| `TWILIO_FROM_NUMBER` | `+19045067476` / (904) 506-7476 — outbound SMS + calls |
+| `TWILIO_MESSAGING_SERVICE_SID` | `MG01ab31b68291d60514f7cb6af98f5a57` — A2P Messaging Service |
+| `TWILIO_CAMPAIGN_SID` | `CMdde30606a066ea5d5c2a4abe6dbd4339` — A2P Campaign (CUSTOMER_CARE, approved 2026-07-20) |
+| `TWILIO_BRAND_SID` | `BN0a864697b432e6be3551efe69b9bb064` — A2P Brand Registration |
 | `RESEND_API_KEY` | Resend email — send + inbound |
 | `OWNER_ALERT_PHONE` | Erik's phone for alerts (fallback: +19045867887) |
 | `VOICE_CALLER_KEY` | Legacy voice-intake key (now unused — rfqBroadcast handles it) |
