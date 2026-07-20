@@ -2,6 +2,20 @@
 
 Twilio SMS + voice, voiceIntake.js, conversation threading (B41), call transcripts, recording, sms_query_log, intent_dead_ends.
 
+## A2P 10DLC (approved 2026-07-20)
+
+Campaign is carrier-registered. Send via numbers on Messaging Service `MG01ab31b68291d60514f7cb6af98f5a57`.
+
+Full reference: [twilio-a2p.md](twilio-a2p.md)
+
+| Resource | SID |
+|---|---|
+| Account | `TWILIO_ACCOUNT_SID` (Railway / Console — not committed) |
+| Brand | `BN0a864697b432e6be3551efe69b9bb064` |
+| Campaign | `CMdde30606a066ea5d5c2a4abe6dbd4339` |
+| Messaging Service | `MG01ab31b68291d60514f7cb6af98f5a57` |
+| From | `+19045067476` |
+
 ## Access Point: Twilio (Architecture Canon)
 
 #### 3. Twilio (`POST /api/local-intel` + voice)
